@@ -1,0 +1,48 @@
+{
+  "name": "@openbindings/mcp",
+  "version": "0.1.0",
+  "description": "OpenBindings MCP binding executor",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "test": "vitest run",
+    "lint": "tsc --noEmit"
+  },
+  "keywords": [
+    "openbindings",
+    "mcp",
+    "model-context-protocol",
+    "executor",
+    "ai-tools"
+  ],
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/openbindings/openbindings-ts.git",
+    "directory": "packages/mcp"
+  },
+  "homepage": "https://openbindings.com",
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@openbindings/sdk": "workspace:*",
+    "@modelcontextprotocol/sdk": "^1.29.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0"
+  }
+}

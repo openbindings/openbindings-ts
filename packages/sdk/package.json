@@ -1,0 +1,46 @@
+{
+  "name": "@openbindings/sdk",
+  "version": "0.1.0",
+  "description": "OpenBindings TypeScript SDK — parse, validate, resolve, and execute OBI interfaces",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "test": "vitest run",
+    "lint": "tsc --noEmit"
+  },
+  "keywords": [
+    "openbindings",
+    "obi",
+    "api",
+    "sdk",
+    "openapi",
+    "grpc",
+    "mcp"
+  ],
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/openbindings/openbindings-ts.git",
+    "directory": "packages/sdk"
+  },
+  "homepage": "https://openbindings.com",
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "canonicalize": "^2.1.0"
+  }
+}
