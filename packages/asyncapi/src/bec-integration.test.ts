@@ -6,7 +6,7 @@ import {
   type OBInterface,
   type StreamEvent,
 } from "@openbindings/sdk";
-import { AsyncAPIExecutor, AsyncAPICreator } from "./executor.js";
+import { AsyncAPIInvoker, AsyncAPICreator } from "./invoker.js";
 import { parseAsyncAPIDocument } from "./util.js";
 
 async function collectStream(
@@ -154,9 +154,9 @@ describe("BEC Integration (AsyncAPI, real HTTP)", () => {
     if (!binding?.ref) throw new Error("expected sendMessage.asyncapi binding with ref");
 
     const specContent = JSON.stringify(makeAsyncAPISpec(port));
-    const asyncExecutor = new AsyncAPIExecutor();
+    const asyncDriver = new AsyncAPIInvoker();
     const events = await collectStream(
-      asyncExecutor.executeBinding({
+      asyncDriver.invokeBinding({
         ref: binding.ref,
         source: { format: "asyncapi@^3.0.0", content: specContent },
         input: { text: "hello" },
@@ -179,9 +179,9 @@ describe("BEC Integration (AsyncAPI, real HTTP)", () => {
     if (!binding?.ref) throw new Error("expected sendMessage.asyncapi binding with ref");
     const specContent = JSON.stringify(makeAsyncAPISpec(port));
 
-    const asyncExecutor = new AsyncAPIExecutor();
+    const asyncDriver = new AsyncAPIInvoker();
     const events = await collectStream(
-      asyncExecutor.executeBinding({
+      asyncDriver.invokeBinding({
         ref: binding.ref,
         source: { format: "asyncapi@^3.0.0", content: specContent },
         input: { text: "hello" },
@@ -203,9 +203,9 @@ describe("BEC Integration (AsyncAPI, real HTTP)", () => {
     if (!binding?.ref) throw new Error("expected receiveEvents.asyncapi binding with ref");
     const specContent = JSON.stringify(makeAsyncAPISpec(port));
 
-    const asyncExecutor = new AsyncAPIExecutor();
+    const asyncDriver = new AsyncAPIInvoker();
     const events = await collectStream(
-      asyncExecutor.executeBinding({
+      asyncDriver.invokeBinding({
         ref: binding.ref,
         source: { format: "asyncapi@^3.0.0", content: specContent },
         context: { bearerToken: SECRET },
@@ -225,9 +225,9 @@ describe("BEC Integration (AsyncAPI, real HTTP)", () => {
     if (!binding?.ref) throw new Error("expected receiveEvents.asyncapi binding with ref");
     const specContent = JSON.stringify(makeAsyncAPISpec(port));
 
-    const asyncExecutor = new AsyncAPIExecutor();
+    const asyncDriver = new AsyncAPIInvoker();
     const events = await collectStream(
-      asyncExecutor.executeBinding({
+      asyncDriver.invokeBinding({
         ref: binding.ref,
         source: { format: "asyncapi@^3.0.0", content: specContent },
       }),

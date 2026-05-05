@@ -4,13 +4,13 @@
  * Uses an actual `ob codegen` output (snapshot at `__codegen__/test-client.ts`)
  * — produced by running `ob codegen <fixture-obi> --lang typescript -o ...`
  * against a hand-authored workers-rpc OBI — and exercises it against the
- * `WorkersRpcExecutor` + a mock binding. This test fails if any of these
+ * `WorkersRpcInvoker` + a mock binding. This test fails if any of these
  * regress:
  *
  *   - codegen template emits a client that imports unavailable SDK exports
  *   - the generated client's connect() flow can't handle a workers-rpc:// URL
- *   - the generated client's execute() dispatch doesn't reach the executor
- *   - the executor doesn't dispatch to the correct binding method
+ *   - the generated client's invoke() dispatch doesn't reach the driver
+ *   - the driver doesn't dispatch to the correct binding method
  *
  * The test-client.ts fixture should be regenerated after any change to:
  *   - the codegen typescript template (cli/internal/codegen/typescript.go)
@@ -25,7 +25,7 @@
 
 import { describe, it, expect } from "vitest";
 import { TestWorkersRpcClient } from "./__codegen__/test-client.js";
-import { WorkersRpcExecutor, type WorkersRpcBinding } from "./index.js";
+import { WorkersRpcInvoker, type WorkersRpcBinding } from "./index.js";
 
 // Mirror of the OBI used to generate test-client.ts. Kept here as a
 // reference; the codegen output embeds this OBI as a string constant
@@ -51,7 +51,7 @@ describe("ob codegen output for workers-rpc OBI", () => {
       ping: async () => ({ echoed: "ok" }),
       addItem: async () => ({ id: "id-1" }),
     };
-    const client = new TestWorkersRpcClient([new WorkersRpcExecutor({ binding })]);
+    const client = new TestWorkersRpcClient([new WorkersRpcInvoker({ binding })]);
     // The URL is symbolic — InterfaceClient.resolve() falls back to the
     // embedded OBI for non-HTTP URLs when no synthesizer is provided.
     await client.connect("workers-rpc://test-service");
@@ -60,7 +60,7 @@ describe("ob codegen output for workers-rpc OBI", () => {
     void TEST_OBI_DESCRIPTION; // suppress unused warning
   });
 
-  it("dispatches the ping operation through the executor", async () => {
+  it("dispatches the ping operation through the driver", async () => {
     const binding: WorkersRpcBinding = {
       ping: async (arg: unknown) => {
         const input = arg as { message?: string } | undefined;
@@ -68,7 +68,7 @@ describe("ob codegen output for workers-rpc OBI", () => {
       },
       addItem: async () => ({ id: "id-1" }),
     };
-    const client = new TestWorkersRpcClient([new WorkersRpcExecutor({ binding })]);
+    const client = new TestWorkersRpcClient([new WorkersRpcInvoker({ binding })]);
     await client.connect("workers-rpc://test-service");
 
     const result = await client.ping({ message: "hello" });
@@ -84,7 +84,7 @@ describe("ob codegen output for workers-rpc OBI", () => {
         return { id: "newly-created" };
       },
     };
-    const client = new TestWorkersRpcClient([new WorkersRpcExecutor({ binding })]);
+    const client = new TestWorkersRpcClient([new WorkersRpcInvoker({ binding })]);
     await client.connect("workers-rpc://test-service");
 
     const result = await client.addItem({ name: "widget", qty: 5 });
@@ -99,7 +99,7 @@ describe("ob codegen output for workers-rpc OBI", () => {
       },
       addItem: async () => ({ id: "x" }),
     };
-    const client = new TestWorkersRpcClient([new WorkersRpcExecutor({ binding })]);
+    const client = new TestWorkersRpcClient([new WorkersRpcInvoker({ binding })]);
     await client.connect("workers-rpc://test-service");
 
     await expect(client.ping({ message: "test" })).rejects.toThrow(/bound method failed/);

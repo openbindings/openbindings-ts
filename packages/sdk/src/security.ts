@@ -81,11 +81,14 @@ async function resolveOAuth2Method(
   fetchFn?: typeof globalThis.fetch,
 ): Promise<Record<string, unknown> | null> {
   // Try BrowserRedirect for the full PKCE flow
-  if (callbacks.browserRedirect && method.authorizeUrl && method.tokenUrl) {
+  const authorizeUrl = method["authorizeUrl"] as string | undefined;
+  const tokenUrl = method["tokenUrl"] as string | undefined;
+  if (callbacks.browserRedirect && authorizeUrl && tokenUrl) {
     try {
       const token = await performPKCEFlow(method, callbacks.browserRedirect, fetchFn);
       return { bearerToken: token };
-    } catch {
+    } catch (e) {
+      if (isAuthCancelled(e)) throw e;
       // Fall through to prompt if PKCE fails
     }
   }
@@ -127,16 +130,21 @@ async function performPKCEFlow(
   const state = base64UrlEncode(stateBytes);
 
   // 4. Build authorization URL
-  const authURL = new URL(method.authorizeUrl!);
+  const authorizeUrl = method["authorizeUrl"] as string;
+  const tokenUrl = method["tokenUrl"] as string;
+  const clientId = method["clientId"] as string | undefined;
+  const scopes = method["scopes"] as string[] | undefined;
+
+  const authURL = new URL(authorizeUrl);
   authURL.searchParams.set("response_type", "code");
   authURL.searchParams.set("code_challenge", codeChallenge);
   authURL.searchParams.set("code_challenge_method", "S256");
   authURL.searchParams.set("state", state);
-  if (method.clientId) {
-    authURL.searchParams.set("client_id", method.clientId);
+  if (clientId) {
+    authURL.searchParams.set("client_id", clientId);
   }
-  if (method.scopes?.length) {
-    authURL.searchParams.set("scope", method.scopes.join(" "));
+  if (scopes?.length) {
+    authURL.searchParams.set("scope", scopes.join(" "));
   }
 
   // 5. Call BrowserRedirect
@@ -166,15 +174,15 @@ async function performPKCEFlow(
     code,
     code_verifier: codeVerifier,
   });
-  if (method.clientId) {
-    tokenParams.set("client_id", method.clientId);
+  if (clientId) {
+    tokenParams.set("client_id", clientId);
   }
   if (result.redirectUri) {
     tokenParams.set("redirect_uri", result.redirectUri);
   }
 
   const doFetch = fetchFn ?? globalThis.fetch;
-  const tokenResp = await doFetch(method.tokenUrl!, {
+  const tokenResp = await doFetch(tokenUrl, {
     method: "POST",
     headers: {
       "Content-Type": "application/x-www-form-urlencoded",

@@ -1,28 +1,28 @@
 import type { OBInterface, BindingEntry, Source } from "./types.js";
 import type {
-  BindingExecutionInput,
+  BindingInvocationInput,
   CreateInput,
   StreamEvent,
   FormatInfo,
-  ListRefsResult,
-} from "./executor-types.js";
+  SourceInspection,
+} from "./invoker-types.js";
 
 /**
- * Executes bindings against format-specific sources.
+ * Invokes bindings against format-specific sources.
  * Implementations handle a specific binding format (e.g., OpenAPI, gRPC, MCP).
  * Callers must consume the returned async iterable to avoid resource leaks.
  */
-export interface BindingExecutor {
+export interface BindingInvoker {
   formats(): FormatInfo[];
-  executeBinding(
-    input: BindingExecutionInput,
+  invokeBinding(
+    input: BindingInvocationInput,
     options?: { signal?: AbortSignal },
   ): AsyncIterable<StreamEvent>;
 }
 
 /**
  * Creates OpenBindings interfaces from format-specific sources.
- * Independent of {@link BindingExecutor} -- an implementation may provide one, the other, or both.
+ * Independent of {@link BindingInvoker} -- an implementation may provide one, the other, or both.
  */
 export interface InterfaceCreator {
   formats(): FormatInfo[];
@@ -30,15 +30,18 @@ export interface InterfaceCreator {
     input: CreateInput,
     options?: { signal?: AbortSignal },
   ): Promise<OBInterface>;
-  /**
-   * List the bindable refs available in a source. Optional -- when not
-   * implemented, tooling should fall back to manual ref entry.
-   * Accepts the document-level Source (format + location + content).
-   */
-  listBindableRefs?(
+}
+
+/**
+ * Inspects binding source artifacts and returns bindable targets that tooling
+ * can frame as OpenBindings operations.
+ */
+export interface SourceInspector {
+  formats(): FormatInfo[];
+  inspectSource(
     source: Source,
     options?: { signal?: AbortSignal },
-  ): Promise<ListRefsResult>;
+  ): Promise<SourceInspection>;
 }
 
 /** Evaluates a transform expression (e.g., JSONata) against input data. */
@@ -48,7 +51,7 @@ export interface TransformEvaluator {
 
 /**
  * Extends TransformEvaluator with support for additional named bindings
- * (e.g., $input in operation graph transforms). Executors that need extra
+ * (e.g., $input in operation graph transforms). Invokers that need extra
  * context check for this interface via runtime duck-typing.
  */
 export interface TransformEvaluatorWithBindings extends TransformEvaluator {
@@ -69,10 +72,10 @@ export type BindingSelector = (
   opKey: string,
 ) => { key: string; binding: BindingEntry };
 
-/** Type guard that checks whether a {@link BindingExecutor} also implements {@link InterfaceCreator}. */
+/** Type guard that checks whether a {@link BindingInvoker} also implements {@link InterfaceCreator}. */
 export function isInterfaceCreator(
-  p: BindingExecutor,
-): p is BindingExecutor & InterfaceCreator {
+  p: BindingInvoker,
+): p is BindingInvoker & InterfaceCreator {
   return "createInterface" in p
     && typeof (p as unknown as Record<string, unknown>)["createInterface"] === "function";
 }

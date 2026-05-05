@@ -1,8 +1,8 @@
-/** Thrown when no executor matches the requested binding format. */
-export class NoExecutorError extends Error {
+/** Thrown when no invoker matches the requested binding format. */
+export class NoInvokerError extends Error {
   constructor(format: string) {
-    super(`openbindings: no executor for format: ${format}`);
-    this.name = "NoExecutorError";
+    super(`openbindings: no invoker for format: ${format}`);
+    this.name = "NoInvokerError";
   }
 }
 

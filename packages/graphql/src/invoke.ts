@@ -1,4 +1,4 @@
-import type { ExecuteOutput, JSONSchema, StreamEvent } from "@openbindings/sdk";
+import type { InvocationOutput, JSONSchema, StreamEvent } from "@openbindings/sdk";
 import {
   ERR_INVALID_REF,
   ERR_EXECUTION_FAILED,
@@ -214,7 +214,7 @@ function inputToVariables(input: unknown, args: InputValue[]): Record<string, un
 }
 
 // ---------------------------------------------------------------------------
-// HTTP execution
+// HTTP invocation
 // ---------------------------------------------------------------------------
 
 interface GraphQLError { message: string }
@@ -269,8 +269,8 @@ class HttpError extends Error {
   }
 }
 
-/** Execute a GraphQL query/mutation and return an ExecuteOutput. */
-export async function executeGraphQL(
+/** Invoke a GraphQL query/mutation and return an InvocationOutput. */
+export async function invokeGraphQL(
   url: string,
   query: string,
   variables: Record<string, unknown> | undefined,
@@ -278,7 +278,7 @@ export async function executeGraphQL(
   headers: Record<string, string>,
   fetchFn: typeof globalThis.fetch = fetch,
   signal?: AbortSignal,
-): Promise<ExecuteOutput> {
+): Promise<InvocationOutput> {
   const start = performance.now();
 
   let result: GraphQLResponse;

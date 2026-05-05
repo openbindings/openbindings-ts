@@ -1,0 +1,335 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openbindings.com/schema/openbindings-0.2.0.json",
+  "title": "OpenBindings Interface Document (v0.2.0-draft)",
+  "description": "Canonical JSON Schema for the OpenBindings interface document.",
+  "type": "object",
+  "required": [
+    "openbindings",
+    "operations"
+  ],
+  "properties": {
+    "openbindings": {
+      "type": "string",
+      "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$",
+      "description": "OpenBindings document format version. Semantic Versioning 2.0.0 (e.g., 0.2.0)."
+    },
+    "name": {
+      "type": "string",
+      "description": "Human-friendly interface name."
+    },
+    "version": {
+      "type": "string",
+      "description": "Author-chosen label for the interface contract version. Not an identifier; does not participate in compatibility checking."
+    },
+    "description": {
+      "type": "string",
+      "description": "Human-readable description of the interface."
+    },
+    "schemas": {
+      "type": "object",
+      "description": "Named JSON Schemas referenced by operations.",
+      "propertyNames": {
+        "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/JSONSchema"
+      }
+    },
+    "operations": {
+      "type": "object",
+      "description": "Operation registry keyed by operation name.",
+      "propertyNames": {
+        "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/Operation"
+      }
+    },
+    "roles": {
+      "type": "object",
+      "description": "Interfaces this document intends to satisfy, mapping local aliases to URLs/paths of other OpenBindings interfaces.",
+      "propertyNames": {
+        "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$"
+      },
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "sources": {
+      "type": "object",
+      "description": "Registry of binding artifacts (e.g., OpenAPI/AsyncAPI/proto).",
+      "propertyNames": {
+        "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/Source"
+      }
+    },
+    "bindings": {
+      "type": "object",
+      "description": "Binding entries keyed by binding name, mapping operations to binding sources.",
+      "propertyNames": {
+        "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/BindingEntry"
+      }
+    },
+    "security": {
+      "type": "object",
+      "description": "Named security entries. Each entry is an array of security methods in preference order (first = preferred). Bindings reference these by key.",
+      "propertyNames": {
+        "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$"
+      },
+      "additionalProperties": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/SecurityMethod"
+        }
+      }
+    },
+    "transforms": {
+      "type": "object",
+      "description": "Named transforms. Each value is a JSONata expression string.",
+      "propertyNames": {
+        "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$"
+      },
+      "additionalProperties": {
+        "type": "string"
+      }
+    }
+  },
+  "additionalProperties": true,
+  "$defs": {
+    "JSONSchema": {
+      "type": "object",
+      "description": "JSON Schema 2020-12 object. Top-level constraints from §6.2 are enforced here (`$schema` value pinned, `$vocabulary` forbidden); recursive enforcement of nested subschemas is a tool concern.",
+      "properties": {
+        "$schema": {
+          "const": "https://json-schema.org/draft/2020-12/schema"
+        },
+        "$vocabulary": false
+      },
+      "additionalProperties": true
+    },
+    "Operation": {
+      "type": "object",
+      "properties": {
+        "description": {
+          "type": "string",
+          "description": "Human-readable description of the operation."
+        },
+        "deprecated": {
+          "type": "boolean",
+          "description": "Whether the operation is deprecated."
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Organizational labels for grouping and filtering."
+        },
+        "aliases": {
+          "type": "array",
+          "description": "Alternate names for matching compatibility.",
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$"
+          }
+        },
+        "satisfies": {
+          "type": "array",
+          "description": "Explicit mappings to operations in other interfaces.",
+          "items": {
+            "$ref": "#/$defs/Satisfies"
+          }
+        },
+        "idempotent": {
+          "type": "boolean",
+          "description": "Whether the operation is idempotent (safe to retry)."
+        },
+        "input": {
+          "oneOf": [
+            { "$ref": "#/$defs/JSONSchema" },
+            { "type": "null" }
+          ],
+          "description": "Input schema. Null or absent means unspecified."
+        },
+        "output": {
+          "oneOf": [
+            { "$ref": "#/$defs/JSONSchema" },
+            { "type": "null" }
+          ],
+          "description": "Output schema. Null or absent means unspecified."
+        },
+        "examples": {
+          "type": "object",
+          "description": "Named examples for this operation.",
+          "propertyNames": {
+            "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/OperationExample"
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "OperationExample": {
+      "type": "object",
+      "description": "An example input/output pair for an operation.",
+      "properties": {
+        "description": {
+          "type": "string",
+          "description": "Human-readable description of this example."
+        },
+        "input": {
+          "description": "Example input value (must validate against input schema)."
+        },
+        "output": {
+          "description": "Example output value (must validate against output schema)."
+        }
+      },
+      "additionalProperties": true
+    },
+    "Satisfies": {
+      "type": "object",
+      "required": [
+        "role",
+        "operation"
+      ],
+      "properties": {
+        "role": {
+          "type": "string",
+          "description": "Role key referencing an entry in the document's roles map."
+        },
+        "operation": {
+          "type": "string",
+          "description": "Operation key or alias within the role's interface."
+        }
+      },
+      "additionalProperties": true
+    },
+    "Source": {
+      "type": "object",
+      "required": [
+        "format"
+      ],
+      "anyOf": [
+        { "required": ["location"] },
+        { "required": ["content"] }
+      ],
+      "properties": {
+        "format": {
+          "type": "string",
+          "description": "Binding format token (e.g., openapi@3.1)."
+        },
+        "location": {
+          "type": "string",
+          "minLength": 1,
+          "description": "URI or path to the binding specification."
+        },
+        "content": {
+          "oneOf": [
+            { "type": "object" },
+            { "type": "string", "minLength": 1 }
+          ],
+          "description": "Binding specification content, embedded directly. Object for JSON-based formats, string for text formats (e.g. KDL, protobuf). If both location and content are present, implementations MUST prefer content."
+        },
+        "description": {
+          "type": "string",
+          "description": "Human-readable description of this binding source."
+        },
+        "priority": {
+          "type": "number",
+          "description": "Default priority for all bindings referencing this source. Lower values are more preferred. Binding-level priority overrides this value."
+        }
+      },
+      "additionalProperties": true
+    },
+    "BindingEntry": {
+      "type": "object",
+      "required": [
+        "operation",
+        "source"
+      ],
+      "properties": {
+        "operation": {
+          "type": "string",
+          "description": "Operation key referenced by this binding."
+        },
+        "source": {
+          "type": "string",
+          "description": "Binding source key from sources."
+        },
+        "ref": {
+          "type": "string",
+          "description": "Pointer into the binding artifact."
+        },
+        "priority": {
+          "type": "number",
+          "description": "Relative binding preference (lower is more preferred)."
+        },
+        "description": {
+          "type": "string",
+          "description": "Human-readable description of this binding."
+        },
+        "deprecated": {
+          "type": "boolean",
+          "description": "If true, this binding is deprecated and an alternative should be preferred."
+        },
+        "security": {
+          "type": "string",
+          "description": "Key referencing an entry in the document's security map. Indicates the security requirements for this binding."
+        },
+        "inputTransform": {
+          "$ref": "#/$defs/TransformOrRef",
+          "description": "Transform from operation input schema to binding input structure."
+        },
+        "outputTransform": {
+          "$ref": "#/$defs/TransformOrRef",
+          "description": "Transform from binding output structure to operation output schema."
+        }
+      },
+      "additionalProperties": true
+    },
+    "SecurityMethod": {
+      "type": "object",
+      "required": ["type"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "description": "Security method type identifier."
+        },
+        "description": {
+          "type": "string",
+          "description": "Human-readable description."
+        }
+      },
+      "additionalProperties": true,
+      "description": "A security method declaration. Discriminated on the `type` field; semantics of each type are defined by the relevant authentication-scheme specification."
+    },
+    "TransformOrRef": {
+      "oneOf": [
+        {
+          "type": "string",
+          "description": "An inline JSONata expression."
+        },
+        {
+          "type": "object",
+          "required": ["$ref"],
+          "properties": {
+            "$ref": {
+              "type": "string",
+              "description": "JSON Pointer reference to a named transform (e.g., '#/transforms/myTransform')."
+            }
+          },
+          "additionalProperties": false
+        }
+      ],
+      "description": "Either an inline JSONata expression or a reference to a named transform."
+    }
+  }
+}

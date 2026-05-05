@@ -1,11 +1,11 @@
 /**
- * Standard error codes for binding executor results. These enable
- * protocol-agnostic error handling by the operation executor and
- * application code. Binding executors SHOULD use these codes in
- * ExecuteError.code.
+ * Standard error codes for binding invoker results. These enable
+ * protocol-agnostic error handling by the operation invoker and
+ * application code. Binding drivers SHOULD use these codes in
+ * InvocationError.code.
  *
  * These are SDK conventions, not spec requirements. Third-party
- * executors MAY use different codes.
+ * drivers MAY use different codes.
  */
 
 /** Authentication needed (e.g., HTTP 401, gRPC Unauthenticated). Retryable with credentials. */
@@ -53,9 +53,12 @@ export const ERR_BINDING_NOT_FOUND = "binding_not_found";
 /** Transform evaluation failed. */
 export const ERR_TRANSFORM_ERROR = "transform_error";
 
+/** Input or output schema validation failed. */
+export const ERR_VALIDATION_FAILED = "validation_failed";
+
 /**
  * Maps an HTTP status code to a standard error code.
- * Shared utility for format executors that handle HTTP responses.
+ * Shared utility for format drivers that handle HTTP responses.
  */
 export function httpErrorCode(status: number): string {
   if (status === 401) return ERR_AUTH_REQUIRED;

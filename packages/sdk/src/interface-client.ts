@@ -1,8 +1,8 @@
 import type { OBInterface } from "./types.js";
-import type { StreamEvent } from "./executor-types.js";
-import type { InterfaceCreator } from "./executors.js";
-import type { ExecutionOptions, ContextStore, PlatformCallbacks } from "./context.js";
-import type { OperationExecutor } from "./executor.js";
+import type { StreamEvent } from "./invoker-types.js";
+import type { InterfaceCreator } from "./invokers.js";
+import type { InvocationOptions, ContextStore, PlatformCallbacks } from "./context.js";
+import type { OperationInvoker } from "./operation-invoker.js";
 import { isHttpUrl } from "./helpers.js";
 import { combineCreators } from "./combiners.js";
 import {
@@ -12,7 +12,10 @@ import {
   type CheckCompatibilityOptions,
 } from "./compatibility.js";
 
-const WELL_KNOWN_PATH = "/.well-known/openbindings";
+export const WELL_KNOWN_PATH = "/.well-known/openbindings";
+
+/** Registered media type for OpenBindings documents. */
+export const MEDIA_TYPE = "application/vnd.openbindings+json";
 
 export type OperationEntry = { input?: unknown; output?: unknown };
 
@@ -29,7 +32,7 @@ export interface InterfaceClientOptions {
   interfaceId?: string;
   contextStore?: ContextStore;
   platformCallbacks?: PlatformCallbacks;
-  defaultOptions?: ExecutionOptions;
+  defaultOptions?: InvocationOptions;
   fetch?: typeof globalThis.fetch;
   onStateChange?: () => void;
 }
@@ -54,8 +57,8 @@ interface ResolveResult {
 export class InterfaceClient<T = Record<string, OperationEntry>> {
   readonly interface: OBInterface | null;
 
-  private executor: OperationExecutor;
-  private readonly defaultOptions?: ExecutionOptions;
+  private invoker: OperationInvoker;
+  private readonly defaultOptions?: InvocationOptions;
   private readonly fetchFn: typeof globalThis.fetch;
   private readonly onStateChange?: () => void;
   private readonly interfaceId?: string;
@@ -67,11 +70,11 @@ export class InterfaceClient<T = Record<string, OperationEntry>> {
 
   constructor(
     iface: OBInterface | null,
-    executor: OperationExecutor,
+    invoker: OperationInvoker,
     opts?: InterfaceClientOptions,
   ) {
     this.interface = iface;
-    this.executor = executor;
+    this.invoker = invoker;
     this.interfaceId = opts?.interfaceId;
     this.defaultOptions = opts?.defaultOptions;
     if (opts?.fetch) {
@@ -86,7 +89,7 @@ export class InterfaceClient<T = Record<string, OperationEntry>> {
     this.onStateChange = opts?.onStateChange;
 
     if (opts?.contextStore || opts?.platformCallbacks || opts?.fetch) {
-      this.executor = this.executor.withRuntime(
+      this.invoker = this.invoker.withRuntime(
         opts.contextStore,
         opts.platformCallbacks,
         opts.fetch,
@@ -119,7 +122,7 @@ export class InterfaceClient<T = Record<string, OperationEntry>> {
    * specific capabilities ad-hoc:
    *
    * ```ts
-   * const client = new InterfaceClient(null, executor);
+   * const client = new InterfaceClient(null, invoker);
    * await client.resolve("http://localhost:20290");
    * const issues = client.conforms(workspaceManagerIface, "openbindings.workspace-manager");
    * ```
@@ -225,7 +228,7 @@ export class InterfaceClient<T = Record<string, OperationEntry>> {
 
   /**
    * Re-resolves against the same target, bypassing any caches.
-   * For HTTP targets this re-fetches the content and passes it to executors
+   * For HTTP targets this re-fetches the content and passes it to drivers
    * so cached parsed documents are replaced with fresh versions.
    */
   async refresh(opts?: { signal?: AbortSignal }): Promise<void> {
@@ -279,21 +282,21 @@ export class InterfaceClient<T = Record<string, OperationEntry>> {
   }
 
   /**
-   * Executes an operation, returning a stream of events. Every operation is
+   * Invokes an operation, returning a stream of events. Every operation is
    * a stream — unary calls produce exactly one event.
    */
-  async *execute<K extends string & keyof T>(
+  async *invoke<K extends string & keyof T>(
     operation: K,
     input?: K extends keyof T ? (T[K] extends { input: infer I } ? I : undefined) : unknown,
-    options?: ExecutionOptions,
+    options?: InvocationOptions,
   ): AsyncGenerator<StreamEvent> {
     if (this._state.kind !== "bound" || !this.resolvedInterface) {
       throw new Error(`openbindings: client is not bound to a service (state: ${this._state.kind})`);
     }
 
-    const merged = mergeExecutionOptions(this.defaultOptions, options);
+    const merged = mergeInvocationOptions(this.defaultOptions, options);
 
-    yield* this.executor.executeOperation(
+    yield* this.invoker.invoke(
       { interface: this.resolvedInterface, operation, input, options: merged },
     );
   }
@@ -330,7 +333,10 @@ export class InterfaceClient<T = Record<string, OperationEntry>> {
     signal: AbortSignal,
   ): Promise<OBInterface | null> {
     try {
-      const resp = await this.fetchFn(url, { signal });
+      const resp = await this.fetchFn(url, {
+        signal,
+        headers: { Accept: "application/vnd.openbindings+json, application/json" },
+      });
       if (!resp.ok) return null;
       const body = await resp.json();
       if (isOBInterface(body)) return body;
@@ -428,10 +434,10 @@ export class InterfaceClient<T = Record<string, OperationEntry>> {
   }
 }
 
-function mergeExecutionOptions(
-  defaults?: ExecutionOptions,
-  perCall?: ExecutionOptions,
-): ExecutionOptions | undefined {
+function mergeInvocationOptions(
+  defaults?: InvocationOptions,
+  perCall?: InvocationOptions,
+): InvocationOptions | undefined {
   if (!defaults) return perCall;
   if (!perCall) return defaults;
   return {

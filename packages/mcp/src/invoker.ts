@@ -8,19 +8,20 @@ import {
   contextBearerToken,
   contextApiKey,
   contextBasicAuth,
-  type BindingExecutor,
+  type BindingInvoker,
   type InterfaceCreator,
-  type BindingExecutionInput,
+  type SourceInspector,
+  type BindingInvocationInput,
   type CreateInput,
   type OBInterface,
   type StreamEvent,
   type FormatInfo,
-  type ExecutionOptions,
+  type InvocationOptions,
   type Source,
-  type ListRefsResult,
+  type SourceInspection,
 } from "@openbindings/sdk";
 import { FORMAT_TOKEN } from "./constants.js";
-import { executeMCPBinding, parseRef } from "./execute.js";
+import { invokeMCPBinding, parseRef } from "./invoke.js";
 import { discover, convertToInterface } from "./create.js";
 
 // ---------------------------------------------------------------------------
@@ -30,7 +31,7 @@ import { discover, convertToInterface } from "./create.js";
 /** Build HTTP headers from binding context and execution options. */
 function buildHeaders(
   context?: Record<string, unknown>,
-  options?: ExecutionOptions,
+  options?: InvocationOptions,
 ): Record<string, string> {
   const headers: Record<string, string> = {};
 
@@ -79,17 +80,17 @@ function normalizeEndpoint(url: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// Executor
+// Driver
 // ---------------------------------------------------------------------------
 
-/** Executes MCP bindings by connecting to MCP servers via Streamable HTTP. */
-export class MCPExecutor implements BindingExecutor {
+/** Invokes MCP bindings by connecting to MCP servers via Streamable HTTP. */
+export class MCPInvoker implements BindingInvoker {
   formats(): FormatInfo[] {
     return [{ token: FORMAT_TOKEN, description: "MCP via Streamable HTTP" }];
   }
 
-  async *executeBinding(
-    input: BindingExecutionInput,
+  async *invokeBinding(
+    input: BindingInvocationInput,
     options?: { signal?: AbortSignal },
   ): AsyncIterable<StreamEvent> {
     // Validate ref early.
@@ -103,7 +104,7 @@ export class MCPExecutor implements BindingExecutor {
     const enriched = await this.resolveStoreContext(input);
     const headers = buildHeaders(enriched.context, enriched.options);
 
-    let result = await executeMCPBinding(
+    let result = await invokeMCPBinding(
       enriched.source.location!,
       enriched.ref,
       enriched.input,
@@ -126,7 +127,7 @@ export class MCPExecutor implements BindingExecutor {
           }
         }
         const retryHeaders = buildHeaders(retryInput.context, retryInput.options);
-        result = await executeMCPBinding(
+        result = await invokeMCPBinding(
           retryInput.source.location!,
           retryInput.ref,
           retryInput.input,
@@ -144,8 +145,8 @@ export class MCPExecutor implements BindingExecutor {
   }
 
   private async resolveStoreContext(
-    input: BindingExecutionInput,
-  ): Promise<BindingExecutionInput> {
+    input: BindingInvocationInput,
+  ): Promise<BindingInvocationInput> {
     if (!input.store || !input.source.location) return input;
 
     const key = normalizeEndpoint(input.source.location);
@@ -172,7 +173,7 @@ export class MCPExecutor implements BindingExecutor {
 // ---------------------------------------------------------------------------
 
 /** Creates OBInterface definitions by discovering an MCP server's capabilities. */
-export class MCPCreator implements InterfaceCreator {
+export class MCPCreator implements InterfaceCreator, SourceInspector {
   formats(): FormatInfo[] {
     return [{ token: FORMAT_TOKEN, description: "MCP via Streamable HTTP" }];
   }
@@ -197,28 +198,28 @@ export class MCPCreator implements InterfaceCreator {
     return iface;
   }
 
-  /** Lists all bindable refs (tools, resources, prompts) from an MCP server. */
-  async listBindableRefs(
+  /** Lists all bindable targets (tools, resources, prompts) from an MCP server. */
+  async inspectSource(
     source: Source,
     options?: { signal?: AbortSignal },
-  ): Promise<ListRefsResult> {
+  ): Promise<SourceInspection> {
     if (!source.location) throw new Error("MCP source requires a location (endpoint URL)");
     const disc = await discover(source.location, options?.signal);
-    const refs: ListRefsResult["refs"] = [];
+    const targets: SourceInspection["targets"] = [];
 
     for (const tool of disc.tools.sort((a, b) => a.name.localeCompare(b.name))) {
-      refs.push({ ref: `tools/${tool.name}`, description: tool.description });
+      targets.push({ ref: `tools/${tool.name}`, operation: tool.description ? { description: tool.description } : undefined });
     }
     for (const res of disc.resources.sort((a, b) => a.name.localeCompare(b.name))) {
-      refs.push({ ref: `resources/${res.uri}`, description: res.description });
+      targets.push({ ref: `resources/${res.uri}`, operation: res.description ? { description: res.description } : undefined });
     }
     for (const tmpl of disc.resourceTemplates.sort((a, b) => a.name.localeCompare(b.name))) {
-      refs.push({ ref: `resources/${tmpl.uriTemplate}`, description: tmpl.description });
+      targets.push({ ref: `resources/${tmpl.uriTemplate}`, operation: tmpl.description ? { description: tmpl.description } : undefined });
     }
     for (const prompt of disc.prompts.sort((a, b) => a.name.localeCompare(b.name))) {
-      refs.push({ ref: `prompts/${prompt.name}`, description: prompt.description });
+      targets.push({ ref: `prompts/${prompt.name}`, operation: prompt.description ? { description: prompt.description } : undefined });
     }
 
-    return { refs, exhaustive: true };
+    return { targets, exhaustive: true };
   }
 }

@@ -10,6 +10,6 @@ export const MAX_SELECTION_DEPTH = 3;
 /**
  * Conventional input schema property name for a pre-built GraphQL query.
  * When the operation's input schema declares this property with a const value,
- * the executor uses it instead of building a query from introspection.
+ * the driver uses it instead of building a query from introspection.
  */
 export const QUERY_FIELD_NAME = "_query";

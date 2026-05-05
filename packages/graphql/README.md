@@ -1,10 +1,10 @@
 # @openbindings/graphql
 
-GraphQL binding executor and interface creator for the [OpenBindings](https://openbindings.com) TypeScript SDK.
+GraphQL binding invoker and interface creator for the [OpenBindings](https://openbindings.com) TypeScript SDK.
 
-This package enables OpenBindings to execute operations against GraphQL endpoints and synthesize OBI documents from GraphQL schemas via introspection. It builds queries, mutations, and subscriptions from operation refs, applies credentials, and returns results as a stream of events. Subscriptions stream over the `graphql-transport-ws` WebSocket protocol.
+This package enables OpenBindings to invoke operations against GraphQL endpoints and synthesize OBI documents from GraphQL schemas via introspection. It builds queries, mutations, and subscriptions from operation refs, applies credentials, and returns results as a stream of events. Subscriptions stream over the `graphql-transport-ws` WebSocket protocol.
 
-See the [spec](https://github.com/openbindings/spec) and [pattern documentation](https://github.com/openbindings/spec/tree/main/patterns) for how executors and creators fit into the OpenBindings architecture.
+See the [spec](https://github.com/openbindings/spec) and [pattern documentation](https://github.com/openbindings/spec/tree/main/patterns) for how drivers and creators fit into the OpenBindings architecture.
 
 ## Install
 
@@ -16,23 +16,23 @@ Requires [@openbindings/sdk](https://www.npmjs.com/package/@openbindings/sdk) (t
 
 ## Usage
 
-### Register with OperationExecutor
+### Register with OperationInvoker
 
 ```typescript
-import { OperationExecutor } from "@openbindings/sdk";
-import { GraphQLExecutor, GraphQLCreator } from "@openbindings/graphql";
+import { OperationInvoker } from "@openbindings/sdk";
+import { GraphQLInvoker, GraphQLCreator } from "@openbindings/graphql";
 
-const exec = new OperationExecutor([new GraphQLExecutor(), new GraphQLCreator()]);
+const dispatcher = new OperationInvoker([new GraphQLInvoker(), new GraphQLCreator()]);
 ```
 
-The executor declares the versionless `graphql` format token — it handles any GraphQL endpoint.
+The driver declares the versionless `graphql` format token — it handles any GraphQL endpoint.
 
-### Execute a binding
+### Invoke a binding
 
 ```typescript
-const executor = new GraphQLExecutor();
+const driver = new GraphQLInvoker();
 
-for await (const event of executor.executeBinding({
+for await (const event of driver.invokeBinding({
   source: {
     format: "graphql",
     location: "https://api.example.com/graphql",
@@ -48,7 +48,7 @@ for await (const event of executor.executeBinding({
 
 Refs follow the convention `Query/<field>`, `Mutation/<field>`, or `Subscription/<field>`.
 
-The executor caches the introspected schema per endpoint on the executor instance. Inline schemas are also supported via `Source.content` (full introspection response, `__schema` wrapper, or bare schema object).
+The driver caches the introspected schema per endpoint on the driver instance. Inline schemas are also supported via `Source.content` (full introspection response, `__schema` wrapper, or bare schema object).
 
 ### Create an interface from a GraphQL endpoint
 
@@ -63,7 +63,7 @@ const iface = await creator.createInterface({
 });
 ```
 
-The creator runs a standard introspection query against the endpoint and synthesizes an OBI with one operation per root field. Each operation's input schema embeds a `_query` const containing the pre-built GraphQL query string, so the executor can reuse it without re-introspecting.
+The creator runs a standard introspection query against the endpoint and synthesizes an OBI with one operation per root field. Each operation's input schema embeds a `_query` const containing the pre-built GraphQL query string, so the driver can reuse it without re-introspecting.
 
 ## How it works
 
@@ -77,7 +77,7 @@ The creator runs a standard introspection query against the endpoint and synthes
    - **Query / Mutation:** HTTP POST, returns one stream event
    - **Subscription:** opens a WebSocket using the `graphql-transport-ws` protocol, sends `connection_init` → `subscribe`, then forwards each `next` message as a stream event until `complete` or close
 
-On a 401/403, if the binding declares security entries and a credential callback is configured, the executor calls `resolveSecurity` and retries once.
+On a 401/403, if the binding declares security entries and a credential callback is configured, the driver calls `resolveSecurity` and retries once.
 
 ### Credential application
 
@@ -87,7 +87,7 @@ GraphQL has no native security scheme declarations, so headers are derived direc
 2. **`apiKey`** → `Authorization: ApiKey <token>`
 3. **`basic.username` + `basic.password`** → `Authorization: Basic <base64>`
 
-`ExecutionOptions.headers` are merged in after, and `ExecutionOptions.cookies` are joined as a sorted `Cookie:` header.
+`InvocationOptions.headers` are merged in after, and `InvocationOptions.cookies` are joined as a sorted `Cookie:` header.
 
 For subscriptions, browsers cannot set custom headers on a WebSocket upgrade, so the `Authorization` header is forwarded inside the `connection_init` payload as `{ authorization: "Bearer ..." }` instead.
 

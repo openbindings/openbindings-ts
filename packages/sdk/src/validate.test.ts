@@ -36,10 +36,10 @@ describe("validateInterface", () => {
     expect(() => validateInterface(iface)).toThrow(ValidationError);
   });
 
-  it("requires semver format", () => {
+  it("requires SemVer 2.0.0 format (OBI-D-16)", () => {
     const iface = minimalInterface();
     iface.openbindings = "1.0";
-    expect(() => validateInterface(iface)).toThrow("MAJOR.MINOR.PATCH");
+    expect(() => validateInterface(iface)).toThrow("OBI-D-16");
   });
 
   it("requires operations", () => {
@@ -48,10 +48,10 @@ describe("validateInterface", () => {
     expect(() => validateInterface(iface)).toThrow("operations: required");
   });
 
-  it("catches source with both location and content", () => {
+  it("accepts source with both location and content", () => {
     const iface = minimalInterface();
     iface.sources!.main.content = { openapi: "3.1.0" };
-    expect(() => validateInterface(iface)).toThrow("cannot have both location and content");
+    expect(() => validateInterface(iface)).not.toThrow();
   });
 
   it("catches binding referencing unknown operation", () => {
@@ -82,12 +82,10 @@ describe("validateInterface", () => {
     ).not.toThrow();
   });
 
-  it("enforces supported version when requested", () => {
+  it("refuses higher-major versions unconditionally (OBI-T-04)", () => {
     const iface = minimalInterface();
     iface.openbindings = "9.9.9";
-    expect(() =>
-      validateInterface(iface, { requireSupportedVersion: true }),
-    ).toThrow("unsupported version");
+    expect(() => validateInterface(iface)).toThrow("OBI-T-04");
   });
 
   it("catches binding referencing unknown security", () => {
@@ -103,13 +101,14 @@ describe("validateInterface", () => {
     expect(() => validateInterface(iface)).not.toThrow();
   });
 
-  it("catches inline transform missing type", () => {
+  it("catches non-string inline transform", () => {
+    // Per v0.2 §6.5, inline transforms are JSONata expression strings.
     const iface = minimalInterface();
     iface.bindings!["getUser.main"] = {
       ...iface.bindings!["getUser.main"],
       inputTransform: { expression: "foo" } as any,
     };
-    expect(() => validateInterface(iface)).toThrow("inputTransform.type: required");
+    expect(() => validateInterface(iface)).toThrow("must be a non-empty JSONata expression");
   });
 
   it("validates alias uniqueness", () => {
@@ -118,5 +117,113 @@ describe("validateInterface", () => {
       aliases: ["getUser"],
     };
     expect(() => validateInterface(iface)).toThrow("conflicts with operation key");
+  });
+});
+
+describe("validateInterface with validateExamples (OBI-T-09)", () => {
+  function ifaceWithExample(overrides?: {
+    input?: unknown;
+    output?: unknown;
+    inputSchema?: Record<string, unknown> | null;
+    outputSchema?: Record<string, unknown> | null;
+  }): OBInterface {
+    const op: Record<string, unknown> = {};
+    if (overrides?.inputSchema !== null) {
+      op.input = overrides?.inputSchema ?? {
+        type: "object",
+        properties: { name: { type: "string" } },
+        required: ["name"],
+        additionalProperties: false,
+      };
+    }
+    if (overrides?.outputSchema !== null) {
+      op.output = overrides?.outputSchema ?? {
+        type: "object",
+        properties: { id: { type: "number" } },
+        required: ["id"],
+        additionalProperties: false,
+      };
+    }
+    op.examples = {
+      basic: {
+        ...(overrides?.input !== undefined ? { input: overrides.input } : { input: { name: "Alice" } }),
+        ...(overrides?.output !== undefined ? { output: overrides.output } : { output: { id: 42 } }),
+      },
+    };
+    return {
+      openbindings: "0.1.0",
+      operations: { createUser: op as any },
+      sources: {
+        main: { format: "openapi@3.1", location: "https://example.com/api.json" },
+      },
+      bindings: {
+        "createUser.main": { operation: "createUser", source: "main", ref: "#/paths/~1users/post" },
+      },
+    };
+  }
+
+  it("passes when examples match their schemas", () => {
+    const iface = ifaceWithExample();
+    expect(() => validateInterface(iface, { validateExamples: true })).not.toThrow();
+  });
+
+  it("fails when example input does not match the input schema", () => {
+    const iface = ifaceWithExample({ input: { name: 123 } });
+    expect(() => validateInterface(iface, { validateExamples: true })).toThrow(
+      /OBI-D-15/,
+    );
+    try {
+      validateInterface(iface, { validateExamples: true });
+    } catch (err) {
+      expect(err).toBeInstanceOf(ValidationError);
+      const problems = (err as InstanceType<typeof ValidationError>).problems;
+      expect(problems.some((p: string) => p.includes('examples["basic"].input'))).toBe(true);
+    }
+  });
+
+  it("fails when example output does not match the output schema", () => {
+    const iface = ifaceWithExample({ output: { id: "not-a-number" } });
+    expect(() => validateInterface(iface, { validateExamples: true })).toThrow(
+      /OBI-D-15/,
+    );
+    try {
+      validateInterface(iface, { validateExamples: true });
+    } catch (err) {
+      expect(err).toBeInstanceOf(ValidationError);
+      const problems = (err as InstanceType<typeof ValidationError>).problems;
+      expect(problems.some((p: string) => p.includes('examples["basic"].output'))).toBe(true);
+    }
+  });
+
+  it("does not check examples when validateExamples is false (default)", () => {
+    // Invalid input that would fail if examples were checked.
+    const iface = ifaceWithExample({ input: { name: 123 } });
+    expect(() => validateInterface(iface)).not.toThrow();
+    expect(() => validateInterface(iface, {})).not.toThrow();
+    expect(() => validateInterface(iface, { validateExamples: false })).not.toThrow();
+  });
+
+  it("skips operations without examples gracefully", () => {
+    const iface: OBInterface = {
+      openbindings: "0.1.0",
+      operations: {
+        noExamples: {
+          input: { type: "object" },
+          output: { type: "object" },
+        },
+      },
+      sources: {
+        main: { format: "openapi@3.1", location: "https://example.com/api.json" },
+      },
+      bindings: {
+        "noExamples.main": { operation: "noExamples", source: "main", ref: "#/paths/~1foo/get" },
+      },
+    };
+    expect(() => validateInterface(iface, { validateExamples: true })).not.toThrow();
+  });
+
+  it("skips examples when the operation has no schemas", () => {
+    const iface = ifaceWithExample({ inputSchema: null, outputSchema: null });
+    expect(() => validateInterface(iface, { validateExamples: true })).not.toThrow();
   });
 });

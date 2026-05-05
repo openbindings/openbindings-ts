@@ -60,7 +60,7 @@ export interface VersionRange {
 }
 
 /**
- * Parse a range token used by executors.
+ * Parse a range token used by drivers.
  *
  *  "grpc"            → versionless
  *  "openapi@^3.0.0"  → caret

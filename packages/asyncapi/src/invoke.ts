@@ -1,7 +1,7 @@
 import type {
-  BindingExecutionInput,
-  ExecuteOutput,
-  ExecutionOptions,
+  BindingInvocationInput,
+  InvocationOutput,
+  InvocationOptions,
   StreamEvent,
 } from "@openbindings/sdk";
 import {
@@ -31,11 +31,11 @@ import type { WSPool } from "./ws-pool.js";
 
 const MAX_RESPONSE_BYTES = 10 * 1024 * 1024;
 
-export async function executeBinding(
-  input: BindingExecutionInput,
+export async function invokeBinding(
+  input: BindingInvocationInput,
   options?: { signal?: AbortSignal },
   preloadedDoc?: AsyncAPIDocument,
-): Promise<ExecuteOutput> {
+): Promise<InvocationOutput> {
   const start = performance.now();
 
   let doc: AsyncAPIDocument;
@@ -72,16 +72,16 @@ export async function executeBinding(
 
   switch (asyncOp.action) {
     case "receive":
-      return executeReceive(serverURL, protocol, address, doc, asyncOp, input, start, options);
+      return invokeReceive(serverURL, protocol, address, doc, asyncOp, input, start, options);
     case "send":
-      return executeSend(serverURL, protocol, address, doc, asyncOp, input, start, options);
+      return invokeSend(serverURL, protocol, address, doc, asyncOp, input, start, options);
     default:
       return failedOutput(start, ERR_EXECUTION_FAILED, `unknown action "${asyncOp.action}"`);
   }
 }
 
 export async function* subscribeBinding(
-  input: BindingExecutionInput,
+  input: BindingInvocationInput,
   options?: { signal?: AbortSignal },
   preloadedDoc?: AsyncAPIDocument,
   wsPool?: WSPool,
@@ -191,7 +191,7 @@ export function resolveAsyncAPIServerKey(doc: AsyncAPIDocument): string {
 
 function resolveServer(
   doc: AsyncAPIDocument,
-  opts?: ExecutionOptions,
+  opts?: InvocationOptions,
 ): { url: string; protocol: string } {
   if (opts?.metadata?.["baseURL"]) {
     const base = String(opts.metadata["baseURL"]);
@@ -350,7 +350,7 @@ function applyContext(
   doc: AsyncAPIDocument,
   asyncOp: AsyncAPIOperation,
   ctx?: Record<string, unknown>,
-  opts?: ExecutionOptions,
+  opts?: InvocationOptions,
 ): Record<string, string> | undefined {
   let queryParams: Record<string, string> | undefined;
 
@@ -382,19 +382,19 @@ function applyContext(
 }
 
 // ---------------------------------------------------------------------------
-// Execute: Receive (SSE)
+// Invoke: Receive (SSE)
 // ---------------------------------------------------------------------------
 
-async function executeReceive(
+async function invokeReceive(
   serverURL: string,
   protocol: string,
   address: string,
   doc: AsyncAPIDocument,
   asyncOp: AsyncAPIOperation,
-  input: BindingExecutionInput,
+  input: BindingInvocationInput,
   start: number,
   options?: { signal?: AbortSignal },
-): Promise<ExecuteOutput> {
+): Promise<InvocationOutput> {
   let maxEvents = 1;
   if (input.input && typeof input.input === "object" && !Array.isArray(input.input)) {
     const m = input.input as Record<string, unknown>;
@@ -408,37 +408,37 @@ async function executeReceive(
       `receive not supported for protocol "${protocol}" (supported: http, https)`);
   }
 
-  return executeSSESubscribe(serverURL, address, maxEvents, doc, asyncOp, input, start, options);
+  return invokeSSESubscribe(serverURL, address, maxEvents, doc, asyncOp, input, start, options);
 }
 
-async function executeSend(
+async function invokeSend(
   serverURL: string,
   protocol: string,
   address: string,
   doc: AsyncAPIDocument,
   asyncOp: AsyncAPIOperation,
-  input: BindingExecutionInput,
+  input: BindingInvocationInput,
   start: number,
   options?: { signal?: AbortSignal },
-): Promise<ExecuteOutput> {
+): Promise<InvocationOutput> {
   if (protocol !== "http" && protocol !== "https") {
     return failedOutput(start, ERR_SOURCE_CONFIG_ERROR,
       `send not supported for protocol "${protocol}" (supported: http, https)`);
   }
 
-  return executeHTTPSend(serverURL, address, doc, asyncOp, input, start, options);
+  return invokeHTTPSend(serverURL, address, doc, asyncOp, input, start, options);
 }
 
-async function executeSSESubscribe(
+async function invokeSSESubscribe(
   serverURL: string,
   address: string,
   maxEvents: number,
   doc: AsyncAPIDocument,
   asyncOp: AsyncAPIOperation,
-  input: BindingExecutionInput,
+  input: BindingInvocationInput,
   start: number,
   options?: { signal?: AbortSignal },
-): Promise<ExecuteOutput> {
+): Promise<InvocationOutput> {
   let url = `${serverURL}/${address.replace(/^\/+/, "")}`;
 
   const headers = new Headers({ Accept: "text/event-stream" });
@@ -517,7 +517,7 @@ async function* streamSSE(
   address: string,
   doc: AsyncAPIDocument,
   asyncOp: AsyncAPIOperation,
-  input: BindingExecutionInput,
+  input: BindingInvocationInput,
   options?: { signal?: AbortSignal },
 ): AsyncIterable<StreamEvent> {
   let url = `${serverURL}/${address.replace(/^\/+/, "")}`;
@@ -587,7 +587,7 @@ async function* streamSSE(
 }
 
 // ---------------------------------------------------------------------------
-// Execute: WebSocket
+// Invoke: WebSocket
 // ---------------------------------------------------------------------------
 
 async function* streamWS(
@@ -595,7 +595,7 @@ async function* streamWS(
   address: string,
   doc: AsyncAPIDocument,
   asyncOp: AsyncAPIOperation,
-  input: BindingExecutionInput,
+  input: BindingInvocationInput,
   options?: { signal?: AbortSignal },
 ): AsyncIterable<StreamEvent> {
   const wsURL = new URL(`/${address.replace(/^\/+/, "")}`, serverURL);
@@ -695,7 +695,7 @@ async function* pooledStreamWS(
   address: string,
   doc: AsyncAPIDocument,
   asyncOp: AsyncAPIOperation,
-  input: BindingExecutionInput,
+  input: BindingInvocationInput,
   options?: { signal?: AbortSignal },
 ): AsyncIterable<StreamEvent> {
   let pooled;
@@ -763,7 +763,7 @@ async function* pooledSendWS(
   pool: WSPool,
   serverURL: string,
   address: string,
-  input: BindingExecutionInput,
+  input: BindingInvocationInput,
   options?: { signal?: AbortSignal },
 ): AsyncIterable<StreamEvent> {
   let pooled;
@@ -787,18 +787,18 @@ async function* pooledSendWS(
 }
 
 // ---------------------------------------------------------------------------
-// Execute: HTTP Send (POST)
+// Invoke: HTTP Send (POST)
 // ---------------------------------------------------------------------------
 
-async function executeHTTPSend(
+async function invokeHTTPSend(
   serverURL: string,
   address: string,
   doc: AsyncAPIDocument,
   asyncOp: AsyncAPIOperation,
-  input: BindingExecutionInput,
+  input: BindingInvocationInput,
   start: number,
   options?: { signal?: AbortSignal },
-): Promise<ExecuteOutput> {
+): Promise<InvocationOutput> {
   let url = `${serverURL}/${address.replace(/^\/+/, "")}`;
 
   const body = input.input != null ? JSON.stringify(input.input) : "{}";
@@ -905,7 +905,7 @@ async function readResponseText(resp: Response, maxBytes: number): Promise<strin
   return chunks.join("");
 }
 
-function failedOutput(startMs: number, code: string, message: string): ExecuteOutput {
+function failedOutput(startMs: number, code: string, message: string): InvocationOutput {
   return {
     status: 1,
     durationMs: Math.round(performance.now() - startMs),
@@ -913,7 +913,7 @@ function failedOutput(startMs: number, code: string, message: string): ExecuteOu
   };
 }
 
-function httpErrorOutput(startMs: number, statusCode: number, statusText: string): ExecuteOutput {
+function httpErrorOutput(startMs: number, statusCode: number, statusText: string): InvocationOutput {
   return {
     output: undefined,
     status: statusCode,

@@ -115,6 +115,25 @@ describe("resolveSecurity", () => {
         }
     });
 
+    it("propagates AuthCancelled from browserRedirect in OAuth2 PKCE flow", async () => {
+        const methods: SecurityMethod[] = [{
+            type: "oauth2",
+            authorizeUrl: "https://auth.example.com/authorize",
+            tokenUrl: "https://auth.example.com/token",
+        }];
+
+        const err = new Error("user cancelled");
+        err.name = "AuthCancelled";
+
+        const callbacks: PlatformCallbacks = {
+            browserRedirect: async (_url: string) => {
+                throw err;
+            },
+        };
+
+        await expect(resolveSecurity(methods, callbacks)).rejects.toThrow(err);
+    });
+
     it("uses description in prompt message", async () => {
         let promptMessage = "";
         const callbacks: PlatformCallbacks = {

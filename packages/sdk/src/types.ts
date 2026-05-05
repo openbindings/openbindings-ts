@@ -29,8 +29,8 @@ export interface Operation {
   satisfies?: Satisfies[];
 
   idempotent?: boolean;
-  input?: JSONSchema;
-  output?: JSONSchema;
+  input?: JSONSchema | null;
+  output?: JSONSchema | null;
 
   examples?: Record<string, OperationExample>;
   [key: string]: unknown;
@@ -47,49 +47,37 @@ export interface Source {
   [key: string]: unknown;
 }
 
-/** A JSON-to-JSON transformation. For v0.1, type must be "jsonata". */
-export interface Transform {
-  type: string;
-  expression: string;
-  [key: string]: unknown;
-}
+/**
+ * A JSONata 2.0 transformation expression string.
+ *
+ * Per OpenBindings v0.2 §6.5, transforms are JSONata expression strings; tools
+ * claiming Invoking-class conformance evaluate them per JSONata 2.0 (OBI-T-11).
+ */
+export type Transform = string;
 
 /**
- * Either an inline transform or a `$ref` to a named transform.
- * Use {@link isTransformRef} to determine which form is present.
+ * Either an inline transform (a JSONata expression string) or a `$ref` object
+ * pointing to a named entry in the document's `transforms` map.
+ *
+ * Use {@link isTransformRef} to discriminate at runtime.
  */
-export interface TransformOrRef {
-  $ref?: string;
-  type?: string;
-  expression?: string;
-  [key: string]: unknown;
-}
+export type TransformOrRef = Transform | TransformRef;
 
-/** A {@link TransformOrRef} that is known to be a `$ref` reference. */
-export interface TransformRef extends TransformOrRef {
+/** A `$ref` object form pointing to a named transform. */
+export interface TransformRef {
   $ref: string;
 }
 
 /**
  * A security method declaration, discriminated on the `type` field.
+ * Per spec §6.6, only `type` (required) and `description` (optional) are
+ * spec-defined; all other fields are open-ended and scheme-specific.
  * Well-known types: "bearer", "oauth2", "basic", "apiKey".
  * Unknown types SHOULD be skipped by clients.
  */
 export interface SecurityMethod {
   type: string;
   description?: string;
-  /** OAuth2 authorization endpoint URL (required for type "oauth2"). */
-  authorizeUrl?: string;
-  /** OAuth2 token endpoint URL (required for type "oauth2"). */
-  tokenUrl?: string;
-  /** Available OAuth2 scopes. */
-  scopes?: string[];
-  /** For type "oauth2": optional client identifier. Servers MAY use a default. */
-  clientId?: string;
-  /** For type "apiKey": the name of the header, query parameter, or cookie. */
-  name?: string;
-  /** For type "apiKey": where the key is sent ("header", "query", or "cookie"). */
-  in?: "header" | "query" | "cookie";
   [key: string]: unknown;
 }
 
@@ -129,27 +117,30 @@ export interface OBInterface {
 
 /** Returns true if the transform is a `$ref` reference to a named transform. */
 export function isTransformRef(t: TransformOrRef): t is TransformRef {
-  return typeof t.$ref === "string" && t.$ref !== "";
+  return (
+    typeof t === "object" &&
+    t !== null &&
+    typeof (t as TransformRef).$ref === "string" &&
+    (t as TransformRef).$ref !== ""
+  );
 }
 
 /**
- * Resolves a {@link TransformOrRef} to a concrete {@link Transform}.
- * For inline transforms, returns the transform directly. For `$ref` references,
- * looks up the named transform in the provided map. Returns `undefined` if unresolvable.
+ * Resolves a {@link TransformOrRef} to a concrete JSONata expression string.
+ * For inline transforms, returns the expression directly. For `$ref`
+ * references, looks up the named transform in the provided map. Returns
+ * `undefined` if unresolvable.
  */
 export function resolveTransform(
   t: TransformOrRef,
   transforms?: Record<string, Transform>,
 ): Transform | undefined {
   if (!isTransformRef(t)) {
-    if (typeof t.type === "string" && typeof t.expression === "string") {
-      return { type: t.type, expression: t.expression };
-    }
-    return undefined;
+    return typeof t === "string" ? t : undefined;
   }
 
   const prefix = "#/transforms/";
-  const ref = t.$ref!;
+  const ref = t.$ref;
   if (!ref.startsWith(prefix)) return undefined;
   const name = ref.slice(prefix.length);
   if (!name || !transforms) return undefined;

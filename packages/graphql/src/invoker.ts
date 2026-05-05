@@ -9,19 +9,20 @@ import {
   contextBearerToken,
   contextApiKey,
   contextBasicAuth,
-  type BindingExecutor,
+  type BindingInvoker,
   type InterfaceCreator,
-  type BindingExecutionInput,
+  type SourceInspector,
+  type BindingInvocationInput,
   type CreateInput,
   type OBInterface,
   type StreamEvent,
   type FormatInfo,
-  type ExecutionOptions,
+  type InvocationOptions,
   type Source,
-  type ListRefsResult,
+  type SourceInspection,
 } from "@openbindings/sdk";
 import { FORMAT_TOKEN } from "./constants.js";
-import { parseRef, introspect, buildQuery, executeGraphQL, subscribeGraphQL, isAuthError, parseIntrospectionContent } from "./execute.js";
+import { parseRef, introspect, buildQuery, invokeGraphQL, subscribeGraphQL, isAuthError, parseIntrospectionContent } from "./invoke.js";
 import type { IntrospectionSchema } from "./introspection.js";
 import { buildTypeMap, rootTypeName } from "./introspection.js";
 import { convertToInterface } from "./create.js";
@@ -32,7 +33,7 @@ import { convertToInterface } from "./create.js";
 
 function buildHeaders(
   context?: Record<string, unknown>,
-  options?: ExecutionOptions,
+  options?: InvocationOptions,
 ): Record<string, string> {
   const headers: Record<string, string> = {};
 
@@ -75,19 +76,19 @@ function normalizeEndpoint(url: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// Executor
+// Driver
 // ---------------------------------------------------------------------------
 
-/** Executes GraphQL bindings via HTTP POST with introspection-driven query construction. */
-export class GraphQLExecutor implements BindingExecutor {
+/** Invokes GraphQL bindings via HTTP POST with introspection-driven query construction. */
+export class GraphQLInvoker implements BindingInvoker {
   private readonly schemaCache = new Map<string, IntrospectionSchema>();
 
   formats(): FormatInfo[] {
     return [{ token: FORMAT_TOKEN, description: "GraphQL APIs" }];
   }
 
-  async *executeBinding(
-    input: BindingExecutionInput,
+  async *invokeBinding(
+    input: BindingInvocationInput,
     options?: { signal?: AbortSignal },
   ): AsyncIterable<StreamEvent> {
     // Validate ref early.
@@ -147,8 +148,8 @@ export class GraphQLExecutor implements BindingExecutor {
       return;
     }
 
-    // Execute query/mutation via HTTP.
-    let result = await executeGraphQL(url, query, variables, fieldName, headers, fetchFn, options?.signal);
+    // Invoke query/mutation via HTTP.
+    let result = await invokeGraphQL(url, query, variables, fieldName, headers, fetchFn, options?.signal);
 
     // Auth retry.
     if (result.error?.code === ERR_AUTH_REQUIRED && enriched.security?.length && enriched.callbacks) {
@@ -160,7 +161,7 @@ export class GraphQLExecutor implements BindingExecutor {
           if (key) try { await enriched.store.set(key, retryContext); } catch { /* ignore */ }
         }
         const retryHeaders = buildHeaders(retryContext, enriched.options);
-        result = await executeGraphQL(url, query, variables, fieldName, retryHeaders, fetchFn, options?.signal);
+        result = await invokeGraphQL(url, query, variables, fieldName, retryHeaders, fetchFn, options?.signal);
       }
     }
 
@@ -185,7 +186,7 @@ export class GraphQLExecutor implements BindingExecutor {
     return schema;
   }
 
-  private async resolveStoreContext(input: BindingExecutionInput): Promise<BindingExecutionInput> {
+  private async resolveStoreContext(input: BindingInvocationInput): Promise<BindingInvocationInput> {
     if (!input.store || !input.source.location) return input;
     const key = normalizeEndpoint(input.source.location);
     if (!key) return input;
@@ -204,7 +205,7 @@ export class GraphQLExecutor implements BindingExecutor {
 // ---------------------------------------------------------------------------
 
 /** Creates OBInterface definitions by introspecting GraphQL endpoints. */
-export class GraphQLCreator implements InterfaceCreator {
+export class GraphQLCreator implements InterfaceCreator, SourceInspector {
   formats(): FormatInfo[] {
     return [{ token: FORMAT_TOKEN, description: "GraphQL APIs" }];
   }
@@ -225,14 +226,14 @@ export class GraphQLCreator implements InterfaceCreator {
     return iface;
   }
 
-  /** Lists all bindable refs (Query/Mutation/Subscription fields) from a GraphQL endpoint. */
-  async listBindableRefs(
+  /** Lists all bindable targets (Query/Mutation/Subscription fields) from a GraphQL endpoint. */
+  async inspectSource(
     source: Source,
     options?: { signal?: AbortSignal },
-  ): Promise<ListRefsResult> {
+  ): Promise<SourceInspection> {
     if (!source.location) throw new Error("GraphQL source requires a location (endpoint URL)");
     const schema = await introspect(source.location, {}, fetch, options?.signal);
-    const refs: ListRefsResult["refs"] = [];
+    const targets: SourceInspection["targets"] = [];
     const tm = buildTypeMap(schema);
 
     const rootTypes: Array<{ label: string; typeName: string | null }> = [
@@ -247,10 +248,11 @@ export class GraphQLCreator implements InterfaceCreator {
       if (!t?.fields) continue;
       for (const f of [...t.fields].sort((a, b) => a.name.localeCompare(b.name))) {
         if (f.name.startsWith("__")) continue;
-        refs.push({ ref: `${rt.label}/${f.name}`, description: f.description || undefined });
+        const desc = f.description || undefined;
+        targets.push({ ref: `${rt.label}/${f.name}`, operation: desc ? { description: desc } : undefined });
       }
     }
 
-    return { refs, exhaustive: true };
+    return { targets, exhaustive: true };
   }
 }

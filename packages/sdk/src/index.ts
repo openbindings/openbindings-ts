@@ -14,19 +14,19 @@ export type {
 export { isTransformRef, resolveTransform } from "./types.js";
 
 export type {
-  ExecuteSource,
-  BindingExecutionInput,
-  OperationExecutionInput,
-  ExecuteOutput,
+  InvocationSource,
+  BindingInvocationInput,
+  OperationInvocationInput,
+  InvocationOutput,
   CreateSource,
   CreateInput,
-  ExecutionOptions,
+  InvocationOptions,
   StreamEvent,
-  ExecuteError,
+  InvocationError,
   FormatInfo,
-  BindableRef,
-  ListRefsResult,
-} from "./executor-types.js";
+  BindableTarget,
+  SourceInspection,
+} from "./invoker-types.js";
 
 export type {
   ContextStore,
@@ -48,27 +48,30 @@ export {
 } from "./context.js";
 
 export type {
-  BindingExecutor,
+  BindingInvoker,
   InterfaceCreator,
+  SourceInspector,
   TransformEvaluator,
   TransformEvaluatorWithBindings,
   BindingSelector,
-} from "./executors.js";
-export { isInterfaceCreator, isTransformEvaluatorWithBindings } from "./executors.js";
+} from "./invokers.js";
+export { isInterfaceCreator, isTransformEvaluatorWithBindings } from "./invokers.js";
 
 export {
-  OperationExecutor,
+  OperationInvoker,
   defaultBindingSelector,
-} from "./executor.js";
-export type { OperationExecutorOptions } from "./executor.js";
+} from "./operation-invoker.js";
+export type { OperationInvokerOptions } from "./operation-invoker.js";
 
-export { combineExecutors, combineCreators, type CombinedExecutor } from "./combiners.js";
+export { combineInvokers, combineCreators, combineSourceInspectors, type CombinedInvoker } from "./combiners.js";
 
 export { validateInterface } from "./validate.js";
 export type { ValidateOptions } from "./validate.js";
+export { parseDocument } from "./parse.js";
+export type { ParseDocumentOptions } from "./parse.js";
 
 export {
-  NoExecutorError,
+  NoInvokerError,
   NoCreatorError,
   OperationNotFoundError,
   BindingNotFoundError,
@@ -86,6 +89,8 @@ export {
   MAX_TESTED_VERSION,
   supportedRange,
   isSupportedVersion,
+  isValidSemver,
+  isHigherMajorOrPre1MinorThanMaxTested,
 } from "./version.js";
 
 export type { FormatToken, VersionRange, RangeKind } from "./format-token.js";
@@ -102,7 +107,7 @@ export {
 
 export { canonicalize } from "./canonical-json.js";
 
-export { InterfaceClient } from "./interface-client.js";
+export { InterfaceClient, MEDIA_TYPE, WELL_KNOWN_PATH } from "./interface-client.js";
 export type {
   OperationEntry,
   InterfaceClientState,
@@ -130,6 +135,7 @@ export {
   ERR_CANCELLED,
   ERR_BINDING_NOT_FOUND,
   ERR_TRANSFORM_ERROR,
+  ERR_VALIDATION_FAILED,
   httpErrorCode,
 } from "./errcodes.js";
 

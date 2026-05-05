@@ -3,10 +3,10 @@
 // ---------------------------------------------------------------------------
 
 /**
- * A key-value store for binding execution context.
- * Keys are executor-determined strings (typically a normalized API origin).
+ * A key-value store for binding invocation context.
+ * Keys are driver-determined strings (typically a normalized API origin).
  * Values are opaque credential maps using well-known field names for
- * cross-executor interoperability.
+ * cross-driver interoperability.
  *
  * The SDK stores and retrieves context but never inspects its contents.
  * Async because browser/persistent stores are inherently async.
@@ -41,7 +41,7 @@ export interface FileSelectOptions {
 }
 
 /**
- * Functions injected into executors so they can interact with the runtime
+ * Functions injected into drivers so they can interact with the runtime
  * environment without knowing what platform they're running on.
  * Each field is optional — undefined means the capability is unavailable.
  */
@@ -57,10 +57,10 @@ export interface PlatformCallbacks {
 // ---------------------------------------------------------------------------
 
 /**
- * Developer-supplied per-request settings passed through to the executor.
+ * Developer-supplied per-request settings passed through to the driver.
  * Unlike context, options are not stored or resolved.
  */
-export interface ExecutionOptions {
+export interface InvocationOptions {
   headers?: Record<string, string>;
   cookies?: Record<string, string>;
   environment?: Record<string, string>;
@@ -136,7 +136,7 @@ export function redactContext(ctx: Record<string, unknown> | null | undefined): 
 /**
  * Normalizes a URL to a stable context store key.
  * The key is scheme://host (path, query, and fragment are stripped) to
- * enable cross-executor credential sharing for the same API origin.
+ * enable cross-driver credential sharing for the same API origin.
  * http:// is normalized to https://. Non-URL strings are returned as-is.
  */
 export function normalizeContextKey(raw: string): string {
@@ -196,7 +196,7 @@ export class MemoryStore implements ContextStore {
 // Error classes
 // ---------------------------------------------------------------------------
 
-/** Thrown when an executor cannot proceed because required context (credentials, configuration) is missing. */
+/** Thrown when a driver cannot proceed because required context (credentials, configuration) is missing. */
 export class ContextInsufficientError extends Error {
   constructor(message = "openbindings: context insufficient for this binding") {
     super(message);

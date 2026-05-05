@@ -1,19 +1,19 @@
-import type { BindingExecutor, InterfaceCreator } from "./executors.js";
+import type { BindingInvoker, InterfaceCreator, SourceInspector } from "./invokers.js";
 import type {
-  BindingExecutionInput,
+  BindingInvocationInput,
   StreamEvent,
   FormatInfo,
   CreateInput,
-  ListRefsResult,
-} from "./executor-types.js";
+  SourceInspection,
+} from "./invoker-types.js";
 import type { OBInterface, Source } from "./types.js";
 import { type VersionRange, parseRange, matchesRange } from "./format-token.js";
 import { formatName } from "./helpers.js";
-import { NoExecutorError, NoCreatorError, NoSourcesError } from "./errors.js";
+import { NoInvokerError, NoCreatorError, NoSourcesError } from "./errors.js";
 
-interface ExecutorEntry {
+interface InvokerEntry {
   range: VersionRange;
-  executor: BindingExecutor;
+  invoker: BindingInvoker;
   info: FormatInfo;
 }
 
@@ -23,22 +23,28 @@ interface CreatorEntry {
   info: FormatInfo;
 }
 
-/**
- * Returns a single BindingExecutor that routes to the appropriate inner
- * executor based on the source format token. First match wins.
- */
-export interface CombinedExecutor extends BindingExecutor {
-  /** Register an additional executor after construction. First match wins. */
-  add(executor: BindingExecutor): void;
+interface InspectorEntry {
+  range: VersionRange;
+  inspector: SourceInspector;
+  info: FormatInfo;
 }
 
-export function combineExecutors(...executors: BindingExecutor[]): CombinedExecutor {
-  const entries: ExecutorEntry[] = [];
+/**
+ * Returns a single BindingInvoker that routes to the appropriate inner
+ * invoker based on the source format token. First match wins.
+ */
+export interface CombinedInvoker extends BindingInvoker {
+  /** Register an additional invoker after construction. First match wins. */
+  add(invoker: BindingInvoker): void;
+}
+
+export function combineInvokers(...invokers: BindingInvoker[]): CombinedInvoker {
+  const entries: InvokerEntry[] = [];
   const byName = new Map<string, number[]>();
   const allFormats: FormatInfo[] = [];
 
-  function register(exec: BindingExecutor): void {
-    for (const info of exec.formats()) {
+  function register(invoker: BindingInvoker): void {
+    for (const info of invoker.formats()) {
       let range: VersionRange;
       try {
         range = parseRange(info.token);
@@ -47,7 +53,7 @@ export function combineExecutors(...executors: BindingExecutor[]): CombinedExecu
       }
 
       const idx = entries.length;
-      entries.push({ range, executor: exec, info });
+      entries.push({ range, invoker, info });
 
       const indices = byName.get(range.name);
       if (indices) {
@@ -60,23 +66,23 @@ export function combineExecutors(...executors: BindingExecutor[]): CombinedExecu
     }
   }
 
-  for (const exec of executors) {
-    register(exec);
+  for (const invoker of invokers) {
+    register(invoker);
   }
 
-  function findExecutor(sourceFormat: string): BindingExecutor | undefined {
+  function findInvoker(sourceFormat: string): BindingInvoker | undefined {
     const name = formatName(sourceFormat);
     const indices = byName.get(name);
     if (!indices) return undefined;
     for (const idx of indices) {
       const entry = entries[idx];
       if (matchesRange(entry.range, sourceFormat)) {
-        return entry.executor;
+        return entry.invoker;
       }
     }
     // Name-only fallback: handles synthesis where the source format is the
-    // executor's own range token rather than an exact version from an OBI.
-    return indices.length > 0 ? entries[indices[0]].executor : undefined;
+    // invoker's own range token rather than an exact version from an OBI.
+    return indices.length > 0 ? entries[indices[0]].invoker : undefined;
   }
 
   return {
@@ -84,13 +90,13 @@ export function combineExecutors(...executors: BindingExecutor[]): CombinedExecu
     formats(): FormatInfo[] {
       return [...allFormats];
     },
-    async *executeBinding(
-      input: BindingExecutionInput,
+    async *invokeBinding(
+      input: BindingInvocationInput,
       options?: { signal?: AbortSignal },
     ): AsyncIterable<StreamEvent> {
-      const exec = findExecutor(input.source.format);
-      if (!exec) throw new NoExecutorError(input.source.format);
-      yield* exec.executeBinding(input, options);
+      const invoker = findInvoker(input.source.format);
+      if (!invoker) throw new NoInvokerError(input.source.format);
+      yield* invoker.invokeBinding(input, options);
     },
   };
 }
@@ -154,16 +160,65 @@ export function combineCreators(...creators: InterfaceCreator[]): InterfaceCreat
       if (!creator) throw new NoCreatorError(input.sources[0].format);
       return creator.createInterface(input, options);
     },
-    async listBindableRefs(
+  };
+}
+
+/**
+ * Returns a single SourceInspector that routes to the appropriate inner
+ * inspector based on the source format token. First match wins.
+ */
+export function combineSourceInspectors(...inspectors: SourceInspector[]): SourceInspector {
+  const entries: InspectorEntry[] = [];
+  const byName = new Map<string, number[]>();
+  const allFormats: FormatInfo[] = [];
+
+  for (const inspector of inspectors) {
+    for (const info of inspector.formats()) {
+      let range: VersionRange;
+      try {
+        range = parseRange(info.token);
+      } catch {
+        continue;
+      }
+
+      const idx = entries.length;
+      entries.push({ range, inspector, info });
+
+      const indices = byName.get(range.name);
+      if (indices) {
+        indices.push(idx);
+      } else {
+        byName.set(range.name, [idx]);
+      }
+
+      allFormats.push(info);
+    }
+  }
+
+  function findInspector(sourceFormat: string): SourceInspector | undefined {
+    const name = formatName(sourceFormat);
+    const indices = byName.get(name);
+    if (!indices) return undefined;
+    for (const idx of indices) {
+      const entry = entries[idx];
+      if (matchesRange(entry.range, sourceFormat)) {
+        return entry.inspector;
+      }
+    }
+    return indices.length > 0 ? entries[indices[0]].inspector : undefined;
+  }
+
+  return {
+    formats(): FormatInfo[] {
+      return [...allFormats];
+    },
+    async inspectSource(
       source: Source,
       options?: { signal?: AbortSignal },
-    ): Promise<ListRefsResult> {
-      const creator = findCreator(source.format);
-      if (!creator) throw new NoCreatorError(source.format);
-      if (!creator.listBindableRefs) {
-        throw new Error(`Creator for format ${source.format} does not support ref listing`);
-      }
-      return creator.listBindableRefs(source, options);
+    ): Promise<SourceInspection> {
+      const inspector = findInspector(source.format);
+      if (!inspector) throw new NoCreatorError(source.format);
+      return inspector.inspectSource(source, options);
     },
   };
 }

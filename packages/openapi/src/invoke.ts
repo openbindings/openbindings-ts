@@ -1,7 +1,7 @@
 import type {
-  BindingExecutionInput,
-  ExecuteOutput,
-  ExecutionOptions,
+  BindingInvocationInput,
+  InvocationOutput,
+  InvocationOptions,
 } from "@openbindings/sdk";
 import {
   maybeJSON,
@@ -23,12 +23,12 @@ import { errorMessage, loadOpenAPIDocument, mergeParameters, parseRef } from "./
 
 const MAX_RESPONSE_BYTES = 10 * 1024 * 1024;
 
-/** Executes an OpenAPI binding by resolving the ref, building the HTTP request, and returning the response. */
-export async function executeBinding(
-  input: BindingExecutionInput,
+/** Invokes an OpenAPI binding by resolving the ref, building the HTTP request, and returning the response. */
+export async function invokeBinding(
+  input: BindingInvocationInput,
   options?: { signal?: AbortSignal },
   preloadedDoc?: OpenAPIDocument,
-): Promise<ExecuteOutput> {
+): Promise<InvocationOutput> {
   const start = performance.now();
 
   let doc: OpenAPIDocument;
@@ -78,10 +78,10 @@ async function doHTTPRequest(
   pathTemplate: string,
   method: string,
   baseURL: string,
-  input: BindingExecutionInput,
+  input: BindingInvocationInput,
   start: number,
   options?: { signal?: AbortSignal },
-): Promise<ExecuteOutput> {
+): Promise<InvocationOutput> {
   const allParams = mergeParameters(
     pathItem["parameters"] as OpenAPIParameter[] | undefined,
     op.parameters,
@@ -248,7 +248,7 @@ function asInputRecord(input: unknown): Record<string, unknown> {
   return {};
 }
 
-function resolveBaseURL(doc: OpenAPIDocument, opts?: ExecutionOptions): string {
+function resolveBaseURL(doc: OpenAPIDocument, opts?: InvocationOptions): string {
   const metaBase = opts?.metadata?.["baseURL"];
   if (typeof metaBase === "string" && metaBase) {
     return metaBase.replace(/\/+$/, "");
@@ -264,7 +264,7 @@ function resolveBaseURL(doc: OpenAPIDocument, opts?: ExecutionOptions): string {
 
 function resolveBaseURLWithLocation(
   doc: OpenAPIDocument,
-  opts?: ExecutionOptions,
+  opts?: InvocationOptions,
   sourceLocation?: string,
 ): string {
   const base = resolveBaseURL(doc, opts);
@@ -334,7 +334,7 @@ function applyContext(
   doc: OpenAPIDocument,
   op: OpenAPIOperation,
   ctx?: Record<string, unknown>,
-  opts?: ExecutionOptions,
+  opts?: InvocationOptions,
 ): Record<string, string> | undefined {
   let queryParams: Record<string, string> | undefined;
 
@@ -510,7 +510,7 @@ async function readResponseText(resp: Response, maxBytes: number): Promise<strin
   return chunks.join("");
 }
 
-function failedOutput(startMs: number, code: string, message: string): ExecuteOutput {
+function failedOutput(startMs: number, code: string, message: string): InvocationOutput {
   return {
     status: 1,
     durationMs: Math.round(performance.now() - startMs),

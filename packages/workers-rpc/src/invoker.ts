@@ -1,6 +1,6 @@
 import type {
-  BindingExecutor,
-  BindingExecutionInput,
+  BindingInvoker,
+  BindingInvocationInput,
   StreamEvent,
   FormatInfo,
 } from "@openbindings/sdk";
@@ -27,33 +27,33 @@ export interface WorkersRpcBinding {
   [methodName: string]: (...args: unknown[]) => unknown;
 }
 
-/** Construction options for {@link WorkersRpcExecutor}. */
-export interface WorkersRpcExecutorOptions {
+/** Construction options for {@link WorkersRpcInvoker}. */
+export interface WorkersRpcInvokerOptions {
   /**
    * The bound entrypoint object — typically `env.YOUR_BINDING_NAME` from
-   * within a Worker. The executor calls methods on this object directly.
+   * within a Worker. The driver calls methods on this object directly.
    *
    * Provide this when constructing per-request: each Worker request gets a
-   * fresh `env`, so the executor should be constructed inside the request
+   * fresh `env`, so the driver should be constructed inside the request
    * handler, not at module load.
    */
   binding: WorkersRpcBinding;
 }
 
 /**
- * Executes Workers RPC bindings by calling methods on a Cloudflare service
+ * Invokes Workers RPC bindings by calling methods on a Cloudflare service
  * binding object.
  *
  * Usage from a Worker:
  *
  * ```ts
- * import { WorkersRpcExecutor } from "@openbindings/workers-rpc";
+ * import { WorkersRpcInvoker } from "@openbindings/workers-rpc";
  * import { MyServiceClient } from "./generated/my-service-client.js";
  *
  * export default {
  *   async fetch(request, env, ctx) {
  *     const client = new MyServiceClient([
- *       new WorkersRpcExecutor({ binding: env.MY_SERVICE }),
+ *       new WorkersRpcInvoker({ binding: env.MY_SERVICE }),
  *     ]);
  *     await client.connect("workers-rpc://my-service");
  *     const result = await client.someMethod({ foo: "bar" });
@@ -64,17 +64,17 @@ export interface WorkersRpcExecutorOptions {
  *
  * The `connect()` URL is informational only — there's no real network
  * dispatch, so the URL scheme `workers-rpc://` is a convention. Any URL
- * works; the executor's `formats()` declaration is what matters for
- * format-token-based dispatch in `OperationExecutor`.
+ * works; the driver's `formats()` declaration is what matters for
+ * format-token-based dispatch in `OperationInvoker`.
  *
  * Trust model: Workers RPC bindings are a Cloudflare-runtime feature.
  * Only sibling Workers that have the binding declared in their wrangler.toml
  * `[[services]]` block can reach the target. The Cloudflare runtime is the
- * trust boundary; this executor doesn't perform any auth check itself.
+ * trust boundary; this driver doesn't perform any auth check itself.
  *
  * Error model: errors thrown by the target Worker's RPC method propagate
  * across the binding boundary as Error instances (with `name` and `message`
- * preserved by the structured-clone algorithm). The executor catches them,
+ * preserved by the structured-clone algorithm). The driver catches them,
  * yields a `StreamEvent` with `error.code = "execution_failed"`, and ends
  * the stream. Custom error subclasses are flattened to the base Error shape;
  * if the target wants to communicate structured error info, it should
@@ -82,24 +82,24 @@ export interface WorkersRpcExecutorOptions {
  * throwing.
  *
  * Streaming: Workers RPC supports streaming via async iterables, but this
- * executor currently treats every method as unary (one yield per call).
+ * driver currently treats every method as unary (one yield per call).
  * Streaming support could be added later by detecting iterable returns and
  * yielding multiple events.
  */
-export class WorkersRpcExecutor implements BindingExecutor {
+export class WorkersRpcInvoker implements BindingInvoker {
   private readonly binding: WorkersRpcBinding;
 
-  constructor(options: WorkersRpcExecutorOptions) {
+  constructor(options: WorkersRpcInvokerOptions) {
     this.binding = options.binding;
   }
 
-  /** Returns the format tokens this executor supports. */
+  /** Returns the format tokens this driver supports. */
   formats(): FormatInfo[] {
     return [{ token: FORMAT_TOKEN, description: "Cloudflare Workers RPC bindings" }];
   }
 
   /**
-   * Executes a single binding by invoking the corresponding method on the
+   * Invokes a single binding by calling the corresponding method on the
    * service binding object and yielding the result (or error) as a single
    * StreamEvent.
    *
@@ -111,8 +111,8 @@ export class WorkersRpcExecutor implements BindingExecutor {
    * Workers RPC's structured-clone serialization handles object/array/etc.
    * shapes; consumers should not pre-stringify.
    */
-  async *executeBinding(
-    input: BindingExecutionInput,
+  async *invokeBinding(
+    input: BindingInvocationInput,
     options?: { signal?: AbortSignal },
   ): AsyncIterable<StreamEvent> {
     const start = Date.now();

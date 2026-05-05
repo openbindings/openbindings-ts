@@ -1,18 +1,19 @@
 import type {
-  BindingExecutor,
+  BindingInvoker,
   InterfaceCreator,
-  BindingExecutionInput,
+  SourceInspector,
+  BindingInvocationInput,
   CreateInput,
   OBInterface,
   Source,
   StreamEvent,
   FormatInfo,
-  ListRefsResult,
+  SourceInspection,
 } from "@openbindings/sdk";
 import { NoSourcesError, ERR_SOURCE_LOAD_FAILED, ERR_REF_NOT_FOUND, ERR_AUTH_REQUIRED, resolveSecurity } from "@openbindings/sdk";
 import type { AsyncAPIDocument } from "./asyncapi-types.js";
 import { FORMAT_TOKEN } from "./constants.js";
-import { executeBinding, subscribeBinding, resolveAsyncAPIServerKey } from "./execute.js";
+import { invokeBinding, subscribeBinding, resolveAsyncAPIServerKey } from "./invoke.js";
 import { convertToInterface } from "./create.js";
 import { parseAsyncAPIDocument, parseRef } from "./util.js";
 import { WSPool } from "./ws-pool.js";
@@ -39,22 +40,22 @@ async function loadDoc(
 }
 
 // ---------------------------------------------------------------------------
-// Executor
+// Driver
 // ---------------------------------------------------------------------------
 
-/** Executes AsyncAPI 3.x bindings over HTTP, SSE, and WebSocket protocols. */
-export class AsyncAPIExecutor implements BindingExecutor {
+/** Invokes AsyncAPI 3.x bindings over HTTP, SSE, and WebSocket protocols. */
+export class AsyncAPIInvoker implements BindingInvoker {
   private readonly docCache = new Map<string, AsyncAPIDocument>();
   /** @internal */ readonly wsPool = new WSPool();
 
-  /** Returns the format tokens this executor supports. */
+  /** Returns the format tokens this driver supports. */
   formats(): FormatInfo[] {
     return [{ token: FORMAT_TOKEN, description: "AsyncAPI 3.x event-driven APIs" }];
   }
 
-  /** Executes a single binding, yielding stream events for the result. */
-  async *executeBinding(
-    input: BindingExecutionInput,
+  /** Invokes a single binding, yielding stream events for the result. */
+  async *invokeBinding(
+    input: BindingInvocationInput,
     options?: { signal?: AbortSignal },
   ): AsyncIterable<StreamEvent> {
     let doc: AsyncAPIDocument;
@@ -99,8 +100,8 @@ export class AsyncAPIExecutor implements BindingExecutor {
       // Streaming path — delegate to subscribeBinding which returns AsyncIterable<StreamEvent>
       yield* subscribeBinding(enriched, options, doc, this.wsPool);
     } else {
-      // Unary path — call executeBinding which returns Promise<ExecuteOutput>
-      let result = await executeBinding(enriched, options, doc);
+      // Unary path — call invokeBinding which returns Promise<InvocationOutput>
+      let result = await invokeBinding(enriched, options, doc);
 
       if (result.error?.code === ERR_AUTH_REQUIRED && enriched.security?.length && enriched.callbacks) {
         const creds = await resolveSecurity(enriched.security, enriched.callbacks, enriched.fetch);
@@ -115,7 +116,7 @@ export class AsyncAPIExecutor implements BindingExecutor {
               try { await retryInput.store.set(key, retryInput.context!); } catch {}
             }
           }
-          result = await executeBinding(retryInput, options, doc);
+          result = await invokeBinding(retryInput, options, doc);
         }
       }
 
@@ -132,9 +133,9 @@ export class AsyncAPIExecutor implements BindingExecutor {
    * and merges with any developer-supplied context. Dev context wins.
    */
   private async resolveStoreContext(
-    input: BindingExecutionInput,
+    input: BindingInvocationInput,
     doc: AsyncAPIDocument,
-  ): Promise<BindingExecutionInput> {
+  ): Promise<BindingInvocationInput> {
     if (!input.store) return input;
 
     const key = resolveAsyncAPIServerKey(doc);
@@ -161,7 +162,7 @@ export class AsyncAPIExecutor implements BindingExecutor {
 // ---------------------------------------------------------------------------
 
 /** Creates OBInterface definitions from AsyncAPI 3.x documents. */
-export class AsyncAPICreator implements InterfaceCreator {
+export class AsyncAPICreator implements InterfaceCreator, SourceInspector {
   /** Returns the format tokens this creator supports. */
   formats(): FormatInfo[] {
     return [{ token: FORMAT_TOKEN, description: "AsyncAPI 3.x event-driven APIs" }];
@@ -184,22 +185,22 @@ export class AsyncAPICreator implements InterfaceCreator {
     return iface;
   }
 
-  /** Lists all bindable refs (operation IDs) from an AsyncAPI source. */
-  async listBindableRefs(
+  /** Lists all bindable targets (operation IDs) from an AsyncAPI source. */
+  async inspectSource(
     source: Source,
     options?: { signal?: AbortSignal },
-  ): Promise<ListRefsResult> {
+  ): Promise<SourceInspection> {
     const doc = await parseAsyncAPIDocument(source.location, source.content, options);
-    const refs: ListRefsResult["refs"] = [];
+    const targets: SourceInspection["targets"] = [];
 
     if (doc.operations) {
       for (const opID of Object.keys(doc.operations).sort()) {
         const asyncOp = doc.operations[opID];
         const desc = asyncOp?.description || asyncOp?.summary || undefined;
-        refs.push({ ref: `#/operations/${opID}`, description: desc });
+        targets.push({ ref: `#/operations/${opID}`, operation: desc ? { description: desc } : undefined });
       }
     }
 
-    return { refs, exhaustive: true };
+    return { targets, exhaustive: true };
   }
 }

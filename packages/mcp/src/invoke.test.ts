@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseRef } from "./execute.js";
+import { parseRef } from "./invoke.js";
 
 describe("parseRef", () => {
   it("parses tool ref", () => {

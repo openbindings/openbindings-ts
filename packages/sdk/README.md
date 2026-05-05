@@ -1,10 +1,12 @@
 # @openbindings/sdk
 
-Core TypeScript SDK for the [OpenBindings](https://openbindings.com) specification. Parse, validate, resolve, and execute OpenBindings interfaces.
+Core TypeScript SDK for the [OpenBindings](https://openbindings.com) specification. Parse, validate, resolve, and invoke OpenBindings interfaces.
 
 OpenBindings is an open standard: one interface, limitless bindings. An OBI (OpenBindings Interface) document describes what operations a service offers and how to reach them, independent of protocol. See the [spec](https://github.com/openbindings/spec) and [guides](https://github.com/openbindings/spec/tree/main/guides) for details.
 
-**Spec version:** implements OpenBindings 0.1. Exact range is exported as `MIN_SUPPORTED_VERSION` / `MAX_TESTED_VERSION`; check programmatically via `isSupportedVersion(version)`.
+**Spec version:** implements OpenBindings 0.2. Exact range is exported as `MIN_SUPPORTED_VERSION` / `MAX_TESTED_VERSION`; check programmatically via `isSupportedVersion(version)`.
+
+**Conformance:** `parseDocument(data)` rejects malformed JSON and duplicate object keys (OBI-D-01), then `validateInterface(iface)` enforces OBI-D-02 through OBI-D-17 and OBI-T-04. OBI-D-02 (document validates against `openbindings.schema.json`) and OBI-D-15 (examples validate against their operation's input/output schemas) are enforced via [Ajv 2020-12](https://ajv.js.org/json-schema.html#draft-2020-12). The schema is embedded at build time (synced via `scripts/sync-schema.sh`). In this monorepo, run `pnpm conformance` with the spec repo checked out at `./spec` or `../spec` to exercise the core conformance corpus.
 
 ## Install
 
@@ -18,25 +20,25 @@ npm install @openbindings/sdk
 - **Validation** with shape-level checks, strict mode for unknown fields, and format token validation
 - **Schema compatibility** checking (Profile v0.1) with covariant/contravariant directionality and diagnostic reasons
 - **InterfaceClient** for resolving OBIs from URLs, well-known discovery, or synthesis from raw specs
-- **OperationExecutor** for routing operations to binding executors by format, with transform support
+- **OperationInvoker** for routing operations to binding invokers by format, with transform support
 - **Context store** for per-host credential persistence with scheme-agnostic key normalization
 
-The SDK defines the contracts that binding executors implement but does not contain any format-specific logic. Format support is added by installing executor packages like [`@openbindings/openapi`](https://www.npmjs.com/package/@openbindings/openapi) or [`@openbindings/asyncapi`](https://www.npmjs.com/package/@openbindings/asyncapi).
+The SDK defines the contracts that binding invokers implement but does not contain any format-specific logic. Format support is added by installing driver packages like [`@openbindings/openapi`](https://www.npmjs.com/package/@openbindings/openapi) or [`@openbindings/asyncapi`](https://www.npmjs.com/package/@openbindings/asyncapi).
 
 ## Quick start
 
 ```typescript
-import { InterfaceClient, OperationExecutor, MemoryStore } from "@openbindings/sdk";
-import { OpenAPIExecutor, OpenAPICreator } from "@openbindings/openapi";
+import { InterfaceClient, OperationInvoker, MemoryStore } from "@openbindings/sdk";
+import { OpenAPIInvoker, OpenAPICreator } from "@openbindings/openapi";
 
-const exec = new OperationExecutor([new OpenAPIExecutor(), new OpenAPICreator()]);
-const client = new InterfaceClient(null, exec, {
+const dispatcher = new OperationInvoker([new OpenAPIInvoker(), new OpenAPICreator()]);
+const client = new InterfaceClient(null, dispatcher, {
   contextStore: new MemoryStore(),
 });
 
 await client.resolve("https://api.example.com");
 
-for await (const event of client.execute("listItems", { limit: 10 })) {
+for await (const event of client.invoke("listItems", { limit: 10 })) {
   if (event.error) {
     console.error(event.error.message);
     break;

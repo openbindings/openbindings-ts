@@ -1,6 +1,6 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import type { ExecuteOutput } from "@openbindings/sdk";
+import type { InvocationOutput } from "@openbindings/sdk";
 import {
   ERR_INVALID_REF,
   ERR_INVALID_INPUT,
@@ -47,12 +47,12 @@ async function connect(
   return client;
 }
 
-/** Execute a tool call. */
-async function executeTool(
+/** Invoke a tool call. */
+async function invokeTool(
   client: Client,
   toolName: string,
   input: unknown,
-): Promise<ExecuteOutput> {
+): Promise<InvocationOutput> {
   const start = performance.now();
 
   if (input != null && (typeof input !== "object" || Array.isArray(input))) {
@@ -81,10 +81,10 @@ async function executeTool(
 }
 
 /** Read an MCP resource. */
-async function executeResource(
+async function invokeResource(
   client: Client,
   uri: string,
-): Promise<ExecuteOutput> {
+): Promise<InvocationOutput> {
   const start = performance.now();
   const result = await client.readResource({ uri });
   const durationMs = Math.round(performance.now() - start);
@@ -111,11 +111,11 @@ async function executeResource(
 }
 
 /** Get an MCP prompt. */
-async function executePrompt(
+async function invokePrompt(
   client: Client,
   promptName: string,
   input: unknown,
-): Promise<ExecuteOutput> {
+): Promise<InvocationOutput> {
   const start = performance.now();
 
   // Prompt arguments must be Record<string, string>.
@@ -138,15 +138,15 @@ async function executePrompt(
 }
 
 /**
- * Execute a binding against an MCP server. Each call creates a fresh session.
+ * Invoke a binding against an MCP server. Each call creates a fresh session.
  */
-export async function executeMCPBinding(
+export async function invokeMCPBinding(
   url: string,
   ref: string,
   input: unknown,
   headers: Record<string, string>,
   signal?: AbortSignal,
-): Promise<ExecuteOutput> {
+): Promise<InvocationOutput> {
   const { entityType, name } = parseRef(ref);
 
   const start = performance.now();
@@ -168,11 +168,11 @@ export async function executeMCPBinding(
   try {
     switch (entityType) {
       case "tools":
-        return await executeTool(client, name, input);
+        return await invokeTool(client, name, input);
       case "resources":
-        return await executeResource(client, name);
+        return await invokeResource(client, name);
       case "prompts":
-        return await executePrompt(client, name, input);
+        return await invokePrompt(client, name, input);
       default:
         return {
           status: 1,

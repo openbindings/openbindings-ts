@@ -1,16 +1,16 @@
-import type { OBInterface, BindingEntry, Transform, TransformOrRef } from "./types.js";
+import type { OBInterface, BindingEntry, Transform, TransformOrRef, JSONSchema } from "./types.js";
 import { resolveTransform } from "./types.js";
 import type {
-  BindingExecutionInput,
-  OperationExecutionInput,
+  BindingInvocationInput,
+  OperationInvocationInput,
   StreamEvent,
   FormatInfo,
-} from "./executor-types.js";
+} from "./invoker-types.js";
 import type {
-  BindingExecutor,
+  BindingInvoker,
   BindingSelector,
   TransformEvaluator,
-} from "./executors.js";
+} from "./invokers.js";
 import type { ContextStore, PlatformCallbacks } from "./context.js";
 import {
   BindingNotFoundError,
@@ -21,10 +21,13 @@ import {
   TransformRefNotFoundError,
   UnknownSourceError,
 } from "./errors.js";
-import { combineExecutors, type CombinedExecutor } from "./combiners.js";
-import { ERR_BINDING_NOT_FOUND, ERR_TRANSFORM_ERROR } from "./errcodes.js";
+import { combineInvokers, type CombinedInvoker } from "./combiners.js";
+import { ERR_BINDING_NOT_FOUND, ERR_TRANSFORM_ERROR, ERR_VALIDATION_FAILED } from "./errcodes.js";
+import { Ajv2020 } from "ajv/dist/2020.js";
+import addFormats from "ajv-formats";
+import { buildSchemaDefs, buildExampleSchema } from "./schema-validation.js";
 
-export interface OperationExecutorOptions {
+export interface OperationInvokerOptions {
   bindingSelector?: BindingSelector;
   transformEvaluator?: TransformEvaluator;
   contextStore?: ContextStore;
@@ -32,79 +35,79 @@ export interface OperationExecutorOptions {
   fetch?: typeof globalThis.fetch;
 }
 
-export class OperationExecutor {
+export class OperationInvoker {
   readonly bindingSelector?: BindingSelector;
   readonly transformEvaluator?: TransformEvaluator;
   readonly contextStore?: ContextStore;
   readonly platformCallbacks?: PlatformCallbacks;
   readonly fetch?: typeof globalThis.fetch;
 
-  private readonly executor: CombinedExecutor;
+  private readonly invoker: CombinedInvoker;
 
-  constructor(executors: BindingExecutor[], opts?: OperationExecutorOptions) {
+  constructor(invokers: BindingInvoker[], opts?: OperationInvokerOptions) {
     this.bindingSelector = opts?.bindingSelector;
     this.transformEvaluator = opts?.transformEvaluator;
     this.contextStore = opts?.contextStore;
     this.platformCallbacks = opts?.platformCallbacks;
     this.fetch = opts?.fetch;
-    this.executor = combineExecutors(...executors);
+    this.invoker = combineInvokers(...invokers);
   }
 
   /**
-   * Register an additional BindingExecutor after construction. Useful when
-   * an executor depends on the OperationExecutor itself, creating a circular
+   * Register an additional BindingInvoker after construction. Useful when
+   * an invoker depends on the OperationInvoker itself, creating a circular
    * dependency that cannot be resolved at construction time. Call during
    * initialization, before concurrent use.
    */
-  addBindingExecutor(executor: BindingExecutor): void {
-    this.executor.add(executor);
+  addBindingInvoker(invoker: BindingInvoker): void {
+    this.invoker.add(invoker);
   }
 
   /**
-   * Returns a new OperationExecutor sharing the combined executor but with
+   * Returns a new OperationInvoker sharing the combined invoker but with
    * independent store/callbacks. Undefined arguments inherit the original's
-   * values. Used by InterfaceClient to avoid mutating a shared executor.
+   * values. Used by InterfaceClient to avoid mutating a shared invoker.
    */
   withRuntime(
     store?: ContextStore,
     callbacks?: PlatformCallbacks,
     fetchFn?: typeof globalThis.fetch,
-  ): OperationExecutor {
-    const cp = Object.create(OperationExecutor.prototype) as OperationExecutor;
+  ): OperationInvoker {
+    const cp = Object.create(OperationInvoker.prototype) as OperationInvoker;
     (cp as any).bindingSelector = this.bindingSelector;
     (cp as any).transformEvaluator = this.transformEvaluator;
     (cp as any).contextStore = store ?? this.contextStore;
     (cp as any).platformCallbacks = callbacks ?? this.platformCallbacks;
     (cp as any).fetch = fetchFn ?? this.fetch;
-    (cp as any).executor = this.executor;
+    (cp as any).invoker = this.invoker;
     return cp;
   }
 
   formats(): FormatInfo[] {
-    return this.executor.formats();
+    return this.invoker.formats();
   }
 
   private availableFormats(): Set<string> {
-    return new Set(this.executor.formats().map(f => f.token));
+    return new Set(this.invoker.formats().map(f => f.token));
   }
 
-  async *executeBinding(
-    input: BindingExecutionInput,
+  async *invokeBinding(
+    input: BindingInvocationInput,
     options?: { signal?: AbortSignal },
   ): AsyncIterable<StreamEvent> {
-    yield* this.executor.executeBinding(this.withRuntimeInput(input), options);
+    yield* this.invoker.invokeBinding(this.withRuntimeInput(input), options);
   }
 
   /**
    * Resolves an OBI operation to a binding and yields a stream of events.
    * Every operation is a stream — unary calls produce a single event.
    *
-   * The executor's executeBinding returns AsyncIterable<StreamEvent>.
-   * Input transforms apply once before execution. Output transforms apply
+   * The invoker's invokeBinding returns AsyncIterable<StreamEvent>.
+   * Input transforms apply once before invocation. Output transforms apply
    * per event.
    */
-  async *executeOperation(
-    input: OperationExecutionInput,
+  async *invoke(
+    input: OperationInvocationInput,
     options?: { signal?: AbortSignal },
   ): AsyncGenerator<StreamEvent> {
     const iface = input.interface;
@@ -139,7 +142,38 @@ export class OperationExecutor {
     const source = iface.sources?.[binding.source];
     if (!source) throw new UnknownSourceError(bindingKey, binding.source);
 
-    let execInput = input.input;
+    // OBI-T-07: Validate input against the operation's input schema before transform.
+    if (op.input != null && input.input !== undefined) {
+      const defs = buildSchemaDefs(iface.schemas);
+      const ajv = new Ajv2020({ strict: false, allErrors: true });
+      addFormats(ajv);
+      try {
+        const validate = ajv.compile(buildExampleSchema(op.input, defs));
+        if (!validate(input.input)) {
+          const messages = (validate.errors ?? []).map(e => {
+            const path = e.instancePath || "";
+            return `${path ? path + ": " : ""}${e.message ?? "schema violation"}`;
+          });
+          yield {
+            error: {
+              code: ERR_VALIDATION_FAILED,
+              message: `openbindings: input validation failed for "${input.operation}": ${messages.join("; ")}`,
+            },
+          };
+          return;
+        }
+      } catch (err) {
+        yield {
+          error: {
+            code: ERR_VALIDATION_FAILED,
+            message: `openbindings: input schema compilation failed for "${input.operation}": ${(err as Error).message}`,
+          },
+        };
+        return;
+      }
+    }
+
+    let invokeInput = input.input;
 
     if (binding.inputTransform) {
       if (!this.transformEvaluator) {
@@ -152,11 +186,11 @@ export class OperationExecutor {
         return;
       }
       try {
-        execInput = await applyTransformRef(
+        invokeInput = await applyTransformRef(
           this.transformEvaluator,
           iface.transforms,
           binding.inputTransform,
-          execInput,
+          invokeInput,
         );
       } catch (e: unknown) {
         yield {
@@ -174,17 +208,15 @@ export class OperationExecutor {
         ? iface.security[binding.security]
         : undefined;
 
-    const bindingIn: BindingExecutionInput = {
+    const bindingIn: BindingInvocationInput = {
       source: {
         format: source.format,
         location: source.location,
-        ...(source.content != null && !source.location
-          ? { content: source.content }
-          : {}),
+        ...(source.content != null ? { content: source.content } : {}),
       },
       ref: binding.ref ?? "",
-      input: execInput,
-      inputSchema: op.input,
+      input: invokeInput,
+      inputSchema: op.input ?? undefined,
       interface: iface,
       context: input.context,
       options: input.options,
@@ -192,28 +224,33 @@ export class OperationExecutor {
     };
 
     yield* this.transformStream(
-      this.executeBinding(bindingIn, options),
+      this.invokeBinding(bindingIn, options),
       binding,
       iface.transforms,
       bindingKey,
+      op.output ?? undefined,
+      iface.schemas,
     );
   }
 
   /**
-   * Wraps a stream of events, applying outputTransform to each event's data.
-   * Passes through events without data or with errors unchanged.
+   * Wraps a stream of events, applying outputTransform to each event's data
+   * and validating against outputSchema (OBI-T-08). Passes through events
+   * without data or with errors unchanged.
    */
   private async *transformStream(
     source: AsyncIterable<StreamEvent>,
     binding: BindingEntry,
     transforms: Record<string, Transform> | undefined,
     bindingKey: string,
+    outputSchema?: JSONSchema,
+    schemas?: Record<string, JSONSchema>,
   ): AsyncGenerator<StreamEvent> {
-    if (!binding.outputTransform) {
+    if (!binding.outputTransform && !outputSchema) {
       yield* source;
       return;
     }
-    if (!this.transformEvaluator) {
+    if (binding.outputTransform && !this.transformEvaluator) {
       yield {
         error: {
           code: ERR_TRANSFORM_ERROR,
@@ -222,36 +259,70 @@ export class OperationExecutor {
       };
       return;
     }
+
+    // Compile output schema once outside the loop.
+    let outputValidate: ReturnType<InstanceType<typeof Ajv2020>["compile"]> | undefined;
+    if (outputSchema) {
+      try {
+        const defs = buildSchemaDefs(schemas);
+        const ajv = new Ajv2020({ strict: false, allErrors: true });
+        addFormats(ajv);
+        outputValidate = ajv.compile(buildExampleSchema(outputSchema, defs));
+      } catch {
+        // Schema compilation failure is non-fatal for output; skip validation.
+      }
+    }
+
     for await (const ev of source) {
       if (ev.error || ev.data === undefined) {
         yield ev;
         continue;
       }
-      try {
-        const transformed = await applyTransformRef(
-          this.transformEvaluator,
-          transforms,
-          binding.outputTransform,
-          ev.data,
-        );
-        yield { data: transformed };
-      } catch (e: unknown) {
-        yield {
-          error: {
-            code: ERR_TRANSFORM_ERROR,
-            message: `openbindings: output transform failed for "${bindingKey}": ${e instanceof Error ? e.message : String(e)}`,
-          },
-        };
+      let data: unknown = ev.data;
+      if (binding.outputTransform) {
+        try {
+          data = await applyTransformRef(
+            this.transformEvaluator!,
+            transforms,
+            binding.outputTransform,
+            data,
+          );
+        } catch (e: unknown) {
+          yield {
+            error: {
+              code: ERR_TRANSFORM_ERROR,
+              message: `openbindings: output transform failed for "${bindingKey}": ${e instanceof Error ? e.message : String(e)}`,
+            },
+          };
+          continue;
+        }
       }
+      // OBI-T-08: Validate output after transform.
+      if (outputValidate && data !== undefined) {
+        if (!outputValidate(data)) {
+          const messages = (outputValidate.errors ?? []).map(e => {
+            const path = e.instancePath || "";
+            return `${path ? path + ": " : ""}${e.message ?? "schema violation"}`;
+          });
+          yield {
+            error: {
+              code: ERR_VALIDATION_FAILED,
+              message: `openbindings: output validation failed for "${bindingKey}": ${messages.join("; ")}`,
+            },
+          };
+          continue;
+        }
+      }
+      yield { data };
     }
   }
 
   /**
    * Returns a copy of input with store and callbacks filled from the
-   * executor when the input doesn't already have them. Never mutates
+   * invoker when the input doesn't already have them. Never mutates
    * the caller's input. Short-circuits when nothing needs filling.
    */
-  private withRuntimeInput(input: BindingExecutionInput): BindingExecutionInput {
+  private withRuntimeInput(input: BindingInvocationInput): BindingInvocationInput {
     const needStore = !input.store && this.contextStore;
     const needCallbacks = !input.callbacks && this.platformCallbacks;
     const needFetch = !input.fetch && this.fetch;
@@ -291,7 +362,7 @@ export function defaultBindingSelector(
 
     const source = iface.sources?.[b.source];
 
-    // Skip bindings whose source format the executor can't handle.
+    // Skip bindings whose source format the invoker can't handle.
     if (availableFormats && source && !formatMatches(source.format, availableFormats)) continue;
 
     // Binding priority overrides source priority.
@@ -338,11 +409,13 @@ async function applyTransformRef(
   transformOrRef: TransformOrRef,
   data: unknown,
 ): Promise<unknown> {
-  const t = resolveTransform(transformOrRef, transforms);
-  if (!t) {
-    if (transformOrRef.$ref) throw new TransformRefNotFoundError(transformOrRef.$ref);
+  const expr = resolveTransform(transformOrRef, transforms);
+  if (expr === undefined) {
+    if (typeof transformOrRef === "object" && transformOrRef !== null && transformOrRef.$ref) {
+      throw new TransformRefNotFoundError(transformOrRef.$ref);
+    }
     throw new Error("openbindings: invalid transform: neither ref nor inline");
   }
-  if (!t.expression) throw new EmptyTransformExpressionError();
-  return evaluator.evaluate(t.expression, data);
+  if (expr === "") throw new EmptyTransformExpressionError();
+  return evaluator.evaluate(expr, data);
 }

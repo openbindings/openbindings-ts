@@ -3,19 +3,20 @@ import {
   ERR_SOURCE_LOAD_FAILED,
   ERR_AUTH_REQUIRED,
   resolveSecurity,
-  type BindingExecutor,
+  type BindingInvoker,
   type InterfaceCreator,
-  type BindingExecutionInput,
+  type SourceInspector,
+  type BindingInvocationInput,
   type CreateInput,
   type OBInterface,
   type Source,
   type StreamEvent,
   type FormatInfo,
-  type ListRefsResult,
+  type SourceInspection,
 } from "@openbindings/sdk";
 import type { OpenAPIDocument } from "./types.js";
 import { FORMAT_TOKEN } from "./constants.js";
-import { executeBinding, resolveServerKey } from "./execute.js";
+import { invokeBinding, resolveServerKey } from "./invoke.js";
 import { convertToInterface } from "./create.js";
 import { loadOpenAPIDocument, buildJsonPointerRef } from "./util.js";
 
@@ -41,21 +42,21 @@ async function loadDoc(
 }
 
 // ---------------------------------------------------------------------------
-// Executor
+// Driver
 // ---------------------------------------------------------------------------
 
-/** Executes OpenAPI bindings by performing HTTP requests against the described API. */
-export class OpenAPIExecutor implements BindingExecutor {
+/** Invokes OpenAPI bindings by performing HTTP requests against the described API. */
+export class OpenAPIInvoker implements BindingInvoker {
   private readonly docCache = new Map<string, OpenAPIDocument>();
 
-  /** Returns the format tokens this executor supports. */
+  /** Returns the format tokens this driver supports. */
   formats(): FormatInfo[] {
     return [{ token: FORMAT_TOKEN, description: "OpenAPI 3.x HTTP APIs" }];
   }
 
-  /** Executes a single binding by making an HTTP request and yielding the result or error. */
-  async *executeBinding(
-    input: BindingExecutionInput,
+  /** Invokes a single binding by making an HTTP request and yielding the result or error. */
+  async *invokeBinding(
+    input: BindingInvocationInput,
     options?: { signal?: AbortSignal },
   ): AsyncIterable<StreamEvent> {
     let doc: OpenAPIDocument;
@@ -67,7 +68,7 @@ export class OpenAPIExecutor implements BindingExecutor {
     }
 
     const enriched = await this.resolveStoreContext(input, doc);
-    let result = await executeBinding(enriched, options, doc);
+    let result = await invokeBinding(enriched, options, doc);
 
     if (result.error?.code === ERR_AUTH_REQUIRED && enriched.security?.length && enriched.callbacks) {
       const creds = await resolveSecurity(enriched.security, enriched.callbacks, enriched.fetch);
@@ -82,7 +83,7 @@ export class OpenAPIExecutor implements BindingExecutor {
             try { await retryInput.store.set(key, retryInput.context!); } catch {}
           }
         }
-        result = await executeBinding(retryInput, options, doc);
+        result = await invokeBinding(retryInput, options, doc);
       }
     }
 
@@ -98,9 +99,9 @@ export class OpenAPIExecutor implements BindingExecutor {
    * and merges with any developer-supplied context. Dev context wins.
    */
   private async resolveStoreContext(
-    input: BindingExecutionInput,
+    input: BindingInvocationInput,
     doc: OpenAPIDocument,
-  ): Promise<BindingExecutionInput> {
+  ): Promise<BindingInvocationInput> {
     if (!input.store) return input;
 
     const key = resolveServerKey(doc, input.source.location);
@@ -127,7 +128,7 @@ export class OpenAPIExecutor implements BindingExecutor {
 // ---------------------------------------------------------------------------
 
 /** Creates OBInterface definitions from OpenAPI specification documents. */
-export class OpenAPICreator implements InterfaceCreator {
+export class OpenAPICreator implements InterfaceCreator, SourceInspector {
   /** Returns the format tokens this creator supports. */
   formats(): FormatInfo[] {
     return [{ token: FORMAT_TOKEN, description: "OpenAPI 3.x HTTP APIs" }];
@@ -149,15 +150,15 @@ export class OpenAPICreator implements InterfaceCreator {
     return iface;
   }
 
-  /** Lists all bindable refs (path+method combinations) from an OpenAPI source. */
-  async listBindableRefs(
+  /** Lists all bindable targets (path+method combinations) from an OpenAPI source. */
+  async inspectSource(
     source: Source,
     options?: { signal?: AbortSignal },
-  ): Promise<ListRefsResult> {
+  ): Promise<SourceInspection> {
     const doc = await loadOpenAPIDocument(source.location, source.content, options) as OpenAPIDocument;
-    const refs: ListRefsResult["refs"] = [];
+    const targets: SourceInspection["targets"] = [];
 
-    if (!doc.paths) return { refs, exhaustive: true };
+    if (!doc.paths) return { targets, exhaustive: true };
 
     const methods = ["get", "put", "post", "delete", "options", "head", "patch", "trace"];
     for (const [pathStr, pathItemRaw] of Object.entries(doc.paths).sort(([a], [b]) => a.localeCompare(b))) {
@@ -167,13 +168,14 @@ export class OpenAPICreator implements InterfaceCreator {
         const op = pathItem[method];
         if (!op || typeof op !== "object") continue;
         const opObj = op as { description?: string; summary?: string };
-        refs.push({
+        const desc = opObj.description || opObj.summary || undefined;
+        targets.push({
           ref: buildJsonPointerRef(pathStr, method),
-          description: opObj.description || opObj.summary || undefined,
+          operation: desc ? { description: desc } : undefined,
         });
       }
     }
 
-    return { refs, exhaustive: true };
+    return { targets, exhaustive: true };
   }
 }

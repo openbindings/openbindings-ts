@@ -1,23 +1,23 @@
 import { describe, it, expect } from "vitest";
-import type { BindingExecutionInput } from "@openbindings/sdk";
+import type { BindingInvocationInput } from "@openbindings/sdk";
 import {
   ERR_INVALID_REF,
   ERR_REF_NOT_FOUND,
   ERR_EXECUTION_FAILED,
   ERR_CANCELLED,
 } from "@openbindings/sdk";
-import { WorkersRpcExecutor, type WorkersRpcBinding } from "./executor.js";
+import { WorkersRpcInvoker, type WorkersRpcBinding } from "./invoker.js";
 import { FORMAT_TOKEN } from "./constants.js";
 
-// Helper: drain the executor's async iterable into a single result.
+// Helper: drain the driver's async iterable into a single result.
 async function drain(it: AsyncIterable<unknown>): Promise<unknown[]> {
   const out: unknown[] = [];
   for await (const event of it) out.push(event);
   return out;
 }
 
-// Helper: minimal BindingExecutionInput for the tests.
-function input(ref: string, payload: unknown): BindingExecutionInput {
+// Helper: minimal BindingInvocationInput for the tests.
+function input(ref: string, payload: unknown): BindingInvocationInput {
   return {
     source: { format: FORMAT_TOKEN, location: "workers-rpc://test" },
     ref,
@@ -25,17 +25,17 @@ function input(ref: string, payload: unknown): BindingExecutionInput {
   };
 }
 
-describe("WorkersRpcExecutor.formats", () => {
+describe("WorkersRpcInvoker.formats", () => {
   it("declares workers-rpc@^1.0.0 as the supported format token", () => {
-    const exec = new WorkersRpcExecutor({ binding: {} });
-    const formats = exec.formats();
+    const invoker = new WorkersRpcInvoker({ binding: {} });
+    const formats = invoker.formats();
     expect(formats).toHaveLength(1);
     expect(formats[0].token).toBe(FORMAT_TOKEN);
     expect(formats[0].description).toBeTypeOf("string");
   });
 });
 
-describe("WorkersRpcExecutor.executeBinding — happy path", () => {
+describe("WorkersRpcInvoker.invokeBinding — happy path", () => {
   it("calls the named method on the binding and yields the result", async () => {
     let receivedArg: unknown = undefined;
     const binding: WorkersRpcBinding = {
@@ -44,8 +44,8 @@ describe("WorkersRpcExecutor.executeBinding — happy path", () => {
         return { ok: true, access_token: "tok-123" };
       },
     };
-    const exec = new WorkersRpcExecutor({ binding });
-    const events = await drain(exec.executeBinding(input("mintToken", { user: "matt" })));
+    const invoker = new WorkersRpcInvoker({ binding });
+    const events = await drain(invoker.invokeBinding(input("mintToken", { user: "matt" })));
 
     expect(events).toHaveLength(1);
     const ev = events[0] as { data?: unknown; durationMs?: number };
@@ -58,14 +58,14 @@ describe("WorkersRpcExecutor.executeBinding — happy path", () => {
     const binding: WorkersRpcBinding = {
       ping: () => "pong",
     };
-    const exec = new WorkersRpcExecutor({ binding });
-    const events = await drain(exec.executeBinding(input("ping", undefined)));
+    const invoker = new WorkersRpcInvoker({ binding });
+    const events = await drain(invoker.invokeBinding(input("ping", undefined)));
     expect((events[0] as { data?: unknown }).data).toBe("pong");
   });
 
   it("passes the structured input through unchanged (no JSON round-trip)", async () => {
     // Workers RPC structured-cloning preserves Date, Map, Uint8Array, etc.
-    // The executor should not pre-stringify or otherwise mangle the input.
+    // The driver should not pre-stringify or otherwise mangle the input.
     const date = new Date("2026-04-01T00:00:00Z");
     const bytes = new Uint8Array([1, 2, 3]);
     let received: unknown;
@@ -75,26 +75,26 @@ describe("WorkersRpcExecutor.executeBinding — happy path", () => {
         return arg;
       },
     };
-    const exec = new WorkersRpcExecutor({ binding });
-    await drain(exec.executeBinding(input("echo", { date, bytes })));
+    const invoker = new WorkersRpcInvoker({ binding });
+    await drain(invoker.invokeBinding(input("echo", { date, bytes })));
     const r = received as { date: Date; bytes: Uint8Array };
     expect(r.date).toBe(date); // identity, not just equality
     expect(r.bytes).toBe(bytes);
   });
 });
 
-describe("WorkersRpcExecutor.executeBinding — errors", () => {
+describe("WorkersRpcInvoker.invokeBinding — errors", () => {
   it("yields invalid_ref when the ref is empty", async () => {
-    const exec = new WorkersRpcExecutor({ binding: { foo: () => 1 } });
-    const events = await drain(exec.executeBinding(input("", undefined)));
+    const invoker = new WorkersRpcInvoker({ binding: { foo: () => 1 } });
+    const events = await drain(invoker.invokeBinding(input("", undefined)));
     expect(events).toHaveLength(1);
     const ev = events[0] as { error?: { code: string } };
     expect(ev.error?.code).toBe(ERR_INVALID_REF);
   });
 
   it("yields ref_not_found when the binding has no such method", async () => {
-    const exec = new WorkersRpcExecutor({ binding: { knownMethod: () => 1 } });
-    const events = await drain(exec.executeBinding(input("missingMethod", undefined)));
+    const invoker = new WorkersRpcInvoker({ binding: { knownMethod: () => 1 } });
+    const events = await drain(invoker.invokeBinding(input("missingMethod", undefined)));
     const ev = events[0] as { error?: { code: string; message: string } };
     expect(ev.error?.code).toBe(ERR_REF_NOT_FOUND);
     expect(ev.error?.message).toContain("missingMethod");
@@ -106,8 +106,8 @@ describe("WorkersRpcExecutor.executeBinding — errors", () => {
         throw new Error("kaboom");
       },
     };
-    const exec = new WorkersRpcExecutor({ binding });
-    const events = await drain(exec.executeBinding(input("explode", undefined)));
+    const invoker = new WorkersRpcInvoker({ binding });
+    const events = await drain(invoker.invokeBinding(input("explode", undefined)));
     const ev = events[0] as { error?: { code: string; message: string; details?: unknown } };
     expect(ev.error?.code).toBe(ERR_EXECUTION_FAILED);
     expect(ev.error?.message).toBe("kaboom");
@@ -120,8 +120,8 @@ describe("WorkersRpcExecutor.executeBinding — errors", () => {
         throw new TypeError("async kaboom");
       },
     };
-    const exec = new WorkersRpcExecutor({ binding });
-    const events = await drain(exec.executeBinding(input("asyncExplode", undefined)));
+    const invoker = new WorkersRpcInvoker({ binding });
+    const events = await drain(invoker.invokeBinding(input("asyncExplode", undefined)));
     const ev = events[0] as { error?: { code: string; message: string; details?: { name?: string } } };
     expect(ev.error?.code).toBe(ERR_EXECUTION_FAILED);
     expect(ev.error?.message).toBe("async kaboom");
@@ -136,11 +136,11 @@ describe("WorkersRpcExecutor.executeBinding — errors", () => {
         return "done";
       },
     };
-    const exec = new WorkersRpcExecutor({ binding });
+    const invoker = new WorkersRpcInvoker({ binding });
     const ac = new AbortController();
     ac.abort();
     const events = await drain(
-      exec.executeBinding(input("slow", undefined), { signal: ac.signal }),
+      invoker.invokeBinding(input("slow", undefined), { signal: ac.signal }),
     );
     expect(called).toBe(false);
     const ev = events[0] as { error?: { code: string } };
@@ -148,27 +148,27 @@ describe("WorkersRpcExecutor.executeBinding — errors", () => {
   });
 });
 
-describe("WorkersRpcExecutor — single-event semantics", () => {
+describe("WorkersRpcInvoker — single-event semantics", () => {
   it("yields exactly one event per call (unary semantics)", async () => {
-    const exec = new WorkersRpcExecutor({ binding: { echo: (x: unknown) => x } });
-    const events = await drain(exec.executeBinding(input("echo", "hello")));
+    const invoker = new WorkersRpcInvoker({ binding: { echo: (x: unknown) => x } });
+    const events = await drain(invoker.invokeBinding(input("echo", "hello")));
     expect(events).toHaveLength(1);
   });
 
   it("yields exactly one event on error", async () => {
-    const exec = new WorkersRpcExecutor({
+    const invoker = new WorkersRpcInvoker({
       binding: {
         boom: () => {
           throw new Error("nope");
         },
       },
     });
-    const events = await drain(exec.executeBinding(input("boom", undefined)));
+    const events = await drain(invoker.invokeBinding(input("boom", undefined)));
     expect(events).toHaveLength(1);
   });
 });
 
-describe("WorkersRpcExecutor — Cloudflare ServiceStub Proxy compatibility", () => {
+describe("WorkersRpcInvoker — Cloudflare ServiceStub Proxy compatibility", () => {
   // Cloudflare's `env.YOUR_BINDING` is a Proxy whose method names are
   // hidden from `Object.keys` and whose getter returns a dispatch
   // function with the stub captured internally. The runtime considers
@@ -177,7 +177,7 @@ describe("WorkersRpcExecutor — Cloudflare ServiceStub Proxy compatibility", ()
   // the stub across the binding boundary and fails with
   // "This ServiceStub cannot be serialized."
   //
-  // The fix in executor.ts is to invoke as `this.binding[methodName](input)`
+  // The fix in driver.ts is to invoke as `this.binding[methodName](input)`
   // (property-access form) so the proxy's getter handles dispatch with
   // the captured stub. This regression test ensures we never reintroduce
   // the broken `.call(this.binding, ...)` form.
@@ -214,12 +214,12 @@ describe("WorkersRpcExecutor — Cloudflare ServiceStub Proxy compatibility", ()
       },
     });
 
-    // The executor's typeof-function check happens via the proxy getter,
-    // which returns the function — so the executor proceeds to invoke.
-    const exec = new WorkersRpcExecutor({
+    // The driver's typeof-function check happens via the proxy getter,
+    // which returns the function — so the driver proceeds to invoke.
+    const invoker = new WorkersRpcInvoker({
       binding: fakeStub as unknown as WorkersRpcBinding,
     });
-    const events = await drain(exec.executeBinding(input("ping", { msg: "hi" })));
+    const events = await drain(invoker.invokeBinding(input("ping", { msg: "hi" })));
 
     expect(invokedAsProperty).toBe(true);
     expect(receivedArg).toEqual({ msg: "hi" });
@@ -243,7 +243,7 @@ describe("WorkersRpcExecutor — Cloudflare ServiceStub Proxy compatibility", ()
       get(_target, prop) {
         if (prop === "checkThis") {
           // A regular (non-arrow) function so `this` is sensitive to
-          // the call site. If the executor uses property-access form
+          // the call site. If the driver uses property-access form
           // (binding[methodName](...)), `this` will be the proxy (i.e.
           // the fakeStub). If it uses .call(otherObj, ...), this will
           // be otherObj. Either way the function runs; the test asserts
@@ -258,10 +258,10 @@ describe("WorkersRpcExecutor — Cloudflare ServiceStub Proxy compatibility", ()
       },
     });
 
-    const exec = new WorkersRpcExecutor({
+    const invoker = new WorkersRpcInvoker({
       binding: fakeStub as unknown as WorkersRpcBinding,
     });
-    await drain(exec.executeBinding(input("checkThis", null)));
+    await drain(invoker.invokeBinding(input("checkThis", null)));
 
     // With property-access invocation, `this` is the proxy itself.
     // The previous broken implementation used method.call(this.binding,

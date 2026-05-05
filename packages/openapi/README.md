@@ -1,10 +1,10 @@
 # @openbindings/openapi
 
-OpenAPI 3.x binding executor and interface creator for the [OpenBindings](https://openbindings.com) TypeScript SDK.
+OpenAPI 3.x binding invoker and interface creator for the [OpenBindings](https://openbindings.com) TypeScript SDK.
 
-This package enables OpenBindings to execute operations against OpenAPI specs and synthesize OBI documents from them. It reads OpenAPI 3.x documents, constructs HTTP requests, applies credentials via security schemes, and returns results as a stream of events.
+This package enables OpenBindings to invoke operations against OpenAPI specs and synthesize OBI documents from them. It reads OpenAPI 3.x documents, constructs HTTP requests, applies credentials via security schemes, and returns results as a stream of events.
 
-See the [spec](https://github.com/openbindings/spec) and [pattern documentation](https://github.com/openbindings/spec/tree/main/patterns) for how executors and creators fit into the OpenBindings architecture.
+See the [spec](https://github.com/openbindings/spec) and [pattern documentation](https://github.com/openbindings/spec/tree/main/patterns) for how drivers and creators fit into the OpenBindings architecture.
 
 ## Install
 
@@ -16,25 +16,25 @@ Requires [@openbindings/sdk](https://www.npmjs.com/package/@openbindings/sdk) (t
 
 ## Usage
 
-### Register with OperationExecutor
+### Register with OperationInvoker
 
 ```typescript
-import { OperationExecutor } from "@openbindings/sdk";
-import { OpenAPIExecutor, OpenAPICreator } from "@openbindings/openapi";
+import { OperationInvoker } from "@openbindings/sdk";
+import { OpenAPIInvoker, OpenAPICreator } from "@openbindings/openapi";
 
-const exec = new OperationExecutor([new OpenAPIExecutor(), new OpenAPICreator()]);
+const dispatcher = new OperationInvoker([new OpenAPIInvoker(), new OpenAPICreator()]);
 ```
 
-The executor declares `openapi@^3.0.0` — it handles any OpenAPI 3.x spec.
+The driver declares `openapi@^3.0.0` — it handles any OpenAPI 3.x spec.
 
-### Execute a binding
+### Invoke a binding
 
-Typically you don't call the executor directly — the `OperationExecutor` routes operations to it based on the OBI's source format. But direct use is straightforward:
+Typically you don't call the driver directly — the `OperationInvoker` routes operations to it based on the OBI's source format. But direct use is straightforward:
 
 ```typescript
-const executor = new OpenAPIExecutor();
+const driver = new OpenAPIInvoker();
 
-for await (const event of executor.executeBinding({
+for await (const event of driver.invokeBinding({
   source: {
     format: "openapi@3.1",
     location: "https://api.example.com/openapi.json",

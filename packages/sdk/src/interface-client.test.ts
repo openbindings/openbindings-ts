@@ -1,27 +1,27 @@
 import { describe, it, expect } from "vitest";
 import {
   InterfaceClient,
-  OperationExecutor,
+  OperationInvoker,
   type OBInterface,
-  type BindingExecutionInput,
+  type BindingInvocationInput,
   type StreamEvent,
-  type BindingExecutor,
+  type BindingInvoker,
   type CompatibilityIssue,
 } from "./index.js";
 
-function createMockExecutor(
-  executeFn?: (input: BindingExecutionInput) => AsyncIterable<StreamEvent>,
-): BindingExecutor {
+function createMockDriver(
+  invokeFn?: (input: BindingInvocationInput) => AsyncIterable<StreamEvent>,
+): BindingInvoker {
   return {
     formats() {
       return [{ token: "test@1.0" }];
     },
-    async *executeBinding(input: BindingExecutionInput) {
-      if (executeFn) {
-        yield* executeFn(input);
+    async *invokeBinding(input: BindingInvocationInput) {
+      if (invokeFn) {
+        yield* invokeFn(input);
         return;
       }
-      yield { data: "ok" };
+      yield { data: { result: "ok" } };
     },
   };
 }
@@ -88,8 +88,8 @@ const incompatibleIface: OBInterface = {
 
 describe("InterfaceClient — discovery mode", () => {
   it("accepts null and resolves to bound without compatibility check", async () => {
-    const exec = new OperationExecutor([createMockExecutor()]);
-    const client = new InterfaceClient(null, exec);
+    const opInvoker = new OperationInvoker([createMockDriver()]);
+    const client = new InterfaceClient(null, opInvoker);
 
     expect(client.interface).toBeNull();
     expect(client.state.kind).toBe("idle");
@@ -100,27 +100,27 @@ describe("InterfaceClient — discovery mode", () => {
     expect(client.resolved).toBe(serviceOBI);
   });
 
-  it("executes operations against the resolved OBI", async () => {
-    const exec = new OperationExecutor([createMockExecutor()]);
-    const client = new InterfaceClient(null, exec);
+  it("invokes operations against the resolved OBI", async () => {
+    const opInvoker = new OperationInvoker([createMockDriver()]);
+    const client = new InterfaceClient(null, opInvoker);
 
     await client.resolve(serviceOBI);
     const events: { data?: unknown; error?: unknown }[] = [];
-    for await (const ev of client.execute("search" as any, { q: "test" })) {
+    for await (const ev of client.invoke("search" as any, { q: "test" })) {
       events.push(ev);
     }
 
     expect(events).toHaveLength(1);
-    expect(events[0].data).toBe("ok");
+    expect(events[0].data).toEqual({ result: "ok" });
     expect(events[0].error).toBeUndefined();
   });
 
-  it("throws when executing before resolution", async () => {
-    const exec = new OperationExecutor([createMockExecutor()]);
-    const client = new InterfaceClient(null, exec);
+  it("throws when invoking before resolution", async () => {
+    const opInvoker = new OperationInvoker([createMockDriver()]);
+    const client = new InterfaceClient(null, opInvoker);
 
     await expect(async () => {
-      for await (const _ev of client.execute("search" as any)) { /* drain */ }
+      for await (const _ev of client.invoke("search" as any)) { /* drain */ }
     }).rejects.toThrow("not bound");
   });
 });
@@ -131,8 +131,8 @@ describe("InterfaceClient — discovery mode", () => {
 
 describe("InterfaceClient.conforms()", () => {
   it("returns empty array when service conforms to the required interface", async () => {
-    const exec = new OperationExecutor([createMockExecutor()]);
-    const client = new InterfaceClient(null, exec);
+    const opInvoker = new OperationInvoker([createMockDriver()]);
+    const client = new InterfaceClient(null, opInvoker);
     await client.resolve(serviceOBI);
 
     const issues = await client.conforms(workspaceManagerIface);
@@ -140,8 +140,8 @@ describe("InterfaceClient.conforms()", () => {
   });
 
   it("returns issues when service lacks required operations", async () => {
-    const exec = new OperationExecutor([createMockExecutor()]);
-    const client = new InterfaceClient(null, exec);
+    const opInvoker = new OperationInvoker([createMockDriver()]);
+    const client = new InterfaceClient(null, opInvoker);
     await client.resolve(serviceOBI);
 
     const issues = await client.conforms(incompatibleIface);
@@ -151,8 +151,8 @@ describe("InterfaceClient.conforms()", () => {
   });
 
   it("supports satisfies-based matching when interfaceId is provided", async () => {
-    const exec = new OperationExecutor([createMockExecutor()]);
-    const client = new InterfaceClient(null, exec);
+    const opInvoker = new OperationInvoker([createMockDriver()]);
+    const client = new InterfaceClient(null, opInvoker);
 
     const renamedIface: OBInterface = {
       openbindings: "0.2.0",
@@ -172,8 +172,8 @@ describe("InterfaceClient.conforms()", () => {
   });
 
   it("throws when called before resolution", async () => {
-    const exec = new OperationExecutor([createMockExecutor()]);
-    const client = new InterfaceClient(null, exec);
+    const opInvoker = new OperationInvoker([createMockDriver()]);
+    const client = new InterfaceClient(null, opInvoker);
 
     await expect(client.conforms(workspaceManagerIface)).rejects.toThrow(
       "Cannot check conformance before resolution",
@@ -181,13 +181,13 @@ describe("InterfaceClient.conforms()", () => {
   });
 
   it("works from demand mode too (single required interface)", async () => {
-    const exec = new OperationExecutor([createMockExecutor()]);
+    const opInvoker = new OperationInvoker([createMockDriver()]);
     const requiredIface: OBInterface = {
       openbindings: "0.2.0",
       operations: { getInfo: { kind: "method", output: { type: "object" } } },
     };
 
-    const client = new InterfaceClient(requiredIface, exec);
+    const client = new InterfaceClient(requiredIface, opInvoker);
     await client.resolve(serviceOBI);
     expect(client.state.kind).toBe("bound");
 
@@ -205,8 +205,8 @@ describe("InterfaceClient.conforms()", () => {
 
 describe("InterfaceClient — demand mode (backward compat)", () => {
   it("still enforces compatibility when required interface is provided", async () => {
-    const exec = new OperationExecutor([createMockExecutor()]);
-    const client = new InterfaceClient(incompatibleIface, exec);
+    const opInvoker = new OperationInvoker([createMockDriver()]);
+    const client = new InterfaceClient(incompatibleIface, opInvoker);
 
     await client.resolve(serviceOBI);
 
@@ -216,8 +216,8 @@ describe("InterfaceClient — demand mode (backward compat)", () => {
   });
 
   it("reaches bound state with a compatible required interface", async () => {
-    const exec = new OperationExecutor([createMockExecutor()]);
-    const client = new InterfaceClient(workspaceManagerIface, exec);
+    const opInvoker = new OperationInvoker([createMockDriver()]);
+    const client = new InterfaceClient(workspaceManagerIface, opInvoker);
 
     await client.resolve(serviceOBI);
 
@@ -226,8 +226,8 @@ describe("InterfaceClient — demand mode (backward compat)", () => {
   });
 
   it("close() resets state in demand mode", async () => {
-    const exec = new OperationExecutor([createMockExecutor()]);
-    const client = new InterfaceClient(workspaceManagerIface, exec);
+    const opInvoker = new OperationInvoker([createMockDriver()]);
+    const client = new InterfaceClient(workspaceManagerIface, opInvoker);
 
     await client.resolve(serviceOBI);
     expect(client.state.kind).toBe("bound");
@@ -238,15 +238,15 @@ describe("InterfaceClient — demand mode (backward compat)", () => {
   });
 
   it("interfaceJSON() returns the required interface", () => {
-    const exec = new OperationExecutor([createMockExecutor()]);
-    const client = new InterfaceClient(workspaceManagerIface, exec);
+    const opInvoker = new OperationInvoker([createMockDriver()]);
+    const client = new InterfaceClient(workspaceManagerIface, opInvoker);
     const json = client.interfaceJSON();
     expect(JSON.parse(json)).toEqual(workspaceManagerIface);
   });
 
   it("interfaceJSON() returns 'null' in discovery mode", () => {
-    const exec = new OperationExecutor([createMockExecutor()]);
-    const client = new InterfaceClient(null, exec);
+    const opInvoker = new OperationInvoker([createMockDriver()]);
+    const client = new InterfaceClient(null, opInvoker);
     expect(client.interfaceJSON()).toBe("null");
   });
 });

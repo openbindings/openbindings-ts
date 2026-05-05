@@ -1,13 +1,13 @@
 /**
  * @openbindings/workers-rpc
  *
- * Cloudflare Workers RPC binding executor for OpenBindings.
+ * Cloudflare Workers RPC binding invoker for OpenBindings.
  *
- * Use {@link WorkersRpcExecutor} to dispatch operation calls from a Worker
+ * Use {@link WorkersRpcInvoker} to dispatch operation calls from a Worker
  * to a sibling Worker exposing a `WorkerEntrypoint` class via a service
  * binding declared in `wrangler.toml`.
  *
- * The executor implements the standard `BindingExecutor` interface from
+ * The driver implements the standard `BindingInvoker` interface from
  * `@openbindings/sdk` and slots into any OB codegen client. The codegen
  * client is generated from an OBI document whose source declares
  * `format: "workers-rpc@^1.0.0"` and whose binding entries' `ref` field
@@ -34,6 +34,6 @@
  * ```
  */
 
-export { WorkersRpcExecutor } from "./executor.js";
-export type { WorkersRpcBinding, WorkersRpcExecutorOptions } from "./executor.js";
+export { WorkersRpcInvoker } from "./invoker.js";
+export type { WorkersRpcBinding, WorkersRpcInvokerOptions } from "./invoker.js";
 export { FORMAT_TOKEN, DEFAULT_SOURCE_NAME } from "./constants.js";

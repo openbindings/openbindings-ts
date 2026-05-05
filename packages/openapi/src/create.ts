@@ -339,7 +339,7 @@ function convertSecurityScheme(s: OpenAPISecurityScheme): SecurityMethod {
         type: "apiKey",
         description: s.description || undefined,
         name: s.name,
-        in: s.in as SecurityMethod["in"],
+        in: s.in,
       };
 
     case "openIdConnect":

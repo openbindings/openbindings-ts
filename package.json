@@ -4,11 +4,14 @@
   "scripts": {
     "build": "pnpm -r build",
     "test": "vitest run",
+    "conformance": "pnpm --filter @openbindings/sdk conformance",
     "lint": "pnpm -r --filter './packages/*' exec tsc --noEmit"
   },
   "devDependencies": {
     "@types/json-schema": "^7.0.15",
+    "@types/node": "^22.19.17",
     "tsup": "^8.5.1",
+    "tsx": "^4.21.0",
     "typescript": "^5.9.3",
     "vitest": "^4.1.3"
   }

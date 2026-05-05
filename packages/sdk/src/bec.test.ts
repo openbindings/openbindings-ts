@@ -8,45 +8,45 @@ import {
   contextString,
   ContextInsufficientError,
   ResolutionUnavailableError,
-  OperationExecutor,
+  OperationInvoker,
   defaultBindingSelector,
   InterfaceClient,
   BindingNotFoundError,
 } from "./index.js";
 import type {
-  BindingExecutor,
+  BindingInvoker,
   ContextStore,
   PlatformCallbacks,
-  BindingExecutionInput,
-  ExecuteOutput,
+  BindingInvocationInput,
+  InvocationOutput,
   StreamEvent,
   OBInterface,
   FormatInfo,
 } from "./index.js";
 
 // ---------------------------------------------------------------------------
-// Mock executor for BEC tests
+// Mock invoker for BEC tests
 // ---------------------------------------------------------------------------
 
-interface MockExecutorOpts {
+interface MockInvokerOpts {
   formats?: FormatInfo[];
-  executeFn?: (input: BindingExecutionInput) => AsyncIterable<StreamEvent>;
+  invokeFn?: (input: BindingInvocationInput) => AsyncIterable<StreamEvent>;
 }
 
-function createMockExecutor(opts: MockExecutorOpts = {}) {
-  const executor: BindingExecutor = {
+function createMockInvoker(opts: MockInvokerOpts = {}) {
+  const invoker: BindingInvoker = {
     formats() {
       return opts.formats ?? [{ token: "test@1.0" }];
     },
-    async *executeBinding(input: BindingExecutionInput) {
-      if (opts.executeFn) {
-        yield* opts.executeFn(input);
+    async *invokeBinding(input: BindingInvocationInput) {
+      if (opts.invokeFn) {
+        yield* opts.invokeFn(input);
         return;
       }
       yield { data: "ok" };
     },
   };
-  return executor;
+  return invoker;
 }
 
 // ---------------------------------------------------------------------------
@@ -161,16 +161,16 @@ describe("well-known context helpers", () => {
 });
 
 // ---------------------------------------------------------------------------
-// OperationExecutor BEC tests
+// OperationInvoker BEC tests
 // ---------------------------------------------------------------------------
 
-describe("OperationExecutor BEC", () => {
-  it("propagates store and callbacks to executor via withRuntimeInput", async () => {
+describe("OperationInvoker BEC", () => {
+  it("propagates store and callbacks to driver via withRuntimeInput", async () => {
     let capturedStore: ContextStore | undefined;
     let capturedCallbacks: PlatformCallbacks | undefined;
 
-    const executor = createMockExecutor({
-      executeFn: async function* (input) {
+    const driver = createMockInvoker({
+      invokeFn: async function* (input) {
         capturedStore = input.store;
         capturedCallbacks = input.callbacks;
         yield { data: "ok" };
@@ -180,12 +180,12 @@ describe("OperationExecutor BEC", () => {
     const store = new MemoryStore();
     const callbacks: PlatformCallbacks = {};
 
-    const exec = new OperationExecutor([executor], {
+    const opInvoker = new OperationInvoker([driver], {
       contextStore: store,
       platformCallbacks: callbacks,
     });
 
-    for await (const _ of exec.executeBinding({
+    for await (const _ of opInvoker.invokeBinding({
       source: { format: "test@1.0" },
       ref: "",
     })) { /* drain */ }
@@ -200,20 +200,20 @@ describe("OperationExecutor BEC", () => {
     let capturedStore: ContextStore | undefined;
     let capturedCb: PlatformCallbacks | undefined;
 
-    const executor = createMockExecutor({
-      executeFn: async function* (input) {
+    const driver = createMockInvoker({
+      invokeFn: async function* (input) {
         capturedStore = input.store;
         capturedCb = input.callbacks;
         yield { data: "ok" };
       },
     });
 
-    const exec = new OperationExecutor([executor], {
+    const opInvoker = new OperationInvoker([driver], {
       contextStore: new MemoryStore(),
       platformCallbacks: {},
     });
 
-    for await (const _ of exec.executeBinding({
+    for await (const _ of opInvoker.invokeBinding({
       source: { format: "test@1.0" },
       ref: "",
       store: existingStore,
@@ -224,18 +224,18 @@ describe("OperationExecutor BEC", () => {
     expect(capturedCb).toBe(existingCb);
   });
 
-  it("context passes through as-is (executors resolve internally)", async () => {
+  it("context passes through as-is (drivers resolve internally)", async () => {
     let capturedCtx: Record<string, unknown> | undefined;
-    const executor = createMockExecutor({
-      executeFn: async function* (input) {
+    const driver = createMockInvoker({
+      invokeFn: async function* (input) {
         capturedCtx = input.context;
         yield { data: "ok" };
       },
     });
 
-    const exec = new OperationExecutor([executor]);
+    const opInvoker = new OperationInvoker([driver]);
 
-    for await (const _ of exec.executeBinding({
+    for await (const _ of opInvoker.invokeBinding({
       source: { format: "test@1.0" },
       ref: "",
       context: { custom: "value" },
@@ -246,22 +246,22 @@ describe("OperationExecutor BEC", () => {
 
   it("caller's input is never mutated (reusable across calls)", async () => {
     let capturedStore: ContextStore | undefined;
-    const executor = createMockExecutor({
-      executeFn: async function* (input) {
+    const driver = createMockInvoker({
+      invokeFn: async function* (input) {
         capturedStore = input.store;
         yield { data: "ok" };
       },
     });
 
     const store = new MemoryStore();
-    const exec = new OperationExecutor([executor], { contextStore: store });
+    const opInvoker = new OperationInvoker([driver], { contextStore: store });
 
-    const input: BindingExecutionInput = {
+    const input: BindingInvocationInput = {
       source: { format: "test@1.0" },
       ref: "",
     };
 
-    for await (const _ of exec.executeBinding(input)) { /* drain */ }
+    for await (const _ of opInvoker.invokeBinding(input)) { /* drain */ }
     expect(capturedStore).toBe(store);
     expect(input.store).toBeUndefined();
     expect(input.callbacks).toBeUndefined();
@@ -269,37 +269,37 @@ describe("OperationExecutor BEC", () => {
 
   it("input is reusable across multiple calls", async () => {
     let callCount = 0;
-    const executor = createMockExecutor({
-      executeFn: async function* (input) {
+    const driver = createMockInvoker({
+      invokeFn: async function* (input) {
         callCount++;
         expect(input.store).toBeDefined();
         yield { data: callCount };
       },
     });
 
-    const exec = new OperationExecutor([executor], {
+    const opInvoker = new OperationInvoker([driver], {
       contextStore: new MemoryStore(),
     });
 
-    const input: BindingExecutionInput = {
+    const input: BindingInvocationInput = {
       source: { format: "test@1.0" },
       ref: "",
     };
 
     for (let i = 0; i < 3; i++) {
-      for await (const _ of exec.executeBinding(input)) { /* drain */ }
+      for await (const _ of opInvoker.invokeBinding(input)) { /* drain */ }
     }
     expect(callCount).toBe(3);
   });
 
   it("formats() returns defensive copy", () => {
-    const executor = createMockExecutor();
-    const exec = new OperationExecutor([executor]);
+    const driver = createMockInvoker();
+    const opInvoker = new OperationInvoker([driver]);
 
-    const fmts = exec.formats();
+    const fmts = opInvoker.formats();
     fmts[0] = { token: "MUTATED" };
 
-    expect(exec.formats()[0].token).toBe("test@1.0");
+    expect(opInvoker.formats()[0].token).toBe("test@1.0");
   });
 });
 
@@ -307,13 +307,13 @@ describe("OperationExecutor BEC", () => {
 // withRuntime tests
 // ---------------------------------------------------------------------------
 
-describe("OperationExecutor.withRuntime", () => {
+describe("OperationInvoker.withRuntime", () => {
   it("clones with overrides", () => {
-    const executor = createMockExecutor();
-    const orig = new OperationExecutor([executor]);
+    const driver = createMockInvoker();
+    const orig = new OperationInvoker([driver]);
     const origStore = new MemoryStore();
 
-    const origWithStore = new OperationExecutor([executor], {
+    const origWithStore = new OperationInvoker([driver], {
       contextStore: origStore,
     });
 
@@ -328,10 +328,10 @@ describe("OperationExecutor.withRuntime", () => {
   });
 
   it("undefined inherits original", () => {
-    const executor = createMockExecutor();
+    const driver = createMockInvoker();
     const origStore = new MemoryStore();
     const origCb: PlatformCallbacks = {};
-    const orig = new OperationExecutor([executor], {
+    const orig = new OperationInvoker([driver], {
       contextStore: origStore,
       platformCallbacks: origCb,
     });
@@ -343,16 +343,16 @@ describe("OperationExecutor.withRuntime", () => {
 });
 
 // ---------------------------------------------------------------------------
-// executeBinding streaming BEC tests
+// invokeBinding streaming BEC tests
 // ---------------------------------------------------------------------------
 
-describe("executeBinding streaming BEC", () => {
+describe("invokeBinding streaming BEC", () => {
   it("propagates store and callbacks", async () => {
     let capturedStore: ContextStore | undefined;
     let capturedCb: PlatformCallbacks | undefined;
 
-    const executor = createMockExecutor({
-      executeFn: async function* (input) {
+    const driver = createMockInvoker({
+      invokeFn: async function* (input) {
         capturedStore = input.store;
         capturedCb = input.callbacks;
         yield { data: "event" };
@@ -361,12 +361,12 @@ describe("executeBinding streaming BEC", () => {
 
     const store = new MemoryStore();
     const cb: PlatformCallbacks = {};
-    const exec = new OperationExecutor([executor], {
+    const opInvoker = new OperationInvoker([driver], {
       contextStore: store,
       platformCallbacks: cb,
     });
 
-    const iter = exec.executeBinding({
+    const iter = opInvoker.invokeBinding({
       source: { format: "test@1.0" },
       ref: "",
     });
@@ -378,20 +378,20 @@ describe("executeBinding streaming BEC", () => {
 });
 
 // ---------------------------------------------------------------------------
-// executeOperation BEC integration
+// invoke BEC integration
 // ---------------------------------------------------------------------------
 
-describe("executeOperation BEC integration", () => {
-  it("context flows through to executor", async () => {
+describe("invoke BEC integration", () => {
+  it("context flows through to driver", async () => {
     let capturedCtx: Record<string, unknown> | undefined;
-    const executor = createMockExecutor({
-      executeFn: async function* (input) {
+    const driver = createMockInvoker({
+      invokeFn: async function* (input) {
         capturedCtx = input.context;
         yield { data: "ok" };
       },
     });
 
-    const exec = new OperationExecutor([executor], { contextStore: new MemoryStore() });
+    const opInvoker = new OperationInvoker([driver], { contextStore: new MemoryStore() });
 
     const iface: OBInterface = {
       openbindings: "0.1.0",
@@ -402,7 +402,7 @@ describe("executeOperation BEC integration", () => {
       },
     };
 
-    for await (const _ev of exec.executeOperation({
+    for await (const _ev of opInvoker.invoke({
       interface: iface,
       operation: "getUser",
       context: { bearerToken: "op-token" },
@@ -418,15 +418,15 @@ describe("executeOperation BEC integration", () => {
 
 describe("InterfaceClient", () => {
   it("close() resets state and is idempotent", () => {
-    const executor = createMockExecutor();
-    const exec = new OperationExecutor([executor]);
+    const driver = createMockInvoker();
+    const opInvoker = new OperationInvoker([driver]);
 
     const iface: OBInterface = {
       openbindings: "0.1.0",
       operations: {},
     };
 
-    const client = new InterfaceClient(iface, exec);
+    const client = new InterfaceClient(iface, opInvoker);
     expect(client.state.kind).toBe("idle");
 
     // Resolve directly with a compatible interface
@@ -441,16 +441,16 @@ describe("InterfaceClient", () => {
     expect(client.state.kind).toBe("idle");
   });
 
-  it("constructor clones executor when store/callbacks provided", async () => {
+  it("constructor clones opInvoker when store/callbacks provided", async () => {
     let capturedStore: ContextStore | undefined;
-    const executor = createMockExecutor({
-      executeFn: async function* (input) {
+    const driver = createMockInvoker({
+      invokeFn: async function* (input) {
         capturedStore = input.store;
         yield { data: "ok" };
       },
     });
 
-    const origExec = new OperationExecutor([executor]);
+    const origDispatcher = new OperationInvoker([driver]);
     const store = new MemoryStore();
 
     const iface: OBInterface = {
@@ -460,27 +460,27 @@ describe("InterfaceClient", () => {
       bindings: { "op.s": { operation: "op", source: "s", ref: "" } },
     };
 
-    const client = new InterfaceClient(iface, origExec, {
+    const client = new InterfaceClient(iface, origDispatcher, {
       contextStore: store,
     });
 
     await client.resolve(iface);
-    for await (const _ev of client.execute("op" as any)) { /* drain */ }
+    for await (const _ev of client.invoke("op" as any)) { /* drain */ }
 
     expect(capturedStore).toBe(store);
-    expect(origExec.contextStore).toBeUndefined();
+    expect(origDispatcher.contextStore).toBeUndefined();
   });
 
   it("merges default and per-call execution options", async () => {
-    let capturedInput: BindingExecutionInput | undefined;
-    const executor = createMockExecutor({
-      executeFn: async function* (input) {
+    let capturedInput: BindingInvocationInput | undefined;
+    const driver = createMockInvoker({
+      invokeFn: async function* (input) {
         capturedInput = input;
         yield { data: "ok" };
       },
     });
 
-    const exec = new OperationExecutor([executor]);
+    const opInvoker = new OperationInvoker([driver]);
     const iface: OBInterface = {
       openbindings: "0.1.0",
       operations: { op: { kind: "method" } },
@@ -488,14 +488,14 @@ describe("InterfaceClient", () => {
       bindings: { "op.s": { operation: "op", source: "s", ref: "" } },
     };
 
-    const client = new InterfaceClient(iface, exec, {
+    const client = new InterfaceClient(iface, opInvoker, {
       defaultOptions: {
         headers: { "X-Base": "base", "X-Override": "base" },
       },
     });
 
     await client.resolve(iface);
-    for await (const _ev of client.execute("op" as any, undefined, {
+    for await (const _ev of client.invoke("op" as any, undefined, {
       headers: { "X-Override": "call", "X-New": "new" },
     })) { /* drain */ }
 

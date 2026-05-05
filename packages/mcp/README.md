@@ -1,10 +1,10 @@
 # @openbindings/mcp
 
-Model Context Protocol (MCP) binding executor and interface creator for the [OpenBindings](https://openbindings.com) TypeScript SDK.
+Model Context Protocol (MCP) binding invoker and interface creator for the [OpenBindings](https://openbindings.com) TypeScript SDK.
 
-This package enables OpenBindings to execute operations against MCP servers and synthesize OBI documents from them. It connects to MCP servers via the Streamable HTTP transport, dispatches calls to tools, resources, resource templates, and prompts, and returns results as a stream of events. Built on `@modelcontextprotocol/sdk`.
+This package enables OpenBindings to invoke operations against MCP servers and synthesize OBI documents from them. It connects to MCP servers via the Streamable HTTP transport, dispatches calls to tools, resources, resource templates, and prompts, and returns results as a stream of events. Built on `@modelcontextprotocol/sdk`.
 
-See the [spec](https://github.com/openbindings/spec) and [pattern documentation](https://github.com/openbindings/spec/tree/main/patterns) for how executors and creators fit into the OpenBindings architecture.
+See the [spec](https://github.com/openbindings/spec) and [pattern documentation](https://github.com/openbindings/spec/tree/main/patterns) for how drivers and creators fit into the OpenBindings architecture.
 
 ## Install
 
@@ -16,23 +16,23 @@ Requires [@openbindings/sdk](https://www.npmjs.com/package/@openbindings/sdk) (t
 
 ## Usage
 
-### Register with OperationExecutor
+### Register with OperationInvoker
 
 ```typescript
-import { OperationExecutor } from "@openbindings/sdk";
-import { MCPExecutor, MCPCreator } from "@openbindings/mcp";
+import { OperationInvoker } from "@openbindings/sdk";
+import { MCPInvoker, MCPCreator } from "@openbindings/mcp";
 
-const exec = new OperationExecutor([new MCPExecutor(), new MCPCreator()]);
+const dispatcher = new OperationInvoker([new MCPInvoker(), new MCPCreator()]);
 ```
 
-The executor declares the date-versioned format token `mcp@2025-11-25`, matching the MCP protocol revision it implements. The MCP server must support the **Streamable HTTP** transport — stdio and the legacy SSE transport are not supported.
+The driver declares the date-versioned format token `mcp@2025-11-25`, matching the MCP protocol revision it implements. The MCP server must support the **Streamable HTTP** transport — stdio and the legacy SSE transport are not supported.
 
-### Execute a binding
+### Invoke a binding
 
 ```typescript
-const executor = new MCPExecutor();
+const driver = new MCPInvoker();
 
-for await (const event of executor.executeBinding({
+for await (const event of driver.invokeBinding({
   source: {
     format: "mcp@2025-11-25",
     location: "https://mcp.example.com",
@@ -79,7 +79,7 @@ The creator connects to the server, lists every advertised tool, resource, resou
    - **`prompts/<name>`:** calls `client.getPrompt`. Output is `{ messages, description? }`.
 4. Closes the client in a `finally` block.
 
-On a connect-time 401/403, the executor maps the error to `auth_required` / `permission_denied`. If the binding declares security entries and a credential callback is configured, it calls `resolveSecurity` and retries once with the new credentials.
+On a connect-time 401/403, the driver maps the error to `auth_required` / `permission_denied`. If the binding declares security entries and a credential callback is configured, it calls `resolveSecurity` and retries once with the new credentials.
 
 ### Credential application
 
@@ -89,7 +89,7 @@ MCP has no native security scheme declarations. Headers are passed to the underl
 2. **`apiKey`** → `Authorization: ApiKey <token>`
 3. **`basic.username` + `basic.password`** → `Authorization: Basic <base64>`
 
-`ExecutionOptions.headers` are merged in after, and `ExecutionOptions.cookies` are joined as a sorted `Cookie:` header.
+`InvocationOptions.headers` are merged in after, and `InvocationOptions.cookies` are joined as a sorted `Cookie:` header.
 
 ### Interface creation
 

@@ -1,12 +1,12 @@
 /**
- * WebSocket connection pool for the AsyncAPI executor.
+ * WebSocket connection pool for the AsyncAPI driver.
  *
  * Multiple operations on the same channel (same server + address) share
  * a single WebSocket connection. This is load-bearing for the AsyncAPI
  * two-operation pattern where a `receive` operation opens a long-lived
  * stream and `send` operations push messages on the same channel.
  *
- * Without pooling, each executeBinding call opens a separate WebSocket
+ * Without pooling, each invokeBinding call opens a separate WebSocket
  * and the server (e.g. a Durable Object) tracks subscriptions per-socket,
  * so send and receive never share state.
  *

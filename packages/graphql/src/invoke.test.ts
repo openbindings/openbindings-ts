@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseRef, typeRefToGraphQL, buildSelectionSet, buildQueryFromIntrospection, queryFromSchema, parseIntrospectionContent } from "./execute.js";
+import { parseRef, typeRefToGraphQL, buildSelectionSet, buildQueryFromIntrospection, queryFromSchema, parseIntrospectionContent } from "./invoke.js";
 import type { IntrospectionSchema, FullType, TypeMap } from "./introspection.js";
 
 describe("parseRef", () => {
