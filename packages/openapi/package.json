@@ -1,7 +1,7 @@
 {
   "name": "@openbindings/openapi",
   "version": "0.1.0",
-  "description": "OpenBindings OpenAPI/HTTP binding executor",
+  "description": "OpenBindings OpenAPI/HTTP binding invoker",
   "type": "module",
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
@@ -24,7 +24,7 @@
   "keywords": [
     "openbindings",
     "openapi",
-    "executor",
+    "invoker",
     "http",
     "rest"
   ],

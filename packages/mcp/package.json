@@ -1,7 +1,7 @@
 {
   "name": "@openbindings/mcp",
   "version": "0.1.0",
-  "description": "OpenBindings MCP binding executor",
+  "description": "OpenBindings MCP binding invoker",
   "type": "module",
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
@@ -25,7 +25,7 @@
     "openbindings",
     "mcp",
     "model-context-protocol",
-    "executor",
+    "invoker",
     "ai-tools"
   ],
   "license": "Apache-2.0",

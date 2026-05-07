@@ -1,7 +1,7 @@
 {
   "name": "@openbindings/asyncapi",
   "version": "0.1.0",
-  "description": "OpenBindings AsyncAPI binding executor",
+  "description": "OpenBindings AsyncAPI binding invoker",
   "type": "module",
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
@@ -24,7 +24,7 @@
   "keywords": [
     "openbindings",
     "asyncapi",
-    "executor",
+    "invoker",
     "sse",
     "events"
   ],

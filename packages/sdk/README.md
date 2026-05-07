@@ -18,7 +18,7 @@ npm install @openbindings/sdk
 
 - **Core types** for OpenBindings interface documents: operations, bindings, sources, transforms, schemas, roles
 - **Validation** with shape-level checks, strict mode for unknown fields, and format token validation
-- **Schema compatibility** checking (Profile v0.1) with covariant/contravariant directionality and diagnostic reasons
+- **Schema compatibility** checking (reference-tooling profile, not part of the spec) with covariant/contravariant directionality and diagnostic reasons
 - **InterfaceClient** for resolving OBIs from URLs, well-known discovery, or synthesis from raw specs
 - **OperationInvoker** for routing operations to binding invokers by format, with transform support
 - **Context store** for per-host credential persistence with scheme-agnostic key normalization
@@ -48,6 +48,23 @@ for await (const event of client.invoke("listItems", { limit: 10 })) {
 ```
 
 See the [monorepo README](https://github.com/openbindings/openbindings-ts#readme) for full documentation.
+
+## Transforms (Invoking-class only)
+
+OpenBindings 0.2.0 mandates JSONata 2.0 as the transform language for tools that evaluate `inputTransform`/`outputTransform` (OBI-T-11). This SDK does not bundle a JSONata runtime; Inspection-class and Codegen-class tools do not need one, and shipping it as a hard dependency would tax those callers. To wire up Invoking-class behavior, install `jsonata` separately and pass an adapter implementing the `TransformEvaluator` interface:
+
+```typescript
+import jsonata from "jsonata";
+import { OperationInvoker, type TransformEvaluator } from "@openbindings/sdk";
+
+const transformEvaluator: TransformEvaluator = {
+  evaluate: (expression, data) => jsonata(expression).evaluate(data),
+};
+
+const invoker = new OperationInvoker([/* invokers */], { transformEvaluator });
+```
+
+OBIs that declare no transforms require no runtime; calls to operations whose bindings carry transforms will surface `NoTransformEvaluatorError` if no evaluator is configured.
 
 ## License
 
