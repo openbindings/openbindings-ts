@@ -107,6 +107,8 @@ export {
 
 export { canonicalize } from "./canonical-json.js";
 
+export { canonicalizeLocation, resolveRef, unknownFields } from "./uri.js";
+
 export { InterfaceClient, MEDIA_TYPE, WELL_KNOWN_PATH } from "./interface-client.js";
 export type {
   OperationEntry,
