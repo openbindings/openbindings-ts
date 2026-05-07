@@ -76,13 +76,11 @@ export function combineInvokers(...invokers: BindingInvoker[]): CombinedInvoker 
     if (!indices) return undefined;
     for (const idx of indices) {
       const entry = entries[idx];
-      if (matchesRange(entry.range, sourceFormat)) {
+      if (entry.info.token === sourceFormat || matchesRange(entry.range, sourceFormat)) {
         return entry.invoker;
       }
     }
-    // Name-only fallback: handles synthesis where the source format is the
-    // invoker's own range token rather than an exact version from an OBI.
-    return indices.length > 0 ? entries[indices[0]].invoker : undefined;
+    return undefined;
   }
 
   return {
@@ -139,12 +137,11 @@ export function combineCreators(...creators: InterfaceCreator[]): InterfaceCreat
     if (!indices) return undefined;
     for (const idx of indices) {
       const entry = entries[idx];
-      if (matchesRange(entry.range, sourceFormat)) {
+      if (entry.info.token === sourceFormat || matchesRange(entry.range, sourceFormat)) {
         return entry.creator;
       }
     }
-    // Name-only fallback
-    return indices.length > 0 ? entries[indices[0]].creator : undefined;
+    return undefined;
   }
 
   return {
@@ -201,11 +198,11 @@ export function combineSourceInspectors(...inspectors: SourceInspector[]): Sourc
     if (!indices) return undefined;
     for (const idx of indices) {
       const entry = entries[idx];
-      if (matchesRange(entry.range, sourceFormat)) {
+      if (entry.info.token === sourceFormat || matchesRange(entry.range, sourceFormat)) {
         return entry.inspector;
       }
     }
-    return indices.length > 0 ? entries[indices[0]].inspector : undefined;
+    return undefined;
   }
 
   return {

@@ -120,7 +120,7 @@ describe("validateInterface", () => {
   });
 });
 
-describe("validateInterface with validateExamples (OBI-T-09)", () => {
+describe("validateInterface example validation (OBI-D-15)", () => {
   function ifaceWithExample(overrides?: {
     input?: unknown;
     output?: unknown;
@@ -195,12 +195,11 @@ describe("validateInterface with validateExamples (OBI-T-09)", () => {
     }
   });
 
-  it("does not check examples when validateExamples is false (default)", () => {
-    // Invalid input that would fail if examples were checked.
+  it("checks examples by default", () => {
     const iface = ifaceWithExample({ input: { name: 123 } });
-    expect(() => validateInterface(iface)).not.toThrow();
-    expect(() => validateInterface(iface, {})).not.toThrow();
-    expect(() => validateInterface(iface, { validateExamples: false })).not.toThrow();
+    expect(() => validateInterface(iface)).toThrow(/OBI-D-15/);
+    expect(() => validateInterface(iface, {})).toThrow(/OBI-D-15/);
+    expect(() => validateInterface(iface, { validateExamples: false })).toThrow(/OBI-D-15/);
   });
 
   it("skips operations without examples gracefully", () => {

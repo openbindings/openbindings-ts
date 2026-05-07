@@ -239,7 +239,7 @@ describe("OBI-T-07 — input validation", () => {
     expect(events[0].error).toBeUndefined();
   });
 
-  it("skips validation when input is undefined", async () => {
+  it("rejects undefined input when an input schema is specified", async () => {
     const invoker = new OperationInvoker([stubInvoker({ ok: true })]);
     const events: StreamEvent[] = [];
     for await (const ev of invoker.invoke({
@@ -249,7 +249,7 @@ describe("OBI-T-07 — input validation", () => {
       events.push(ev);
     }
     expect(events).toHaveLength(1);
-    expect(events[0].error).toBeUndefined();
+    expect(events[0].error?.code).toBe(ERR_VALIDATION_FAILED);
   });
 
   it("validates input with $ref to #/schemas", async () => {

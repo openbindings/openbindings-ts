@@ -26,6 +26,7 @@ import { ERR_BINDING_NOT_FOUND, ERR_TRANSFORM_ERROR, ERR_VALIDATION_FAILED } fro
 import { Ajv2020 } from "ajv/dist/2020.js";
 import addFormats from "ajv-formats";
 import { buildSchemaDefs, buildExampleSchema } from "./schema-validation.js";
+import { matchesRange, parseRange } from "./format-token.js";
 
 export interface OperationInvokerOptions {
   bindingSelector?: BindingSelector;
@@ -143,7 +144,7 @@ export class OperationInvoker {
     if (!source) throw new UnknownSourceError(bindingKey, binding.source);
 
     // OBI-T-07: Validate input against the operation's input schema before transform.
-    if (op.input != null && input.input !== undefined) {
+    if (op.input != null) {
       const defs = buildSchemaDefs(iface.schemas);
       const ajv = new Ajv2020({ strict: false, allErrors: true });
       addFormats(ajv);
@@ -268,13 +269,22 @@ export class OperationInvoker {
         const ajv = new Ajv2020({ strict: false, allErrors: true });
         addFormats(ajv);
         outputValidate = ajv.compile(buildExampleSchema(outputSchema, defs));
-      } catch {
-        // Schema compilation failure is non-fatal for output; skip validation.
+      } catch (err) {
+        yield {
+          error: {
+            code: ERR_VALIDATION_FAILED,
+            message: `openbindings: output schema compilation failed for "${bindingKey}": ${(err as Error).message}`,
+          },
+        };
+        for await (const _ of source) {
+          // Drain producer.
+        }
+        return;
       }
     }
 
     for await (const ev of source) {
-      if (ev.error || ev.data === undefined) {
+      if (ev.error) {
         yield ev;
         continue;
       }
@@ -298,7 +308,7 @@ export class OperationInvoker {
         }
       }
       // OBI-T-08: Validate output after transform.
-      if (outputValidate && data !== undefined) {
+      if (outputValidate) {
         if (!outputValidate(data)) {
           const messages = (outputValidate.errors ?? []).map(e => {
             const path = e.instancePath || "";
@@ -389,16 +399,16 @@ export function defaultBindingSelector(
 }
 
 /**
- * Checks whether a source format token matches any token in the available set.
- * Handles versioned tokens: "openapi@3.1" matches "openapi@3.1" exactly,
- * and bare tokens like "mcp" match "mcp" or any "mcp@..." variant.
+ * Checks whether a source format token satisfies any advertised token/range.
  */
 function formatMatches(sourceFormat: string, available: Set<string>): boolean {
   if (available.has(sourceFormat)) return true;
-  // Try bare token match: "mcp" matches if available has "mcp@..."
-  const bare = sourceFormat.split("@")[0];
   for (const f of available) {
-    if (f === bare || f.split("@")[0] === bare) return true;
+    try {
+      if (matchesRange(parseRange(f), sourceFormat)) return true;
+    } catch {
+      // Ignore malformed advertised ranges.
+    }
   }
   return false;
 }

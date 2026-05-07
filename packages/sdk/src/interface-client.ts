@@ -5,6 +5,7 @@ import type { InvocationOptions, ContextStore, PlatformCallbacks } from "./conte
 import type { OperationInvoker } from "./operation-invoker.js";
 import { isHttpUrl } from "./helpers.js";
 import { combineCreators } from "./combiners.js";
+import { parseDocument } from "./parse.js";
 import {
   checkInterfaceCompatibility,
   isOBInterface,
@@ -332,17 +333,19 @@ export class InterfaceClient<T = Record<string, OperationEntry>> {
     url: string,
     signal: AbortSignal,
   ): Promise<OBInterface | null> {
+    const resp = await this.fetchFn(url, {
+      signal,
+      headers: { Accept: "application/vnd.openbindings+json, application/json" },
+    });
+    if (!resp.ok) return null;
+    const text = await resp.text();
+    let body: unknown;
     try {
-      const resp = await this.fetchFn(url, {
-        signal,
-        headers: { Accept: "application/vnd.openbindings+json, application/json" },
-      });
-      if (!resp.ok) return null;
-      const body = await resp.json();
-      if (isOBInterface(body)) return body;
+      body = JSON.parse(text);
     } catch {
       return null;
     }
+    if (isOBInterface(body)) return parseDocument(text);
     return null;
   }
 
