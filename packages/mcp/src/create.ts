@@ -5,7 +5,7 @@ import { MAX_TESTED_VERSION } from "@openbindings/sdk";
 import { FORMAT_TOKEN, DEFAULT_SOURCE_NAME } from "./constants.js";
 
 const CLIENT_NAME = "openbindings-mcp";
-const CLIENT_VERSION = "0.1.0";
+const CLIENT_VERSION = "0.2.0";
 
 interface MCPDiscovery {
   serverName?: string;

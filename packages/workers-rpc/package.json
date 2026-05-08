@@ -1,6 +1,6 @@
 {
   "name": "@openbindings/workers-rpc",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "OpenBindings Cloudflare Workers RPC binding invoker",
   "type": "module",
   "main": "./dist/index.cjs",

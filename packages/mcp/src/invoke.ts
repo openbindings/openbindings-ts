@@ -11,7 +11,7 @@ import {
 } from "@openbindings/sdk";
 
 const CLIENT_NAME = "openbindings-mcp";
-const CLIENT_VERSION = "0.1.0";
+const CLIENT_VERSION = "0.2.0";
 
 /** Parse a ref like "tools/name", "resources/uri", or "prompts/name". */
 export function parseRef(ref: string): { entityType: string; name: string } {
