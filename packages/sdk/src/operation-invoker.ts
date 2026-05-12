@@ -23,10 +23,9 @@ import {
 } from "./errors.js";
 import { combineInvokers, type CombinedInvoker } from "./combiners.js";
 import { ERR_BINDING_NOT_FOUND, ERR_TRANSFORM_ERROR, ERR_VALIDATION_FAILED } from "./errcodes.js";
-import { Ajv2020 } from "ajv/dist/2020.js";
-import addFormats from "ajv-formats";
-import { buildSchemaDefs, buildExampleSchema } from "./schema-validation.js";
 import { matchesRange, parseRange } from "./format-token.js";
+import { buildSchemaDefs, compileExampleSchema, safeValidate } from "./schema-validation.js";
+import type { Validator } from "@cfworker/json-schema";
 
 export interface OperationInvokerOptions {
   bindingSelector?: BindingSelector;
@@ -145,29 +144,25 @@ export class OperationInvoker {
 
     // OBI-T-07: Validate input against the operation's input schema before transform.
     if (op.input != null) {
-      const defs = buildSchemaDefs(iface.schemas);
-      const ajv = new Ajv2020({ strict: false, allErrors: true });
-      addFormats(ajv);
+      let inputValidator: Validator;
       try {
-        const validate = ajv.compile(buildExampleSchema(op.input, defs));
-        if (!validate(input.input)) {
-          const messages = (validate.errors ?? []).map(e => {
-            const path = e.instancePath || "";
-            return `${path ? path + ": " : ""}${e.message ?? "schema violation"}`;
-          });
-          yield {
-            error: {
-              code: ERR_VALIDATION_FAILED,
-              message: `openbindings: input validation failed for "${input.operation}": ${messages.join("; ")}`,
-            },
-          };
-          return;
-        }
+        inputValidator = compileExampleSchema(op.input, buildSchemaDefs(iface.schemas));
       } catch (err) {
         yield {
           error: {
             code: ERR_VALIDATION_FAILED,
             message: `openbindings: input schema compilation failed for "${input.operation}": ${(err as Error).message}`,
+          },
+        };
+        return;
+      }
+      const r = safeValidate(inputValidator, input.input);
+      if (!r.valid) {
+        yield {
+          error: {
+            code: ERR_VALIDATION_FAILED,
+            message: `openbindings: input validation failed for "${input.operation}": ${r.errors.join("; ")}`,
+            details: { failures: r.failures },
           },
         };
         return;
@@ -262,13 +257,10 @@ export class OperationInvoker {
     }
 
     // Compile output schema once outside the loop.
-    let outputValidate: ReturnType<InstanceType<typeof Ajv2020>["compile"]> | undefined;
+    let outputValidator: Validator | undefined;
     if (outputSchema) {
       try {
-        const defs = buildSchemaDefs(schemas);
-        const ajv = new Ajv2020({ strict: false, allErrors: true });
-        addFormats(ajv);
-        outputValidate = ajv.compile(buildExampleSchema(outputSchema, defs));
+        outputValidator = compileExampleSchema(outputSchema, buildSchemaDefs(schemas));
       } catch (err) {
         yield {
           error: {
@@ -307,17 +299,21 @@ export class OperationInvoker {
           continue;
         }
       }
-      // OBI-T-08: Validate output after transform.
-      if (outputValidate) {
-        if (!outputValidate(data)) {
-          const messages = (outputValidate.errors ?? []).map(e => {
-            const path = e.instancePath || "";
-            return `${path ? path + ": " : ""}${e.message ?? "schema violation"}`;
-          });
+      // OBI-T-08: Validate output after transform. On failure, yield the
+      // data alongside the error so callers can inspect or render the
+      // underlying response while still being informed of the schema
+      // mismatch. The spec describes a T-08 failure as an "invocation
+      // error for that operation"; it does not prescribe how the SDK
+      // surfaces that error, and it does not require hiding the data.
+      if (outputValidator) {
+        const r = safeValidate(outputValidator, data);
+        if (!r.valid) {
           yield {
+            data,
             error: {
               code: ERR_VALIDATION_FAILED,
-              message: `openbindings: output validation failed for "${bindingKey}": ${messages.join("; ")}`,
+              message: `openbindings: output validation failed for "${bindingKey}": ${r.errors.join("; ")}`,
+              details: { failures: r.failures },
             },
           };
           continue;

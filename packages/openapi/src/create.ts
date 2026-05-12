@@ -12,6 +12,7 @@ import type {
   OpenAPIOAuthFlow,
 } from "./types.js";
 import { DEFAULT_SOURCE_NAME } from "./constants.js";
+import { translateSchemaDialect } from "./translate.js";
 import {
   buildJsonPointerRef,
   loadOpenAPIDocument,
@@ -81,10 +82,14 @@ export async function convertToInterface(
       }
 
       const inputSchema = buildInputSchema(opObj, pathParams);
-      if (inputSchema) obiOp.input = inputSchema;
+      if (inputSchema) {
+        obiOp.input = translateSchemaDialect(inputSchema, formatVersion) as JSONSchema;
+      }
 
       const outputSchema = buildOutputSchema(opObj);
-      if (outputSchema) obiOp.output = outputSchema;
+      if (outputSchema) {
+        obiOp.output = translateSchemaDialect(outputSchema, formatVersion) as JSONSchema;
+      }
 
       iface.operations[opKey] = obiOp;
 

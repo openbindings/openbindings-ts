@@ -2,14 +2,7 @@
 import {
   InterfaceClient,
   OperationInvoker,
-  MemoryStore,
-  normalizeContextKey,
-  type BindingInvoker,
-  type InterfaceClientOptions,
   type OBInterface,
-  type StreamEvent,
-  type ContextStore,
-  type PlatformCallbacks,
   type InvocationOptions,
 } from "@openbindings/sdk";
 
@@ -41,30 +34,42 @@ export interface TypedStreamEvent<T> {
 
 // --- Error ---
 
+/**
+ * Thrown by generated client methods when the operation fails.
+ *
+ * For OBI-T-08 output-validation failures the SDK yields both the
+ * underlying response AND a validation error in the same event. The
+ * generated method still throws (preserving the throwing-function
+ * API), but attaches the response on `data` so catchers can opt
+ * into using it:
+ *
+ *   try {
+ *     const info = await client.getInfo();
+ *   } catch (e) {
+ *     if (e instanceof ClientOperationError && e.data) {
+ *       // soft mismatch — data was produced, validation flagged it
+ *     }
+ *   }
+ *
+ * Pre-data failures (transport, auth, transform, input validation)
+ * leave `data` undefined.
+ */
 export class ClientOperationError extends Error {
   readonly code: string;
   readonly details?: unknown;
-  constructor(code: string, message: string, details?: unknown) {
+  readonly data?: unknown;
+  constructor(code: string, message: string, details?: unknown, data?: unknown) {
     super(message);
     this.name = 'ClientOperationError';
     this.code = code;
     this.details = details;
+    this.data = data;
   }
 }
 
-// --- Options ---
+// --- Embedded contract ---
 
-export interface ConnectOptions {
-  bearerToken?: string;
-  contextStore?: ContextStore;
-  platformCallbacks?: PlatformCallbacks;
-  signal?: AbortSignal;
-}
-
-export interface ClientOptions {
-  contextStore?: ContextStore;
-  platformCallbacks?: PlatformCallbacks;
-}
+const INTERFACE: OBInterface = JSON.parse('{"bindings":{"addItem.rpc":{"operation":"addItem","ref":"addItem","source":"rpc"},"ping.rpc":{"operation":"ping","ref":"ping","source":"rpc"}},"name":"TestWorkersRpc","openbindings":"0.1.0","operations":{"addItem":{"description":"Add an item, returning the new item id.","input":{"properties":{"name":{"minLength":1,"type":"string"},"qty":{"default":1,"minimum":1,"type":"integer"}},"required":["name"],"type":"object"},"output":{"properties":{"id":{"type":"string"}},"required":["id"],"type":"object"}},"ping":{"description":"Health check that returns a string.","input":{"properties":{"message":{"type":"string"}},"type":"object"},"output":{"properties":{"echoed":{"type":"string"}},"required":["echoed"],"type":"object"}}},"sources":{"rpc":{"format":"workers-rpc@^1.0.0","location":"workers-rpc://test-service"}}}');
 
 // --- Operation type map ---
 
@@ -75,43 +80,13 @@ type TestWorkersRpcOperations = {
 
 // --- Client ---
 
-/** Smoke test OBI for the workers-rpc binding format. */
 export class TestWorkersRpcClient {
-  private invoker: OperationInvoker;
-  private _client: InterfaceClient<TestWorkersRpcOperations> | null = null;
-  private opts: ClientOptions;
+  /** The OBI contract this client was generated against. Operations + schemas only; no bindings. */
+  static readonly CONTRACT: OBInterface = INTERFACE;
+  private readonly client: InterfaceClient<TestWorkersRpcOperations>;
 
-  constructor(drivers: BindingInvoker[], opts?: ClientOptions) {
-    this.invoker = new OperationInvoker(drivers);
-    this.opts = opts ?? {};
-  }
-
-  /**
-   * Connect to a service. Resolves the OBI, sets up auth context,
-   * and prepares the client for operation calls.
-   */
-  async connect(url: string, opts?: ConnectOptions): Promise<void> {
-    const store = opts?.contextStore ?? this.opts.contextStore ?? new MemoryStore();
-    const callbacks = opts?.platformCallbacks ?? this.opts.platformCallbacks;
-    if (opts?.bearerToken) {
-      const key = normalizeContextKey(url);
-      await store.set(key, { bearerToken: opts.bearerToken });
-    }
-    const runtimeInvoker = this.invoker.withRuntime(store, callbacks);
-    const client = new InterfaceClient<TestWorkersRpcOperations>(INTERFACE, runtimeInvoker, {
-      contextStore: store,
-      platformCallbacks: callbacks,
-    });
-    await client.resolve(url, { signal: opts?.signal });
-    if (client.state.kind === 'error') {
-      throw new Error(client.state.message);
-    }
-    this._client = client;
-  }
-
-  private get client(): InterfaceClient<TestWorkersRpcOperations> {
-    if (!this._client) throw new Error('Not connected. Call connect() first.');
-    return this._client;
+  constructor(iface: OBInterface, invoker: OperationInvoker) {
+    this.client = new InterfaceClient<TestWorkersRpcOperations>(iface, invoker);
   }
 
   /**
@@ -120,7 +95,7 @@ export class TestWorkersRpcClient {
   async addItem(input: AddItemInput, options?: InvocationOptions): Promise<AddItemOutput> {
     for await (const event of this.client.invoke("addItem", input, options)) {
       if (event.error) {
-        throw new ClientOperationError(event.error.code, event.error.message, event.error.details);
+        throw new ClientOperationError(event.error.code, event.error.message, event.error.details, event.data);
       }
       if (event.data !== undefined) {
         return event.data as AddItemOutput;
@@ -142,7 +117,7 @@ export class TestWorkersRpcClient {
   async ping(input: PingInput, options?: InvocationOptions): Promise<PingOutput> {
     for await (const event of this.client.invoke("ping", input, options)) {
       if (event.error) {
-        throw new ClientOperationError(event.error.code, event.error.message, event.error.details);
+        throw new ClientOperationError(event.error.code, event.error.message, event.error.details, event.data);
       }
       if (event.data !== undefined) {
         return event.data as PingOutput;
@@ -160,6 +135,3 @@ export class TestWorkersRpcClient {
 
 }
 
-// --- Embedded interface ---
-
-const INTERFACE: OBInterface = JSON.parse('{"bindings":{"addItem.rpc":{"operation":"addItem","ref":"addItem","source":"rpc"},"ping.rpc":{"operation":"ping","ref":"ping","source":"rpc"}},"name":"TestWorkersRpc","openbindings":"0.1.0","operations":{"addItem":{"description":"Add an item, returning the new item id.","input":{"properties":{"name":{"minLength":1,"type":"string"},"qty":{"default":1,"minimum":1,"type":"integer"}},"required":["name"],"type":"object"},"output":{"properties":{"id":{"type":"string"}},"required":["id"],"type":"object"}},"ping":{"description":"Health check that returns a string.","input":{"properties":{"message":{"type":"string"}},"type":"object"},"output":{"properties":{"echoed":{"type":"string"}},"required":["echoed"],"type":"object"}}},"sources":{"rpc":{"format":"workers-rpc@^1.0.0","location":"workers-rpc://test-service"}}}');

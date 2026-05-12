@@ -67,8 +67,10 @@ export { combineInvokers, combineCreators, combineSourceInspectors, type Combine
 
 export { validateInterface } from "./validate.js";
 export type { ValidateOptions } from "./validate.js";
-export { parseDocument } from "./parse.js";
+export { parseDocument, validateDocument, formatValidationErrors } from "./parse.js";
 export type { ParseDocumentOptions } from "./parse.js";
+
+export type { ValidationFailure } from "./schema-validation.js";
 
 export {
   NoInvokerError,
@@ -109,12 +111,11 @@ export { canonicalize } from "./canonical-json.js";
 
 export { canonicalizeLocation, resolveRef, unknownFields } from "./uri.js";
 
-export { InterfaceClient, MEDIA_TYPE, WELL_KNOWN_PATH } from "./interface-client.js";
-export type {
-  OperationEntry,
-  InterfaceClientState,
-  InterfaceClientOptions,
-} from "./interface-client.js";
+export { InterfaceClient } from "./interface-client.js";
+export type { OperationEntry, InterfaceClientOptions } from "./interface-client.js";
+
+export { fetchInterface, MEDIA_TYPE, WELL_KNOWN_PATH } from "./fetch.js";
+export type { FetchInterfaceOptions, FetchedInterface } from "./fetch.js";
 
 export { checkInterfaceCompatibility, isOBInterface } from "./compatibility.js";
 export type { CompatibilityIssue, CheckCompatibilityOptions } from "./compatibility.js";

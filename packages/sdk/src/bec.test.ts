@@ -417,30 +417,6 @@ describe("invoke BEC integration", () => {
 // ---------------------------------------------------------------------------
 
 describe("InterfaceClient", () => {
-  it("close() resets state and is idempotent", () => {
-    const driver = createMockInvoker();
-    const opInvoker = new OperationInvoker([driver]);
-
-    const iface: OBInterface = {
-      openbindings: "0.1.0",
-      operations: {},
-    };
-
-    const client = new InterfaceClient(iface, opInvoker);
-    expect(client.state.kind).toBe("idle");
-
-    // Resolve directly with a compatible interface
-    client.resolve(iface);
-
-    client.close();
-    expect(client.state.kind).toBe("idle");
-    expect(client.resolved).toBeUndefined();
-
-    // Idempotent
-    client.close();
-    expect(client.state.kind).toBe("idle");
-  });
-
   it("constructor clones opInvoker when store/callbacks provided", async () => {
     let capturedStore: ContextStore | undefined;
     const driver = createMockInvoker({
@@ -464,7 +440,6 @@ describe("InterfaceClient", () => {
       contextStore: store,
     });
 
-    await client.resolve(iface);
     for await (const _ev of client.invoke("op" as any)) { /* drain */ }
 
     expect(capturedStore).toBe(store);
@@ -494,7 +469,6 @@ describe("InterfaceClient", () => {
       },
     });
 
-    await client.resolve(iface);
     for await (const _ev of client.invoke("op" as any, undefined, {
       headers: { "X-Override": "call", "X-New": "new" },
     })) { /* drain */ }

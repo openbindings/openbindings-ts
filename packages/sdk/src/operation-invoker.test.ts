@@ -6,6 +6,12 @@ import type { OBInterface } from "./types.js";
 import { BindingNotFoundError, NoInvokerError, OperationNotFoundError } from "./errors.js";
 import { ERR_VALIDATION_FAILED } from "./errcodes.js";
 
+
+// Tests that exercise OBI-T-07/T-08 wire in the default validator from
+// @openbindings/validate. The SDK no longer ships its own validator;
+// see ./operation-invoker.ts and the validate package's docs.
+
+
 const mockInvoker: BindingInvoker = {
   formats() {
     return [{ token: "openapi@3.1" }];
@@ -355,7 +361,7 @@ describe("OBI-T-07 — input validation", () => {
 });
 
 describe("OBI-T-08 — output validation", () => {
-  it("rejects invalid output when schema is specified", async () => {
+  it("yields data alongside error when output fails validation", async () => {
     const invoker = new OperationInvoker([stubInvoker({ invalid: true })]);
     const events: StreamEvent[] = [];
     for await (const ev of invoker.invoke({
@@ -366,6 +372,9 @@ describe("OBI-T-08 — output validation", () => {
     }
     expect(events).toHaveLength(1);
     expect(events[0].error?.code).toBe(ERR_VALIDATION_FAILED);
+    // The underlying response is surfaced so callers can inspect it
+    // (e.g. UI renders the data and the schema mismatch side by side).
+    expect(events[0].data).toEqual({ invalid: true });
   });
 
   it("accepts valid output when schema is specified", async () => {
@@ -416,7 +425,7 @@ describe("OBI-T-08 — output validation", () => {
     expect(events[0].error).toBeUndefined();
   });
 
-  it("rejects output that fails $ref schema", async () => {
+  it("yields data alongside error when $ref output schema fails", async () => {
     const invoker = new OperationInvoker([stubInvoker({ missing: "fields" })]);
     const events: StreamEvent[] = [];
     for await (const ev of invoker.invoke({
@@ -428,6 +437,7 @@ describe("OBI-T-08 — output validation", () => {
     }
     expect(events).toHaveLength(1);
     expect(events[0].error?.code).toBe(ERR_VALIDATION_FAILED);
+    expect(events[0].data).toEqual({ missing: "fields" });
   });
 
   it("validates output after transform", async () => {
@@ -472,7 +482,7 @@ describe("OBI-T-08 — output validation", () => {
     expect(events[0].error).toBeUndefined();
   });
 
-  it("rejects invalid output after transform", async () => {
+  it("yields post-transform data alongside error when output fails validation", async () => {
     const driver: BindingInvoker = {
       formats: () => [{ token: "openapi@3.1" }],
       async *invokeBinding() { yield { data: { raw: true } }; },
@@ -511,6 +521,56 @@ describe("OBI-T-08 — output validation", () => {
     }
     expect(events).toHaveLength(1);
     expect(events[0].error?.code).toBe(ERR_VALIDATION_FAILED);
+    // The post-transform value (not the pre-transform "raw: true") is
+    // what we validated, so it's also what we yield alongside the error.
+    expect(events[0].data).toEqual({ wrong: "shape" });
+  });
+
+  it("yields the actual PokéAPI-style nullable mismatch with data + error", async () => {
+    // The schema declares { type: "string" } for `next`, but the server
+    // sent `null` (the original PokéAPI ability_list case). The SDK
+    // surfaces both: the data the caller might want to render, and the
+    // diagnostic explaining why it doesn't match the declared contract.
+    const invoker = new OperationInvoker([
+      stubInvoker({ count: 2, next: null, results: [] }),
+    ]);
+    const iface: OBInterface = {
+      openbindings: "0.1.0",
+      operations: {
+        abilityList: {
+          output: {
+            type: "object",
+            properties: {
+              count: { type: "integer" },
+              next: { type: "string" },
+              results: { type: "array" },
+            },
+            required: ["count", "next", "results"],
+          },
+        },
+      },
+      sources: { api: { format: "openapi@3.1", location: "x" } },
+      bindings: { "abilityList.api": { operation: "abilityList", source: "api", ref: "" } },
+    };
+    const events: StreamEvent[] = [];
+    for await (const ev of invoker.invoke({
+      interface: iface,
+      operation: "abilityList",
+    })) {
+      events.push(ev);
+    }
+    expect(events).toHaveLength(1);
+    expect(events[0].error?.code).toBe(ERR_VALIDATION_FAILED);
+    expect(events[0].error?.message).toContain("output validation failed");
+    expect(events[0].data).toEqual({ count: 2, next: null, results: [] });
+    // Structured failures let UIs render per-field diagnostics without
+    // parsing the human-readable message string.
+    const details = events[0].error?.details as { failures?: Array<{ path: string; message: string }> } | undefined;
+    expect(details?.failures).toBeDefined();
+    expect(details!.failures!.length).toBeGreaterThan(0);
+    const nextFailure = details!.failures!.find((f) => f.path === "#/next");
+    expect(nextFailure).toBeDefined();
+    expect(nextFailure!.message.toLowerCase()).toContain("null");
   });
 });
 

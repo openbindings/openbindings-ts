@@ -4,12 +4,14 @@ import {
   InterfaceClient,
   OperationInvoker,
   MemoryStore,
+  fetchInterface,
   normalizeContextKey,
   type OBInterface,
   type PlatformCallbacks,
   type StreamEvent,
 } from "@openbindings/sdk";
 import { OpenAPIInvoker, OpenAPICreator } from "./invoker.js";
+
 
 async function collectStream(stream: AsyncIterable<StreamEvent>): Promise<{ data?: unknown; error?: { code: string; message: string } }> {
   let lastData: unknown;
@@ -171,20 +173,18 @@ describe("BEC Integration (real HTTP)", () => {
     server?.close();
   });
 
+  async function fetch(): Promise<OBInterface> {
+    const { iface } = await fetchInterface(specURL, { creators: [new OpenAPICreator()] });
+    return iface;
+  }
+
   it("returns 401 when no credentials are stored (no prompt/retry)", async () => {
     const store = new MemoryStore();
-
     const opInvoker = new OperationInvoker(
       [new OpenAPIInvoker()],
       { contextStore: store },
     );
-
-    const client = new InterfaceClient(requiredInterface, opInvoker, {
-      contextStore: store,
-    });
-
-    await client.resolve(specURL, { creators: [new OpenAPICreator()] });
-    expect(client.state.kind).toBe("bound");
+    const client = new InterfaceClient(await fetch(), opInvoker, { contextStore: store });
 
     // No credentials stored → 401 returned directly (no prompt, no retry)
     const result = await collectStream(client.invoke("listItems" as any));
@@ -201,13 +201,7 @@ describe("BEC Integration (real HTTP)", () => {
       [new OpenAPIInvoker()],
       { contextStore: store },
     );
-
-    const client = new InterfaceClient(requiredInterface, opInvoker, {
-      contextStore: store,
-    });
-
-    await client.resolve(specURL, { creators: [new OpenAPICreator()] });
-    expect(client.state.kind).toBe("bound");
+    const client = new InterfaceClient(await fetch(), opInvoker, { contextStore: store });
 
     // First call: stored creds → 200
     const result1 = await collectStream(client.invoke("listItems" as any));
@@ -227,18 +221,11 @@ describe("BEC Integration (real HTTP)", () => {
 
   it("returns 401 error when no prompt callback is available", async () => {
     const store = new MemoryStore();
-
     const opInvoker = new OperationInvoker(
       [new OpenAPIInvoker()],
       { contextStore: store },
     );
-
-    const client = new InterfaceClient(requiredInterface, opInvoker, {
-      contextStore: store,
-    });
-
-    await client.resolve(specURL, { creators: [new OpenAPICreator()] });
-    expect(client.state.kind).toBe("bound");
+    const client = new InterfaceClient(await fetch(), opInvoker, { contextStore: store });
 
     const result = await collectStream(client.invoke("listItems" as any));
     expect(result.error).toBeDefined();
@@ -264,14 +251,10 @@ describe("BEC Integration (real HTTP)", () => {
       [new OpenAPIInvoker()],
       { contextStore: store, platformCallbacks: callbacks },
     );
-
-    const client = new InterfaceClient(requiredInterface, opInvoker, {
+    const client = new InterfaceClient(await fetch(), opInvoker, {
       contextStore: store,
       platformCallbacks: callbacks,
     });
-
-    await client.resolve(specURL, { creators: [new OpenAPICreator()] });
-    expect(client.state.kind).toBe("bound");
 
     const result = await collectStream(client.invoke("listItems" as any));
     expect(result.error).toBeUndefined();
@@ -296,15 +279,9 @@ describe("BEC Integration (real HTTP)", () => {
       { contextStore: store2 },
     );
 
-    const client1 = new InterfaceClient(requiredInterface, opInvoker1, {
-      contextStore: store1,
-    });
-    const client2 = new InterfaceClient(requiredInterface, opInvoker2, {
-      contextStore: store2,
-    });
-
-    await client1.resolve(specURL, { creators: [new OpenAPICreator()] });
-    await client2.resolve(specURL, { creators: [new OpenAPICreator()] });
+    const iface = await fetch();
+    const client1 = new InterfaceClient(iface, opInvoker1, { contextStore: store1 });
+    const client2 = new InterfaceClient(iface, opInvoker2, { contextStore: store2 });
 
     // client1 has credentials → succeeds
     const result1 = await collectStream(client1.invoke("listItems" as any));

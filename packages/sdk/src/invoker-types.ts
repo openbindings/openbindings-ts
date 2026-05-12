@@ -75,6 +75,18 @@ export interface CreateInput {
 /**
  * A single event from a streaming invocation.
  * Unary operations emit one event; streaming operations emit multiple.
+ *
+ * An event may carry:
+ *   - `data` only — success.
+ *   - `error` only — failure prior to producing data (e.g. transport error,
+ *     input validation, transform failure).
+ *   - `data` AND `error` — OBI-T-08 output validation failed against the
+ *     declared output schema. The data is still surfaced so callers may
+ *     inspect or render it, while the error reports the schema mismatch.
+ *
+ * Callers that previously short-circuited on `error` will continue to see
+ * the failure; callers that want to render the underlying response (e.g.
+ * a UI debugger) should consult `data` even when `error` is set.
  */
 export interface StreamEvent {
   data?: unknown;

@@ -23,6 +23,7 @@ import {
 } from "@openbindings/sdk";
 import { WorkersRpcInvoker, type WorkersRpcBinding } from "./index.js";
 
+
 // A minimal OBI shaped exactly like what `ob create` + hand-edits
 // would produce for a workers-rpc surface. Two operations: one
 // happy-path (`ping`), one with structured business errors (`addItem`,
@@ -109,13 +110,12 @@ async function invokeOnce(
 }
 
 describe("workers-rpc end-to-end via InterfaceClient", () => {
-  it("connect() with the symbolic workers-rpc:// URL succeeds without fetching", async () => {
+  it("constructs from an OBI without any network or symbolic URL", () => {
     const client = buildClient({});
-    // The URL is symbolic — there's no HTTP server at workers-rpc://test.
-    // The fallback path in InterfaceClient.resolve() detects the non-HTTP
-    // scheme + embedded interface and uses the embedded OBI directly.
-    await client.resolve("workers-rpc://test-service");
-    expect(client.state.kind).toBe("bound");
+    // No URL involved at all — the OBI is supplied at construction.
+    // For workers-rpc, the embedded contract IS the OBI used for dispatch.
+    expect(client).toBeDefined();
+    expect(client.interface).toBe(TEST_OBI);
   });
 
   it("dispatches a unary call through the WorkersRpcInvoker", async () => {
@@ -126,7 +126,6 @@ describe("workers-rpc end-to-end via InterfaceClient", () => {
       },
     };
     const client = buildClient(binding);
-    await client.resolve("workers-rpc://test-service");
 
     const result = await invokeOnce(client, "ping", { message: "hello" });
     expect(result.error).toBeUndefined();
@@ -144,7 +143,6 @@ describe("workers-rpc end-to-end via InterfaceClient", () => {
       },
     };
     const client = buildClient(binding);
-    await client.resolve("workers-rpc://test-service");
 
     const happy = await invokeOnce(client, "addItem", { name: "widget" });
     expect(happy.error).toBeUndefined();
@@ -165,7 +163,6 @@ describe("workers-rpc end-to-end via InterfaceClient", () => {
       },
     };
     const client = buildClient(binding);
-    await client.resolve("workers-rpc://test-service");
 
     const result = await invokeOnce(client, "ping", { message: "test" });
     expect(result.data).toBeUndefined();
@@ -180,7 +177,6 @@ describe("workers-rpc end-to-end via InterfaceClient", () => {
       ping: async () => ({ echoed: "" }),
     };
     const client = buildClient(binding);
-    await client.resolve("workers-rpc://test-service");
 
     const result = await invokeOnce(client, "addItem", { name: "widget" });
     expect(result.data).toBeUndefined();
@@ -200,7 +196,6 @@ describe("workers-rpc end-to-end via InterfaceClient", () => {
       },
     };
     const client = buildClient(binding);
-    await client.resolve("workers-rpc://test-service");
 
     // Pass a Date object as part of the input. Note: the OBI says the
     // input is `{message: string}` but for this test we're verifying

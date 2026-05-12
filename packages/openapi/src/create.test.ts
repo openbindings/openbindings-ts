@@ -415,3 +415,123 @@ describe("convertToInterface", () => {
     expect(iface.security).toBeUndefined();
   });
 });
+
+describe("convertToInterface — OpenAPI 3.0 dialect translation", () => {
+  const SPEC_30_NULLABLE = {
+    openapi: "3.0.3",
+    info: { title: "PokéAPI-ish", version: "1.0.0" },
+    paths: {
+      "/ability": {
+        get: {
+          operationId: "abilityList",
+          responses: {
+            "200": {
+              description: "OK",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    properties: {
+                      count: { type: "integer" },
+                      next: { type: "string", nullable: true, format: "uri" },
+                      previous: { type: "string", nullable: true, format: "uri" },
+                    },
+                    required: ["count"],
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  };
+
+  it("translates nullable: true in 3.0 documents to type arrays with 'null'", async () => {
+    const iface = await convertToInterface(undefined, SPEC_30_NULLABLE);
+    const output = iface.operations["abilityList"].output!;
+    const props = output.properties as Record<string, Record<string, unknown>>;
+    expect(props["next"]).toEqual({ type: ["string", "null"], format: "uri" });
+    expect(props["previous"]).toEqual({ type: ["string", "null"], format: "uri" });
+    expect(props["count"]).toEqual({ type: "integer" });
+  });
+
+  it("emits format token openapi@3.0 for 3.0.x sources", async () => {
+    const iface = await convertToInterface(undefined, SPEC_30_NULLABLE);
+    expect(iface.sources?.["openapi"].format).toBe("openapi@3.0");
+  });
+
+  it("preserves 3.1 schemas verbatim (already 2020-12)", async () => {
+    const spec31 = {
+      openapi: "3.1.0",
+      info: { title: "T", version: "1.0.0" },
+      paths: {
+        "/x": {
+          get: {
+            operationId: "x",
+            responses: {
+              "200": {
+                description: "OK",
+                content: {
+                  "application/json": {
+                    schema: {
+                      type: "object",
+                      properties: {
+                        next: { type: ["string", "null"], format: "uri" },
+                        // Inert nullable in 3.1 — should pass through unchanged
+                        legacy: { type: "string", nullable: true },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    };
+    const iface = await convertToInterface(undefined, spec31);
+    const output = iface.operations["x"].output!;
+    const props = output.properties as Record<string, Record<string, unknown>>;
+    expect(props["next"]).toEqual({ type: ["string", "null"], format: "uri" });
+    // The inert nullable: true survives untouched in 3.1 — we don't second-guess.
+    expect(props["legacy"]).toEqual({ type: "string", nullable: true });
+  });
+
+  it("translates boolean exclusiveMinimum to numeric form", async () => {
+    const spec30 = {
+      openapi: "3.0.3",
+      info: { title: "T", version: "1.0.0" },
+      paths: {
+        "/q": {
+          get: {
+            operationId: "q",
+            parameters: [
+              {
+                name: "page",
+                in: "query",
+                schema: {
+                  type: "integer",
+                  minimum: 0,
+                  exclusiveMinimum: true,
+                  maximum: 100,
+                  exclusiveMaximum: false,
+                },
+              },
+            ],
+            responses: { "200": { description: "OK" } },
+          },
+        },
+      },
+    };
+    const iface = await convertToInterface(undefined, spec30);
+    const input = iface.operations["q"].input!;
+    const props = input.properties as Record<string, Record<string, unknown>>;
+    expect(props["page"]).toEqual({
+      type: "integer",
+      exclusiveMinimum: 0,
+      maximum: 100,
+    });
+  });
+});
+

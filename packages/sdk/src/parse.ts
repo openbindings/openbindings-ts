@@ -1,17 +1,77 @@
 import type { OBInterface } from "./types.js";
+import { ValidationError } from "./errors.js";
+import { validateAgainstOBISchema } from "./schema-validation.js";
 import { validateInterface, type ValidateOptions } from "./validate.js";
 
-export interface ParseDocumentOptions extends ValidateOptions {}
+/**
+ * Options accepted by {@link parseDocument}. Reserved for future flags;
+ * the SDK's parse step currently has no configurable behavior. Use
+ * {@link validateDocument} or {@link validateInterface} for OBI-D rule
+ * enforcement options such as `rejectUnknownTypedFields`.
+ */
+export interface ParseDocumentOptions {}
 
+/**
+ * Parses an OBI document from JSON and validates it against
+ * `openbindings.schema.json`:
+ *
+ *   - OBI-D-01: rejects duplicate JSON object keys.
+ *   - OBI-D-02: validates against the meta-schema. The meta-schema's
+ *     SemVer pattern on `openbindings` also covers OBI-D-16.
+ *
+ * Returns a typed {@link OBInterface}. Full OBI-D rule enforcement
+ * (cross-references, identifier patterns, example schema checks,
+ * version refusal via OBI-T-04, etc.) is the job of
+ * {@link validateInterface}. Use {@link validateDocument} for the
+ * combined parse-and-validate convenience.
+ *
+ * Throws {@link ValidationError} on shape/schema failure, or
+ * {@link SyntaxError} on malformed JSON.
+ */
 export function parseDocument(
   input: string | Uint8Array,
-  options: ParseDocumentOptions = {},
+  _options: ParseDocumentOptions = {},
 ): OBInterface {
   const text = typeof input === "string" ? input : new TextDecoder().decode(input);
   rejectDuplicateObjectKeys(text);
-  const parsed = JSON.parse(text) as OBInterface;
-  validateInterface(parsed, options);
-  return parsed;
+  const parsed = JSON.parse(text);
+
+  const errs: string[] = [];
+  validateAgainstOBISchema(errs, parsed);
+  if (errs.length > 0) {
+    throw new ValidationError(errs);
+  }
+
+  return parsed as OBInterface;
+}
+
+/**
+ * Convenience that calls {@link parseDocument} followed by
+ * {@link validateInterface}. Returns a typed {@link OBInterface} that
+ * has passed both the meta-schema check and the full OBI-D rule walk.
+ *
+ * Throws {@link ValidationError} or {@link SyntaxError} on failure.
+ */
+export function validateDocument(
+  input: string | Uint8Array,
+  options: ValidateOptions = {},
+): OBInterface {
+  const iface = parseDocument(input);
+  validateInterface(iface, options);
+  return iface;
+}
+
+/**
+ * Formats a {@link ValidationError} as a human-readable, newline-joined
+ * string of its individual problems. Non-validation errors are returned
+ * via their `message` property.
+ */
+export function formatValidationErrors(err: unknown): string {
+  if (err instanceof ValidationError) {
+    return err.problems.join("\n");
+  }
+  if (err instanceof Error) return err.message;
+  return String(err);
 }
 
 function rejectDuplicateObjectKeys(text: string): void {
