@@ -1,7 +1,7 @@
 import type { BindingInvoker, InterfaceCreator, SourceInspector } from "./invokers.js";
 import type {
   BindingInvocationInput,
-  StreamEvent,
+  InvocationOutput,
   FormatInfo,
   CreateInput,
   SourceInspection,
@@ -91,7 +91,7 @@ export function combineInvokers(...invokers: BindingInvoker[]): CombinedInvoker 
     async *invokeBinding(
       input: BindingInvocationInput,
       options?: { signal?: AbortSignal },
-    ): AsyncIterable<StreamEvent> {
+    ): AsyncIterable<InvocationOutput> {
       const invoker = findInvoker(input.source.format);
       if (!invoker) throw new NoInvokerError(input.source.format);
       yield* invoker.invokeBinding(input, options);

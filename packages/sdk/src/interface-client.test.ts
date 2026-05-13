@@ -5,12 +5,12 @@ import {
   checkInterfaceCompatibility,
   type OBInterface,
   type BindingInvocationInput,
-  type StreamEvent,
+  type InvocationOutput,
   type BindingInvoker,
 } from "./index.js";
 
 function createMockDriver(
-  invokeFn?: (input: BindingInvocationInput) => AsyncIterable<StreamEvent>,
+  invokeFn?: (input: BindingInvocationInput) => AsyncIterable<InvocationOutput>,
 ): BindingInvoker {
   return {
     formats() {
@@ -21,7 +21,7 @@ function createMockDriver(
         yield* invokeFn(input);
         return;
       }
-      yield { data: { result: "ok" } };
+      yield { output: { result: "ok" } };
     },
   };
 }
@@ -99,7 +99,7 @@ describe("InterfaceClient", () => {
     }
 
     expect(events).toHaveLength(1);
-    expect(events[0].data).toEqual({ result: "ok" });
+    expect(events[0].output).toEqual({ result: "ok" });
     expect(events[0].error).toBeUndefined();
   });
 

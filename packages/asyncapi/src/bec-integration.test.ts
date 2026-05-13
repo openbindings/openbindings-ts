@@ -4,15 +4,15 @@ import {
   MemoryStore,
   normalizeContextKey,
   type OBInterface,
-  type StreamEvent,
+  type InvocationOutput,
 } from "@openbindings/sdk";
 import { AsyncAPIInvoker, AsyncAPICreator } from "./invoker.js";
 import { parseAsyncAPIDocument } from "./util.js";
 
 async function collectStream(
-  stream: AsyncIterable<StreamEvent>,
-): Promise<StreamEvent[]> {
-  const events: StreamEvent[] = [];
+  stream: AsyncIterable<InvocationOutput>,
+): Promise<InvocationOutput[]> {
+  const events: InvocationOutput[] = [];
   for await (const ev of stream) events.push(ev);
   return events;
 }
@@ -193,7 +193,7 @@ describe("BEC Integration (AsyncAPI, real HTTP)", () => {
     expect(events.length).toBe(1);
     const ev = events[0];
     expect(ev.error).toBeUndefined();
-    expect(ev.data).toEqual({ echo: { text: "hello" } });
+    expect(ev.output).toEqual({ echo: { text: "hello" } });
     expect(ev.status).toBe(200);
   });
 
@@ -213,10 +213,10 @@ describe("BEC Integration (AsyncAPI, real HTTP)", () => {
     );
 
     // Should receive 2 data events
-    const dataEvents = events.filter((e) => e.data !== undefined);
+    const dataEvents = events.filter((e) => e.output !== undefined);
     expect(dataEvents.length).toBe(2);
-    expect(dataEvents[0].data).toEqual({ seq: 1 });
-    expect(dataEvents[1].data).toEqual({ seq: 2 });
+    expect(dataEvents[0].output).toEqual({ seq: 1 });
+    expect(dataEvents[1].output).toEqual({ seq: 2 });
   });
 
   it("SSE receive returns error when no credentials", async () => {

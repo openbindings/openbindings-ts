@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { OperationInvoker, defaultBindingSelector } from "./operation-invoker.js";
 import type { BindingInvoker, TransformEvaluator } from "./invokers.js";
-import type { StreamEvent } from "./invoker-types.js";
+import type { InvocationOutput } from "./invoker-types.js";
 import type { OBInterface } from "./types.js";
 import { BindingNotFoundError, NoInvokerError, OperationNotFoundError } from "./errors.js";
 import { ERR_VALIDATION_FAILED } from "./errcodes.js";
@@ -17,7 +17,7 @@ const mockInvoker: BindingInvoker = {
     return [{ token: "openapi@3.1" }];
   },
   async *invokeBinding(input) {
-    yield { data: { mock: true, ref: input.ref } };
+    yield { output: { mock: true, ref: input.ref } };
   },
 };
 
@@ -41,7 +41,7 @@ const testInterface: OBInterface = {
 describe("OperationInvoker", () => {
   it("routes invokeBinding by format", async () => {
     const invoker = new OperationInvoker([mockInvoker]);
-    const events: StreamEvent[] = [];
+    const events: InvocationOutput[] = [];
     for await (const ev of invoker.invokeBinding({
       source: { format: "openapi@3.1", location: "https://x.com" },
       ref: "#/paths/~1users/get",
@@ -49,7 +49,7 @@ describe("OperationInvoker", () => {
       events.push(ev);
     }
     expect(events).toHaveLength(1);
-    expect(events[0].data).toEqual({ mock: true, ref: "#/paths/~1users/get" });
+    expect(events[0].output).toEqual({ mock: true, ref: "#/paths/~1users/get" });
   });
 
   it("throws NoInvokerError for unknown format", async () => {
@@ -63,7 +63,7 @@ describe("OperationInvoker", () => {
 
   it("invokes an operation by key (stream)", async () => {
     const invoker = new OperationInvoker([mockInvoker]);
-    const events: StreamEvent[] = [];
+    const events: InvocationOutput[] = [];
     for await (const ev of invoker.invoke({
       interface: testInterface,
       operation: "getUser",
@@ -71,7 +71,7 @@ describe("OperationInvoker", () => {
       events.push(ev);
     }
     expect(events).toHaveLength(1);
-    expect(events[0].data).toEqual({ mock: true, ref: "#/paths/~1users/get" });
+    expect(events[0].output).toEqual({ mock: true, ref: "#/paths/~1users/get" });
   });
 
   it("throws OperationNotFoundError for missing op", async () => {
@@ -85,7 +85,7 @@ describe("OperationInvoker", () => {
 
   it("yields binding_not_found when bindingKey does not exist", async () => {
     const invoker = new OperationInvoker([mockInvoker]);
-    const events: StreamEvent[] = [];
+    const events: InvocationOutput[] = [];
     for await (const ev of invoker.invoke({
       interface: testInterface,
       operation: "getUser",
@@ -188,17 +188,17 @@ const ifaceWithSchemaRef: OBInterface = {
   },
 };
 
-function stubInvoker(data: unknown): BindingInvoker {
+function stubInvoker(output: unknown): BindingInvoker {
   return {
     formats: () => [{ token: "openapi@3.1" }],
-    async *invokeBinding() { yield { data }; },
+    async *invokeBinding() { yield { output }; },
   };
 }
 
 describe("OBI-T-07 — input validation", () => {
   it("rejects invalid input when schema is specified", async () => {
     const invoker = new OperationInvoker([stubInvoker({ ok: true })]);
-    const events: StreamEvent[] = [];
+    const events: InvocationOutput[] = [];
     for await (const ev of invoker.invoke({
       interface: ifaceWithInputSchema,
       operation: "createUser",
@@ -212,7 +212,7 @@ describe("OBI-T-07 — input validation", () => {
 
   it("accepts valid input when schema is specified", async () => {
     const invoker = new OperationInvoker([stubInvoker({ ok: true })]);
-    const events: StreamEvent[] = [];
+    const events: InvocationOutput[] = [];
     for await (const ev of invoker.invoke({
       interface: ifaceWithInputSchema,
       operation: "createUser",
@@ -221,7 +221,7 @@ describe("OBI-T-07 — input validation", () => {
       events.push(ev);
     }
     expect(events).toHaveLength(1);
-    expect(events[0].data).toEqual({ ok: true });
+    expect(events[0].output).toEqual({ ok: true });
     expect(events[0].error).toBeUndefined();
   });
 
@@ -233,7 +233,7 @@ describe("OBI-T-07 — input validation", () => {
       sources: { api: { format: "openapi@3.1", location: "x" } },
       bindings: { "ping.api": { operation: "ping", source: "api", ref: "" } },
     };
-    const events: StreamEvent[] = [];
+    const events: InvocationOutput[] = [];
     for await (const ev of invoker.invoke({
       interface: iface,
       operation: "ping",
@@ -247,7 +247,7 @@ describe("OBI-T-07 — input validation", () => {
 
   it("rejects undefined input when an input schema is specified", async () => {
     const invoker = new OperationInvoker([stubInvoker({ ok: true })]);
-    const events: StreamEvent[] = [];
+    const events: InvocationOutput[] = [];
     for await (const ev of invoker.invoke({
       interface: ifaceWithInputSchema,
       operation: "createUser",
@@ -275,7 +275,7 @@ describe("OBI-T-07 — input validation", () => {
       bindings: { "createUser.api": { operation: "createUser", source: "api", ref: "" } },
     };
     const invoker = new OperationInvoker([stubInvoker({ ok: true })]);
-    const events: StreamEvent[] = [];
+    const events: InvocationOutput[] = [];
     for await (const ev of invoker.invoke({
       interface: iface,
       operation: "createUser",
@@ -284,7 +284,7 @@ describe("OBI-T-07 — input validation", () => {
       events.push(ev);
     }
     expect(events).toHaveLength(1);
-    expect(events[0].data).toEqual({ ok: true });
+    expect(events[0].output).toEqual({ ok: true });
     expect(events[0].error).toBeUndefined();
   });
 
@@ -305,7 +305,7 @@ describe("OBI-T-07 — input validation", () => {
       bindings: { "createUser.api": { operation: "createUser", source: "api", ref: "" } },
     };
     const invoker = new OperationInvoker([stubInvoker({ ok: true })]);
-    const events: StreamEvent[] = [];
+    const events: InvocationOutput[] = [];
     for await (const ev of invoker.invoke({
       interface: iface,
       operation: "createUser",
@@ -322,7 +322,7 @@ describe("OBI-T-07 — input validation", () => {
     const transformEval: TransformEvaluator = { evaluate: evaluateSpy };
     const driver: BindingInvoker = {
       formats: () => [{ token: "openapi@3.1" }],
-      async *invokeBinding() { yield { data: { ok: true } }; },
+      async *invokeBinding() { yield { output: { ok: true } }; },
     };
     const invoker = new OperationInvoker([driver], { transformEvaluator: transformEval });
     const iface: OBInterface = {
@@ -346,7 +346,7 @@ describe("OBI-T-07 — input validation", () => {
         },
       },
     };
-    const events: StreamEvent[] = [];
+    const events: InvocationOutput[] = [];
     for await (const ev of invoker.invoke({
       interface: iface,
       operation: "createUser",
@@ -363,7 +363,7 @@ describe("OBI-T-07 — input validation", () => {
 describe("OBI-T-08 — output validation", () => {
   it("yields data alongside error when output fails validation", async () => {
     const invoker = new OperationInvoker([stubInvoker({ invalid: true })]);
-    const events: StreamEvent[] = [];
+    const events: InvocationOutput[] = [];
     for await (const ev of invoker.invoke({
       interface: ifaceWithOutputSchema,
       operation: "getUser",
@@ -374,12 +374,12 @@ describe("OBI-T-08 — output validation", () => {
     expect(events[0].error?.code).toBe(ERR_VALIDATION_FAILED);
     // The underlying response is surfaced so callers can inspect it
     // (e.g. UI renders the data and the schema mismatch side by side).
-    expect(events[0].data).toEqual({ invalid: true });
+    expect(events[0].output).toEqual({ invalid: true });
   });
 
   it("accepts valid output when schema is specified", async () => {
     const invoker = new OperationInvoker([stubInvoker({ id: "1", name: "alice" })]);
-    const events: StreamEvent[] = [];
+    const events: InvocationOutput[] = [];
     for await (const ev of invoker.invoke({
       interface: ifaceWithOutputSchema,
       operation: "getUser",
@@ -387,7 +387,7 @@ describe("OBI-T-08 — output validation", () => {
       events.push(ev);
     }
     expect(events).toHaveLength(1);
-    expect(events[0].data).toEqual({ id: "1", name: "alice" });
+    expect(events[0].output).toEqual({ id: "1", name: "alice" });
     expect(events[0].error).toBeUndefined();
   });
 
@@ -399,7 +399,7 @@ describe("OBI-T-08 — output validation", () => {
       sources: { api: { format: "openapi@3.1", location: "x" } },
       bindings: { "ping.api": { operation: "ping", source: "api", ref: "" } },
     };
-    const events: StreamEvent[] = [];
+    const events: InvocationOutput[] = [];
     for await (const ev of invoker.invoke({
       interface: iface,
       operation: "ping",
@@ -412,7 +412,7 @@ describe("OBI-T-08 — output validation", () => {
 
   it("validates output with $ref to #/schemas", async () => {
     const invoker = new OperationInvoker([stubInvoker({ id: "1", name: "alice" })]);
-    const events: StreamEvent[] = [];
+    const events: InvocationOutput[] = [];
     for await (const ev of invoker.invoke({
       interface: ifaceWithSchemaRef,
       operation: "getUser",
@@ -421,13 +421,13 @@ describe("OBI-T-08 — output validation", () => {
       events.push(ev);
     }
     expect(events).toHaveLength(1);
-    expect(events[0].data).toEqual({ id: "1", name: "alice" });
+    expect(events[0].output).toEqual({ id: "1", name: "alice" });
     expect(events[0].error).toBeUndefined();
   });
 
   it("yields data alongside error when $ref output schema fails", async () => {
     const invoker = new OperationInvoker([stubInvoker({ missing: "fields" })]);
-    const events: StreamEvent[] = [];
+    const events: InvocationOutput[] = [];
     for await (const ev of invoker.invoke({
       interface: ifaceWithSchemaRef,
       operation: "getUser",
@@ -437,13 +437,13 @@ describe("OBI-T-08 — output validation", () => {
     }
     expect(events).toHaveLength(1);
     expect(events[0].error?.code).toBe(ERR_VALIDATION_FAILED);
-    expect(events[0].data).toEqual({ missing: "fields" });
+    expect(events[0].output).toEqual({ missing: "fields" });
   });
 
   it("validates output after transform", async () => {
     const driver: BindingInvoker = {
       formats: () => [{ token: "openapi@3.1" }],
-      async *invokeBinding() { yield { data: { raw: true } }; },
+      async *invokeBinding() { yield { output: { raw: true } }; },
     };
     const transformEval: TransformEvaluator = {
       evaluate: async () => ({ id: "1", name: "alice" }),
@@ -470,7 +470,7 @@ describe("OBI-T-08 — output validation", () => {
         },
       },
     };
-    const events: StreamEvent[] = [];
+    const events: InvocationOutput[] = [];
     for await (const ev of invoker.invoke({
       interface: iface,
       operation: "getUser",
@@ -478,14 +478,14 @@ describe("OBI-T-08 — output validation", () => {
       events.push(ev);
     }
     expect(events).toHaveLength(1);
-    expect(events[0].data).toEqual({ id: "1", name: "alice" });
+    expect(events[0].output).toEqual({ id: "1", name: "alice" });
     expect(events[0].error).toBeUndefined();
   });
 
   it("yields post-transform data alongside error when output fails validation", async () => {
     const driver: BindingInvoker = {
       formats: () => [{ token: "openapi@3.1" }],
-      async *invokeBinding() { yield { data: { raw: true } }; },
+      async *invokeBinding() { yield { output: { raw: true } }; },
     };
     const transformEval: TransformEvaluator = {
       evaluate: async () => ({ wrong: "shape" }),
@@ -512,7 +512,7 @@ describe("OBI-T-08 — output validation", () => {
         },
       },
     };
-    const events: StreamEvent[] = [];
+    const events: InvocationOutput[] = [];
     for await (const ev of invoker.invoke({
       interface: iface,
       operation: "getUser",
@@ -523,7 +523,7 @@ describe("OBI-T-08 — output validation", () => {
     expect(events[0].error?.code).toBe(ERR_VALIDATION_FAILED);
     // The post-transform value (not the pre-transform "raw: true") is
     // what we validated, so it's also what we yield alongside the error.
-    expect(events[0].data).toEqual({ wrong: "shape" });
+    expect(events[0].output).toEqual({ wrong: "shape" });
   });
 
   it("yields the actual PokéAPI-style nullable mismatch with data + error", async () => {
@@ -552,7 +552,7 @@ describe("OBI-T-08 — output validation", () => {
       sources: { api: { format: "openapi@3.1", location: "x" } },
       bindings: { "abilityList.api": { operation: "abilityList", source: "api", ref: "" } },
     };
-    const events: StreamEvent[] = [];
+    const events: InvocationOutput[] = [];
     for await (const ev of invoker.invoke({
       interface: iface,
       operation: "abilityList",
@@ -562,7 +562,7 @@ describe("OBI-T-08 — output validation", () => {
     expect(events).toHaveLength(1);
     expect(events[0].error?.code).toBe(ERR_VALIDATION_FAILED);
     expect(events[0].error?.message).toContain("output validation failed");
-    expect(events[0].data).toEqual({ count: 2, next: null, results: [] });
+    expect(events[0].output).toEqual({ count: 2, next: null, results: [] });
     // Structured failures let UIs render per-field diagnostics without
     // parsing the human-readable message string.
     const details = events[0].error?.details as { failures?: Array<{ path: string; message: string }> } | undefined;

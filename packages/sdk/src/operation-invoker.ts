@@ -3,7 +3,7 @@ import { resolveTransform } from "./types.js";
 import type {
   BindingInvocationInput,
   OperationInvocationInput,
-  StreamEvent,
+  InvocationOutput,
   FormatInfo,
 } from "./invoker-types.js";
 import type {
@@ -94,7 +94,7 @@ export class OperationInvoker {
   async *invokeBinding(
     input: BindingInvocationInput,
     options?: { signal?: AbortSignal },
-  ): AsyncIterable<StreamEvent> {
+  ): AsyncIterable<InvocationOutput> {
     yield* this.invoker.invokeBinding(this.withRuntimeInput(input), options);
   }
 
@@ -102,14 +102,14 @@ export class OperationInvoker {
    * Resolves an OBI operation to a binding and yields a stream of events.
    * Every operation is a stream — unary calls produce a single event.
    *
-   * The invoker's invokeBinding returns AsyncIterable<StreamEvent>.
+   * The invoker's invokeBinding returns AsyncIterable<InvocationOutput>.
    * Input transforms apply once before invocation. Output transforms apply
    * per event.
    */
   async *invoke(
     input: OperationInvocationInput,
     options?: { signal?: AbortSignal },
-  ): AsyncGenerator<StreamEvent> {
+  ): AsyncGenerator<InvocationOutput> {
     const iface = input.interface;
     if (!iface) throw new MissingInterfaceError();
     const op = iface.operations[input.operation];
@@ -235,13 +235,13 @@ export class OperationInvoker {
    * without data or with errors unchanged.
    */
   private async *transformStream(
-    source: AsyncIterable<StreamEvent>,
+    source: AsyncIterable<InvocationOutput>,
     binding: BindingEntry,
     transforms: Record<string, Transform> | undefined,
     bindingKey: string,
     outputSchema?: JSONSchema,
     schemas?: Record<string, JSONSchema>,
-  ): AsyncGenerator<StreamEvent> {
+  ): AsyncGenerator<InvocationOutput> {
     if (!binding.outputTransform && !outputSchema) {
       yield* source;
       return;
@@ -280,7 +280,7 @@ export class OperationInvoker {
         yield ev;
         continue;
       }
-      let data: unknown = ev.data;
+      let data: unknown = ev.output;
       if (binding.outputTransform) {
         try {
           data = await applyTransformRef(
@@ -309,7 +309,7 @@ export class OperationInvoker {
         const r = safeValidate(outputValidator, data);
         if (!r.valid) {
           yield {
-            data,
+            output: data,
             error: {
               code: ERR_VALIDATION_FAILED,
               message: `openbindings: output validation failed for "${bindingKey}": ${r.errors.join("; ")}`,
@@ -319,7 +319,7 @@ export class OperationInvoker {
           continue;
         }
       }
-      yield { data };
+      yield { output: data };
     }
   }
 

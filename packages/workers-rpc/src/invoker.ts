@@ -1,7 +1,7 @@
 import type {
   BindingInvoker,
   BindingInvocationInput,
-  StreamEvent,
+  InvocationOutput,
   FormatInfo,
 } from "@openbindings/sdk";
 import {
@@ -75,7 +75,7 @@ export interface WorkersRpcInvokerOptions {
  * Error model: errors thrown by the target Worker's RPC method propagate
  * across the binding boundary as Error instances (with `name` and `message`
  * preserved by the structured-clone algorithm). The driver catches them,
- * yields a `StreamEvent` with `error.code = "execution_failed"`, and ends
+ * yields a `InvocationOutput` with `error.code = "execution_failed"`, and ends
  * the stream. Custom error subclasses are flattened to the base Error shape;
  * if the target wants to communicate structured error info, it should
  * return a discriminated-union result type from the method instead of
@@ -101,7 +101,7 @@ export class WorkersRpcInvoker implements BindingInvoker {
   /**
    * Invokes a single binding by calling the corresponding method on the
    * service binding object and yielding the result (or error) as a single
-   * StreamEvent.
+   * InvocationOutput.
    *
    * The `ref` field of the binding entry is interpreted as the literal
    * method name on the WorkerEntrypoint class. There is no path encoding,
@@ -114,7 +114,7 @@ export class WorkersRpcInvoker implements BindingInvoker {
   async *invokeBinding(
     input: BindingInvocationInput,
     options?: { signal?: AbortSignal },
-  ): AsyncIterable<StreamEvent> {
+  ): AsyncIterable<InvocationOutput> {
     const start = Date.now();
     const methodName = input.ref;
 
@@ -180,7 +180,7 @@ export class WorkersRpcInvoker implements BindingInvoker {
     }
 
     yield {
-      data: result,
+      output: result,
       durationMs: Date.now() - start,
     };
   }

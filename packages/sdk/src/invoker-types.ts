@@ -44,13 +44,6 @@ export interface OperationInvocationInput {
   bindingKey?: string;
 }
 
-/** The result of an operation invocation. */
-export interface InvocationOutput {
-  output?: unknown;
-  status?: number;
-  durationMs?: number;
-  error?: InvocationError;
-}
 
 /** Describes a binding source for interface creation. */
 export interface CreateSource {
@@ -73,23 +66,24 @@ export interface CreateInput {
 }
 
 /**
- * A single event from a streaming invocation.
- * Unary operations emit one event; streaming operations emit multiple.
+ * A single output produced by an operation invocation.
+ * Unary invocations produce one InvocationOutput; streaming invocations
+ * produce many over time.
  *
- * An event may carry:
- *   - `data` only — success.
- *   - `error` only — failure prior to producing data (e.g. transport error,
+ * Each one may carry:
+ *   - `output` only — success.
+ *   - `error` only — failure prior to producing output (e.g. transport error,
  *     input validation, transform failure).
- *   - `data` AND `error` — OBI-T-08 output validation failed against the
+ *   - `output` AND `error` — OBI-T-08 output validation failed against the
  *     declared output schema. The data is still surfaced so callers may
  *     inspect or render it, while the error reports the schema mismatch.
  *
  * Callers that previously short-circuited on `error` will continue to see
  * the failure; callers that want to render the underlying response (e.g.
- * a UI debugger) should consult `data` even when `error` is set.
+ * a UI debugger) should consult `output` even when `error` is set.
  */
-export interface StreamEvent {
-  data?: unknown;
+export interface InvocationOutput {
+  output?: unknown;
   error?: InvocationError;
   status?: number;
   durationMs?: number;

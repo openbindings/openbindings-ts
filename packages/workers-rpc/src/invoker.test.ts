@@ -49,7 +49,7 @@ describe("WorkersRpcInvoker.invokeBinding — happy path", () => {
 
     expect(events).toHaveLength(1);
     const ev = events[0] as { data?: unknown; durationMs?: number };
-    expect(ev.data).toEqual({ ok: true, access_token: "tok-123" });
+    expect(ev.output).toEqual({ ok: true, access_token: "tok-123" });
     expect(typeof ev.durationMs).toBe("number");
     expect(receivedArg).toEqual({ user: "matt" });
   });
@@ -60,7 +60,7 @@ describe("WorkersRpcInvoker.invokeBinding — happy path", () => {
     };
     const invoker = new WorkersRpcInvoker({ binding });
     const events = await drain(invoker.invokeBinding(input("ping", undefined)));
-    expect((events[0] as { data?: unknown }).data).toBe("pong");
+    expect((events[0] as { data?: unknown }).output).toBe("pong");
   });
 
   it("passes the structured input through unchanged (no JSON round-trip)", async () => {
@@ -223,7 +223,7 @@ describe("WorkersRpcInvoker — Cloudflare ServiceStub Proxy compatibility", () 
 
     expect(invokedAsProperty).toBe(true);
     expect(receivedArg).toEqual({ msg: "hi" });
-    expect((events[0] as { data?: unknown }).data).toEqual({ echoed: { msg: "hi" } });
+    expect((events[0] as { data?: unknown }).output).toEqual({ echoed: { msg: "hi" } });
   });
 
   it("does not pass the binding as `this` to the dispatched method", async () => {

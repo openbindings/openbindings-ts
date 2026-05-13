@@ -19,7 +19,6 @@ import type {
   PlatformCallbacks,
   BindingInvocationInput,
   InvocationOutput,
-  StreamEvent,
   OBInterface,
   FormatInfo,
 } from "./index.js";
@@ -30,7 +29,7 @@ import type {
 
 interface MockInvokerOpts {
   formats?: FormatInfo[];
-  invokeFn?: (input: BindingInvocationInput) => AsyncIterable<StreamEvent>;
+  invokeFn?: (input: BindingInvocationInput) => AsyncIterable<InvocationOutput>;
 }
 
 function createMockInvoker(opts: MockInvokerOpts = {}) {
@@ -43,7 +42,7 @@ function createMockInvoker(opts: MockInvokerOpts = {}) {
         yield* opts.invokeFn(input);
         return;
       }
-      yield { data: "ok" };
+      yield { output: "ok" };
     },
   };
   return invoker;
@@ -173,7 +172,7 @@ describe("OperationInvoker BEC", () => {
       invokeFn: async function* (input) {
         capturedStore = input.store;
         capturedCallbacks = input.callbacks;
-        yield { data: "ok" };
+        yield { output: "ok" };
       },
     });
 
@@ -204,7 +203,7 @@ describe("OperationInvoker BEC", () => {
       invokeFn: async function* (input) {
         capturedStore = input.store;
         capturedCb = input.callbacks;
-        yield { data: "ok" };
+        yield { output: "ok" };
       },
     });
 
@@ -229,7 +228,7 @@ describe("OperationInvoker BEC", () => {
     const driver = createMockInvoker({
       invokeFn: async function* (input) {
         capturedCtx = input.context;
-        yield { data: "ok" };
+        yield { output: "ok" };
       },
     });
 
@@ -249,7 +248,7 @@ describe("OperationInvoker BEC", () => {
     const driver = createMockInvoker({
       invokeFn: async function* (input) {
         capturedStore = input.store;
-        yield { data: "ok" };
+        yield { output: "ok" };
       },
     });
 
@@ -273,7 +272,7 @@ describe("OperationInvoker BEC", () => {
       invokeFn: async function* (input) {
         callCount++;
         expect(input.store).toBeDefined();
-        yield { data: callCount };
+        yield { output: callCount };
       },
     });
 
@@ -355,7 +354,7 @@ describe("invokeBinding streaming BEC", () => {
       invokeFn: async function* (input) {
         capturedStore = input.store;
         capturedCb = input.callbacks;
-        yield { data: "event" };
+        yield { output: "event" };
       },
     });
 
@@ -387,7 +386,7 @@ describe("invoke BEC integration", () => {
     const driver = createMockInvoker({
       invokeFn: async function* (input) {
         capturedCtx = input.context;
-        yield { data: "ok" };
+        yield { output: "ok" };
       },
     });
 
@@ -422,7 +421,7 @@ describe("InterfaceClient", () => {
     const driver = createMockInvoker({
       invokeFn: async function* (input) {
         capturedStore = input.store;
-        yield { data: "ok" };
+        yield { output: "ok" };
       },
     });
 
@@ -451,7 +450,7 @@ describe("InterfaceClient", () => {
     const driver = createMockInvoker({
       invokeFn: async function* (input) {
         capturedInput = input;
-        yield { data: "ok" };
+        yield { output: "ok" };
       },
     });
 

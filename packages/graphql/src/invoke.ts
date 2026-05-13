@@ -1,4 +1,4 @@
-import type { InvocationOutput, JSONSchema, StreamEvent } from "@openbindings/sdk";
+import type { InvocationOutput, JSONSchema } from "@openbindings/sdk";
 import {
   ERR_INVALID_REF,
   ERR_EXECUTION_FAILED,
@@ -366,7 +366,7 @@ function httpToWS(url: string): string {
 
 /**
  * Subscribe to a GraphQL subscription via the graphql-transport-ws protocol.
- * Yields StreamEvents as they arrive until the subscription completes or is cancelled.
+ * Yields InvocationOutputs as they arrive until the subscription completes or is cancelled.
  */
 export async function* subscribeGraphQL(
   url: string,
@@ -374,7 +374,7 @@ export async function* subscribeGraphQL(
   variables: Record<string, unknown> | undefined,
   headers: Record<string, string>,
   signal?: AbortSignal,
-): AsyncGenerator<StreamEvent> {
+): AsyncGenerator<InvocationOutput> {
   const wsURL = httpToWS(url);
 
   // Browser WebSocket API doesn't support custom headers on the upgrade request.
@@ -436,11 +436,11 @@ export async function* subscribeGraphQL(
   ws.send(JSON.stringify({ id: "1", type: "subscribe", payload }));
 
   // Stream events via an async queue.
-  const queue: Array<StreamEvent | null> = [];
+  const queue: Array<InvocationOutput | null> = [];
   let waiting: (() => void) | null = null;
   let done = false;
 
-  function enqueue(event: StreamEvent | null) {
+  function enqueue(event: InvocationOutput | null) {
     queue.push(event);
     if (waiting) { waiting(); waiting = null; }
   }

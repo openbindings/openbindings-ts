@@ -2,7 +2,7 @@ import type { OBInterface, BindingEntry, Source } from "./types.js";
 import type {
   BindingInvocationInput,
   CreateInput,
-  StreamEvent,
+  InvocationOutput,
   FormatInfo,
   SourceInspection,
 } from "./invoker-types.js";
@@ -17,7 +17,7 @@ export interface BindingInvoker {
   invokeBinding(
     input: BindingInvocationInput,
     options?: { signal?: AbortSignal },
-  ): AsyncIterable<StreamEvent>;
+  ): AsyncIterable<InvocationOutput>;
 }
 
 /**

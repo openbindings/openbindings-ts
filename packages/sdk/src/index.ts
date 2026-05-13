@@ -21,7 +21,6 @@ export type {
   CreateSource,
   CreateInput,
   InvocationOptions,
-  StreamEvent,
   InvocationError,
   FormatInfo,
   BindableTarget,

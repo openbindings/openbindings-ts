@@ -8,20 +8,20 @@ import {
   normalizeContextKey,
   type OBInterface,
   type PlatformCallbacks,
-  type StreamEvent,
+  type InvocationOutput,
 } from "@openbindings/sdk";
 import { OpenAPIInvoker, OpenAPICreator } from "./invoker.js";
 
 
-async function collectStream(stream: AsyncIterable<StreamEvent>): Promise<{ data?: unknown; error?: { code: string; message: string } }> {
+async function collectStream(stream: AsyncIterable<InvocationOutput>): Promise<{ data?: unknown; error?: { code: string; message: string } }> {
   let lastData: unknown;
   let firstError: { code: string; message: string } | undefined;
   for await (const ev of stream) {
     if (ev.error && !firstError) firstError = ev.error;
-    if (ev.data !== undefined) lastData = ev.data;
+    if (ev.output !== undefined) lastData = ev.output;
   }
   if (firstError) return { error: firstError };
-  return { data: lastData };
+  return { output: lastData };
 }
 
 const SECRET = "test-token-123";
@@ -206,17 +206,17 @@ describe("BEC Integration (real HTTP)", () => {
     // First call: stored creds → 200
     const result1 = await collectStream(client.invoke("listItems" as any));
     expect(result1.error).toBeUndefined();
-    expect(result1.data).toEqual(ITEMS);
+    expect(result1.output).toEqual(ITEMS);
 
     // Second call: same stored creds → 200
     const result2 = await collectStream(client.invoke("listItems" as any));
     expect(result2.error).toBeUndefined();
-    expect(result2.data).toEqual(ITEMS);
+    expect(result2.output).toEqual(ITEMS);
 
     // Different operation on the same origin reuses the stored credential
     const result3 = await collectStream(client.invoke("getItem" as any, { id: 1 } as any));
     expect(result3.error).toBeUndefined();
-    expect(result3.data).toEqual({ id: 1, name: "Alpha" });
+    expect(result3.output).toEqual({ id: 1, name: "Alpha" });
   });
 
   it("returns 401 error when no prompt callback is available", async () => {
@@ -258,7 +258,7 @@ describe("BEC Integration (real HTTP)", () => {
 
     const result = await collectStream(client.invoke("listItems" as any));
     expect(result.error).toBeUndefined();
-    expect(result.data).toEqual(ITEMS);
+    expect(result.output).toEqual(ITEMS);
     expect(promptCount).toBe(0);
   });
 
@@ -286,7 +286,7 @@ describe("BEC Integration (real HTTP)", () => {
     // client1 has credentials → succeeds
     const result1 = await collectStream(client1.invoke("listItems" as any));
     expect(result1.error).toBeUndefined();
-    expect(result1.data).toEqual(ITEMS);
+    expect(result1.output).toEqual(ITEMS);
 
     // client2 has no credentials → 401
     const result2 = await collectStream(client2.invoke("listItems" as any));

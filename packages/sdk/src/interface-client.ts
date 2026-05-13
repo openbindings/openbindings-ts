@@ -1,5 +1,5 @@
 import type { OBInterface } from "./types.js";
-import type { StreamEvent } from "./invoker-types.js";
+import type { InvocationOutput } from "./invoker-types.js";
 import type { InvocationOptions, ContextStore, PlatformCallbacks } from "./context.js";
 import type { OperationInvoker } from "./operation-invoker.js";
 
@@ -45,7 +45,7 @@ export class InterfaceClient<T = Record<string, OperationEntry>> {
     operation: K,
     input?: K extends keyof T ? (T[K] extends { input: infer I } ? I : undefined) : unknown,
     options?: InvocationOptions,
-  ): AsyncGenerator<StreamEvent> {
+  ): AsyncGenerator<InvocationOutput> {
     const merged = mergeInvocationOptions(this.defaultOptions, options);
     yield* this.invoker.invoke({
       interface: this.interface,

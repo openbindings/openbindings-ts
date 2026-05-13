@@ -15,7 +15,7 @@ import {
   type BindingInvocationInput,
   type CreateInput,
   type OBInterface,
-  type StreamEvent,
+  type InvocationOutput,
   type FormatInfo,
   type InvocationOptions,
   type Source,
@@ -90,7 +90,7 @@ export class GraphQLInvoker implements BindingInvoker {
   async *invokeBinding(
     input: BindingInvocationInput,
     options?: { signal?: AbortSignal },
-  ): AsyncIterable<StreamEvent> {
+  ): AsyncIterable<InvocationOutput> {
     // Validate ref early.
     let rootType: string, fieldName: string;
     try {
@@ -168,7 +168,7 @@ export class GraphQLInvoker implements BindingInvoker {
     if (result.error) {
       yield { error: result.error, status: result.status, durationMs: result.durationMs };
     } else {
-      yield { data: result.output, status: result.status, durationMs: result.durationMs };
+      yield { output: result.output, status: result.status, durationMs: result.durationMs };
     }
   }
 

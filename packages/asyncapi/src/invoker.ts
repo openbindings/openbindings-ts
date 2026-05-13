@@ -6,7 +6,7 @@ import type {
   CreateInput,
   OBInterface,
   Source,
-  StreamEvent,
+  InvocationOutput,
   FormatInfo,
   SourceInspection,
 } from "@openbindings/sdk";
@@ -57,7 +57,7 @@ export class AsyncAPIInvoker implements BindingInvoker {
   async *invokeBinding(
     input: BindingInvocationInput,
     options?: { signal?: AbortSignal },
-  ): AsyncIterable<StreamEvent> {
+  ): AsyncIterable<InvocationOutput> {
     let doc: AsyncAPIDocument;
     try {
       doc = await loadDoc(this.docCache, input.source.location, input.source.content, options, input.fetch);
@@ -97,7 +97,7 @@ export class AsyncAPIInvoker implements BindingInvoker {
       (asyncOp.action === "send" && (protocol === "ws" || protocol === "wss"));
 
     if (isStreaming) {
-      // Streaming path — delegate to subscribeBinding which returns AsyncIterable<StreamEvent>
+      // Streaming path — delegate to subscribeBinding which returns AsyncIterable<InvocationOutput>
       yield* subscribeBinding(enriched, options, doc, this.wsPool);
     } else {
       // Unary path — call invokeBinding which returns Promise<InvocationOutput>
@@ -123,7 +123,7 @@ export class AsyncAPIInvoker implements BindingInvoker {
       if (result.error) {
         yield { error: result.error, status: result.status, durationMs: result.durationMs };
       } else {
-        yield { data: result.output, status: result.status, durationMs: result.durationMs };
+        yield { output: result.output, status: result.status, durationMs: result.durationMs };
       }
     }
   }

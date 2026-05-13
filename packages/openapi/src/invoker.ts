@@ -10,7 +10,7 @@ import {
   type CreateInput,
   type OBInterface,
   type Source,
-  type StreamEvent,
+  type InvocationOutput,
   type FormatInfo,
   type SourceInspection,
 } from "@openbindings/sdk";
@@ -58,7 +58,7 @@ export class OpenAPIInvoker implements BindingInvoker {
   async *invokeBinding(
     input: BindingInvocationInput,
     options?: { signal?: AbortSignal },
-  ): AsyncIterable<StreamEvent> {
+  ): AsyncIterable<InvocationOutput> {
     let doc: OpenAPIDocument;
     try {
       doc = await loadDoc(this.docCache, input.source.location, input.source.content, options, input.fetch);
@@ -90,7 +90,7 @@ export class OpenAPIInvoker implements BindingInvoker {
     if (result.error) {
       yield { error: result.error, status: result.status, durationMs: result.durationMs };
     } else {
-      yield { data: result.output, status: result.status, durationMs: result.durationMs };
+      yield { output: result.output, status: result.status, durationMs: result.durationMs };
     }
   }
 

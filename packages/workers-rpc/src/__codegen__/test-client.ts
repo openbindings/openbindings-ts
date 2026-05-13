@@ -25,10 +25,10 @@ export interface PingOutput {
   echoed: string;
 }
 
-// --- Stream event ---
+// --- Invocation output ---
 
-export interface TypedStreamEvent<T> {
-  data?: T;
+export interface TypedInvocationOutput<T> {
+  output?: T;
   error?: { code: string; message: string; details?: unknown };
 }
 
@@ -95,19 +95,19 @@ export class TestWorkersRpcClient {
   async addItem(input: AddItemInput, options?: InvocationOptions): Promise<AddItemOutput> {
     for await (const event of this.client.invoke("addItem", input, options)) {
       if (event.error) {
-        throw new ClientOperationError(event.error.code, event.error.message, event.error.details, event.data);
+        throw new ClientOperationError(event.error.code, event.error.message, event.error.details, event.output);
       }
-      if (event.data !== undefined) {
-        return event.data as AddItemOutput;
+      if (event.output !== undefined) {
+        return event.output as AddItemOutput;
       }
     }
     throw new ClientOperationError("no_data", "addItem returned no data");
   }
 
   /** Stream variant of addItem. */
-  async *addItemStream(input: AddItemInput, options?: InvocationOptions): AsyncGenerator<TypedStreamEvent<AddItemOutput>> {
+  async *addItemStream(input: AddItemInput, options?: InvocationOptions): AsyncGenerator<TypedInvocationOutput<AddItemOutput>> {
     for await (const event of this.client.invoke("addItem", input, options)) {
-      yield event as TypedStreamEvent<AddItemOutput>;
+      yield event as TypedInvocationOutput<AddItemOutput>;
     }
   }
 
@@ -117,19 +117,19 @@ export class TestWorkersRpcClient {
   async ping(input: PingInput, options?: InvocationOptions): Promise<PingOutput> {
     for await (const event of this.client.invoke("ping", input, options)) {
       if (event.error) {
-        throw new ClientOperationError(event.error.code, event.error.message, event.error.details, event.data);
+        throw new ClientOperationError(event.error.code, event.error.message, event.error.details, event.output);
       }
-      if (event.data !== undefined) {
-        return event.data as PingOutput;
+      if (event.output !== undefined) {
+        return event.output as PingOutput;
       }
     }
     throw new ClientOperationError("no_data", "ping returned no data");
   }
 
   /** Stream variant of ping. */
-  async *pingStream(input: PingInput, options?: InvocationOptions): AsyncGenerator<TypedStreamEvent<PingOutput>> {
+  async *pingStream(input: PingInput, options?: InvocationOptions): AsyncGenerator<TypedInvocationOutput<PingOutput>> {
     for await (const event of this.client.invoke("ping", input, options)) {
-      yield event as TypedStreamEvent<PingOutput>;
+      yield event as TypedInvocationOutput<PingOutput>;
     }
   }
 

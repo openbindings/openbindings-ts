@@ -129,7 +129,7 @@ describe("workers-rpc end-to-end via InterfaceClient", () => {
 
     const result = await invokeOnce(client, "ping", { message: "hello" });
     expect(result.error).toBeUndefined();
-    expect(result.data).toEqual({ echoed: "hello" });
+    expect(result.output).toEqual({ echoed: "hello" });
   });
 
   it("propagates a discriminated-union result from the binding", async () => {
@@ -146,14 +146,14 @@ describe("workers-rpc end-to-end via InterfaceClient", () => {
 
     const happy = await invokeOnce(client, "addItem", { name: "widget" });
     expect(happy.error).toBeUndefined();
-    expect(happy.data).toEqual({ ok: true, id: "item-123" });
+    expect(happy.output).toEqual({ ok: true, id: "item-123" });
 
     const sad = await invokeOnce(client, "addItem", { name: "" });
     expect(sad.error).toBeUndefined();
     // The SDK doesn't introspect the discriminated union — it just
     // passes the structured result through. The caller checks
-    // `result.data.ok` to discriminate.
-    expect(sad.data).toEqual({ ok: false, code: "invalid_name", message: "name is empty" });
+    // `result.output.ok` to discriminate.
+    expect(sad.output).toEqual({ ok: false, code: "invalid_name", message: "name is empty" });
   });
 
   it("surfaces a thrown error from the binding as a stream event error", async () => {
@@ -165,7 +165,7 @@ describe("workers-rpc end-to-end via InterfaceClient", () => {
     const client = buildClient(binding);
 
     const result = await invokeOnce(client, "ping", { message: "test" });
-    expect(result.data).toBeUndefined();
+    expect(result.output).toBeUndefined();
     expect(result.error?.code).toBe(ERR_EXECUTION_FAILED);
     expect(result.error?.message).toBe("backend exploded");
   });
@@ -179,7 +179,7 @@ describe("workers-rpc end-to-end via InterfaceClient", () => {
     const client = buildClient(binding);
 
     const result = await invokeOnce(client, "addItem", { name: "widget" });
-    expect(result.data).toBeUndefined();
+    expect(result.output).toBeUndefined();
     expect(result.error?.code).toBe(ERR_REF_NOT_FOUND);
     expect(result.error?.message).toContain("addItem");
   });

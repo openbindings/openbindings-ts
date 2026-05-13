@@ -2,7 +2,6 @@ import type {
   BindingInvocationInput,
   InvocationOutput,
   InvocationOptions,
-  StreamEvent,
 } from "@openbindings/sdk";
 import {
   maybeJSON,
@@ -85,7 +84,7 @@ export async function* subscribeBinding(
   options?: { signal?: AbortSignal },
   preloadedDoc?: AsyncAPIDocument,
   wsPool?: WSPool,
-): AsyncIterable<StreamEvent> {
+): AsyncIterable<InvocationOutput> {
   let doc: AsyncAPIDocument;
   if (preloadedDoc) {
     doc = preloadedDoc;
@@ -519,7 +518,7 @@ async function* streamSSE(
   asyncOp: AsyncAPIOperation,
   input: BindingInvocationInput,
   options?: { signal?: AbortSignal },
-): AsyncIterable<StreamEvent> {
+): AsyncIterable<InvocationOutput> {
   let url = `${serverURL}/${address.replace(/^\/+/, "")}`;
 
   const headers = new Headers({ Accept: "text/event-stream" });
@@ -569,14 +568,14 @@ async function* streamSSE(
           continue;
         }
         if (line === "" && dataLines.length > 0) {
-          yield { data: parseSSEPayload(dataLines) };
+          yield { output: parseSSEPayload(dataLines) };
           dataLines = [];
         }
       }
     }
 
     if (dataLines.length > 0) {
-      yield { data: parseSSEPayload(dataLines) };
+      yield { output: parseSSEPayload(dataLines) };
     }
   } catch (e: unknown) {
     if (options?.signal?.aborted) return;
@@ -597,7 +596,7 @@ async function* streamWS(
   asyncOp: AsyncAPIOperation,
   input: BindingInvocationInput,
   options?: { signal?: AbortSignal },
-): AsyncIterable<StreamEvent> {
+): AsyncIterable<InvocationOutput> {
   const wsURL = new URL(`/${address.replace(/^\/+/, "")}`, serverURL);
 
   // Apply query-param credentials (e.g. apiKey in query) to the WebSocket URL.
@@ -613,7 +612,7 @@ async function* streamWS(
 
   const ws = new WebSocket(wsURL.toString());
 
-  const queue: StreamEvent[] = [];
+  const queue: InvocationOutput[] = [];
   let resolve: (() => void) | undefined;
   let done = false;
 
@@ -623,12 +622,12 @@ async function* streamWS(
       if (parsed.error) {
         queue.push({ error: parsed.error });
       } else if (parsed.data !== undefined) {
-        queue.push({ data: parsed.data });
+        queue.push({ output: parsed.data });
       } else {
-        queue.push({ data: parsed });
+        queue.push({ output: parsed });
       }
     } catch {
-      queue.push({ data: String(ev.data) });
+      queue.push({ output: String(ev.data) });
     }
     resolve?.();
   });
@@ -697,7 +696,7 @@ async function* pooledStreamWS(
   asyncOp: AsyncAPIOperation,
   input: BindingInvocationInput,
   options?: { signal?: AbortSignal },
-): AsyncIterable<StreamEvent> {
+): AsyncIterable<InvocationOutput> {
   let pooled;
   try {
     pooled = await pool.acquire(serverURL, address);
@@ -719,7 +718,7 @@ async function* pooledStreamWS(
     pooled.send(JSON.stringify(payload));
   }
 
-  const queue: StreamEvent[] = [];
+  const queue: InvocationOutput[] = [];
   let resolve: (() => void) | undefined;
   let done = false;
 
@@ -765,7 +764,7 @@ async function* pooledSendWS(
   address: string,
   input: BindingInvocationInput,
   options?: { signal?: AbortSignal },
-): AsyncIterable<StreamEvent> {
+): AsyncIterable<InvocationOutput> {
   let pooled;
   try {
     pooled = await pool.acquire(serverURL, address);

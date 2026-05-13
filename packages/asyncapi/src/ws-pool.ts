@@ -19,7 +19,7 @@
  *     is closed and evicted.
  */
 
-import type { StreamEvent } from "@openbindings/sdk";
+import type { InvocationOutput } from "@openbindings/sdk";
 
 const DEFAULT_IDLE_TIMEOUT_MS = 30_000;
 
@@ -27,7 +27,7 @@ export interface PooledWS {
   /** The underlying WebSocket. */
   ws: WebSocket;
   /** Add a message listener. Returns a removal function. */
-  onMessage(handler: (event: StreamEvent) => void): () => void;
+  onMessage(handler: (event: InvocationOutput) => void): () => void;
   /** Add a close/error listener. Returns a removal function. */
   onClose(handler: () => void): () => void;
   /** Send a message on the shared socket. */
@@ -40,7 +40,7 @@ interface PoolEntry {
   ws: WebSocket;
   refCount: number;
   idleTimer: ReturnType<typeof setTimeout> | null;
-  messageHandlers: Set<(event: StreamEvent) => void>;
+  messageHandlers: Set<(event: InvocationOutput) => void>;
   closeHandlers: Set<() => void>;
   ready: Promise<void>;
   key: string;
@@ -114,22 +114,22 @@ export class WSPool {
 
     const ws = new WebSocket(url);
 
-    const messageHandlers = new Set<(event: StreamEvent) => void>();
+    const messageHandlers = new Set<(event: InvocationOutput) => void>();
     const closeHandlers = new Set<() => void>();
 
     ws.addEventListener("message", (ev) => {
-      let event: StreamEvent;
+      let event: InvocationOutput;
       try {
         const parsed = JSON.parse(String(ev.data));
         if (parsed.error) {
           event = { error: parsed.error };
         } else if (parsed.data !== undefined) {
-          event = { data: parsed.data };
+          event = { output: parsed.data };
         } else {
-          event = { data: parsed };
+          event = { output: parsed };
         }
       } catch {
-        event = { data: String(ev.data) };
+        event = { output: String(ev.data) };
       }
       for (const handler of messageHandlers) {
         handler(event);
@@ -173,7 +173,7 @@ export class WSPool {
     return {
       ws: entry.ws,
 
-      onMessage(handler: (event: StreamEvent) => void): () => void {
+      onMessage(handler: (event: InvocationOutput) => void): () => void {
         entry.messageHandlers.add(handler);
         return () => { entry.messageHandlers.delete(handler); };
       },
