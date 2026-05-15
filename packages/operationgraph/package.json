@@ -1,0 +1,49 @@
+{
+  "name": "@openbindings/operationgraph",
+  "version": "0.2.0",
+  "description": "OpenBindings operation-graph binding invoker",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "test": "vitest run",
+    "lint": "tsc --noEmit"
+  },
+  "keywords": [
+    "openbindings",
+    "operation-graph",
+    "invoker",
+    "binding",
+    "graph",
+    "orchestration"
+  ],
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/openbindings/openbindings-ts.git",
+    "directory": "packages/operationgraph"
+  },
+  "homepage": "https://openbindings.com",
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@cfworker/json-schema": "^4.1.1",
+    "@openbindings/sdk": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0"
+  }
+}

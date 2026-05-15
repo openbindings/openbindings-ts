@@ -57,6 +57,19 @@ export const ERR_TRANSFORM_ERROR = "transform_error";
 export const ERR_VALIDATION_FAILED = "validation_failed";
 
 /**
+ * The operation graph exceeded the maximum number of events permitted per
+ * execution. Protects against unbounded event amplification from map nodes
+ * in cycles.
+ */
+export const ERR_EVENT_LIMIT_EXCEEDED = "event_limit_exceeded";
+
+/** An exit node terminated the operation graph execution with an error. */
+export const ERR_OPERATION_GRAPH_EXIT = "operation_graph_exit";
+
+/** A map node's transform did not produce an array value as required. */
+export const ERR_MAP_NOT_ARRAY = "map_not_array";
+
+/**
  * Maps an HTTP status code to a standard error code.
  * Shared utility for format drivers that handle HTTP responses.
  */
