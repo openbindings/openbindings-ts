@@ -13,15 +13,15 @@ import {
 import { OpenAPIInvoker, OpenAPICreator } from "./invoker.js";
 
 
-async function collectStream(stream: AsyncIterable<InvocationOutput>): Promise<{ data?: unknown; error?: { code: string; message: string } }> {
-  let lastData: unknown;
+async function collectStream(stream: AsyncIterable<InvocationOutput>): Promise<{ output?: unknown; error?: { code: string; message: string } }> {
+  let lastOutput: unknown;
   let firstError: { code: string; message: string } | undefined;
   for await (const ev of stream) {
     if (ev.error && !firstError) firstError = ev.error;
-    if (ev.output !== undefined) lastData = ev.output;
+    if (ev.output !== undefined) lastOutput = ev.output;
   }
   if (firstError) return { error: firstError };
-  return { output: lastData };
+  return { output: lastOutput };
 }
 
 const SECRET = "test-token-123";

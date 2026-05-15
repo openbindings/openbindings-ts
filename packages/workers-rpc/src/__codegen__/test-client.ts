@@ -3,7 +3,6 @@ import {
   InterfaceClient,
   OperationInvoker,
   type OBInterface,
-  type InvocationOptions,
 } from "@openbindings/sdk";
 
 // --- Types ---
@@ -92,8 +91,8 @@ export class TestWorkersRpcClient {
   /**
    * Add an item, returning the new item id.
    */
-  async addItem(input: AddItemInput, options?: InvocationOptions): Promise<AddItemOutput> {
-    for await (const event of this.client.invoke("addItem", input, options)) {
+  async addItem(input: AddItemInput, context?: Record<string, unknown>): Promise<AddItemOutput> {
+    for await (const event of this.client.invoke("addItem", input, context)) {
       if (event.error) {
         throw new ClientOperationError(event.error.code, event.error.message, event.error.details, event.output);
       }
@@ -105,8 +104,8 @@ export class TestWorkersRpcClient {
   }
 
   /** Stream variant of addItem. */
-  async *addItemStream(input: AddItemInput, options?: InvocationOptions): AsyncGenerator<TypedInvocationOutput<AddItemOutput>> {
-    for await (const event of this.client.invoke("addItem", input, options)) {
+  async *addItemStream(input: AddItemInput, context?: Record<string, unknown>): AsyncGenerator<TypedInvocationOutput<AddItemOutput>> {
+    for await (const event of this.client.invoke("addItem", input, context)) {
       yield event as TypedInvocationOutput<AddItemOutput>;
     }
   }
@@ -114,8 +113,8 @@ export class TestWorkersRpcClient {
   /**
    * Health check that returns a string.
    */
-  async ping(input: PingInput, options?: InvocationOptions): Promise<PingOutput> {
-    for await (const event of this.client.invoke("ping", input, options)) {
+  async ping(input: PingInput, context?: Record<string, unknown>): Promise<PingOutput> {
+    for await (const event of this.client.invoke("ping", input, context)) {
       if (event.error) {
         throw new ClientOperationError(event.error.code, event.error.message, event.error.details, event.output);
       }
@@ -127,8 +126,8 @@ export class TestWorkersRpcClient {
   }
 
   /** Stream variant of ping. */
-  async *pingStream(input: PingInput, options?: InvocationOptions): AsyncGenerator<TypedInvocationOutput<PingOutput>> {
-    for await (const event of this.client.invoke("ping", input, options)) {
+  async *pingStream(input: PingInput, context?: Record<string, unknown>): AsyncGenerator<TypedInvocationOutput<PingOutput>> {
+    for await (const event of this.client.invoke("ping", input, context)) {
       yield event as TypedInvocationOutput<PingOutput>;
     }
   }

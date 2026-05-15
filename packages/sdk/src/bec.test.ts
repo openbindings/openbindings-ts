@@ -445,7 +445,7 @@ describe("InterfaceClient", () => {
     expect(origDispatcher.contextStore).toBeUndefined();
   });
 
-  it("merges default and per-call execution options", async () => {
+  it("merges default and per-call context", async () => {
     let capturedInput: BindingInvocationInput | undefined;
     const driver = createMockInvoker({
       invokeFn: async function* (input) {
@@ -463,17 +463,21 @@ describe("InterfaceClient", () => {
     };
 
     const client = new InterfaceClient(iface, opInvoker, {
-      defaultOptions: {
-        headers: { "X-Base": "base", "X-Override": "base" },
+      defaultContext: {
+        bearerToken: "default-tok",
+        headers: { "X-Base": "base" },
       },
     });
 
     for await (const _ev of client.invoke("op" as any, undefined, {
-      headers: { "X-Override": "call", "X-New": "new" },
+      bearerToken: "call-tok",
+      apiKey: "call-key",
     })) { /* drain */ }
 
-    expect(capturedInput!.options).toEqual({
-      headers: { "X-Base": "base", "X-Override": "call", "X-New": "new" },
+    expect(capturedInput!.context).toEqual({
+      bearerToken: "call-tok",
+      apiKey: "call-key",
+      headers: { "X-Base": "base" },
     });
   });
 });

@@ -215,7 +215,6 @@ export class OperationInvoker {
       inputSchema: op.input ?? undefined,
       interface: iface,
       context: input.context,
-      options: input.options,
       security: securityMethods,
     };
 

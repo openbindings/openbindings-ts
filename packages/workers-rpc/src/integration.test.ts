@@ -101,8 +101,8 @@ async function invokeOnce(
   client: InterfaceClient,
   op: string,
   input: unknown,
-): Promise<{ data?: unknown; error?: { code: string; message: string } }> {
-  const stream = (client.invoke as (op: string, input: unknown) => AsyncIterable<{ data?: unknown; error?: { code: string; message: string } }>)(op, input);
+): Promise<{ output?: unknown; error?: { code: string; message: string } }> {
+  const stream = (client.invoke as (op: string, input: unknown) => AsyncIterable<{ output?: unknown; error?: { code: string; message: string } }>)(op, input);
   for await (const event of stream) {
     return event;
   }

@@ -93,7 +93,7 @@ describe("InterfaceClient", () => {
     const opInvoker = new OperationInvoker([createMockDriver()]);
     const client = new InterfaceClient(serviceOBI, opInvoker);
 
-    const events: { data?: unknown; error?: unknown }[] = [];
+    const events: { output?: unknown; error?: unknown }[] = [];
     for await (const ev of client.invoke("search" as never, { q: "test" } as never)) {
       events.push(ev);
     }

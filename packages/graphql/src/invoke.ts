@@ -456,7 +456,7 @@ export async function* subscribeGraphQL(
             done = true;
             enqueue(null);
           } else {
-            enqueue({ data: p?.data });
+            enqueue({ output: p?.data });
           }
           break;
         }

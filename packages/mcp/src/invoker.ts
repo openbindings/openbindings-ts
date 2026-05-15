@@ -8,6 +8,8 @@ import {
   contextBearerToken,
   contextApiKey,
   contextBasicAuth,
+  contextHeaders,
+  contextCookies,
   type BindingInvoker,
   type InterfaceCreator,
   type SourceInspector,
@@ -16,7 +18,6 @@ import {
   type OBInterface,
   type InvocationOutput,
   type FormatInfo,
-  type InvocationOptions,
   type Source,
   type SourceInspection,
 } from "@openbindings/sdk";
@@ -28,11 +29,8 @@ import { discover, convertToInterface } from "./create.js";
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** Build HTTP headers from binding context and execution options. */
-function buildHeaders(
-  context?: Record<string, unknown>,
-  options?: InvocationOptions,
-): Record<string, string> {
+/** Build HTTP headers from binding context. */
+function buildHeaders(context?: Record<string, unknown>): Record<string, string> {
   const headers: Record<string, string> = {};
 
   if (context) {
@@ -50,15 +48,10 @@ function buildHeaders(
         }
       }
     }
-  }
-
-  if (options?.headers) {
-    for (const [k, v] of Object.entries(options.headers)) {
+    for (const [k, v] of Object.entries(contextHeaders(context))) {
       headers[k] = v;
     }
-  }
-  if (options?.cookies) {
-    const pairs = Object.entries(options.cookies)
+    const pairs = Object.entries(contextCookies(context))
       .map(([k, v]) => `${k}=${v}`)
       .sort();
     if (pairs.length > 0) {
@@ -102,7 +95,7 @@ export class MCPInvoker implements BindingInvoker {
     }
 
     const enriched = await this.resolveStoreContext(input);
-    const headers = buildHeaders(enriched.context, enriched.options);
+    const headers = buildHeaders(enriched.context);
 
     let result = await invokeMCPBinding(
       enriched.source.location!,
@@ -126,7 +119,7 @@ export class MCPInvoker implements BindingInvoker {
             try { await retryInput.store.set(key, retryInput.context!); } catch { /* ignore */ }
           }
         }
-        const retryHeaders = buildHeaders(retryInput.context, retryInput.options);
+        const retryHeaders = buildHeaders(retryInput.context);
         result = await invokeMCPBinding(
           retryInput.source.location!,
           retryInput.ref,

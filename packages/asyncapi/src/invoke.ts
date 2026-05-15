@@ -1,13 +1,15 @@
 import type {
   BindingInvocationInput,
   InvocationOutput,
-  InvocationOptions,
 } from "@openbindings/sdk";
 import {
   maybeJSON,
   contextBearerToken,
   contextApiKey,
   contextBasicAuth,
+  contextHeaders,
+  contextCookies,
+  contextMetadata,
   normalizeContextKey,
   httpErrorCode,
   ERR_INVALID_REF,
@@ -62,7 +64,7 @@ export async function invokeBinding(
 
   let serverURL: string, protocol: string;
   try {
-    ({ url: serverURL, protocol } = resolveServer(doc, input.options));
+    ({ url: serverURL, protocol } = resolveServer(doc, input.context));
   } catch (e: unknown) {
     return failedOutput(start, ERR_SOURCE_CONFIG_ERROR, errorMessage(e));
   }
@@ -113,7 +115,7 @@ export async function* subscribeBinding(
 
   let serverURL: string, protocol: string;
   try {
-    ({ url: serverURL, protocol } = resolveServer(doc, input.options));
+    ({ url: serverURL, protocol } = resolveServer(doc, input.context));
   } catch (e: unknown) {
     yield { error: { code: ERR_SOURCE_CONFIG_ERROR, message: errorMessage(e) } };
     return;
@@ -190,10 +192,11 @@ export function resolveAsyncAPIServerKey(doc: AsyncAPIDocument): string {
 
 function resolveServer(
   doc: AsyncAPIDocument,
-  opts?: InvocationOptions,
+  ctx?: Record<string, unknown>,
 ): { url: string; protocol: string } {
-  if (opts?.metadata?.["baseURL"]) {
-    const base = String(opts.metadata["baseURL"]);
+  const meta = contextMetadata(ctx);
+  if (meta["baseURL"]) {
+    const base = String(meta["baseURL"]);
     let proto = "http";
     if (base.startsWith("https://")) proto = "https";
     else if (base.startsWith("wss://")) proto = "wss";
@@ -349,7 +352,6 @@ function applyContext(
   doc: AsyncAPIDocument,
   asyncOp: AsyncAPIOperation,
   ctx?: Record<string, unknown>,
-  opts?: InvocationOptions,
 ): Record<string, string> | undefined {
   let queryParams: Record<string, string> | undefined;
 
@@ -359,17 +361,12 @@ function applyContext(
       applyCredentialsFallback(headers, ctx);
     }
     queryParams = result.queryParams;
-  }
-
-  if (opts?.headers) {
-    for (const [k, v] of Object.entries(opts.headers)) {
+    for (const [k, v] of Object.entries(contextHeaders(ctx))) {
       headers.set(k, v);
     }
-  }
-
-  if (opts?.cookies) {
+    const cookies = contextCookies(ctx);
     const parts: string[] = [];
-    for (const [k, v] of Object.entries(opts.cookies)) {
+    for (const [k, v] of Object.entries(cookies)) {
       parts.push(`${k}=${encodeURIComponent(v)}`);
     }
     if (parts.length > 0) {
@@ -441,7 +438,7 @@ async function invokeSSESubscribe(
   let url = `${serverURL}/${address.replace(/^\/+/, "")}`;
 
   const headers = new Headers({ Accept: "text/event-stream" });
-  const authQueryParams = applyContext(headers, doc, asyncOp, input.context, input.options);
+  const authQueryParams = applyContext(headers, doc, asyncOp, input.context);
   if (authQueryParams) {
     const sep = url.includes("?") ? "&" : "?";
     url += sep + new URLSearchParams(authQueryParams).toString();
@@ -522,7 +519,7 @@ async function* streamSSE(
   let url = `${serverURL}/${address.replace(/^\/+/, "")}`;
 
   const headers = new Headers({ Accept: "text/event-stream" });
-  const authQueryParams = applyContext(headers, doc, asyncOp, input.context, input.options);
+  const authQueryParams = applyContext(headers, doc, asyncOp, input.context);
   if (authQueryParams) {
     const sep = url.includes("?") ? "&" : "?";
     url += sep + new URLSearchParams(authQueryParams).toString();
@@ -603,7 +600,7 @@ async function* streamWS(
   // Note: browser WebSocket API does not support custom headers, so header-based
   // auth is handled via the message body (bearer token) instead.
   const tempHeaders = new Headers();
-  const authQueryParams = applyContext(tempHeaders, doc, asyncOp, input.context, input.options);
+  const authQueryParams = applyContext(tempHeaders, doc, asyncOp, input.context);
   if (authQueryParams) {
     for (const [k, v] of Object.entries(authQueryParams)) {
       wsURL.searchParams.set(k, v);
@@ -806,7 +803,7 @@ async function invokeHTTPSend(
     "Content-Type": "application/json",
     Accept: "application/json",
   });
-  const authQueryParams = applyContext(headers, doc, asyncOp, input.context, input.options);
+  const authQueryParams = applyContext(headers, doc, asyncOp, input.context);
   if (authQueryParams) {
     const sep = url.includes("?") ? "&" : "?";
     url += sep + new URLSearchParams(authQueryParams).toString();

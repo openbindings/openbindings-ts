@@ -1,6 +1,6 @@
 import type { OBInterface } from "./types.js";
 import type { InvocationOutput } from "./invoker-types.js";
-import type { InvocationOptions, ContextStore, PlatformCallbacks } from "./context.js";
+import type { ContextStore, PlatformCallbacks } from "./context.js";
 import type { OperationInvoker } from "./operation-invoker.js";
 
 export type OperationEntry = { input?: unknown; output?: unknown };
@@ -8,7 +8,7 @@ export type OperationEntry = { input?: unknown; output?: unknown };
 export interface InterfaceClientOptions {
   contextStore?: ContextStore;
   platformCallbacks?: PlatformCallbacks;
-  defaultOptions?: InvocationOptions;
+  defaultContext?: Record<string, unknown>;
 }
 
 /**
@@ -23,7 +23,7 @@ export interface InterfaceClientOptions {
 export class InterfaceClient<T = Record<string, OperationEntry>> {
   readonly interface: OBInterface;
   private readonly invoker: OperationInvoker;
-  private readonly defaultOptions?: InvocationOptions;
+  private readonly defaultContext?: Record<string, unknown>;
 
   constructor(
     iface: OBInterface,
@@ -34,7 +34,7 @@ export class InterfaceClient<T = Record<string, OperationEntry>> {
     this.invoker = (opts?.contextStore || opts?.platformCallbacks)
       ? invoker.withRuntime(opts.contextStore, opts.platformCallbacks)
       : invoker;
-    this.defaultOptions = opts?.defaultOptions;
+    this.defaultContext = opts?.defaultContext;
   }
 
   /**
@@ -44,14 +44,14 @@ export class InterfaceClient<T = Record<string, OperationEntry>> {
   async *invoke<K extends string & keyof T>(
     operation: K,
     input?: K extends keyof T ? (T[K] extends { input: infer I } ? I : undefined) : unknown,
-    options?: InvocationOptions,
+    context?: Record<string, unknown>,
   ): AsyncGenerator<InvocationOutput> {
-    const merged = mergeInvocationOptions(this.defaultOptions, options);
+    const merged = mergeContext(this.defaultContext, context);
     yield* this.invoker.invoke({
       interface: this.interface,
       operation,
       input,
-      options: merged,
+      context: merged,
     });
   }
 
@@ -60,25 +60,11 @@ export class InterfaceClient<T = Record<string, OperationEntry>> {
   }
 }
 
-function mergeInvocationOptions(
-  defaults?: InvocationOptions,
-  perCall?: InvocationOptions,
-): InvocationOptions | undefined {
+function mergeContext(
+  defaults?: Record<string, unknown>,
+  perCall?: Record<string, unknown>,
+): Record<string, unknown> | undefined {
   if (!defaults) return perCall;
   if (!perCall) return defaults;
-  return {
-    headers: mergeMaps(defaults.headers, perCall.headers),
-    cookies: mergeMaps(defaults.cookies, perCall.cookies),
-    environment: mergeMaps(defaults.environment, perCall.environment),
-    metadata: mergeMaps(defaults.metadata, perCall.metadata),
-  };
-}
-
-function mergeMaps<V>(
-  base?: Record<string, V>,
-  overlay?: Record<string, V>,
-): Record<string, V> | undefined {
-  if (!overlay || Object.keys(overlay).length === 0) return base;
-  if (!base || Object.keys(base).length === 0) return overlay;
-  return { ...base, ...overlay };
+  return { ...defaults, ...perCall };
 }

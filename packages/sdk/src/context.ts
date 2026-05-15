@@ -53,21 +53,6 @@ export interface PlatformCallbacks {
 }
 
 // ---------------------------------------------------------------------------
-// Execution options (developer-supplied, not stored)
-// ---------------------------------------------------------------------------
-
-/**
- * Developer-supplied per-request settings passed through to the driver.
- * Unlike context, options are not stored or resolved.
- */
-export interface InvocationOptions {
-  headers?: Record<string, string>;
-  cookies?: Record<string, string>;
-  environment?: Record<string, string>;
-  metadata?: Record<string, unknown>;
-}
-
-// ---------------------------------------------------------------------------
 // Well-known context helpers
 // ---------------------------------------------------------------------------
 
@@ -76,6 +61,39 @@ export function contextBearerToken(ctx: Record<string, unknown> | null | undefin
   if (!ctx) return "";
   const v = ctx["bearerToken"];
   return typeof v === "string" ? v : "";
+}
+
+/** Returns the well-known `headers` field from context as a typed string-string map. */
+export function contextHeaders(ctx: Record<string, unknown> | null | undefined): Record<string, string> {
+  return extractStringMap(ctx, "headers");
+}
+
+/** Returns the well-known `cookies` field from context as a typed string-string map. */
+export function contextCookies(ctx: Record<string, unknown> | null | undefined): Record<string, string> {
+  return extractStringMap(ctx, "cookies");
+}
+
+/** Returns the well-known `environment` field from context as a typed string-string map. */
+export function contextEnvironment(ctx: Record<string, unknown> | null | undefined): Record<string, string> {
+  return extractStringMap(ctx, "environment");
+}
+
+/** Returns the well-known `metadata` field from context, or an empty object if absent. */
+export function contextMetadata(ctx: Record<string, unknown> | null | undefined): Record<string, unknown> {
+  if (!ctx) return {};
+  const raw = ctx["metadata"];
+  return raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
+}
+
+function extractStringMap(ctx: Record<string, unknown> | null | undefined, key: string): Record<string, string> {
+  if (!ctx) return {};
+  const raw = ctx[key];
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof v === "string") out[k] = v;
+  }
+  return out;
 }
 
 /** Returns the well-known `apiKey` field from context, or empty string if absent. */

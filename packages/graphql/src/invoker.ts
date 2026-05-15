@@ -9,6 +9,8 @@ import {
   contextBearerToken,
   contextApiKey,
   contextBasicAuth,
+  contextHeaders,
+  contextCookies,
   type BindingInvoker,
   type InterfaceCreator,
   type SourceInspector,
@@ -17,7 +19,6 @@ import {
   type OBInterface,
   type InvocationOutput,
   type FormatInfo,
-  type InvocationOptions,
   type Source,
   type SourceInspection,
 } from "@openbindings/sdk";
@@ -31,10 +32,7 @@ import { convertToInterface } from "./create.js";
 // Helpers
 // ---------------------------------------------------------------------------
 
-function buildHeaders(
-  context?: Record<string, unknown>,
-  options?: InvocationOptions,
-): Record<string, string> {
+function buildHeaders(context?: Record<string, unknown>): Record<string, string> {
   const headers: Record<string, string> = {};
 
   if (context) {
@@ -52,15 +50,11 @@ function buildHeaders(
         }
       }
     }
-  }
-
-  if (options?.headers) {
-    for (const [k, v] of Object.entries(options.headers)) {
+    for (const [k, v] of Object.entries(contextHeaders(context))) {
       headers[k] = v;
     }
-  }
-  if (options?.cookies) {
-    const pairs = Object.entries(options.cookies).map(([k, v]) => `${k}=${v}`).sort();
+    const cookies = contextCookies(context);
+    const pairs = Object.entries(cookies).map(([k, v]) => `${k}=${v}`).sort();
     if (pairs.length > 0) headers["Cookie"] = pairs.join("; ");
   }
 
@@ -106,7 +100,7 @@ export class GraphQLInvoker implements BindingInvoker {
     }
 
     const enriched = await this.resolveStoreContext(input);
-    const headers = buildHeaders(enriched.context, enriched.options);
+    const headers = buildHeaders(enriched.context);
     const fetchFn = enriched.fetch ?? fetch;
     const url = enriched.source.location!;
 
@@ -160,7 +154,7 @@ export class GraphQLInvoker implements BindingInvoker {
           const key = normalizeEndpoint(url);
           if (key) try { await enriched.store.set(key, retryContext); } catch { /* ignore */ }
         }
-        const retryHeaders = buildHeaders(retryContext, enriched.options);
+        const retryHeaders = buildHeaders(retryContext);
         result = await invokeGraphQL(url, query, variables, fieldName, retryHeaders, fetchFn, options?.signal);
       }
     }

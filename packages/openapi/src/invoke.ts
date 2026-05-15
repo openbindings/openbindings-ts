@@ -1,7 +1,6 @@
 import type {
   BindingInvocationInput,
   InvocationOutput,
-  InvocationOptions,
 } from "@openbindings/sdk";
 import {
   maybeJSON,
@@ -9,6 +8,9 @@ import {
   contextBearerToken,
   contextApiKey,
   contextBasicAuth,
+  contextHeaders,
+  contextCookies,
+  contextMetadata,
   normalizeContextKey,
   httpErrorCode,
   ERR_INVALID_REF,
@@ -51,7 +53,7 @@ export async function invokeBinding(
 
   let baseURL: string;
   try {
-    baseURL = resolveBaseURLWithLocation(doc, input.options, input.source.location);
+    baseURL = resolveBaseURLWithLocation(doc, input.context, input.source.location);
   } catch (e: unknown) {
     return failedOutput(start, ERR_SOURCE_CONFIG_ERROR, errorMessage(e));
   }
@@ -106,7 +108,7 @@ async function doHTTPRequest(
     fetchHeaders.set(k, String(v));
   }
 
-  const authQueryParams = applyContext(fetchHeaders, doc, op, input.context, input.options);
+  const authQueryParams = applyContext(fetchHeaders, doc, op, input.context);
   if (authQueryParams) {
     const sep = reqURL.includes("?") ? "&" : "?";
     reqURL += sep + new URLSearchParams(authQueryParams).toString();
@@ -248,8 +250,8 @@ function asInputRecord(input: unknown): Record<string, unknown> {
   return {};
 }
 
-function resolveBaseURL(doc: OpenAPIDocument, opts?: InvocationOptions): string {
-  const metaBase = opts?.metadata?.["baseURL"];
+function resolveBaseURL(doc: OpenAPIDocument, ctx?: Record<string, unknown>): string {
+  const metaBase = contextMetadata(ctx)["baseURL"];
   if (typeof metaBase === "string" && metaBase) {
     return metaBase.replace(/\/+$/, "");
   }
@@ -259,15 +261,15 @@ function resolveBaseURL(doc: OpenAPIDocument, opts?: InvocationOptions): string 
       return url.replace(/\/+$/, "");
     }
   }
-  throw new Error("no server URL: set servers in the OpenAPI doc or provide baseURL in execution options metadata");
+  throw new Error("no server URL: set servers in the OpenAPI doc or provide baseURL in context metadata");
 }
 
 function resolveBaseURLWithLocation(
   doc: OpenAPIDocument,
-  opts?: InvocationOptions,
+  ctx?: Record<string, unknown>,
   sourceLocation?: string,
 ): string {
-  const base = resolveBaseURL(doc, opts);
+  const base = resolveBaseURL(doc, ctx);
   if (base.startsWith("http://") || base.startsWith("https://")) return base;
   if (sourceLocation && isHttpUrl(sourceLocation)) {
     try {
@@ -334,7 +336,6 @@ function applyContext(
   doc: OpenAPIDocument,
   op: OpenAPIOperation,
   ctx?: Record<string, unknown>,
-  opts?: InvocationOptions,
 ): Record<string, string> | undefined {
   let queryParams: Record<string, string> | undefined;
 
@@ -344,17 +345,12 @@ function applyContext(
       applyCredentialsFallback(headers, ctx);
     }
     queryParams = result.queryParams;
-  }
-
-  if (opts?.headers) {
-    for (const [k, v] of Object.entries(opts.headers)) {
+    for (const [k, v] of Object.entries(contextHeaders(ctx))) {
       headers.set(k, v);
     }
-  }
-
-  if (opts?.cookies) {
+    const cookies = contextCookies(ctx);
     const cookieParts: string[] = [];
-    for (const [k, v] of Object.entries(opts.cookies)) {
+    for (const [k, v] of Object.entries(cookies)) {
       cookieParts.push(`${k}=${encodeURIComponent(v)}`);
     }
     if (cookieParts.length > 0) {

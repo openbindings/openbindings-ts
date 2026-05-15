@@ -1,7 +1,5 @@
 import type { OBInterface, SecurityMethod, JSONSchema, Operation } from "./types.js";
-import type { ContextStore, PlatformCallbacks, InvocationOptions } from "./context.js";
-
-export type { InvocationOptions } from "./context.js";
+import type { ContextStore, PlatformCallbacks } from "./context.js";
 
 /** Identifies the binding source for invocation. */
 export interface InvocationSource {
@@ -21,7 +19,6 @@ export interface BindingInvocationInput {
   ref: string;
   input?: unknown;
   context?: Record<string, unknown>;
-  options?: InvocationOptions;
   store?: ContextStore;
   callbacks?: PlatformCallbacks;
   /** Security methods for this binding, populated by the operation invoker from the OBI's security section. */
@@ -39,7 +36,6 @@ export interface OperationInvocationInput {
   operation: string;
   input?: unknown;
   context?: Record<string, unknown>;
-  options?: InvocationOptions;
   /** When set, bypass the binding selector and use this binding key directly. */
   bindingKey?: string;
 }
