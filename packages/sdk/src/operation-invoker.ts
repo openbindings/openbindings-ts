@@ -66,7 +66,8 @@ export class OperationInvoker {
   /**
    * Returns a new OperationInvoker sharing the combined invoker but with
    * independent store/callbacks. Undefined arguments inherit the original's
-   * values. Used by InterfaceClient to avoid mutating a shared invoker.
+   * values. Useful when one dispatcher needs different runtime for different
+   * call sites without mutating the shared instance.
    */
   withRuntime(
     store?: ContextStore,

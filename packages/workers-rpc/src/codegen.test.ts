@@ -25,7 +25,7 @@
 
 import { describe, it, expect } from "vitest";
 import { OperationInvoker } from "@openbindings/sdk";
-import { TestWorkersRpcClient } from "./__codegen__/test-client.js";
+import { TestWorkersRpcInvoker } from "./__codegen__/test-client.js";
 import { WorkersRpcInvoker, type WorkersRpcBinding } from "./index.js";
 
 const buildInvoker = (binding: WorkersRpcBinding) =>
@@ -55,7 +55,7 @@ describe("ob codegen output for workers-rpc OBI", () => {
       ping: async () => ({ echoed: "ok" }),
       addItem: async () => ({ id: "id-1" }),
     };
-    const client = new TestWorkersRpcClient(TestWorkersRpcClient.CONTRACT, buildInvoker(binding));
+    const client = new TestWorkersRpcInvoker(buildInvoker(binding));
     // No exception means construction succeeded.
     expect(client).toBeDefined();
     void TEST_OBI_DESCRIPTION; // suppress unused warning
@@ -69,9 +69,9 @@ describe("ob codegen output for workers-rpc OBI", () => {
       },
       addItem: async () => ({ id: "id-1" }),
     };
-    const client = new TestWorkersRpcClient(TestWorkersRpcClient.CONTRACT, buildInvoker(binding));
+    const client = new TestWorkersRpcInvoker(buildInvoker(binding));
 
-    const result = await client.ping({ message: "hello" });
+    const result = await client.ping(TestWorkersRpcInvoker.CONTRACT, { message: "hello" });
     expect(result).toEqual({ echoed: "pong: hello" });
   });
 
@@ -84,9 +84,9 @@ describe("ob codegen output for workers-rpc OBI", () => {
         return { id: "newly-created" };
       },
     };
-    const client = new TestWorkersRpcClient(TestWorkersRpcClient.CONTRACT, buildInvoker(binding));
+    const client = new TestWorkersRpcInvoker(buildInvoker(binding));
 
-    const result = await client.addItem({ name: "widget", qty: 5 });
+    const result = await client.addItem(TestWorkersRpcInvoker.CONTRACT, { name: "widget", qty: 5 });
     expect(result).toEqual({ id: "newly-created" });
     expect(received).toEqual({ name: "widget", qty: 5 });
   });
@@ -98,8 +98,8 @@ describe("ob codegen output for workers-rpc OBI", () => {
       },
       addItem: async () => ({ id: "x" }),
     };
-    const client = new TestWorkersRpcClient(TestWorkersRpcClient.CONTRACT, buildInvoker(binding));
+    const client = new TestWorkersRpcInvoker(buildInvoker(binding));
 
-    await expect(client.ping({ message: "test" })).rejects.toThrow(/bound method failed/);
+    await expect(client.ping(TestWorkersRpcInvoker.CONTRACT, { message: "test" })).rejects.toThrow(/bound method failed/);
   });
 });

@@ -10,7 +10,6 @@ import {
   ResolutionUnavailableError,
   OperationInvoker,
   defaultBindingSelector,
-  InterfaceClient,
   BindingNotFoundError,
 } from "./index.js";
 import type {
@@ -412,11 +411,11 @@ describe("invoke BEC integration", () => {
 });
 
 // ---------------------------------------------------------------------------
-// InterfaceClient tests
+// OperationInvoker.withRuntime tests
 // ---------------------------------------------------------------------------
 
-describe("InterfaceClient", () => {
-  it("constructor clones opInvoker when store/callbacks provided", async () => {
+describe("OperationInvoker.withRuntime", () => {
+  it("returns a new invoker that propagates the store to drivers", async () => {
     let capturedStore: ContextStore | undefined;
     const driver = createMockInvoker({
       invokeFn: async function* (input) {
@@ -425,8 +424,9 @@ describe("InterfaceClient", () => {
       },
     });
 
-    const origDispatcher = new OperationInvoker([driver]);
+    const orig = new OperationInvoker([driver]);
     const store = new MemoryStore();
+    const withStore = orig.withRuntime(store);
 
     const iface: OBInterface = {
       openbindings: "0.1.0",
@@ -435,50 +435,13 @@ describe("InterfaceClient", () => {
       bindings: { "op.s": { operation: "op", source: "s", ref: "" } },
     };
 
-    const client = new InterfaceClient(iface, origDispatcher, {
-      contextStore: store,
-    });
-
-    for await (const _ev of client.invoke("op" as any)) { /* drain */ }
+    for await (const _ev of withStore.invoke({ interface: iface, operation: "op" })) {
+      /* drain */
+    }
 
     expect(capturedStore).toBe(store);
-    expect(origDispatcher.contextStore).toBeUndefined();
-  });
-
-  it("merges default and per-call context", async () => {
-    let capturedInput: BindingInvocationInput | undefined;
-    const driver = createMockInvoker({
-      invokeFn: async function* (input) {
-        capturedInput = input;
-        yield { output: "ok" };
-      },
-    });
-
-    const opInvoker = new OperationInvoker([driver]);
-    const iface: OBInterface = {
-      openbindings: "0.1.0",
-      operations: { op: { kind: "method" } },
-      sources: { s: { format: "test@1.0", location: "x" } },
-      bindings: { "op.s": { operation: "op", source: "s", ref: "" } },
-    };
-
-    const client = new InterfaceClient(iface, opInvoker, {
-      defaultContext: {
-        bearerToken: "default-tok",
-        headers: { "X-Base": "base" },
-      },
-    });
-
-    for await (const _ev of client.invoke("op" as any, undefined, {
-      bearerToken: "call-tok",
-      apiKey: "call-key",
-    })) { /* drain */ }
-
-    expect(capturedInput!.context).toEqual({
-      bearerToken: "call-tok",
-      apiKey: "call-key",
-      headers: { "X-Base": "base" },
-    });
+    // Original is untouched.
+    expect(orig.contextStore).toBeUndefined();
   });
 });
 

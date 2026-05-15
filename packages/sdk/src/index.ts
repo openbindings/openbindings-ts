@@ -113,9 +113,6 @@ export { canonicalize } from "./canonical-json.js";
 
 export { canonicalizeLocation, resolveRef, unknownFields } from "./uri.js";
 
-export { InterfaceClient } from "./interface-client.js";
-export type { OperationEntry, InterfaceClientOptions } from "./interface-client.js";
-
 export { fetchInterface, MEDIA_TYPE, WELL_KNOWN_PATH } from "./fetch.js";
 export type { FetchInterfaceOptions, FetchedInterface } from "./fetch.js";
 
