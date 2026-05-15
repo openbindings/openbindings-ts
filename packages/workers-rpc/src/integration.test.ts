@@ -86,7 +86,7 @@ const TEST_OBI: OBInterface = {
 // Helper: build an OperationInvoker around a workers-rpc invoker bound to
 // the mock binding. Mirrors what the codegenned typed-invoker constructor
 // does internally — typed invokers now wrap an OperationInvoker directly
-// (no InterfaceClient layer).
+// (no extra client layer).
 function buildInvoker(binding: WorkersRpcBinding): OperationInvoker {
   return new OperationInvoker([new WorkersRpcInvoker({ binding })]);
 }
