@@ -244,13 +244,5 @@ function rewriteSchemaRefs(value: unknown): void {
 }
 
 function deepCopyJSON<T>(value: T): T {
-  if (value === null || typeof value !== "object") return value;
-  if (Array.isArray(value)) {
-    return value.map((v) => deepCopyJSON(v)) as unknown as T;
-  }
-  const out: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-    out[k] = deepCopyJSON(v);
-  }
-  return out as unknown as T;
+  return structuredClone(value);
 }

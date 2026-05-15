@@ -11,8 +11,6 @@ import { validateAgainstOBISchema, validateExamplesAgainstOpSchemas } from "./sc
 
 export interface ValidateOptions {
   rejectUnknownTypedFields?: boolean;
-  /** Retained for compatibility; examples are always validated by OBI-D-15. */
-  validateExamples?: boolean;
 }
 
 const KNOWN_INTERFACE_FIELDS = new Set([

@@ -164,16 +164,16 @@ describe("validateInterface example validation (OBI-D-15)", () => {
 
   it("passes when examples match their schemas", () => {
     const iface = ifaceWithExample();
-    expect(() => validateInterface(iface, { validateExamples: true })).not.toThrow();
+    expect(() => validateInterface(iface,)).not.toThrow();
   });
 
   it("fails when example input does not match the input schema", () => {
     const iface = ifaceWithExample({ input: { name: 123 } });
-    expect(() => validateInterface(iface, { validateExamples: true })).toThrow(
+    expect(() => validateInterface(iface,)).toThrow(
       /OBI-D-15/,
     );
     try {
-      validateInterface(iface, { validateExamples: true });
+      validateInterface(iface,);
     } catch (err) {
       expect(err).toBeInstanceOf(ValidationError);
       const problems = (err as InstanceType<typeof ValidationError>).problems;
@@ -183,11 +183,11 @@ describe("validateInterface example validation (OBI-D-15)", () => {
 
   it("fails when example output does not match the output schema", () => {
     const iface = ifaceWithExample({ output: { id: "not-a-number" } });
-    expect(() => validateInterface(iface, { validateExamples: true })).toThrow(
+    expect(() => validateInterface(iface,)).toThrow(
       /OBI-D-15/,
     );
     try {
-      validateInterface(iface, { validateExamples: true });
+      validateInterface(iface,);
     } catch (err) {
       expect(err).toBeInstanceOf(ValidationError);
       const problems = (err as InstanceType<typeof ValidationError>).problems;
@@ -199,7 +199,7 @@ describe("validateInterface example validation (OBI-D-15)", () => {
     const iface = ifaceWithExample({ input: { name: 123 } });
     expect(() => validateInterface(iface)).toThrow(/OBI-D-15/);
     expect(() => validateInterface(iface, {})).toThrow(/OBI-D-15/);
-    expect(() => validateInterface(iface, { validateExamples: false })).toThrow(/OBI-D-15/);
+    expect(() => validateInterface(iface,)).toThrow(/OBI-D-15/);
   });
 
   it("skips operations without examples gracefully", () => {
@@ -218,11 +218,11 @@ describe("validateInterface example validation (OBI-D-15)", () => {
         "noExamples.main": { operation: "noExamples", source: "main", ref: "#/paths/~1foo/get" },
       },
     };
-    expect(() => validateInterface(iface, { validateExamples: true })).not.toThrow();
+    expect(() => validateInterface(iface,)).not.toThrow();
   });
 
   it("skips examples when the operation has no schemas", () => {
     const iface = ifaceWithExample({ inputSchema: null, outputSchema: null });
-    expect(() => validateInterface(iface, { validateExamples: true })).not.toThrow();
+    expect(() => validateInterface(iface,)).not.toThrow();
   });
 });

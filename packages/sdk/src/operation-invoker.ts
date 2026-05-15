@@ -74,13 +74,16 @@ export class OperationInvoker {
     callbacks?: PlatformCallbacks,
     fetchFn?: typeof globalThis.fetch,
   ): OperationInvoker {
-    const cp = Object.create(OperationInvoker.prototype) as OperationInvoker;
-    (cp as any).bindingSelector = this.bindingSelector;
-    (cp as any).transformEvaluator = this.transformEvaluator;
-    (cp as any).contextStore = store ?? this.contextStore;
-    (cp as any).platformCallbacks = callbacks ?? this.platformCallbacks;
-    (cp as any).fetch = fetchFn ?? this.fetch;
-    (cp as any).invoker = this.invoker;
+    const cp = new OperationInvoker([], {
+      bindingSelector: this.bindingSelector,
+      transformEvaluator: this.transformEvaluator,
+      contextStore: store ?? this.contextStore,
+      platformCallbacks: callbacks ?? this.platformCallbacks,
+      fetch: fetchFn ?? this.fetch,
+    });
+    // Share the underlying combined-invoker registry rather than re-combining
+    // (which would lose any drivers added via addBindingInvoker on the source).
+    (cp as unknown as { invoker: CombinedInvoker }).invoker = this.invoker;
     return cp;
   }
 

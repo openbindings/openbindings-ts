@@ -19,33 +19,41 @@ npm install @openbindings/sdk
 - **Core types** for OpenBindings interface documents: operations, bindings, sources, transforms, schemas, roles
 - **Validation** with shape-level checks, strict mode for unknown fields, and format token validation
 - **Schema compatibility** checking (reference-tooling profile, not part of the spec) with covariant/contravariant directionality and diagnostic reasons
-- **InterfaceClient** for resolving OBIs from URLs, well-known discovery, or synthesis from raw specs
-- **OperationInvoker** for routing operations to binding invokers by format, with transform support
-- **Context store** for per-host credential persistence with scheme-agnostic key normalization
+- **`fetchInterface`** for resolving OBIs from URLs (well-known discovery, then synthesis from raw OpenAPI / AsyncAPI / etc. via supplied creators)
+- **`OperationInvoker`** that dispatches operations to per-format binding invokers and applies transforms
+- **`ContextStore`** for per-host credential persistence with scheme-agnostic key normalization
 
 The SDK defines the contracts that binding invokers implement but does not contain any format-specific logic. Format support is added by installing driver packages like [`@openbindings/openapi`](https://www.npmjs.com/package/@openbindings/openapi) or [`@openbindings/asyncapi`](https://www.npmjs.com/package/@openbindings/asyncapi).
 
 ## Quick start
 
 ```typescript
-import { InterfaceClient, OperationInvoker, MemoryStore } from "@openbindings/sdk";
+import { OperationInvoker, MemoryStore, fetchInterface } from "@openbindings/sdk";
 import { OpenAPIInvoker, OpenAPICreator } from "@openbindings/openapi";
 
-const dispatcher = new OperationInvoker([new OpenAPIInvoker(), new OpenAPICreator()]);
-const client = new InterfaceClient(null, dispatcher, {
-  contextStore: new MemoryStore(),
+const opInvoker = new OperationInvoker(
+  [new OpenAPIInvoker()],
+  { contextStore: new MemoryStore() },
+);
+
+const { iface } = await fetchInterface("https://api.example.com", {
+  creators: [new OpenAPICreator()],
 });
 
-await client.resolve("https://api.example.com");
-
-for await (const event of client.invoke("listItems", { limit: 10 })) {
+for await (const event of opInvoker.invoke({
+  interface: iface,
+  operation: "listItems",
+  input: { limit: 10 },
+})) {
   if (event.error) {
     console.error(event.error.message);
     break;
   }
-  console.log(event.data);
+  console.log(event.output);
 }
 ```
+
+For typed methods per operation, run `ob codegen <obi> --lang typescript` to produce a `<Name>Invoker` class that wraps an `OperationInvoker` and provides one method per operation.
 
 See the [monorepo README](https://github.com/openbindings/openbindings-ts#readme) for full documentation.
 

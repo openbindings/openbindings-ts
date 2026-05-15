@@ -27,6 +27,7 @@ import type {
   AsyncAPISecurityScheme,
   AsyncAPIServer,
 } from "./asyncapi-types.js";
+import { isSecurityScheme } from "./asyncapi-types.js";
 import { parseAsyncAPIDocument, parseRef, errorMessage } from "./util.js";
 import type { WSPool } from "./ws-pool.js";
 
@@ -237,11 +238,6 @@ function resolveSecuritySchemes(
   return [];
 }
 
-/** Type guard: after dereference, security requirement entries that were $refs to
- *  securitySchemes are resolved into the scheme object itself. */
-function isSecurityScheme(obj: unknown): obj is AsyncAPISecurityScheme {
-  return typeof obj === "object" && obj !== null && "type" in obj;
-}
 
 function applyCredentialsViaSchemes(
   headers: Headers,

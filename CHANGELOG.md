@@ -34,9 +34,9 @@
   byte (U+0000) instead of a space when keying the seen-pairs map, so
   values containing whitespace cannot collide.
 
-- **`validateExamples` option** in `ValidateOptions` is now a no-op kept for
-  back-compat. Examples are validated unconditionally per OBI-D-15
-  (strengthened to MUST in spec 0.2.0).
+- **Examples are validated unconditionally** per OBI-D-15 (strengthened
+  to MUST in spec 0.2.0). The `validateExamples` field on `ValidateOptions`
+  has been removed; only `rejectUnknownTypedFields` remains.
 
 - **Schema-compatibility profile reframed** in the SDK README from
   "Profile v0.1" to "reference-tooling profile (not part of the spec)".
@@ -44,6 +44,23 @@
   made comparison a tool concern; the package's `Normalizer` and
   `inputCompatible`/`outputCompatible` helpers are now openbindings
   reference tooling, not spec primitives.
+
+### Removed
+
+- **`InterfaceClient`.** The class and its associated
+  `InterfaceClientOptions`/`OperationEntry` types are gone. Generated typed
+  invokers (from `ob codegen`) wrap an `OperationInvoker` directly and
+  take the OBI per method call. Direct callers use
+  `OperationInvoker.invoke({ interface, operation, input, context })`.
+
+- **`InvocationOptions`.** Folded into `BindingContext`. Transport fields
+  (`headers`, `cookies`, `environment`, `metadata`) are well-known keys
+  inside the context map; helpers `contextHeaders`/`contextCookies`/
+  `contextEnvironment`/`contextMetadata` read them. `InvokeBindingInput`
+  no longer carries a separate `options` field.
+
+- **`ParseDocumentOptions`.** Empty interface reserved for future flags;
+  dropped per YAGNI. `parseDocument(input)` takes no options.
 
 ### Added
 

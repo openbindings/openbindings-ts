@@ -4,12 +4,8 @@ import {
   ERR_SOURCE_LOAD_FAILED,
   NoSourcesError,
   resolveSecurity,
-  normalizeContextKey,
-  contextBearerToken,
-  contextApiKey,
-  contextBasicAuth,
-  contextHeaders,
-  contextCookies,
+  buildAuthHeaders,
+  normalizeEndpoint,
   type BindingInvoker,
   type InterfaceCreator,
   type SourceInspector,
@@ -24,53 +20,6 @@ import {
 import { FORMAT_TOKEN } from "./constants.js";
 import { invokeMCPBinding, parseRef } from "./invoke.js";
 import { discover, convertToInterface } from "./create.js";
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-/** Build HTTP headers from binding context. */
-function buildHeaders(context?: Record<string, unknown>): Record<string, string> {
-  const headers: Record<string, string> = {};
-
-  if (context) {
-    const bearer = contextBearerToken(context);
-    if (bearer) {
-      headers["Authorization"] = `Bearer ${bearer}`;
-    } else {
-      const apiKey = contextApiKey(context);
-      if (apiKey) {
-        headers["Authorization"] = `ApiKey ${apiKey}`;
-      } else {
-        const basic = contextBasicAuth(context);
-        if (basic) {
-          headers["Authorization"] = `Basic ${btoa(`${basic.username}:${basic.password}`)}`;
-        }
-      }
-    }
-    for (const [k, v] of Object.entries(contextHeaders(context))) {
-      headers[k] = v;
-    }
-    const pairs = Object.entries(contextCookies(context))
-      .map(([k, v]) => `${k}=${v}`)
-      .sort();
-    if (pairs.length > 0) {
-      headers["Cookie"] = pairs.join("; ");
-    }
-  }
-
-  return headers;
-}
-
-/** Normalize an MCP endpoint URL to a context store key. */
-function normalizeEndpoint(url: string): string {
-  try {
-    const parsed = new URL(url);
-    return normalizeContextKey(parsed.host);
-  } catch {
-    return normalizeContextKey(url);
-  }
-}
 
 // ---------------------------------------------------------------------------
 // Driver
@@ -94,11 +43,17 @@ export class MCPInvoker implements BindingInvoker {
       return;
     }
 
+    if (!input.source.location) {
+      yield { error: { code: ERR_SOURCE_LOAD_FAILED, message: "MCP source requires a location (endpoint URL)" } };
+      return;
+    }
+    const location = input.source.location;
+
     const enriched = await this.resolveStoreContext(input);
-    const headers = buildHeaders(enriched.context);
+    const headers = buildAuthHeaders(enriched.context);
 
     let result = await invokeMCPBinding(
-      enriched.source.location!,
+      location,
       enriched.ref,
       enriched.input,
       headers,
@@ -107,21 +62,21 @@ export class MCPInvoker implements BindingInvoker {
 
     // Auth retry.
     if (result.error?.code === ERR_AUTH_REQUIRED && enriched.security?.length && enriched.callbacks) {
-      const creds = await resolveSecurity(enriched.security, enriched.callbacks);
+      const creds = await resolveSecurity(enriched.security, enriched.callbacks, enriched.fetch);
       if (creds) {
         const retryInput = {
           ...enriched,
           context: { ...enriched.context, ...creds },
         };
         if (retryInput.store) {
-          const key = normalizeEndpoint(retryInput.source.location!);
+          const key = normalizeEndpoint(location);
           if (key) {
             try { await retryInput.store.set(key, retryInput.context!); } catch { /* ignore */ }
           }
         }
-        const retryHeaders = buildHeaders(retryInput.context);
+        const retryHeaders = buildAuthHeaders(retryInput.context);
         result = await invokeMCPBinding(
-          retryInput.source.location!,
+          location,
           retryInput.ref,
           retryInput.input,
           retryHeaders,

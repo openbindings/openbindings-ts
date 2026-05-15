@@ -87,7 +87,7 @@ GraphQL has no native security scheme declarations, so headers are derived direc
 2. **`apiKey`** → `Authorization: ApiKey <token>`
 3. **`basic.username` + `basic.password`** → `Authorization: Basic <base64>`
 
-`InvocationOptions.headers` are merged in after, and `InvocationOptions.cookies` are joined as a sorted `Cookie:` header.
+Context's `headers` field merges on top, and `cookies` join as a sorted `Cookie:` header.
 
 For subscriptions, browsers cannot set custom headers on a WebSocket upgrade, so the `Authorization` header is forwarded inside the `connection_init` payload as `{ authorization: "Bearer ..." }` instead.
 

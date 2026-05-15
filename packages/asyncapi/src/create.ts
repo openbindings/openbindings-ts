@@ -7,6 +7,7 @@ import type {
   AsyncAPISecurityScheme,
   AsyncAPISecurityRequirement,
 } from "./asyncapi-types.js";
+import { isSecurityScheme } from "./asyncapi-types.js";
 import { DEFAULT_SOURCE_NAME } from "./constants.js";
 import { sanitizeKey, uniqueKey } from "./util.js";
 
@@ -141,11 +142,6 @@ export async function convertToInterface(
   return iface;
 }
 
-/** Type guard: after dereference, security entries that were $refs to securitySchemes
- *  are resolved into the scheme object itself (which has a `type` field). */
-function isSecurityScheme(obj: unknown): obj is AsyncAPISecurityScheme {
-  return typeof obj === "object" && obj !== null && "type" in obj;
-}
 
 /** Find the name of a resolved security scheme by matching it against the
  *  document-level securitySchemes (by identity or structural equality). */

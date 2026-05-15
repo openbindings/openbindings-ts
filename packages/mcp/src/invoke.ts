@@ -9,9 +9,10 @@ import {
   ERR_AUTH_REQUIRED,
   ERR_PERMISSION_DENIED,
 } from "@openbindings/sdk";
+import { CLIENT_NAME, CLIENT_VERSION } from "./constants.js";
 
-const CLIENT_NAME = "openbindings-mcp";
-const CLIENT_VERSION = "0.2.0";
+
+
 
 /** Parse a ref like "tools/name", "resources/uri", or "prompts/name". */
 export function parseRef(ref: string): { entityType: string; name: string } {

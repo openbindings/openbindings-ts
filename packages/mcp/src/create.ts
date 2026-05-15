@@ -2,10 +2,10 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import type { OBInterface, Operation, BindingEntry, JSONSchema } from "@openbindings/sdk";
 import { MAX_TESTED_VERSION } from "@openbindings/sdk";
-import { FORMAT_TOKEN, DEFAULT_SOURCE_NAME } from "./constants.js";
+import { CLIENT_NAME, CLIENT_VERSION, FORMAT_TOKEN, DEFAULT_SOURCE_NAME } from "./constants.js";
 
-const CLIENT_NAME = "openbindings-mcp";
-const CLIENT_VERSION = "0.2.0";
+
+
 
 interface MCPDiscovery {
   serverName?: string;

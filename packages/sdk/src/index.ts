@@ -44,6 +44,8 @@ export {
   contextMetadata,
   redactContext,
   normalizeContextKey,
+  normalizeEndpoint,
+  buildAuthHeaders,
   MemoryStore,
   ContextInsufficientError,
   ResolutionUnavailableError,
@@ -70,7 +72,6 @@ export { combineInvokers, combineCreators, combineSourceInspectors, type Combine
 export { validateInterface } from "./validate.js";
 export type { ValidateOptions } from "./validate.js";
 export { parseDocument, validateDocument, formatValidationErrors } from "./parse.js";
-export type { ParseDocumentOptions } from "./parse.js";
 
 export type { ValidationFailure } from "./schema-validation.js";
 
@@ -141,7 +142,7 @@ export {
   httpErrorCode,
 } from "./errcodes.js";
 
-export { resolveSecurity } from "./security.js";
+export { resolveSecurity, AuthCancelledError } from "./security.js";
 
 export { dereference } from "./deref.js";
 

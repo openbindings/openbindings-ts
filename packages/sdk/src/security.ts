@@ -1,10 +1,21 @@
 import type { SecurityMethod } from "./types.js";
 import type { PlatformCallbacks, BrowserRedirectResult } from "./context.js";
 
-/** Thrown by platform callbacks to signal the user cancelled the prompt.
- *  Implementations should throw this (or set `name` to `"AuthCancelled"`)
- *  to abort the entire security resolution loop immediately. */
+/**
+ * Thrown by platform callbacks (PromptInput, BrowserRedirect, FileSelect)
+ * to signal the user cancelled the prompt. The security-resolution loop
+ * catches this and aborts the entire walk immediately rather than falling
+ * through to the next method.
+ */
+export class AuthCancelledError extends Error {
+  constructor(message = "auth cancelled by user") {
+    super(message);
+    this.name = "AuthCancelledError";
+  }
+}
+
 function isAuthCancelled(e: unknown): boolean {
+  if (e instanceof AuthCancelledError) return true;
   if (e instanceof Error && (e.name === "AuthCancelled" || e.name === "AuthCancelledError")) return true;
   return false;
 }

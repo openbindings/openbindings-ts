@@ -4,14 +4,6 @@ import { validateAgainstOBISchema } from "./schema-validation.js";
 import { validateInterface, type ValidateOptions } from "./validate.js";
 
 /**
- * Options accepted by {@link parseDocument}. Reserved for future flags;
- * the SDK's parse step currently has no configurable behavior. Use
- * {@link validateDocument} or {@link validateInterface} for OBI-D rule
- * enforcement options such as `rejectUnknownTypedFields`.
- */
-export interface ParseDocumentOptions {}
-
-/**
  * Parses an OBI document from JSON and validates it against
  * `openbindings.schema.json`:
  *
@@ -28,10 +20,7 @@ export interface ParseDocumentOptions {}
  * Throws {@link ValidationError} on shape/schema failure, or
  * {@link SyntaxError} on malformed JSON.
  */
-export function parseDocument(
-  input: string | Uint8Array,
-  _options: ParseDocumentOptions = {},
-): OBInterface {
+export function parseDocument(input: string | Uint8Array): OBInterface {
   const text = typeof input === "string" ? input : new TextDecoder().decode(input);
   rejectDuplicateObjectKeys(text);
   const parsed = JSON.parse(text);

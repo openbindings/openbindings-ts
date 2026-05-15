@@ -89,7 +89,7 @@ MCP has no native security scheme declarations. Headers are passed to the underl
 2. **`apiKey`** → `Authorization: ApiKey <token>`
 3. **`basic.username` + `basic.password`** → `Authorization: Basic <base64>`
 
-`InvocationOptions.headers` are merged in after, and `InvocationOptions.cookies` are joined as a sorted `Cookie:` header.
+Context's `headers` field merges on top, and `cookies` join as a sorted `Cookie:` header.
 
 ### Interface creation
 

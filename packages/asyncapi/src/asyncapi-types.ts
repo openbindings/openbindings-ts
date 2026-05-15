@@ -91,3 +91,9 @@ export interface AsyncAPITag {
 }
 
 export type AsyncAPISecurityRequirement = AsyncAPISecurityScheme | Record<string, string[]>;
+
+/** Type-guard for an AsyncAPI security scheme. Resolved $ref-style entries
+ *  carry a `type` field even after dereferencing into the scheme object. */
+export function isSecurityScheme(obj: unknown): obj is AsyncAPISecurityScheme {
+  return typeof obj === "object" && obj !== null && "type" in obj;
+}

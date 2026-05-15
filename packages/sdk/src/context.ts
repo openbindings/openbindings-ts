@@ -152,10 +152,10 @@ export function redactContext(ctx: Record<string, unknown> | null | undefined): 
 // ---------------------------------------------------------------------------
 
 /**
- * Normalizes a URL to a stable context store key.
- * The key is scheme://host (path, query, and fragment are stripped) to
- * enable cross-driver credential sharing for the same API origin.
- * http:// is normalized to https://. Non-URL strings are returned as-is.
+ * Normalizes a URL to a stable context store key. The key is host[:port]
+ * (scheme, path, query, and fragment are stripped) so that http:// and
+ * https://, and per-path variations, share credentials for the same
+ * origin. Non-URL strings are returned as-is.
  */
 export function normalizeContextKey(raw: string): string {
   raw = raw.trim();
@@ -177,6 +177,59 @@ export function normalizeContextKey(raw: string): string {
   if (slashIdx >= 0) host = host.slice(0, slashIdx);
 
   return host;
+}
+
+/**
+ * Builds an HTTP `Authorization` header (and optional Cookie / merged
+ * headers) from a binding context. Reads the well-known fields:
+ *
+ *   - bearerToken    → `Authorization: Bearer <token>`
+ *   - apiKey         → `Authorization: ApiKey <key>` (no securityScheme awareness)
+ *   - basic          → `Authorization: Basic <base64>`
+ *   - headers        → merged verbatim
+ *   - cookies        → merged into a single `Cookie` header
+ *
+ * `bearerToken` wins over `apiKey` which wins over `basic`. Format
+ * drivers that need scheme-aware placement (OpenAPI, AsyncAPI) should
+ * resolve the security scheme themselves and not use this helper.
+ */
+export function buildAuthHeaders(ctx: Record<string, unknown> | null | undefined): Record<string, string> {
+  const headers: Record<string, string> = {};
+  if (!ctx) return headers;
+
+  const bearer = contextBearerToken(ctx);
+  if (bearer) {
+    headers["Authorization"] = `Bearer ${bearer}`;
+  } else {
+    const apiKey = contextApiKey(ctx);
+    if (apiKey) {
+      headers["Authorization"] = `ApiKey ${apiKey}`;
+    } else {
+      const basic = contextBasicAuth(ctx);
+      if (basic) {
+        headers["Authorization"] = `Basic ${btoa(`${basic.username}:${basic.password}`)}`;
+      }
+    }
+  }
+  for (const [k, v] of Object.entries(contextHeaders(ctx))) {
+    headers[k] = v;
+  }
+  const pairs = Object.entries(contextCookies(ctx)).map(([k, v]) => `${k}=${v}`).sort();
+  if (pairs.length > 0) headers["Cookie"] = pairs.join("; ");
+  return headers;
+}
+
+/**
+ * Normalizes a remote endpoint URL to a context store key. Parses the
+ * URL and returns `normalizeContextKey(host)`; falls back to
+ * `normalizeContextKey(url)` for non-URL strings.
+ */
+export function normalizeEndpoint(url: string): string {
+  try {
+    return normalizeContextKey(new URL(url).host);
+  } catch {
+    return normalizeContextKey(url);
+  }
 }
 
 // ---------------------------------------------------------------------------

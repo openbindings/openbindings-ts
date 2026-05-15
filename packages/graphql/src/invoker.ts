@@ -5,12 +5,8 @@ import {
   ERR_SOURCE_LOAD_FAILED,
   NoSourcesError,
   resolveSecurity,
-  normalizeContextKey,
-  contextBearerToken,
-  contextApiKey,
-  contextBasicAuth,
-  contextHeaders,
-  contextCookies,
+  buildAuthHeaders,
+  normalizeEndpoint,
   type BindingInvoker,
   type InterfaceCreator,
   type SourceInspector,
@@ -31,43 +27,6 @@ import { convertToInterface } from "./create.js";
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-function buildHeaders(context?: Record<string, unknown>): Record<string, string> {
-  const headers: Record<string, string> = {};
-
-  if (context) {
-    const bearer = contextBearerToken(context);
-    if (bearer) {
-      headers["Authorization"] = `Bearer ${bearer}`;
-    } else {
-      const apiKey = contextApiKey(context);
-      if (apiKey) {
-        headers["Authorization"] = `ApiKey ${apiKey}`;
-      } else {
-        const basic = contextBasicAuth(context);
-        if (basic) {
-          headers["Authorization"] = `Basic ${btoa(`${basic.username}:${basic.password}`)}`;
-        }
-      }
-    }
-    for (const [k, v] of Object.entries(contextHeaders(context))) {
-      headers[k] = v;
-    }
-    const cookies = contextCookies(context);
-    const pairs = Object.entries(cookies).map(([k, v]) => `${k}=${v}`).sort();
-    if (pairs.length > 0) headers["Cookie"] = pairs.join("; ");
-  }
-
-  return headers;
-}
-
-function normalizeEndpoint(url: string): string {
-  try {
-    return normalizeContextKey(new URL(url).host);
-  } catch {
-    return normalizeContextKey(url);
-  }
-}
 
 // ---------------------------------------------------------------------------
 // Driver
@@ -100,7 +59,7 @@ export class GraphQLInvoker implements BindingInvoker {
     }
 
     const enriched = await this.resolveStoreContext(input);
-    const headers = buildHeaders(enriched.context);
+    const headers = buildAuthHeaders(enriched.context);
     const fetchFn = enriched.fetch ?? fetch;
     const url = enriched.source.location!;
 
@@ -147,14 +106,14 @@ export class GraphQLInvoker implements BindingInvoker {
 
     // Auth retry.
     if (result.error?.code === ERR_AUTH_REQUIRED && enriched.security?.length && enriched.callbacks) {
-      const creds = await resolveSecurity(enriched.security, enriched.callbacks);
+      const creds = await resolveSecurity(enriched.security, enriched.callbacks, enriched.fetch);
       if (creds) {
         const retryContext = { ...enriched.context, ...creds };
         if (enriched.store) {
           const key = normalizeEndpoint(url);
           if (key) try { await enriched.store.set(key, retryContext); } catch { /* ignore */ }
         }
-        const retryHeaders = buildHeaders(retryContext);
+        const retryHeaders = buildAuthHeaders(retryContext);
         result = await invokeGraphQL(url, query, variables, fieldName, retryHeaders, fetchFn, options?.signal);
       }
     }
