@@ -1,7 +1,7 @@
 /**
  * Validates an operation graph against the well-formedness rules in the
- * openbindings.operation-graph@0.2.0 spec. Mirrors the Go reference
- * implementation; rule numbers in comments match the spec section.
+ * openbindings.operation-graph@0.2.0 spec. Rule numbers in comments match
+ * the spec section.
  */
 import type { Graph, Node } from "./types.js";
 

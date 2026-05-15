@@ -1,11 +1,9 @@
 /**
  * BindingInvoker implementation for the openbindings.operation-graph format.
  *
- * Construction takes an {@link OperationInvoker} so operation nodes can
- * recurse into other operations on the same OBI through it. This mirrors the
- * Go reference (`formats/operationgraph/invoker.go:27-29`) and is necessary
- * because operation graphs are themselves bindings: the engine cannot select
- * bindings on its own.
+ * Construction takes an OperationInvoker so operation nodes can recurse into
+ * other operations on the same OBI through it. The recursive dependency is
+ * resolved post-construction via OperationInvoker.addBindingInvoker.
  */
 import type {
   BindingInvocationInput,
@@ -19,9 +17,7 @@ import type { Document, Graph } from "./types.js";
 import { parseDocument } from "./types.js";
 import { SchemaCache } from "./state.js";
 import { Engine } from "./engine.js";
-
-/** Format token identifying this package as an operation-graph handler. */
-export const FORMAT_TOKEN = "openbindings.operation-graph@0.2.0";
+import { FORMAT_TOKEN } from "./constants.js";
 
 /** BindingInvoker for operation-graph source documents. */
 export class OperationGraphInvoker implements BindingInvoker {
@@ -29,10 +25,6 @@ export class OperationGraphInvoker implements BindingInvoker {
   private readonly docCache = new Map<string, Document>();
   private readonly schemas = new SchemaCache();
 
-  /**
-   * Constructs the invoker. The OperationInvoker is used to invoke
-   * sub-operations referenced by operation nodes in the graph.
-   */
   constructor(invoker: OperationInvoker) {
     this.invoker = invoker;
   }
@@ -91,8 +83,7 @@ export class OperationGraphInvoker implements BindingInvoker {
     } else if (typeof content === "object") {
       parsed = content;
     } else {
-      // Last-resort serialize/deserialize for typed wrappers.
-      parsed = JSON.parse(JSON.stringify(content));
+      parsed = structuredClone(content);
     }
     const doc = parseDocument(parsed);
 

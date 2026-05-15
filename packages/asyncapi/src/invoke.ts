@@ -25,7 +25,6 @@ import type {
   AsyncAPIDocument,
   AsyncAPIOperation,
   AsyncAPISecurityScheme,
-  AsyncAPIServer,
 } from "./asyncapi-types.js";
 import { isSecurityScheme } from "./asyncapi-types.js";
 import { parseAsyncAPIDocument, parseRef, errorMessage } from "./util.js";

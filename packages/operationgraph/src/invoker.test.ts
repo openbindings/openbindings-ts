@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { OperationInvoker, type TransformEvaluator, type TransformEvaluatorWithBindings, type InvocationOutput } from "@openbindings/sdk";
-import { OperationGraphInvoker, FORMAT_TOKEN } from "./invoker.js";
+import { OperationGraphInvoker } from "./invoker.js";
+import { FORMAT_TOKEN } from "./constants.js";
 import { validate } from "./validate.js";
 import type { Graph } from "./types.js";
 

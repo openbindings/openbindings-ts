@@ -24,14 +24,6 @@ import type { IntrospectionSchema } from "./introspection.js";
 import { buildTypeMap, rootTypeName } from "./introspection.js";
 import { convertToInterface } from "./create.js";
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
-// Driver
-// ---------------------------------------------------------------------------
-
 /** Invokes GraphQL bindings via HTTP POST with introspection-driven query construction. */
 export class GraphQLInvoker implements BindingInvoker {
   private readonly schemaCache = new Map<string, IntrospectionSchema>();

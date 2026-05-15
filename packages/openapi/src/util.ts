@@ -54,7 +54,7 @@ export async function loadOpenAPIDocument(
   if (content != null) {
     if (typeof content === "string") return parseJSONOrYAML(content) as OpenAPIDocument;
     if (typeof content === "object") return content as OpenAPIDocument;
-    return JSON.parse(JSON.stringify(content)) as OpenAPIDocument;
+    return structuredClone(content) as OpenAPIDocument;
   }
   if (!location) {
     throw new Error("source must have location or content");

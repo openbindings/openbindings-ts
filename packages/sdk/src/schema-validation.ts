@@ -192,7 +192,7 @@ export function buildSchemaDefs(
   if (!schemas || Object.keys(schemas).length === 0) return undefined;
   const out: Record<string, unknown> = {};
   for (const [name, sch] of Object.entries(schemas)) {
-    const copy = deepCopyJSON(sch);
+    const copy = structuredClone(sch);
     if (typeof copy === "object" && copy !== null) {
       rewriteSchemaRefs(copy);
     }
@@ -205,7 +205,7 @@ function buildCompoundSchema(
   schema: unknown,
   defs: Record<string, unknown> | undefined,
 ): unknown {
-  const root = deepCopyJSON(schema);
+  const root = structuredClone(schema);
   if (typeof root !== "object" || root === null || Array.isArray(root)) {
     return root;
   }
@@ -243,6 +243,3 @@ function rewriteSchemaRefs(value: unknown): void {
   for (const child of Object.values(obj)) rewriteSchemaRefs(child);
 }
 
-function deepCopyJSON<T>(value: T): T {
-  return structuredClone(value);
-}

@@ -11,9 +11,6 @@ import {
 } from "@openbindings/sdk";
 import { CLIENT_NAME, CLIENT_VERSION } from "./constants.js";
 
-
-
-
 /** Parse a ref like "tools/name", "resources/uri", or "prompts/name". */
 export function parseRef(ref: string): { entityType: string; name: string } {
   const idx = ref.indexOf("/");

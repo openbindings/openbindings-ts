@@ -1,38 +1,28 @@
 /**
  * Operation graph execution engine.
  *
- * Mirrors the Go reference implementation (`formats/operationgraph/engine.go`)
- * one-for-one in semantics. The cross-language differences are mechanical:
+ * Each node is an async task with its own {@link AsyncQueue} mailbox; the
+ * engine routes data and completion events through those queues. Cancellation
+ * is via `AbortSignal`; per-node timeouts race an AbortController against
+ * `setTimeout`.
  *
- *   - Go goroutines + channels → async tasks that push into an
- *     {@link AsyncQueue}. The queue is the engine's outbound stream and
- *     also each node's inbound mailbox.
- *   - `sync.atomic.Bool` exit flag → a plain boolean owned by the engine.
- *     JS is single-threaded, so concurrent map access isn't a concern; the
- *     ordering invariants the Go atomics enforce (in-flight workers stop
- *     emitting once exit fires) hold as long as we re-check the flag
- *     wherever the Go code does.
- *   - `context.Context` cancellation → an {@link AbortSignal}; node workers
- *     bail out when the signal fires.
- *   - `time.WithTimeout` → an AbortController raced against `setTimeout`.
+ * Correctness invariants:
  *
- * Correctness invariants kept from Go:
- *
- *   - **Exit short-circuit**: when an exit node fires, every other in-flight
- *     node-execution returns without emitting downstream events.
+ *   - **Exit short-circuit**: when an exit node fires, every in-flight node
+ *     execution returns without emitting downstream events.
  *   - **maxIterations is per-event lineage**: each event carries its own
  *     lineage map; operation nodes increment their key before invoking and
  *     drop the event when the count reaches the limit.
  *   - **onError routing**: a node failure routes a wrapped error event to
- *     `onError`. Without `onError`, the error is silently dropped. The error
- *     event's downstream propagation is bounded by {@link maxErrorDepth}.
+ *     `onError`. Without `onError`, the error is silently dropped. Error
+ *     propagation depth is bounded by {@link maxErrorDepth}.
  *   - **Completion propagation**: when a node has heard "complete" from each
  *     of its incoming edges, it (a) flushes buffer/combine state if any,
  *     then (b) propagates "complete" downstream. Completion travels through
  *     the same mailbox as data events to preserve FIFO ordering.
  *   - **Event amplification limit**: a global counter rejects executions
- *     that exceed {@link maxEvents} events; map nodes inside cycles are the
- *     primary amplification vector.
+ *     that exceed {@link maxEvents}; map nodes inside cycles are the primary
+ *     amplification vector.
  */
 import type {
   BindingInvocationInput,
@@ -61,12 +51,12 @@ import {
 } from "./state.js";
 
 /**
- * Maximum number of data events processed per graph invocation. Mirrors the
- * Go constant; primarily protects against map-in-cycle amplification.
+ * Maximum number of data events processed per graph invocation. Primarily
+ * protects against map-in-cycle amplification.
  */
 export const MAX_EVENTS = 100_000;
 
-/** Maximum depth of onError routing chains. Mirrors the Go constant. */
+/** Maximum depth of onError routing chains. */
 export const MAX_ERROR_DEPTH = 32;
 
 /**
@@ -549,7 +539,7 @@ export class Engine {
     }
     const arr = toArray(result);
     if (!arr) {
-      // Match the Go behavior: error message is the literal error code.
+      // Error message is the literal error code so callers can match on text.
       this.sendError(key, ERR_MAP_NOT_ARRAY, ev.data, ev.lineage, ev.errorDepth);
       return;
     }
@@ -572,7 +562,9 @@ export class Engine {
   }
 }
 
-/** JS truthiness aligned with the Go reference's `isTruthy` helper. */
+/** Truthiness rule for filter-expression results: false on null/undefined,
+ *  false on the value-typed empty cases (false, 0, ""); everything else is
+ *  truthy. Object/array values are always truthy regardless of contents. */
 function isTruthy(v: unknown): boolean {
   if (v === null || v === undefined) return false;
   if (typeof v === "boolean") return v;

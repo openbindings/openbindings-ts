@@ -1,7 +1,5 @@
 /**
- * Operation graph source document types.
- *
- * Mirrors the openbindings.operation-graph@0.2.0 source document shape.
+ * Operation graph source document types (openbindings.operation-graph@0.2.0).
  */
 
 /** Top-level operation graph source document. */

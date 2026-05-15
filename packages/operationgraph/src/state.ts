@@ -2,9 +2,8 @@
  * Per-node state machines for buffer and combine, plus a per-Invoker
  * compiled-schema cache shared by filter and buffer schema matching.
  *
- * JavaScript is single-threaded, so unlike the Go port there are no
- * mutexes. Each engine processes events serially within its own
- * async loop; the shapes here just hold mutable state.
+ * Each engine processes events serially within its own async loop, so the
+ * shapes here just hold mutable state with no lock coordination.
  */
 import { Validator } from "@cfworker/json-schema";
 import type { Node } from "./types.js";
@@ -168,9 +167,8 @@ export class SchemaCache {
       const result = v.validate(data);
       return result.valid;
     } catch {
-      // Validation library may throw on inputs that JSON cannot represent
-      // (e.g., undefined). Treat as non-match — equivalent to Go's
-      // "validation failed = event doesn't match".
+      // The validator throws on inputs JSON can't represent (e.g. undefined).
+      // Treat as non-match so a filter with a strict schema drops them.
       return false;
     }
   }

@@ -4,9 +4,6 @@ import type { OBInterface, Operation, BindingEntry, JSONSchema } from "@openbind
 import { MAX_TESTED_VERSION } from "@openbindings/sdk";
 import { CLIENT_NAME, CLIENT_VERSION, FORMAT_TOKEN, DEFAULT_SOURCE_NAME } from "./constants.js";
 
-
-
-
 interface MCPDiscovery {
   serverName?: string;
   serverVersion?: string;

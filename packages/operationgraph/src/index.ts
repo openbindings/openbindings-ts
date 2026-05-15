@@ -1,4 +1,5 @@
-export { OperationGraphInvoker, FORMAT_TOKEN } from "./invoker.js";
+export { OperationGraphInvoker } from "./invoker.js";
+export { FORMAT_TOKEN } from "./constants.js";
 export { parseDocument } from "./types.js";
 export type { Document, Graph, Node, Edge } from "./types.js";
 export { validate } from "./validate.js";
