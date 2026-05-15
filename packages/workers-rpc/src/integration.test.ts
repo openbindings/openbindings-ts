@@ -8,18 +8,18 @@
  * mock binding → result chain end-to-end.
  *
  * This is the integration test for the whole stack: SDK
- * (InterfaceClient + OperationInvoker) + workers-rpc driver +
- * mock binding. If `ob codegen` produces a client that doesn't work
- * against this stack, this test will catch it.
+ * (OperationInvoker) + workers-rpc driver + mock binding. If
+ * `ob codegen` produces a typed invoker that doesn't work against
+ * this stack, this test will catch it.
  */
 
 import { describe, it, expect } from "vitest";
 import {
-  InterfaceClient,
   OperationInvoker,
   ERR_EXECUTION_FAILED,
   ERR_REF_NOT_FOUND,
   type OBInterface,
+  type OperationInvocationInput,
 } from "@openbindings/sdk";
 import { WorkersRpcInvoker, type WorkersRpcBinding } from "./index.js";
 
@@ -83,39 +83,33 @@ const TEST_OBI: OBInterface = {
   },
 };
 
-// Helper: build an InterfaceClient + opInvoker stack pointing at the
-// given mock binding. Mirrors what the codegenned client constructor
-// does internally.
-function buildClient(binding: WorkersRpcBinding): InterfaceClient {
-  const opInvoker = new OperationInvoker([new WorkersRpcInvoker({ binding })]);
-  const client = new InterfaceClient(TEST_OBI, opInvoker);
-  return client;
+// Helper: build an OperationInvoker around a workers-rpc invoker bound to
+// the mock binding. Mirrors what the codegenned typed-invoker constructor
+// does internally — typed invokers now wrap an OperationInvoker directly
+// (no InterfaceClient layer).
+function buildInvoker(binding: WorkersRpcBinding): OperationInvoker {
+  return new OperationInvoker([new WorkersRpcInvoker({ binding })]);
 }
 
-// Helper: drain the invoke() stream into a single result. The cast on
-// `client.invoke` is intentional — InterfaceClient<T>.invoke is typed
-// against the operation map type parameter, which our untyped fixture
-// client (`InterfaceClient`, no generic) doesn't carry. The runtime
-// behavior is what we're testing.
+// Helper: drain the invoke() stream into a single result.
 async function invokeOnce(
-  client: InterfaceClient,
+  invoker: OperationInvoker,
   op: string,
   input: unknown,
 ): Promise<{ output?: unknown; error?: { code: string; message: string } }> {
-  const stream = (client.invoke as (op: string, input: unknown) => AsyncIterable<{ output?: unknown; error?: { code: string; message: string } }>)(op, input);
-  for await (const event of stream) {
+  const in_: OperationInvocationInput = { interface: TEST_OBI, operation: op, input };
+  for await (const event of invoker.invoke(in_)) {
     return event;
   }
   throw new Error("no event yielded");
 }
 
-describe("workers-rpc end-to-end via InterfaceClient", () => {
+describe("workers-rpc end-to-end via OperationInvoker", () => {
   it("constructs from an OBI without any network or symbolic URL", () => {
-    const client = buildClient({});
-    // No URL involved at all — the OBI is supplied at construction.
+    const invoker = buildInvoker({});
+    // No URL involved at all — the OBI is supplied per call.
     // For workers-rpc, the embedded contract IS the OBI used for dispatch.
-    expect(client).toBeDefined();
-    expect(client.interface).toBe(TEST_OBI);
+    expect(invoker).toBeDefined();
   });
 
   it("dispatches a unary call through the WorkersRpcInvoker", async () => {
@@ -125,9 +119,9 @@ describe("workers-rpc end-to-end via InterfaceClient", () => {
         return { echoed: input?.message ?? "" };
       },
     };
-    const client = buildClient(binding);
+    const invoker = buildInvoker(binding);
 
-    const result = await invokeOnce(client, "ping", { message: "hello" });
+    const result = await invokeOnce(invoker, "ping", { message: "hello" });
     expect(result.error).toBeUndefined();
     expect(result.output).toEqual({ echoed: "hello" });
   });
@@ -142,13 +136,13 @@ describe("workers-rpc end-to-end via InterfaceClient", () => {
         return { ok: true, id: "item-123" };
       },
     };
-    const client = buildClient(binding);
+    const invoker = buildInvoker(binding);
 
-    const happy = await invokeOnce(client, "addItem", { name: "widget" });
+    const happy = await invokeOnce(invoker, "addItem", { name: "widget" });
     expect(happy.error).toBeUndefined();
     expect(happy.output).toEqual({ ok: true, id: "item-123" });
 
-    const sad = await invokeOnce(client, "addItem", { name: "" });
+    const sad = await invokeOnce(invoker, "addItem", { name: "" });
     expect(sad.error).toBeUndefined();
     // The SDK doesn't introspect the discriminated union — it just
     // passes the structured result through. The caller checks
@@ -162,9 +156,9 @@ describe("workers-rpc end-to-end via InterfaceClient", () => {
         throw new Error("backend exploded");
       },
     };
-    const client = buildClient(binding);
+    const invoker = buildInvoker(binding);
 
-    const result = await invokeOnce(client, "ping", { message: "test" });
+    const result = await invokeOnce(invoker, "ping", { message: "test" });
     expect(result.output).toBeUndefined();
     expect(result.error?.code).toBe(ERR_EXECUTION_FAILED);
     expect(result.error?.message).toBe("backend exploded");
@@ -176,9 +170,9 @@ describe("workers-rpc end-to-end via InterfaceClient", () => {
     const binding: WorkersRpcBinding = {
       ping: async () => ({ echoed: "" }),
     };
-    const client = buildClient(binding);
+    const invoker = buildInvoker(binding);
 
-    const result = await invokeOnce(client, "addItem", { name: "widget" });
+    const result = await invokeOnce(invoker, "addItem", { name: "widget" });
     expect(result.output).toBeUndefined();
     expect(result.error?.code).toBe(ERR_REF_NOT_FOUND);
     expect(result.error?.message).toContain("addItem");
@@ -195,13 +189,13 @@ describe("workers-rpc end-to-end via InterfaceClient", () => {
         return { echoed: "" };
       },
     };
-    const client = buildClient(binding);
+    const invoker = buildInvoker(binding);
 
     // Pass a Date object as part of the input. Note: the OBI says the
     // input is `{message: string}` but for this test we're verifying
     // structured-clone passthrough; the driver doesn't validate
     // against the schema.
-    await invokeOnce(client, "ping", { message: "x", when: date } as unknown);
+    await invokeOnce(invoker, "ping", { message: "x", when: date } as unknown);
     const r = received as { when?: Date };
     expect(r.when).toBe(date); // identity, not equality
   });

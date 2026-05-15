@@ -1,7 +1,6 @@
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from "node:http";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import {
-  InterfaceClient,
   OperationInvoker,
   MemoryStore,
   fetchInterface,
@@ -178,16 +177,20 @@ describe("BEC Integration (real HTTP)", () => {
     return iface;
   }
 
+  function invokeListItems(opInv: OperationInvoker, iface: OBInterface) {
+    return collectStream(opInv.invoke({ interface: iface, operation: "listItems" }));
+  }
+
+  function invokeGetItem(opInv: OperationInvoker, iface: OBInterface, input: { id: number }) {
+    return collectStream(opInv.invoke({ interface: iface, operation: "getItem", input }));
+  }
+
   it("returns 401 when no credentials are stored (no prompt/retry)", async () => {
     const store = new MemoryStore();
-    const opInvoker = new OperationInvoker(
-      [new OpenAPIInvoker()],
-      { contextStore: store },
-    );
-    const client = new InterfaceClient(await fetch(), opInvoker, { contextStore: store });
+    const opInvoker = new OperationInvoker([new OpenAPIInvoker()], { contextStore: store });
+    const iface = await fetch();
 
-    // No credentials stored → 401 returned directly (no prompt, no retry)
-    const result = await collectStream(client.invoke("listItems" as any));
+    const result = await invokeListItems(opInvoker, iface);
     expect(result.error).toBeDefined();
     expect(result.error!.code).toBe("auth_required");
   });
@@ -197,37 +200,28 @@ describe("BEC Integration (real HTTP)", () => {
     const contextKey = normalizeContextKey(`http://127.0.0.1:${port}`);
     await store.set(contextKey, { bearerToken: SECRET });
 
-    const opInvoker = new OperationInvoker(
-      [new OpenAPIInvoker()],
-      { contextStore: store },
-    );
-    const client = new InterfaceClient(await fetch(), opInvoker, { contextStore: store });
+    const opInvoker = new OperationInvoker([new OpenAPIInvoker()], { contextStore: store });
+    const iface = await fetch();
 
-    // First call: stored creds → 200
-    const result1 = await collectStream(client.invoke("listItems" as any));
+    const result1 = await invokeListItems(opInvoker, iface);
     expect(result1.error).toBeUndefined();
     expect(result1.output).toEqual(ITEMS);
 
-    // Second call: same stored creds → 200
-    const result2 = await collectStream(client.invoke("listItems" as any));
+    const result2 = await invokeListItems(opInvoker, iface);
     expect(result2.error).toBeUndefined();
     expect(result2.output).toEqual(ITEMS);
 
-    // Different operation on the same origin reuses the stored credential
-    const result3 = await collectStream(client.invoke("getItem" as any, { id: 1 } as any));
+    const result3 = await invokeGetItem(opInvoker, iface, { id: 1 });
     expect(result3.error).toBeUndefined();
     expect(result3.output).toEqual({ id: 1, name: "Alpha" });
   });
 
   it("returns 401 error when no prompt callback is available", async () => {
     const store = new MemoryStore();
-    const opInvoker = new OperationInvoker(
-      [new OpenAPIInvoker()],
-      { contextStore: store },
-    );
-    const client = new InterfaceClient(await fetch(), opInvoker, { contextStore: store });
+    const opInvoker = new OperationInvoker([new OpenAPIInvoker()], { contextStore: store });
+    const iface = await fetch();
 
-    const result = await collectStream(client.invoke("listItems" as any));
+    const result = await invokeListItems(opInvoker, iface);
     expect(result.error).toBeDefined();
     expect(result.error!.code).toBe("auth_required");
   });
@@ -243,7 +237,6 @@ describe("BEC Integration (real HTTP)", () => {
       },
     };
 
-    // Pre-store credentials under the normalized server key
     const contextKey = normalizeContextKey(`http://127.0.0.1:${port}`);
     await store.set(contextKey, { bearerToken: SECRET });
 
@@ -251,12 +244,9 @@ describe("BEC Integration (real HTTP)", () => {
       [new OpenAPIInvoker()],
       { contextStore: store, platformCallbacks: callbacks },
     );
-    const client = new InterfaceClient(await fetch(), opInvoker, {
-      contextStore: store,
-      platformCallbacks: callbacks,
-    });
+    const iface = await fetch();
 
-    const result = await collectStream(client.invoke("listItems" as any));
+    const result = await invokeListItems(opInvoker, iface);
     expect(result.error).toBeUndefined();
     expect(result.output).toEqual(ITEMS);
     expect(promptCount).toBe(0);
@@ -266,30 +256,17 @@ describe("BEC Integration (real HTTP)", () => {
     const store1 = new MemoryStore();
     const store2 = new MemoryStore();
     const contextKey = normalizeContextKey(`http://127.0.0.1:${port}`);
-
-    // Only store1 has credentials
     await store1.set(contextKey, { bearerToken: SECRET });
 
-    const opInvoker1 = new OperationInvoker(
-      [new OpenAPIInvoker()],
-      { contextStore: store1 },
-    );
-    const opInvoker2 = new OperationInvoker(
-      [new OpenAPIInvoker()],
-      { contextStore: store2 },
-    );
-
+    const opInvoker1 = new OperationInvoker([new OpenAPIInvoker()], { contextStore: store1 });
+    const opInvoker2 = new OperationInvoker([new OpenAPIInvoker()], { contextStore: store2 });
     const iface = await fetch();
-    const client1 = new InterfaceClient(iface, opInvoker1, { contextStore: store1 });
-    const client2 = new InterfaceClient(iface, opInvoker2, { contextStore: store2 });
 
-    // client1 has credentials → succeeds
-    const result1 = await collectStream(client1.invoke("listItems" as any));
+    const result1 = await invokeListItems(opInvoker1, iface);
     expect(result1.error).toBeUndefined();
     expect(result1.output).toEqual(ITEMS);
 
-    // client2 has no credentials → 401
-    const result2 = await collectStream(client2.invoke("listItems" as any));
+    const result2 = await invokeListItems(opInvoker2, iface);
     expect(result2.error).toBeDefined();
     expect(result2.error!.code).toBe("auth_required");
   });
