@@ -79,7 +79,7 @@ for await (const event of operationInvoker.invoke({
 }
 ```
 
-For typed methods per operation, run `ob codegen <interface> --lang typescript` to produce a `<Name>Invoker` class with one method per operation. The generated class wraps `OperationInvoker` and takes the live OBI per call. See the [consumer guide](https://github.com/openbindings/spec/blob/main/guides/interface-client.md) for the full pattern.
+For typed methods per operation, run `ob codegen <interface> --lang typescript` to produce a `<Name>Invoker` class with one method per operation. The generated class wraps `OperationInvoker` and takes the live OBI per call. See the [consumer guide](https://github.com/openbindings/spec/blob/main/guides/consuming-an-interface.md) for the full pattern.
 
 ### Check compatibility
 
