@@ -42,7 +42,7 @@ for await (const event of driver.invokeBinding({
   context: { bearerToken: "tok_123" },
 })) {
   if (event.error) console.error(event.error.message);
-  else console.log(event.data);
+  else console.log(event.output);
 }
 ```
 

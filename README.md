@@ -13,17 +13,19 @@ OpenBindings is an open standard: one interface, limitless bindings. An OBI (Ope
 | `@openbindings/asyncapi` | AsyncAPI 3.x binding invoker and interface creator | `npm install @openbindings/asyncapi` |
 | `@openbindings/mcp` | MCP binding invoker and interface creator | `npm install @openbindings/mcp` |
 | `@openbindings/graphql` | GraphQL binding invoker and interface creator | `npm install @openbindings/graphql` |
+| `@openbindings/operationgraph` | Operation-graph binding invoker (compose operations) | `npm install @openbindings/operationgraph` |
+| `@openbindings/workers-rpc` | Cloudflare Workers RPC binding invoker | `npm install @openbindings/workers-rpc` |
 
 ## What the SDK does
 
 - **Core types** for the OpenBindings interface document: operations, bindings, sources, transforms, schemas, roles
 - **Validation** with shape-level checks, strict mode for unknown fields, and format token validation
 - **Schema compatibility** checking under the OpenBindings Profile v0.1 (covariant outputs, contravariant inputs) with diagnostic reasons
-- **InterfaceClient** for resolving OBIs from URLs, well-known discovery, or synthesis from raw specs
-- **OperationInvoker** for routing operations to binding invokers by format, with transform support
+- **`fetchInterface`** for resolving OBIs from URLs (well-known discovery, follows redirects, validates the result)
+- **`OperationInvoker`** for routing operations to binding invokers by format, with transform support
 - **Context store** for per-host credential persistence with scheme-agnostic key normalization
 
-The SDK defines the contracts that binding invokers implement but does not contain any format-specific logic itself. Format support is added by installing driver packages.
+The SDK defines the contracts that binding invokers implement but does not contain any format-specific logic itself. Format support is added by installing format packages.
 
 ## Conformance
 
@@ -51,27 +53,33 @@ for (const [name, op] of Object.entries(iface.operations)) {
 ### Resolve and invoke operations
 
 ```typescript
-import { InterfaceClient, OperationInvoker, MemoryStore } from "@openbindings/sdk";
+import { OperationInvoker, MemoryStore, fetchInterface } from "@openbindings/sdk";
 import { OpenAPIInvoker } from "@openbindings/openapi";
 
 // Create a dispatcher with format support
-const dispatcher = new OperationInvoker([new OpenAPIInvoker()]);
+const operationInvoker = new OperationInvoker(
+  [new OpenAPIInvoker()],
+  { contextStore: new MemoryStore() },
+);
 
-// Create a client and resolve an OBI from a URL
-const client = new InterfaceClient(null, dispatcher, {
-  contextStore: new MemoryStore(),
-});
-await client.resolve("https://api.example.com");
+// Fetch the live OBI from the target's well-known endpoint
+const iface = await fetchInterface("https://api.example.com");
 
 // Invoke an operation — everything is a stream
-for await (const event of client.invoke("listItems", { limit: 10 })) {
+for await (const event of operationInvoker.invoke({
+  interface: iface,
+  operation: "listItems",
+  input: { limit: 10 },
+})) {
   if (event.error) {
     console.error(event.error.message);
     break;
   }
-  console.log(event.data);
+  console.log(event.output);
 }
 ```
+
+For typed methods per operation, run `ob codegen <interface> --lang typescript` to produce a `<Name>Invoker` class with one method per operation. The generated class wraps `OperationInvoker` and takes the live OBI per call. See the [consumer guide](https://github.com/openbindings/spec/blob/main/guides/interface-client.md) for the full pattern.
 
 ### Check compatibility
 
@@ -86,51 +94,35 @@ for (const issue of issues) {
 
 ## Invocation model
 
-Every operation returns an `AsyncIterable<StreamEvent>`. A unary operation yields one event. A streaming operation yields many. The consumer code is the same for both:
+Every operation returns an `AsyncGenerator<InvocationOutput>`. A unary operation yields one event. A streaming operation yields many. The consumer code is the same for both:
 
 ```typescript
-for await (const event of dispatcher.invoke(input)) {
+for await (const event of operationInvoker.invoke({
+  interface: iface,
+  operation: "listItems",
+  input: { limit: 10 },
+})) {
   if (event.error) { /* handle */ }
-  console.log(event.data);
+  console.log(event.output);
 }
 ```
 
-## Binding drivers
+## Binding invokers
 
-The SDK routes operations to binding invokers by format token. Drivers declare what formats they handle (including semver ranges like `openapi@^3.0.0`) and the SDK matches OBI source formats against those declarations:
+The SDK routes operations to binding invokers by format token. Invokers declare what formats they handle (including semver ranges like `openapi@^3.0.0`) and the SDK matches OBI source formats against those declarations:
 
 ```typescript
-const dispatcher = new OperationInvoker([
-  new OpenAPIInvoker(),   // handles openapi@^3.0.0
-  new AsyncAPIInvoker(),  // handles asyncapi@^3.0.0
+const operationInvoker = new OperationInvoker([
+  new OpenAPIInvoker(),    // handles openapi@^3.0.0
+  new AsyncAPIInvoker(),   // handles asyncapi@^3.0.0
 ]);
 ```
 
-Drivers implement `BindingInvoker`. Interface creators (which synthesize OBIs from raw specs) implement `InterfaceCreator`. A single class may implement both.
-
-## Typed interface clients
-
-The `InterfaceClient` supports a generic type parameter for compile-time operation typing:
-
-```typescript
-type MyAPI = {
-  listItems: { input: { limit: number }; output: { items: Item[] } };
-  getItem: { input: { id: string }; output: Item };
-};
-
-const client = new InterfaceClient<MyAPI>(requiredInterface, dispatcher);
-await client.resolve("https://api.example.com");
-
-// 'operation' is constrained to "listItems" | "getItem"
-// 'input' is typed per operation
-for await (const event of client.invoke("listItems", { limit: 10 })) {
-  // event.data is typed
-}
-```
+Invokers implement `BindingInvoker`. Interface creators (which synthesize OBIs from raw specs) implement `InterfaceCreator`. Source inspectors (which enumerate refs in a source) implement `SourceInspector`. A single class may implement any combination. See [Implementing a Binding Format](https://github.com/openbindings/spec/blob/main/guides/implementing-a-binding-format.md) for the full pattern.
 
 ## Context store
 
-Credentials are stored per host, not per request. The context key is `host[:port]` — scheme-agnostic, so `http://`, `https://`, and `ws://` for the same host share credentials:
+Context is stored per host, not per request. The context key is `host[:port]` — scheme-agnostic, so `http://`, `https://`, and `ws://` for the same host share context:
 
 ```typescript
 import { MemoryStore, normalizeContextKey } from "@openbindings/sdk";
@@ -141,7 +133,7 @@ const key = normalizeContextKey("https://api.example.com/v1/users");
 await store.set(key, { bearerToken: "tok_123" });
 ```
 
-Drivers read from the context store automatically when it's configured on the `OperationInvoker` or `InterfaceClient`.
+Binding invokers read from the context store automatically when it's configured on the `OperationInvoker`.
 
 ## Schema compatibility profile
 
@@ -161,7 +153,7 @@ The profile handles: type sets, const/enum, object properties and required field
 
 ## Platform support
 
-The SDK works in Node.js, Deno, Bun, and modern browsers. It uses standard APIs (`fetch`, `AbortSignal`, `structuredClone`) with no platform-specific dependencies. A custom `fetch` implementation can be injected via `InterfaceClientOptions` for environments where the global is unavailable.
+The SDK works in Node.js, Deno, Bun, and modern browsers. It uses standard APIs (`fetch`, `AbortSignal`, `structuredClone`) with no platform-specific dependencies. A custom `fetch` implementation can be injected via `OperationInvokerOptions` for environments where the global is unavailable.
 
 ## License
 
