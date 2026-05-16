@@ -47,25 +47,28 @@ export interface WorkersRpcInvokerOptions {
  * Usage from a Worker:
  *
  * ```ts
+ * import { OperationInvoker } from "@openbindings/sdk";
  * import { WorkersRpcInvoker } from "@openbindings/workers-rpc";
- * import { MyServiceClient } from "./generated/my-service-client.js";
+ * import { MyServiceInvoker } from "./generated/my-service-invoker.js";
  *
  * export default {
  *   async fetch(request, env, ctx) {
- *     const client = new MyServiceClient([
+ *     const operationInvoker = new OperationInvoker([
  *       new WorkersRpcInvoker({ binding: env.MY_SERVICE }),
  *     ]);
- *     await client.connect("workers-rpc://my-service");
- *     const result = await client.someMethod({ foo: "bar" });
+ *     const myService = new MyServiceInvoker(operationInvoker);
+ *     // workers-rpc OBIs are embedded in the codegen output — pass the
+ *     // static CONTRACT instead of fetching from a remote URL.
+ *     const result = await myService.someMethod(MyServiceInvoker.CONTRACT, { foo: "bar" });
  *     // ...
  *   }
  * };
  * ```
  *
- * The `connect()` URL is informational only — there's no real network
- * dispatch, so the URL scheme `workers-rpc://` is a convention. Any URL
- * works; the driver's `formats()` declaration is what matters for
- * format-token-based dispatch in `OperationInvoker`.
+ * The `location` of a workers-rpc source is symbolic — there's no real
+ * network dispatch, so the URL scheme `workers-rpc://` is a convention.
+ * What matters for dispatch is the format token (`workers-rpc@^1.0.0`)
+ * matching the invoker's `formats()` declaration.
  *
  * Trust model: Workers RPC bindings are a Cloudflare-runtime feature.
  * Only sibling Workers that have the binding declared in their wrangler.toml
