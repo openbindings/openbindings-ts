@@ -154,9 +154,9 @@ describe("BEC Integration (AsyncAPI, real HTTP)", () => {
     if (!binding?.ref) throw new Error("expected sendMessage.asyncapi binding with ref");
 
     const specContent = JSON.stringify(makeAsyncAPISpec(port));
-    const asyncDriver = new AsyncAPIInvoker();
+    const asyncInvoker = new AsyncAPIInvoker();
     const events = await collectStream(
-      asyncDriver.invokeBinding({
+      asyncInvoker.invokeBinding({
         ref: binding.ref,
         source: { format: "asyncapi@^3.0.0", content: specContent },
         input: { text: "hello" },
@@ -179,9 +179,9 @@ describe("BEC Integration (AsyncAPI, real HTTP)", () => {
     if (!binding?.ref) throw new Error("expected sendMessage.asyncapi binding with ref");
     const specContent = JSON.stringify(makeAsyncAPISpec(port));
 
-    const asyncDriver = new AsyncAPIInvoker();
+    const asyncInvoker = new AsyncAPIInvoker();
     const events = await collectStream(
-      asyncDriver.invokeBinding({
+      asyncInvoker.invokeBinding({
         ref: binding.ref,
         source: { format: "asyncapi@^3.0.0", content: specContent },
         input: { text: "hello" },
@@ -203,9 +203,9 @@ describe("BEC Integration (AsyncAPI, real HTTP)", () => {
     if (!binding?.ref) throw new Error("expected receiveEvents.asyncapi binding with ref");
     const specContent = JSON.stringify(makeAsyncAPISpec(port));
 
-    const asyncDriver = new AsyncAPIInvoker();
+    const asyncInvoker = new AsyncAPIInvoker();
     const events = await collectStream(
-      asyncDriver.invokeBinding({
+      asyncInvoker.invokeBinding({
         ref: binding.ref,
         source: { format: "asyncapi@^3.0.0", content: specContent },
         context: { bearerToken: SECRET },
@@ -225,9 +225,9 @@ describe("BEC Integration (AsyncAPI, real HTTP)", () => {
     if (!binding?.ref) throw new Error("expected receiveEvents.asyncapi binding with ref");
     const specContent = JSON.stringify(makeAsyncAPISpec(port));
 
-    const asyncDriver = new AsyncAPIInvoker();
+    const asyncInvoker = new AsyncAPIInvoker();
     const events = await collectStream(
-      asyncDriver.invokeBinding({
+      asyncInvoker.invokeBinding({
         ref: binding.ref,
         source: { format: "asyncapi@^3.0.0", content: specContent },
       }),

@@ -40,7 +40,7 @@ async function loadDoc(
 }
 
 // ---------------------------------------------------------------------------
-// Driver
+// Invoker
 // ---------------------------------------------------------------------------
 
 /** Invokes AsyncAPI 3.x bindings over HTTP, SSE, and WebSocket protocols. */
@@ -48,7 +48,7 @@ export class AsyncAPIInvoker implements BindingInvoker {
   private readonly docCache = new Map<string, AsyncAPIDocument>();
   /** @internal */ readonly wsPool = new WSPool();
 
-  /** Returns the format tokens this driver supports. */
+  /** Returns the format tokens this invoker supports. */
   formats(): FormatInfo[] {
     return [{ token: FORMAT_TOKEN, description: "AsyncAPI 3.x event-driven APIs" }];
   }

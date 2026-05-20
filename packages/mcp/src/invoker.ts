@@ -22,7 +22,7 @@ import { invokeMCPBinding, parseRef } from "./invoke.js";
 import { discover, convertToInterface } from "./create.js";
 
 // ---------------------------------------------------------------------------
-// Driver
+// Invoker
 // ---------------------------------------------------------------------------
 
 /** Invokes MCP bindings by connecting to MCP servers via Streamable HTTP. */

@@ -4,11 +4,11 @@
  * Wires up a fake "codegenned client" (constructed by hand here to
  * mirror what `ob codegen --lang typescript` produces) against a
  * WorkersRpcInvoker + a mock service binding, and verifies that
- * method calls flow through the OperationInvoker → driver →
+ * method calls flow through the OperationInvoker → invoker →
  * mock binding → result chain end-to-end.
  *
  * This is the integration test for the whole stack: SDK
- * (OperationInvoker) + workers-rpc driver + mock binding. If
+ * (OperationInvoker) + workers-rpc invoker + mock binding. If
  * `ob codegen` produces a typed invoker that doesn't work against
  * this stack, this test will catch it.
  */
@@ -178,9 +178,9 @@ describe("workers-rpc end-to-end via OperationInvoker", () => {
     expect(result.error?.message).toContain("addItem");
   });
 
-  it("preserves structured input through the driver (no JSON round-trip)", async () => {
+  it("preserves structured input through the invoker (no JSON round-trip)", async () => {
     // Workers RPC structured-cloning preserves complex types like Date,
-    // Map, Uint8Array, etc. The driver must not pre-serialize.
+    // Map, Uint8Array, etc. The invoker must not pre-serialize.
     const date = new Date("2026-01-01T00:00:00Z");
     let received: unknown;
     const binding: WorkersRpcBinding = {
@@ -193,7 +193,7 @@ describe("workers-rpc end-to-end via OperationInvoker", () => {
 
     // Pass a Date object as part of the input. Note: the OBI says the
     // input is `{message: string}` but for this test we're verifying
-    // structured-clone passthrough; the driver doesn't validate
+    // structured-clone passthrough; the invoker doesn't validate
     // against the schema.
     await invokeOnce(invoker, "ping", { message: "x", when: date } as unknown);
     const r = received as { when?: Date };

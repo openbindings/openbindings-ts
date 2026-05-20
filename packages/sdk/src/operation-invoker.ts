@@ -66,8 +66,8 @@ export class OperationInvoker {
   /**
    * Returns a new OperationInvoker sharing the combined invoker but with
    * independent store/callbacks. Undefined arguments inherit the original's
-   * values. Useful when one dispatcher needs different runtime for different
-   * call sites without mutating the shared instance.
+   * values. Useful when one OperationInvoker needs different runtime for
+   * different call sites without mutating the shared instance.
    */
   withRuntime(
     store?: ContextStore,
@@ -82,7 +82,7 @@ export class OperationInvoker {
       fetch: fetchFn ?? this.fetch,
     });
     // Share the underlying combined-invoker registry rather than re-combining
-    // (which would lose any drivers added via addBindingInvoker on the source).
+    // (which would lose any invokers added via addBindingInvoker on the source).
     (cp as unknown as { invoker: CombinedInvoker }).invoker = this.invoker;
     return cp;
   }

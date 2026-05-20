@@ -7,7 +7,7 @@
  * to a sibling Worker exposing a `WorkerEntrypoint` class via a service
  * binding declared in `wrangler.toml`.
  *
- * The driver implements the standard `BindingInvoker` interface from
+ * The invoker implements the standard `BindingInvoker` interface from
  * `@openbindings/sdk` and slots into any OB codegen client. The codegen
  * client is generated from an OBI document whose source declares
  * `format: "workers-rpc@^1.0.0"` and whose binding entries' `ref` field

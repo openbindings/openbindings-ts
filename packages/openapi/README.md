@@ -4,7 +4,7 @@ OpenAPI 3.x binding invoker and interface creator for the [OpenBindings](https:/
 
 This package enables OpenBindings to invoke operations against OpenAPI specs and synthesize OBI documents from them. It reads OpenAPI 3.x documents, constructs HTTP requests, applies credentials via security schemes, and returns results as a stream of events.
 
-See the [spec](https://github.com/openbindings/spec) and [pattern documentation](https://github.com/openbindings/spec/tree/main/patterns) for how drivers and creators fit into the OpenBindings architecture.
+See the [spec](https://github.com/openbindings/spec) and [creators-and-invokers guide](https://github.com/openbindings/spec/blob/main/guides/creators-and-invokers.md) for how invokers and creators fit into the OpenBindings architecture.
 
 ## Install
 
@@ -22,19 +22,19 @@ Requires [@openbindings/sdk](https://www.npmjs.com/package/@openbindings/sdk) (t
 import { OperationInvoker } from "@openbindings/sdk";
 import { OpenAPIInvoker, OpenAPICreator } from "@openbindings/openapi";
 
-const dispatcher = new OperationInvoker([new OpenAPIInvoker(), new OpenAPICreator()]);
+const invoker = new OperationInvoker([new OpenAPIInvoker(), new OpenAPICreator()]);
 ```
 
-The driver declares `openapi@^3.0.0` — it handles any OpenAPI 3.x spec.
+The invoker declares `openapi@^3.0.0` — it handles any OpenAPI 3.x spec.
 
 ### Invoke a binding
 
-Typically you don't call the driver directly — the `OperationInvoker` routes operations to it based on the OBI's source format. But direct use is straightforward:
+Typically you don't call the invoker directly — the `OperationInvoker` routes operations to it based on the OBI's source format. But direct use is straightforward:
 
 ```typescript
-const driver = new OpenAPIInvoker();
+const invoker = new OpenAPIInvoker();
 
-for await (const event of driver.invokeBinding({
+for await (const event of invoker.invokeBinding({
   source: {
     format: "openapi@3.1",
     location: "https://api.example.com/openapi.json",

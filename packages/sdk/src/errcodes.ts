@@ -1,11 +1,11 @@
 /**
  * Standard error codes for binding invoker results. These enable
  * protocol-agnostic error handling by the operation invoker and
- * application code. Binding drivers SHOULD use these codes in
+ * application code. Binding invokers SHOULD use these codes in
  * InvocationError.code.
  *
  * These are SDK conventions, not spec requirements. Third-party
- * drivers MAY use different codes.
+ * invokers MAY use different codes.
  */
 
 /** Authentication needed (e.g., HTTP 401, gRPC Unauthenticated). Retryable with credentials. */
@@ -71,7 +71,7 @@ export const ERR_MAP_NOT_ARRAY = "map_not_array";
 
 /**
  * Maps an HTTP status code to a standard error code.
- * Shared utility for format drivers that handle HTTP responses.
+ * Shared utility for format invokers that handle HTTP responses.
  */
 export function httpErrorCode(status: number): string {
   if (status === 401) return ERR_AUTH_REQUIRED;

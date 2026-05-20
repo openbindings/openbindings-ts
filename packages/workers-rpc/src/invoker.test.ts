@@ -9,7 +9,7 @@ import {
 import { WorkersRpcInvoker, type WorkersRpcBinding } from "./invoker.js";
 import { FORMAT_TOKEN } from "./constants.js";
 
-// Helper: drain the driver's async iterable into a single result.
+// Helper: drain the invoker's async iterable into a single result.
 async function drain(it: AsyncIterable<unknown>): Promise<unknown[]> {
   const out: unknown[] = [];
   for await (const event of it) out.push(event);
@@ -65,7 +65,7 @@ describe("WorkersRpcInvoker.invokeBinding — happy path", () => {
 
   it("passes the structured input through unchanged (no JSON round-trip)", async () => {
     // Workers RPC structured-cloning preserves Date, Map, Uint8Array, etc.
-    // The driver should not pre-stringify or otherwise mangle the input.
+    // The invoker should not pre-stringify or otherwise mangle the input.
     const date = new Date("2026-04-01T00:00:00Z");
     const bytes = new Uint8Array([1, 2, 3]);
     let received: unknown;
@@ -177,7 +177,7 @@ describe("WorkersRpcInvoker — Cloudflare ServiceStub Proxy compatibility", () 
   // the stub across the binding boundary and fails with
   // "This ServiceStub cannot be serialized."
   //
-  // The fix in driver.ts is to invoke as `this.binding[methodName](input)`
+  // The fix in invoker.ts is to invoke as `this.binding[methodName](input)`
   // (property-access form) so the proxy's getter handles dispatch with
   // the captured stub. This regression test ensures we never reintroduce
   // the broken `.call(this.binding, ...)` form.
@@ -214,8 +214,8 @@ describe("WorkersRpcInvoker — Cloudflare ServiceStub Proxy compatibility", () 
       },
     });
 
-    // The driver's typeof-function check happens via the proxy getter,
-    // which returns the function — so the driver proceeds to invoke.
+    // The invoker's typeof-function check happens via the proxy getter,
+    // which returns the function — so the invoker proceeds to invoke.
     const invoker = new WorkersRpcInvoker({
       binding: fakeStub as unknown as WorkersRpcBinding,
     });
@@ -243,7 +243,7 @@ describe("WorkersRpcInvoker — Cloudflare ServiceStub Proxy compatibility", () 
       get(_target, prop) {
         if (prop === "checkThis") {
           // A regular (non-arrow) function so `this` is sensitive to
-          // the call site. If the driver uses property-access form
+          // the call site. If the invoker uses property-access form
           // (binding[methodName](...)), `this` will be the proxy (i.e.
           // the fakeStub). If it uses .call(otherObj, ...), this will
           // be otherObj. Either way the function runs; the test asserts

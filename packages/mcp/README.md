@@ -4,7 +4,7 @@ Model Context Protocol (MCP) binding invoker and interface creator for the [Open
 
 This package enables OpenBindings to invoke operations against MCP servers and synthesize OBI documents from them. It connects to MCP servers via the Streamable HTTP transport, dispatches calls to tools, resources, resource templates, and prompts, and returns results as a stream of events. Built on `@modelcontextprotocol/sdk`.
 
-See the [spec](https://github.com/openbindings/spec) and [pattern documentation](https://github.com/openbindings/spec/tree/main/patterns) for how drivers and creators fit into the OpenBindings architecture.
+See the [spec](https://github.com/openbindings/spec) and [creators-and-invokers guide](https://github.com/openbindings/spec/blob/main/guides/creators-and-invokers.md) for how invokers and creators fit into the OpenBindings architecture.
 
 ## Install
 
@@ -22,17 +22,17 @@ Requires [@openbindings/sdk](https://www.npmjs.com/package/@openbindings/sdk) (t
 import { OperationInvoker } from "@openbindings/sdk";
 import { MCPInvoker, MCPCreator } from "@openbindings/mcp";
 
-const dispatcher = new OperationInvoker([new MCPInvoker(), new MCPCreator()]);
+const invoker = new OperationInvoker([new MCPInvoker(), new MCPCreator()]);
 ```
 
-The driver declares the date-versioned format token `mcp@2025-11-25`, matching the MCP protocol revision it implements. The MCP server must support the **Streamable HTTP** transport — stdio and the legacy SSE transport are not supported.
+The invoker declares the date-versioned format token `mcp@2025-11-25`, matching the MCP protocol revision it implements. The MCP server must support the **Streamable HTTP** transport — stdio and the legacy SSE transport are not supported.
 
 ### Invoke a binding
 
 ```typescript
-const driver = new MCPInvoker();
+const invoker = new MCPInvoker();
 
-for await (const event of driver.invokeBinding({
+for await (const event of invoker.invokeBinding({
   source: {
     format: "mcp@2025-11-25",
     location: "https://mcp.example.com",
@@ -79,7 +79,7 @@ The creator connects to the server, lists every advertised tool, resource, resou
    - **`prompts/<name>`:** calls `client.getPrompt`. Output is `{ messages, description? }`.
 4. Closes the client in a `finally` block.
 
-On a connect-time 401/403, the driver maps the error to `auth_required` / `permission_denied`. If the binding declares security entries and a credential callback is configured, it calls `resolveSecurity` and retries once with the new credentials.
+On a connect-time 401/403, the invoker maps the error to `auth_required` / `permission_denied`. If the binding declares security entries and a credential callback is configured, it calls `resolveSecurity` and retries once with the new credentials.
 
 ### Credential application
 

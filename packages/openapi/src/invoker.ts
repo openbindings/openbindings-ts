@@ -42,14 +42,14 @@ async function loadDoc(
 }
 
 // ---------------------------------------------------------------------------
-// Driver
+// Invoker
 // ---------------------------------------------------------------------------
 
 /** Invokes OpenAPI bindings by performing HTTP requests against the described API. */
 export class OpenAPIInvoker implements BindingInvoker {
   private readonly docCache = new Map<string, OpenAPIDocument>();
 
-  /** Returns the format tokens this driver supports. */
+  /** Returns the format tokens this invoker supports. */
   formats(): FormatInfo[] {
     return [{ token: FORMAT_TOKEN, description: "OpenAPI 3.x HTTP APIs" }];
   }

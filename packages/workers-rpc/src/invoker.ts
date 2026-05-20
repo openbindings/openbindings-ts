@@ -31,10 +31,10 @@ export interface WorkersRpcBinding {
 export interface WorkersRpcInvokerOptions {
   /**
    * The bound entrypoint object — typically `env.YOUR_BINDING_NAME` from
-   * within a Worker. The driver calls methods on this object directly.
+   * within a Worker. The invoker calls methods on this object directly.
    *
    * Provide this when constructing per-request: each Worker request gets a
-   * fresh `env`, so the driver should be constructed inside the request
+   * fresh `env`, so the invoker should be constructed inside the request
    * handler, not at module load.
    */
   binding: WorkersRpcBinding;
@@ -73,11 +73,11 @@ export interface WorkersRpcInvokerOptions {
  * Trust model: Workers RPC bindings are a Cloudflare-runtime feature.
  * Only sibling Workers that have the binding declared in their wrangler.toml
  * `[[services]]` block can reach the target. The Cloudflare runtime is the
- * trust boundary; this driver doesn't perform any auth check itself.
+ * trust boundary; this invoker doesn't perform any auth check itself.
  *
  * Error model: errors thrown by the target Worker's RPC method propagate
  * across the binding boundary as Error instances (with `name` and `message`
- * preserved by the structured-clone algorithm). The driver catches them,
+ * preserved by the structured-clone algorithm). The invoker catches them,
  * yields a `InvocationOutput` with `error.code = "execution_failed"`, and ends
  * the stream. Custom error subclasses are flattened to the base Error shape;
  * if the target wants to communicate structured error info, it should
@@ -85,7 +85,7 @@ export interface WorkersRpcInvokerOptions {
  * throwing.
  *
  * Streaming: Workers RPC supports streaming via async iterables, but this
- * driver currently treats every method as unary (one yield per call).
+ * invoker currently treats every method as unary (one yield per call).
  * Streaming support could be added later by detecting iterable returns and
  * yielding multiple events.
  */
@@ -96,7 +96,7 @@ export class WorkersRpcInvoker implements BindingInvoker {
     this.binding = options.binding;
   }
 
-  /** Returns the format tokens this driver supports. */
+  /** Returns the format tokens this invoker supports. */
   formats(): FormatInfo[] {
     return [{ token: FORMAT_TOKEN, description: "Cloudflare Workers RPC bindings" }];
   }

@@ -320,11 +320,11 @@ describe("OBI-T-07 — input validation", () => {
   it("does not call inputTransform when input validation fails", async () => {
     const evaluateSpy = vi.fn(async () => ({ transformed: true }));
     const transformEval: TransformEvaluator = { evaluate: evaluateSpy };
-    const driver: BindingInvoker = {
+    const bindingInvoker: BindingInvoker = {
       formats: () => [{ token: "openapi@3.1" }],
       async *invokeBinding() { yield { output: { ok: true } }; },
     };
-    const invoker = new OperationInvoker([driver], { transformEvaluator: transformEval });
+    const invoker = new OperationInvoker([bindingInvoker], { transformEvaluator: transformEval });
     const iface: OBInterface = {
       openbindings: "0.1.0",
       operations: {
@@ -441,14 +441,14 @@ describe("OBI-T-08 — output validation", () => {
   });
 
   it("validates output after transform", async () => {
-    const driver: BindingInvoker = {
+    const bindingInvoker: BindingInvoker = {
       formats: () => [{ token: "openapi@3.1" }],
       async *invokeBinding() { yield { output: { raw: true } }; },
     };
     const transformEval: TransformEvaluator = {
       evaluate: async () => ({ id: "1", name: "alice" }),
     };
-    const invoker = new OperationInvoker([driver], { transformEvaluator: transformEval });
+    const invoker = new OperationInvoker([bindingInvoker], { transformEvaluator: transformEval });
     const iface: OBInterface = {
       openbindings: "0.1.0",
       operations: {
@@ -483,14 +483,14 @@ describe("OBI-T-08 — output validation", () => {
   });
 
   it("yields post-transform data alongside error when output fails validation", async () => {
-    const driver: BindingInvoker = {
+    const bindingInvoker: BindingInvoker = {
       formats: () => [{ token: "openapi@3.1" }],
       async *invokeBinding() { yield { output: { raw: true } }; },
     };
     const transformEval: TransformEvaluator = {
       evaluate: async () => ({ wrong: "shape" }),
     };
-    const invoker = new OperationInvoker([driver], { transformEvaluator: transformEval });
+    const invoker = new OperationInvoker([bindingInvoker], { transformEvaluator: transformEval });
     const iface: OBInterface = {
       openbindings: "0.1.0",
       operations: {

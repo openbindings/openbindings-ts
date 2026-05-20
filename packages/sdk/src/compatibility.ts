@@ -32,8 +32,8 @@ export type CheckCompatibilityOptions = {
  *
  * For each matched pair, schemas are normalized (resolving $ref pointers,
  * flattening allOf, etc.) and checked:
- *   - Output schemas must be compatible (driver output satisfies required output)
- *   - Input schemas must be compatible (required input satisfies driver input)
+ *   - Output schemas must be compatible (provided output satisfies required output)
+ *   - Input schemas must be compatible (required input satisfies provided input)
  *
  * Returns an empty array when the provided interface is fully compatible.
  */

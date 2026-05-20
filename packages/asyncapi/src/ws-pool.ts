@@ -1,5 +1,5 @@
 /**
- * WebSocket connection pool for the AsyncAPI driver.
+ * WebSocket connection pool for the AsyncAPI invoker.
  *
  * Multiple operations on the same channel (same server + address) share
  * a single WebSocket connection. This is load-bearing for the AsyncAPI

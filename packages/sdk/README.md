@@ -23,7 +23,7 @@ npm install @openbindings/sdk
 - **`OperationInvoker`** that dispatches operations to per-format binding invokers and applies transforms
 - **`ContextStore`** for per-host credential persistence with scheme-agnostic key normalization
 
-The SDK defines the contracts that binding invokers implement but does not contain any format-specific logic. Format support is added by installing driver packages like [`@openbindings/openapi`](https://www.npmjs.com/package/@openbindings/openapi) or [`@openbindings/asyncapi`](https://www.npmjs.com/package/@openbindings/asyncapi).
+The SDK defines the contracts that binding invokers implement but does not contain any format-specific logic. Format support is added by installing invoker packages like [`@openbindings/openapi`](https://www.npmjs.com/package/@openbindings/openapi) or [`@openbindings/asyncapi`](https://www.npmjs.com/package/@openbindings/asyncapi).
 
 ## Quick start
 

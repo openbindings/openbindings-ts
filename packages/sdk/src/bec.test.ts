@@ -163,11 +163,11 @@ describe("well-known context helpers", () => {
 // ---------------------------------------------------------------------------
 
 describe("OperationInvoker BEC", () => {
-  it("propagates store and callbacks to driver via withRuntimeInput", async () => {
+  it("propagates store and callbacks to the binding invoker via withRuntimeInput", async () => {
     let capturedStore: ContextStore | undefined;
     let capturedCallbacks: PlatformCallbacks | undefined;
 
-    const driver = createMockInvoker({
+    const bindingInvoker = createMockInvoker({
       invokeFn: async function* (input) {
         capturedStore = input.store;
         capturedCallbacks = input.callbacks;
@@ -178,7 +178,7 @@ describe("OperationInvoker BEC", () => {
     const store = new MemoryStore();
     const callbacks: PlatformCallbacks = {};
 
-    const opInvoker = new OperationInvoker([driver], {
+    const opInvoker = new OperationInvoker([bindingInvoker], {
       contextStore: store,
       platformCallbacks: callbacks,
     });
@@ -198,7 +198,7 @@ describe("OperationInvoker BEC", () => {
     let capturedStore: ContextStore | undefined;
     let capturedCb: PlatformCallbacks | undefined;
 
-    const driver = createMockInvoker({
+    const bindingInvoker = createMockInvoker({
       invokeFn: async function* (input) {
         capturedStore = input.store;
         capturedCb = input.callbacks;
@@ -206,7 +206,7 @@ describe("OperationInvoker BEC", () => {
       },
     });
 
-    const opInvoker = new OperationInvoker([driver], {
+    const opInvoker = new OperationInvoker([bindingInvoker], {
       contextStore: new MemoryStore(),
       platformCallbacks: {},
     });
@@ -222,16 +222,16 @@ describe("OperationInvoker BEC", () => {
     expect(capturedCb).toBe(existingCb);
   });
 
-  it("context passes through as-is (drivers resolve internally)", async () => {
+  it("context passes through as-is (invokers resolve internally)", async () => {
     let capturedCtx: Record<string, unknown> | undefined;
-    const driver = createMockInvoker({
+    const bindingInvoker = createMockInvoker({
       invokeFn: async function* (input) {
         capturedCtx = input.context;
         yield { output: "ok" };
       },
     });
 
-    const opInvoker = new OperationInvoker([driver]);
+    const opInvoker = new OperationInvoker([bindingInvoker]);
 
     for await (const _ of opInvoker.invokeBinding({
       source: { format: "test@1.0" },
@@ -244,7 +244,7 @@ describe("OperationInvoker BEC", () => {
 
   it("caller's input is never mutated (reusable across calls)", async () => {
     let capturedStore: ContextStore | undefined;
-    const driver = createMockInvoker({
+    const bindingInvoker = createMockInvoker({
       invokeFn: async function* (input) {
         capturedStore = input.store;
         yield { output: "ok" };
@@ -252,7 +252,7 @@ describe("OperationInvoker BEC", () => {
     });
 
     const store = new MemoryStore();
-    const opInvoker = new OperationInvoker([driver], { contextStore: store });
+    const opInvoker = new OperationInvoker([bindingInvoker], { contextStore: store });
 
     const input: BindingInvocationInput = {
       source: { format: "test@1.0" },
@@ -267,7 +267,7 @@ describe("OperationInvoker BEC", () => {
 
   it("input is reusable across multiple calls", async () => {
     let callCount = 0;
-    const driver = createMockInvoker({
+    const bindingInvoker = createMockInvoker({
       invokeFn: async function* (input) {
         callCount++;
         expect(input.store).toBeDefined();
@@ -275,7 +275,7 @@ describe("OperationInvoker BEC", () => {
       },
     });
 
-    const opInvoker = new OperationInvoker([driver], {
+    const opInvoker = new OperationInvoker([bindingInvoker], {
       contextStore: new MemoryStore(),
     });
 
@@ -291,8 +291,8 @@ describe("OperationInvoker BEC", () => {
   });
 
   it("formats() returns defensive copy", () => {
-    const driver = createMockInvoker();
-    const opInvoker = new OperationInvoker([driver]);
+    const bindingInvoker = createMockInvoker();
+    const opInvoker = new OperationInvoker([bindingInvoker]);
 
     const fmts = opInvoker.formats();
     fmts[0] = { token: "MUTATED" };
@@ -307,11 +307,11 @@ describe("OperationInvoker BEC", () => {
 
 describe("OperationInvoker.withRuntime", () => {
   it("clones with overrides", () => {
-    const driver = createMockInvoker();
-    const orig = new OperationInvoker([driver]);
+    const bindingInvoker = createMockInvoker();
+    const orig = new OperationInvoker([bindingInvoker]);
     const origStore = new MemoryStore();
 
-    const origWithStore = new OperationInvoker([driver], {
+    const origWithStore = new OperationInvoker([bindingInvoker], {
       contextStore: origStore,
     });
 
@@ -326,10 +326,10 @@ describe("OperationInvoker.withRuntime", () => {
   });
 
   it("undefined inherits original", () => {
-    const driver = createMockInvoker();
+    const bindingInvoker = createMockInvoker();
     const origStore = new MemoryStore();
     const origCb: PlatformCallbacks = {};
-    const orig = new OperationInvoker([driver], {
+    const orig = new OperationInvoker([bindingInvoker], {
       contextStore: origStore,
       platformCallbacks: origCb,
     });
@@ -349,7 +349,7 @@ describe("invokeBinding streaming BEC", () => {
     let capturedStore: ContextStore | undefined;
     let capturedCb: PlatformCallbacks | undefined;
 
-    const driver = createMockInvoker({
+    const bindingInvoker = createMockInvoker({
       invokeFn: async function* (input) {
         capturedStore = input.store;
         capturedCb = input.callbacks;
@@ -359,7 +359,7 @@ describe("invokeBinding streaming BEC", () => {
 
     const store = new MemoryStore();
     const cb: PlatformCallbacks = {};
-    const opInvoker = new OperationInvoker([driver], {
+    const opInvoker = new OperationInvoker([bindingInvoker], {
       contextStore: store,
       platformCallbacks: cb,
     });
@@ -380,16 +380,16 @@ describe("invokeBinding streaming BEC", () => {
 // ---------------------------------------------------------------------------
 
 describe("invoke BEC integration", () => {
-  it("context flows through to driver", async () => {
+  it("context flows through to the binding invoker", async () => {
     let capturedCtx: Record<string, unknown> | undefined;
-    const driver = createMockInvoker({
+    const bindingInvoker = createMockInvoker({
       invokeFn: async function* (input) {
         capturedCtx = input.context;
         yield { output: "ok" };
       },
     });
 
-    const opInvoker = new OperationInvoker([driver], { contextStore: new MemoryStore() });
+    const opInvoker = new OperationInvoker([bindingInvoker], { contextStore: new MemoryStore() });
 
     const iface: OBInterface = {
       openbindings: "0.1.0",
@@ -415,16 +415,16 @@ describe("invoke BEC integration", () => {
 // ---------------------------------------------------------------------------
 
 describe("OperationInvoker.withRuntime", () => {
-  it("returns a new invoker that propagates the store to drivers", async () => {
+  it("returns a new invoker that propagates the store to binding invokers", async () => {
     let capturedStore: ContextStore | undefined;
-    const driver = createMockInvoker({
+    const bindingInvoker = createMockInvoker({
       invokeFn: async function* (input) {
         capturedStore = input.store;
         yield { output: "ok" };
       },
     });
 
-    const orig = new OperationInvoker([driver]);
+    const orig = new OperationInvoker([bindingInvoker]);
     const store = new MemoryStore();
     const withStore = orig.withRuntime(store);
 

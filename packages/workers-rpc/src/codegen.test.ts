@@ -9,8 +9,8 @@
  *
  *   - codegen template emits a client that imports unavailable SDK exports
  *   - the generated client's connect() flow can't handle a workers-rpc:// URL
- *   - the generated client's invoke() dispatch doesn't reach the driver
- *   - the driver doesn't dispatch to the correct binding method
+ *   - the generated client's invoke() dispatch doesn't reach the invoker
+ *   - the invoker doesn't dispatch to the correct binding method
  *
  * The test-client.ts fixture should be regenerated after any change to:
  *   - the codegen typescript template (cli/internal/codegen/typescript.go)
@@ -61,7 +61,7 @@ describe("ob codegen output for workers-rpc OBI", () => {
     void TEST_OBI_DESCRIPTION; // suppress unused warning
   });
 
-  it("dispatches the ping operation through the driver", async () => {
+  it("dispatches the ping operation through the invoker", async () => {
     const binding: WorkersRpcBinding = {
       ping: async (arg: unknown) => {
         const input = arg as { message?: string } | undefined;

@@ -4,7 +4,7 @@ AsyncAPI 3.x binding invoker and interface creator for the [OpenBindings](https:
 
 This package enables OpenBindings to invoke operations against AsyncAPI specs and synthesize OBI documents from them. It supports HTTP/SSE for event streaming, HTTP POST for sending messages, and WebSocket for bidirectional communication. Documents are parsed with `js-yaml` and `$ref` pointers resolved with `@openbindings/sdk`'s built-in dereferencer (browser-safe, no Node.js dependencies). Credentials are applied via the spec's security schemes.
 
-See the [spec](https://github.com/openbindings/spec) and [pattern documentation](https://github.com/openbindings/spec/tree/main/patterns) for how drivers and creators fit into the OpenBindings architecture.
+See the [spec](https://github.com/openbindings/spec) and [creators-and-invokers guide](https://github.com/openbindings/spec/blob/main/guides/creators-and-invokers.md) for how invokers and creators fit into the OpenBindings architecture.
 
 ## Install
 
@@ -22,17 +22,17 @@ Requires [@openbindings/sdk](https://www.npmjs.com/package/@openbindings/sdk) (t
 import { OperationInvoker } from "@openbindings/sdk";
 import { AsyncAPIInvoker, AsyncAPICreator } from "@openbindings/asyncapi";
 
-const dispatcher = new OperationInvoker([new AsyncAPIInvoker(), new AsyncAPICreator()]);
+const invoker = new OperationInvoker([new AsyncAPIInvoker(), new AsyncAPICreator()]);
 ```
 
-The driver declares `asyncapi@^3.0.0` — it handles any AsyncAPI 3.x spec.
+The invoker declares `asyncapi@^3.0.0` — it handles any AsyncAPI 3.x spec.
 
 ### Invoke a binding
 
 ```typescript
-const driver = new AsyncAPIInvoker();
+const invoker = new AsyncAPIInvoker();
 
-for await (const event of driver.invokeBinding({
+for await (const event of invoker.invokeBinding({
   source: {
     format: "asyncapi@3.0",
     location: "https://api.example.com/asyncapi.json",

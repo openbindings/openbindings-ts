@@ -56,7 +56,7 @@ for (const [name, op] of Object.entries(iface.operations)) {
 import { OperationInvoker, MemoryStore, fetchInterface } from "@openbindings/sdk";
 import { OpenAPIInvoker } from "@openbindings/openapi";
 
-// Create a dispatcher with format support
+// Create an operation invoker with format support
 const operationInvoker = new OperationInvoker(
   [new OpenAPIInvoker()],
   { contextStore: new MemoryStore() },

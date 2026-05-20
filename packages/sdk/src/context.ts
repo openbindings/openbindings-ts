@@ -4,9 +4,9 @@
 
 /**
  * A key-value store for binding invocation context.
- * Keys are driver-determined strings (typically a normalized API origin).
+ * Keys are invoker-determined strings (typically a normalized API origin).
  * Values are opaque credential maps using well-known field names for
- * cross-driver interoperability.
+ * cross-invoker interoperability.
  *
  * The SDK stores and retrieves context but never inspects its contents.
  * Async because browser/persistent stores are inherently async.
@@ -41,7 +41,7 @@ export interface FileSelectOptions {
 }
 
 /**
- * Functions injected into drivers so they can interact with the runtime
+ * Functions injected into invokers so they can interact with the runtime
  * environment without knowing what platform they're running on.
  * Each field is optional — undefined means the capability is unavailable.
  */
@@ -190,7 +190,7 @@ export function normalizeContextKey(raw: string): string {
  *   - cookies        → merged into a single `Cookie` header
  *
  * `bearerToken` wins over `apiKey` which wins over `basic`. Format
- * drivers that need scheme-aware placement (OpenAPI, AsyncAPI) should
+ * invokers that need scheme-aware placement (OpenAPI, AsyncAPI) should
  * resolve the security scheme themselves and not use this helper.
  */
 export function buildAuthHeaders(ctx: Record<string, unknown> | null | undefined): Record<string, string> {
@@ -267,7 +267,7 @@ export class MemoryStore implements ContextStore {
 // Error classes
 // ---------------------------------------------------------------------------
 
-/** Thrown when a driver cannot proceed because required context (credentials, configuration) is missing. */
+/** Thrown when an invoker cannot proceed because required context (credentials, configuration) is missing. */
 export class ContextInsufficientError extends Error {
   constructor(message = "openbindings: context insufficient for this binding") {
     super(message);
