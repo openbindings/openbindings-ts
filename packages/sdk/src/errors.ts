@@ -16,8 +16,12 @@ export class NoCreatorError extends Error {
 
 /** Thrown when the requested operation does not exist in the interface. */
 export class OperationNotFoundError extends Error {
-  constructor(operation: string) {
-    super(`openbindings: operation not found: ${operation}`);
+  constructor(operation: string, searched?: string[]) {
+    const detail =
+      searched && searched.length > 0
+        ? `; searched operation identifiers (keys and aliases): [${searched.join(", ")}]`
+        : "";
+    super(`openbindings: operation not found: ${operation}${detail}`);
     this.name = "OperationNotFoundError";
   }
 }

@@ -5,13 +5,6 @@
  */
 export type JSONSchema = Record<string, unknown>;
 
-/** Maps a local operation to an operation in another interface via a role. */
-export interface Satisfies {
-  role: string;
-  operation: string;
-  [key: string]: unknown;
-}
-
 /** An example input/output pair for an operation. */
 export interface OperationExample {
   description?: string;
@@ -25,8 +18,12 @@ export interface Operation {
   description?: string;
   deprecated?: boolean;
   tags?: string[];
+  /**
+   * Additional names for this operation, equal in standing to its key. The key
+   * plus aliases form one flat, document-unique namespace; every name resolves
+   * to this operation (see resolveOperation / OBI-T-13).
+   */
   aliases?: string[];
-  satisfies?: Satisfies[];
 
   idempotent?: boolean;
   input?: JSONSchema | null;
@@ -104,7 +101,6 @@ export interface OBInterface {
   description?: string;
   schemas?: Record<string, JSONSchema>;
   operations: Record<string, Operation>;
-  roles?: Record<string, string>;
   sources?: Record<string, Source>;
   bindings?: Record<string, BindingEntry>;
   /** Named security entries referenced by bindings. Each entry is an array of methods in preference order. */

@@ -4,7 +4,7 @@ OpenAPI 3.x binding invoker and interface creator for the [OpenBindings](https:/
 
 This package enables OpenBindings to invoke operations against OpenAPI specs and synthesize OBI documents from them. It reads OpenAPI 3.x documents, constructs HTTP requests, applies credentials via security schemes, and returns results as a stream of events.
 
-See the [spec](https://github.com/openbindings/spec) and [creators-and-invokers guide](https://github.com/openbindings/spec/blob/main/guides/creators-and-invokers.md) for how invokers and creators fit into the OpenBindings architecture.
+See the [spec](https://github.com/openbindings/spec) and the [roles overview](https://openbindings.com/interfaces) for how invokers and creators fit into the OpenBindings architecture.
 
 ## Install
 

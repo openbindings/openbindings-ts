@@ -22,6 +22,7 @@ import {
   UnknownSourceError,
 } from "./errors.js";
 import { combineInvokers, type CombinedInvoker } from "./combiners.js";
+import { resolveOperation, allOperationIdentifiers } from "./resolve-operation.js";
 import { ERR_BINDING_NOT_FOUND, ERR_TRANSFORM_ERROR, ERR_VALIDATION_FAILED } from "./errcodes.js";
 import { matchesRange, parseRange } from "./format-token.js";
 import { buildSchemaDefs, compileExampleSchema, safeValidate } from "./schema-validation.js";
@@ -116,10 +117,16 @@ export class OperationInvoker {
   ): AsyncGenerator<InvocationOutput> {
     const iface = input.interface;
     if (!iface) throw new MissingInterfaceError();
-    const op = iface.operations[input.operation];
-    if (!op) {
-      throw new OperationNotFoundError(input.operation);
+    // OBI-T-13: resolve against the flat key+aliases namespace. Bindings are
+    // selected by the resolved canonical key, not the name the caller used.
+    const resolved = resolveOperation(iface, input.operation);
+    if (!resolved) {
+      throw new OperationNotFoundError(
+        input.operation,
+        allOperationIdentifiers(iface),
+      );
     }
+    const { key: opKey, operation: op } = resolved;
 
     let bindingKey: string;
     let binding: BindingEntry;
@@ -140,7 +147,7 @@ export class OperationInvoker {
     } else {
       const selector = this.bindingSelector ?? ((iface: OBInterface, op: string) =>
         defaultBindingSelector(iface, op, this.availableFormats()));
-      ({ key: bindingKey, binding } = selector(iface, input.operation));
+      ({ key: bindingKey, binding } = selector(iface, opKey));
     }
 
     const source = iface.sources?.[binding.source];

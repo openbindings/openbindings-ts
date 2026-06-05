@@ -4,7 +4,7 @@ AsyncAPI 3.x binding invoker and interface creator for the [OpenBindings](https:
 
 This package enables OpenBindings to invoke operations against AsyncAPI specs and synthesize OBI documents from them. It supports HTTP/SSE for event streaming, HTTP POST for sending messages, and WebSocket for bidirectional communication. Documents are parsed with `js-yaml` and `$ref` pointers resolved with `@openbindings/sdk`'s built-in dereferencer (browser-safe, no Node.js dependencies). Credentials are applied via the spec's security schemes.
 
-See the [spec](https://github.com/openbindings/spec) and [creators-and-invokers guide](https://github.com/openbindings/spec/blob/main/guides/creators-and-invokers.md) for how invokers and creators fit into the OpenBindings architecture.
+See the [spec](https://github.com/openbindings/spec) and the [roles overview](https://openbindings.com/interfaces) for how invokers and creators fit into the OpenBindings architecture.
 
 ## Install
 

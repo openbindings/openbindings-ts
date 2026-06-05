@@ -46,16 +46,6 @@
         "$ref": "#/$defs/Operation"
       }
     },
-    "roles": {
-      "type": "object",
-      "description": "Interfaces this document intends to satisfy, mapping local aliases to URLs/paths of other OpenBindings interfaces.",
-      "propertyNames": {
-        "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$"
-      },
-      "additionalProperties": {
-        "type": "string"
-      }
-    },
     "sources": {
       "type": "object",
       "description": "Registry of binding artifacts (e.g., OpenAPI/AsyncAPI/proto).",
@@ -133,17 +123,10 @@
         },
         "aliases": {
           "type": "array",
-          "description": "Alternate names for matching compatibility.",
+          "description": "Additional names for this operation, equal in standing to its key. The key plus aliases form one flat, document-unique namespace; every name resolves to this operation.",
           "items": {
             "type": "string",
             "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$"
-          }
-        },
-        "satisfies": {
-          "type": "array",
-          "description": "Explicit mappings to operations in other interfaces.",
-          "items": {
-            "$ref": "#/$defs/Satisfies"
           }
         },
         "idempotent": {
@@ -190,24 +173,6 @@
         },
         "output": {
           "description": "Example output value (must validate against output schema)."
-        }
-      },
-      "additionalProperties": true
-    },
-    "Satisfies": {
-      "type": "object",
-      "required": [
-        "role",
-        "operation"
-      ],
-      "properties": {
-        "role": {
-          "type": "string",
-          "description": "Role key referencing an entry in the document's roles map."
-        },
-        "operation": {
-          "type": "string",
-          "description": "Operation key or alias within the role's interface."
         }
       },
       "additionalProperties": true

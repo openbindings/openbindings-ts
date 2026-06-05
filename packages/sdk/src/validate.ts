@@ -15,12 +15,12 @@ export interface ValidateOptions {
 
 const KNOWN_INTERFACE_FIELDS = new Set([
   "openbindings", "name", "version", "description",
-  "schemas", "operations", "roles",
+  "schemas", "operations",
   "sources", "bindings", "transforms", "security",
 ]);
 
 const KNOWN_OPERATION_FIELDS = new Set([
-  "description", "deprecated", "tags", "aliases", "satisfies",
+  "description", "deprecated", "tags", "aliases",
   "idempotent", "input", "output", "examples",
 ]);
 
@@ -29,7 +29,6 @@ const KNOWN_BINDING_FIELDS = new Set([
   "operation", "source", "ref", "priority", "description", "deprecated",
   "inputTransform", "outputTransform", "security",
 ]);
-const KNOWN_SATISFIES_FIELDS = new Set(["role", "operation"]);
 const KNOWN_EXAMPLE_FIELDS = new Set(["description", "input", "output"]);
 
 // OBI-D-04 identifier pattern: every map key and operation alias must match.
@@ -98,20 +97,6 @@ export function validateInterface(
     }
   }
 
-  // Validate roles: keys match the identifier pattern (OBI-D-04), values are
-  // non-empty and well-formed URI references (OBI-D-06).
-  if (iface.roles) {
-    for (const k of Object.keys(iface.roles).sort()) {
-      validateIdent(errs, "roles key", k);
-      const v = iface.roles[k];
-      if (!(v ?? "").trim()) {
-        errs.push(`roles["${k}"]: value must be non-empty`);
-      } else {
-        validateURIRef(errs, `roles["${k}"]`, v);
-      }
-    }
-  }
-
   // Validate schemas: keys match identifier pattern (OBI-D-04); each schema
   // walked for OBI-D-06 ($ref URI), OBI-D-07 ($schema dialect), OBI-D-08 (no
   // $vocabulary).
@@ -166,26 +151,6 @@ export function validateInterface(
       aliasOwner.set(a, k);
     }
 
-    // Satisfies sanity + OBI-D-14 (no duplicate role+operation pairs).
-    const seenSatisfies = new Map<string, number>();
-    for (let idx = 0; idx < (op.satisfies ?? []).length; idx++) {
-      const s = op.satisfies![idx];
-      if (!(s.role ?? "").trim()) {
-        errs.push(`operations["${k}"].satisfies[${idx}].role: required`);
-      } else if (!iface.roles?.[s.role]) {
-        errs.push(`operations["${k}"].satisfies[${idx}].role: references unknown role "${s.role}" (OBI-D-13)`);
-      }
-      if (!(s.operation ?? "").trim()) {
-        errs.push(`operations["${k}"].satisfies[${idx}].operation: required`);
-      }
-      const pair = `${s.role}\u0000${s.operation}`;
-      const firstIdx = seenSatisfies.get(pair);
-      if (firstIdx !== undefined) {
-        errs.push(`operations["${k}"].satisfies[${idx}]: duplicate (role="${s.role}", operation="${s.operation}") — already at [${firstIdx}] (OBI-D-14)`);
-      } else {
-        seenSatisfies.set(pair, idx);
-      }
-    }
 
     // Walk operation input/output schemas for OBI-D-06/D-07/D-08.
     if (op.input != null) {
@@ -202,9 +167,6 @@ export function validateInterface(
 
     if (opts.rejectUnknownTypedFields) {
       appendUnknown(errs, `operations["${k}"]`, op, KNOWN_OPERATION_FIELDS);
-      for (let idx = 0; idx < (op.satisfies ?? []).length; idx++) {
-        appendUnknown(errs, `operations["${k}"].satisfies[${idx}]`, op.satisfies![idx], KNOWN_SATISFIES_FIELDS);
-      }
       for (const [ek, ex] of Object.entries(op.examples ?? {})) {
         appendUnknown(errs, `operations["${k}"].examples["${ek}"]`, ex, KNOWN_EXAMPLE_FIELDS);
       }

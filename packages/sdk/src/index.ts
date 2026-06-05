@@ -1,6 +1,5 @@
 export type {
   JSONSchema,
-  Satisfies,
   OperationExample,
   Operation,
   Source,
@@ -118,7 +117,10 @@ export { fetchInterface, MEDIA_TYPE, WELL_KNOWN_PATH } from "./fetch.js";
 export type { FetchInterfaceOptions, FetchedInterface } from "./fetch.js";
 
 export { checkInterfaceCompatibility, isOBInterface } from "./compatibility.js";
-export type { CompatibilityIssue, CheckCompatibilityOptions } from "./compatibility.js";
+export type { CompatibilityIssue } from "./compatibility.js";
+
+export { resolveOperation, allOperationIdentifiers } from "./resolve-operation.js";
+export type { ResolvedOperation } from "./resolve-operation.js";
 
 export { formatName, maybeJSON, detectFormatVersion, isHttpUrl } from "./helpers.js";
 

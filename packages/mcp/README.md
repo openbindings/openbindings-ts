@@ -4,7 +4,7 @@ Model Context Protocol (MCP) binding invoker and interface creator for the [Open
 
 This package enables OpenBindings to invoke operations against MCP servers and synthesize OBI documents from them. It connects to MCP servers via the Streamable HTTP transport, dispatches calls to tools, resources, resource templates, and prompts, and returns results as a stream of events. Built on `@modelcontextprotocol/sdk`.
 
-See the [spec](https://github.com/openbindings/spec) and [creators-and-invokers guide](https://github.com/openbindings/spec/blob/main/guides/creators-and-invokers.md) for how invokers and creators fit into the OpenBindings architecture.
+See the [spec](https://github.com/openbindings/spec) and the [roles overview](https://openbindings.com/interfaces) for how invokers and creators fit into the OpenBindings architecture.
 
 ## Install
 

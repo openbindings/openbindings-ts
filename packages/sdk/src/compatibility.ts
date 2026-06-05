@@ -1,4 +1,5 @@
-import type { OBInterface, Operation } from "./types.js";
+import type { OBInterface } from "./types.js";
+import { resolveOperation } from "./resolve-operation.js";
 import { Normalizer, inputCompatible, outputCompatible } from "./schema-profile/index.js";
 import type { JSONObject } from "./schema-profile/index.js";
 
@@ -8,27 +9,14 @@ export type CompatibilityIssue = {
   detail?: string;
 };
 
-export type CheckCompatibilityOptions = {
-  /**
-   * Role key identifying the required interface (e.g., "openbindings.workspace-manager").
-   * When provided, enables `satisfies`-based matching: an operation in the provided
-   * interface can satisfy a required operation via its `satisfies` array entry
-   * `{ role: requiredInterfaceId, operation: opKey }`.
-   */
-  requiredInterfaceId?: string;
-};
-
 /**
  * Checks whether a provided interface satisfies the requirements of a
- * required interface. For each operation the required interface declares,
- * the algorithm searches the provided interface using three strategies
- * (first match wins):
- *
- *   1. **Direct key match** — `provided.operations[opKey]` exists
- *   2. **Satisfies match** — any provided operation has a `satisfies` entry
- *      with `{ role: requiredInterfaceId, operation: opKey }`
- *      (requires `options.requiredInterfaceId`)
- *   3. **Aliases match** — any provided operation has `aliases` containing `opKey`
+ * required interface. For each operation the required interface declares by
+ * key, the provided interface is searched by that name against its flat
+ * key+aliases namespace (OBI-T-13): a provided operation matches if its key
+ * equals the required key or one of its aliases does. Carrying the required
+ * contract's operation name as an alias is exactly how an implementation
+ * claims to fulfill that contract.
  *
  * For each matched pair, schemas are normalized (resolving $ref pointers,
  * flattening allOf, etc.) and checked:
@@ -40,17 +28,15 @@ export type CheckCompatibilityOptions = {
 export async function checkInterfaceCompatibility(
   required: OBInterface,
   provided: OBInterface,
-  options?: CheckCompatibilityOptions,
 ): Promise<CompatibilityIssue[]> {
   const issues: CompatibilityIssue[] = [];
-  const interfaceId = options?.requiredInterfaceId;
 
   // Normalizers resolve $refs against their respective interface's schemas.
   const reqNorm = new Normalizer({ root: required as unknown as Record<string, unknown> });
   const provNorm = new Normalizer({ root: provided as unknown as Record<string, unknown> });
 
   for (const [opKey, requiredOp] of Object.entries(required.operations)) {
-    const providedOp = findMatchingOperation(provided, opKey, interfaceId);
+    const providedOp = resolveOperation(provided, opKey)?.operation;
     if (!providedOp) {
       issues.push({ operation: opKey, kind: "missing" });
       continue;
@@ -104,43 +90,6 @@ export async function checkInterfaceCompatibility(
   }
 
   return issues;
-}
-
-/**
- * Finds an operation in `provided` that matches the required `opKey`, using
- * the three-strategy search: direct key, satisfies, aliases.
- */
-function findMatchingOperation(
-  provided: OBInterface,
-  opKey: string,
-  requiredInterfaceId?: string,
-): Operation | undefined {
-  // 1. Direct key match
-  if (provided.operations[opKey]) {
-    return provided.operations[opKey];
-  }
-
-  // 2. Satisfies match (only when requiredInterfaceId is known)
-  if (requiredInterfaceId) {
-    for (const op of Object.values(provided.operations)) {
-      if (
-        op.satisfies?.some(
-          (s) => s.role === requiredInterfaceId && s.operation === opKey,
-        )
-      ) {
-        return op;
-      }
-    }
-  }
-
-  // 3. Aliases match
-  for (const op of Object.values(provided.operations)) {
-    if (op.aliases?.includes(opKey)) {
-      return op;
-    }
-  }
-
-  return undefined;
 }
 
 /** Returns true if a value looks like a valid OBInterface document. */

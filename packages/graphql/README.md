@@ -4,7 +4,7 @@ GraphQL binding invoker and interface creator for the [OpenBindings](https://ope
 
 This package enables OpenBindings to invoke operations against GraphQL endpoints and synthesize OBI documents from GraphQL schemas via introspection. It builds queries, mutations, and subscriptions from operation refs, applies credentials, and returns results as a stream of events. Subscriptions stream over the `graphql-transport-ws` WebSocket protocol.
 
-See the [spec](https://github.com/openbindings/spec) and [creators-and-invokers guide](https://github.com/openbindings/spec/blob/main/guides/creators-and-invokers.md) for how invokers and creators fit into the OpenBindings architecture.
+See the [spec](https://github.com/openbindings/spec) and the [roles overview](https://openbindings.com/interfaces) for how invokers and creators fit into the OpenBindings architecture.
 
 ## Install
 
