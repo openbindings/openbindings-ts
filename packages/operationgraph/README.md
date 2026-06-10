@@ -40,14 +40,17 @@ operationInvoker.addBindingInvoker(operationGraph);
 After that, the operation-graph invoker behaves like any other format invoker. Operations whose bindings reference an `openbindings.operation-graph@0.2.0` source route to it; that source's `graphs` map is keyed by ref.
 
 ```typescript
-for await (const event of operationInvoker.invoke({
+const call = operationInvoker.invoke({
   interface: iface,
   operation: "summarizeOrder",
-  input: { orderId: "abc123" },
-})) {
-  if (event.error) console.error(event.error.message);
-  else console.log(event.output);
+});
+await call.write({ orderId: "abc123" }); // the binding closes input after the first read
+
+for await (const event of call.outputs) {
+  console.log(event);
 }
+// Terminal failures (including exit-node errors) throw from the iteration
+// as InvocationError, e.g. with code ERR_OPERATION_GRAPH_EXIT.
 ```
 
 ## Conventions
@@ -92,17 +95,17 @@ for await (const event of operationInvoker.invoke({
 
 - **`MAX_EVENTS = 100_000`** events per invocation. Prevents runaway graphs (recursive operation nodes, unbounded buffers) from consuming unbounded memory.
 - **`MAX_ERROR_DEPTH = 32`** for `onError` chains. Errors in error-handling paths are bounded so a misconfigured graph cannot loop forever.
-- **Per-node mailboxes**: each node consumes from its own AsyncQueue; backpressure is handled by the producer awaiting `enqueue`.
+- **Per-node mailboxes**: each node consumes from its own AsyncQueue; caller-facing backpressure comes from the engine awaiting `emitOutput` on the invocation handle.
 
 These match the Go reference invoker's invariants and are validated by the same conformance corpus.
 
 ## How it works
 
-1. The invoker receives a `BindingInvocationInput` with a source whose format is `openbindings.operation-graph@0.2.0`.
+1. The invoker receives `BindingInvocationArgs` with a source whose format is `openbindings.operation-graph@0.2.0` and returns an `Invocation` handle synchronously; the graph's work is scheduled on a microtask.
 2. It parses the source's `content` as a `Document`, validates against the format schema, and looks up the graph by `ref`.
-3. An `Engine` instance is constructed with the graph plus the parent `OperationInvoker` (for recursing into `operation` nodes) and the OBI's transform evaluator.
-4. The engine seeds the `input` node with the caller's input, then spins up an async loop per node. Each loop reads from its mailbox, applies its node-type logic, and pushes events to downstream mailboxes.
-5. Events flowing into the `output` node are yielded back to the caller as `InvocationOutput` instances. An event flowing into an `exit` node terminates the graph and produces an `operation_graph_exit` error.
+3. The graph's initial event is the first message written to the handle (the invoker closes the input side after reading it; for operations that declare no input it closes input on entry and seeds `undefined`).
+4. An `Engine` instance is constructed with the graph plus the parent `OperationInvoker` (for recursing into `operation` nodes) and the OBI's transform evaluator. The engine seeds the `input` node, then spins up an async loop per node. Each loop reads from its mailbox, applies its node-type logic, and pushes events to downstream mailboxes.
+5. Events flowing into the `output` node are emitted on the handle (`emitOutput`, with backpressure). An event flowing into an `exit` node terminates the graph: normally on success, or with a terminal `InvocationError` of code `ERR_OPERATION_GRAPH_EXIT` when the node sets `error: true`. Cancelling the handle aborts the engine and any in-flight sub-operations.
 
 ## License
 

@@ -1,24 +1,26 @@
 import {
+  InvocationError,
+  InvocationImpl,
   NoSourcesError,
+  ERR_RUNTIME,
   ERR_SOURCE_LOAD_FAILED,
-  ERR_AUTH_REQUIRED,
-  resolveSecurity,
   type BindingInvoker,
-  type InterfaceCreator,
-  type SourceInspector,
-  type BindingInvocationInput,
+  type BindingInvocationArgs,
+  type ContextRequiredDetails,
   type CreateInput,
+  type FormatInfo,
+  type InterfaceCreator,
+  type Invocation,
   type OBInterface,
   type Source,
-  type InvocationOutput,
-  type FormatInfo,
   type SourceInspection,
+  type SourceInspector,
 } from "@openbindings/sdk";
-import type { OpenAPIDocument } from "./types.js";
+import type { OpenAPIDocument, OpenAPIOperation } from "./types.js";
 import { FORMAT_TOKEN } from "./constants.js";
-import { invokeBinding, resolveServerKey } from "./invoke.js";
+import { requiredContext, resolveRequestBaseURL, runBinding } from "./invoke.js";
 import { convertToInterface } from "./create.js";
-import { loadOpenAPIDocument, buildJsonPointerRef } from "./util.js";
+import { buildJsonPointerRef, errorMessage, loadOpenAPIDocument, parseRef } from "./util.js";
 
 // ---------------------------------------------------------------------------
 // Shared doc-cache helper
@@ -54,72 +56,89 @@ export class OpenAPIInvoker implements BindingInvoker {
     return [{ token: FORMAT_TOKEN, description: "OpenAPI 3.x HTTP APIs" }];
   }
 
-  /** Invokes a single binding by making an HTTP request and yielding the result or error. */
-  async *invokeBinding(
-    input: BindingInvocationInput,
-    options?: { signal?: AbortSignal },
-  ): AsyncIterable<InvocationOutput> {
-    let doc: OpenAPIDocument;
-    try {
-      doc = await loadDoc(this.docCache, input.source.location, input.source.content, options, input.fetch);
-    } catch (e: unknown) {
-      yield { error: { code: ERR_SOURCE_LOAD_FAILED, message: e instanceof Error ? e.message : String(e) } };
-      return;
-    }
-
-    const enriched = await this.resolveStoreContext(input, doc);
-    let result = await invokeBinding(enriched, options, doc);
-
-    if (result.error?.code === ERR_AUTH_REQUIRED && enriched.security?.length && enriched.callbacks) {
-      const creds = await resolveSecurity(enriched.security, enriched.callbacks, enriched.fetch);
-      if (creds) {
-        const retryInput = {
-          ...enriched,
-          context: { ...enriched.context, ...creds },
-        };
-        if (retryInput.store) {
-          const key = resolveServerKey(doc, retryInput.source.location);
-          if (key) {
-            try { await retryInput.store.set(key, retryInput.context!); } catch {}
-          }
-        }
-        result = await invokeBinding(retryInput, options, doc);
-      }
-    }
-
-    if (result.error) {
-      yield { error: result.error, status: result.status, durationMs: result.durationMs };
-    } else {
-      yield { output: result.output, status: result.status, durationMs: result.durationMs };
-    }
+  /**
+   * Returns the invocation handle synchronously; the HTTP work is scheduled
+   * asynchronously. Input messages flow through the handle's `write`
+   * channel. All pre-dispatch failures (bad ref, missing server URL,
+   * unresolvable operation, missing context) terminate the handle before
+   * any network side effect.
+   */
+  invokeBinding<I = unknown, O = unknown>(args: BindingInvocationArgs): Invocation<I, O> {
+    const inv = new InvocationImpl<unknown, unknown>({ signal: args.signal });
+    queueMicrotask(() => {
+      this.run(args, inv).catch((err: unknown) => {
+        inv.fireError(
+          err instanceof InvocationError
+            ? err
+            : new InvocationError(ERR_RUNTIME, errorMessage(err)),
+        );
+      });
+    });
+    return inv as Invocation<I, O>;
   }
 
   /**
-   * Derives the context key from the OpenAPI doc, looks up stored context,
-   * and merges with any developer-supplied context. Dev context wins.
+   * Side-effect-free preflight (the `prepareBinding` operation of the
+   * openbindings.binding-invoker role): derives the operation's auth
+   * requirements from the document's securitySchemes and reports the
+   * context the invocation would require, or null when it can proceed.
+   *
+   * Uses the source content or a previously cached document; never
+   * fetches. When the document would have to be fetched to learn its
+   * security schemes, reports no requirement and lets the invocation
+   * raise the challenge instead.
    */
-  private async resolveStoreContext(
-    input: BindingInvocationInput,
-    doc: OpenAPIDocument,
-  ): Promise<BindingInvocationInput> {
-    if (!input.store) return input;
-
-    const key = resolveServerKey(doc, input.source.location);
-    if (!key) return input;
-
-    let stored: Record<string, unknown> | null;
-    try {
-      stored = await input.store.get(key);
-    } catch {
-      return input;
+  async prepareBinding(args: BindingInvocationArgs): Promise<ContextRequiredDetails | null> {
+    let doc: OpenAPIDocument | undefined;
+    if (args.source.content != null) {
+      try {
+        doc = await loadOpenAPIDocument(args.source.location, args.source.content);
+      } catch {
+        return null;
+      }
+    } else if (args.source.location) {
+      doc = this.docCache.get(args.source.location);
     }
-    if (!stored) return input;
+    if (!doc) return null;
 
-    const merged = input.context && Object.keys(input.context).length > 0
-      ? { ...stored, ...input.context }
-      : stored;
+    let op: OpenAPIOperation | undefined;
+    try {
+      const { path, method } = parseRef(args.ref);
+      op = doc.paths?.[path]?.[method] as OpenAPIOperation | undefined;
+    } catch {
+      return null;
+    }
+    if (!op) return null;
 
-    return { ...input, context: merged };
+    let baseURL: string;
+    try {
+      baseURL = resolveRequestBaseURL(doc, args.context, args.source.location);
+    } catch {
+      // No server URL: the invocation fails with ERR_SOURCE_CONFIG_ERROR
+      // before auth matters, so there is no context to report.
+      return null;
+    }
+    return requiredContext(doc, op, args.context, baseURL);
+  }
+
+  private async run(
+    args: BindingInvocationArgs,
+    inv: InvocationImpl<unknown, unknown>,
+  ): Promise<void> {
+    let doc: OpenAPIDocument;
+    try {
+      doc = await loadDoc(
+        this.docCache,
+        args.source.location,
+        args.source.content,
+        { signal: inv.signal },
+        args.fetch,
+      );
+    } catch (e: unknown) {
+      inv.fireError(new InvocationError(ERR_SOURCE_LOAD_FAILED, errorMessage(e)));
+      return;
+    }
+    await runBinding(args, inv, doc);
   }
 }
 

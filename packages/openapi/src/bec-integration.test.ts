@@ -4,24 +4,15 @@ import {
   OperationInvoker,
   MemoryStore,
   fetchInterface,
-  normalizeContextKey,
+  normalizeEndpoint,
+  single,
+  storeContextResolver,
+  CONTEXT_REQUIRED,
+  ERR_AUTH_REQUIRED,
+  type ContextRequiredDetails,
   type OBInterface,
-  type PlatformCallbacks,
-  type InvocationOutput,
 } from "@openbindings/sdk";
 import { OpenAPIInvoker, OpenAPICreator } from "./invoker.js";
-
-
-async function collectStream(stream: AsyncIterable<InvocationOutput>): Promise<{ output?: unknown; error?: { code: string; message: string } }> {
-  let lastOutput: unknown;
-  let firstError: { code: string; message: string } | undefined;
-  for await (const ev of stream) {
-    if (ev.error && !firstError) firstError = ev.error;
-    if (ev.output !== undefined) lastOutput = ev.output;
-  }
-  if (firstError) return { error: firstError };
-  return { output: lastOutput };
-}
 
 const SECRET = "test-token-123";
 
@@ -97,6 +88,8 @@ const ITEMS = [
   { id: 2, name: "Bravo" },
 ];
 
+let protectedHits = 0;
+
 function handler(port: number) {
   return (req: IncomingMessage, res: ServerResponse) => {
     if (req.url === "/openapi.json" && req.method === "GET") {
@@ -106,6 +99,7 @@ function handler(port: number) {
     }
 
     if (req.url === "/items" && req.method === "GET") {
+      protectedHits++;
       if (req.headers.authorization !== `Bearer ${SECRET}`) {
         res.writeHead(401, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ error: "unauthorized" }));
@@ -118,6 +112,7 @@ function handler(port: number) {
 
     const itemMatch = req.url?.match(/^\/items\/(\d+)$/);
     if (itemMatch && req.method === "GET") {
+      protectedHits++;
       if (req.headers.authorization !== `Bearer ${SECRET}`) {
         res.writeHead(401, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ error: "unauthorized" }));
@@ -138,16 +133,6 @@ function handler(port: number) {
     res.end();
   };
 }
-
-const requiredInterface: OBInterface = {
-  openbindings: "0.2",
-  operations: {
-    listItems: { kind: "method" },
-    getItem: { kind: "method" },
-  },
-  bindings: {},
-  sources: {},
-};
 
 describe("BEC Integration (real HTTP)", () => {
   let server: Server;
@@ -172,102 +157,131 @@ describe("BEC Integration (real HTTP)", () => {
     server?.close();
   });
 
-  async function fetch(): Promise<OBInterface> {
+  async function fetchIface(): Promise<OBInterface> {
     const { iface } = await fetchInterface(specURL, { creators: [new OpenAPICreator()] });
     return iface;
   }
 
-  function invokeListItems(opInv: OperationInvoker, iface: OBInterface) {
-    return collectStream(opInv.invoke({ interface: iface, operation: "listItems" }));
+  function contextKey(): string {
+    return normalizeEndpoint(`http://127.0.0.1:${port}`);
   }
 
-  function invokeGetItem(opInv: OperationInvoker, iface: OBInterface, input: { id: number }) {
-    return collectStream(opInv.invoke({ interface: iface, operation: "getItem", input }));
-  }
+  it("surfaces CONTEXT_REQUIRED without hitting the API when no credentials are available", async () => {
+    const opInvoker = new OperationInvoker([new OpenAPIInvoker()]);
+    const iface = await fetchIface();
 
-  it("returns 401 when no credentials are stored (no prompt/retry)", async () => {
-    const store = new MemoryStore();
-    const opInvoker = new OperationInvoker([new OpenAPIInvoker()], { contextStore: store });
-    const iface = await fetch();
+    const before = protectedHits;
+    const call = opInvoker.invoke({ interface: iface, operation: "listItems" });
 
-    const result = await invokeListItems(opInvoker, iface);
-    expect(result.error).toBeDefined();
-    expect(result.error!.code).toBe("auth_required");
+    await expect(call.closed).rejects.toMatchObject({
+      code: CONTEXT_REQUIRED,
+      details: {
+        key: contextKey(),
+        alternatives: [{ requirements: [{ type: "auth.bearer" }] }],
+      },
+    });
+    expect(protectedHits).toBe(before);
   });
 
   it("succeeds when credentials are pre-stored, reuses across operations", async () => {
     const store = new MemoryStore();
-    const contextKey = normalizeContextKey(`http://127.0.0.1:${port}`);
-    await store.set(contextKey, { bearerToken: SECRET });
+    await store.set(contextKey(), { bearerToken: SECRET });
 
-    const opInvoker = new OperationInvoker([new OpenAPIInvoker()], { contextStore: store });
-    const iface = await fetch();
+    const opInvoker = new OperationInvoker([new OpenAPIInvoker()], {
+      contextResolver: storeContextResolver(store),
+    });
+    const iface = await fetchIface();
 
-    const result1 = await invokeListItems(opInvoker, iface);
-    expect(result1.error).toBeUndefined();
-    expect(result1.output).toEqual(ITEMS);
+    const call1 = opInvoker.invoke({ interface: iface, operation: "listItems" });
+    await expect(single(call1.outputs)).resolves.toEqual(ITEMS);
 
-    const result2 = await invokeListItems(opInvoker, iface);
-    expect(result2.error).toBeUndefined();
-    expect(result2.output).toEqual(ITEMS);
+    const call2 = opInvoker.invoke({ interface: iface, operation: "listItems" });
+    await expect(single(call2.outputs)).resolves.toEqual(ITEMS);
 
-    const result3 = await invokeGetItem(opInvoker, iface, { id: 1 });
-    expect(result3.error).toBeUndefined();
-    expect(result3.output).toEqual({ id: 1, name: "Alpha" });
+    const call3 = opInvoker.invoke({ interface: iface, operation: "getItem" });
+    await call3.write({ id: 1 });
+    await expect(single(call3.outputs)).resolves.toEqual({ id: 1, name: "Alpha" });
   });
 
-  it("returns 401 error when no prompt callback is available", async () => {
-    const store = new MemoryStore();
-    const opInvoker = new OperationInvoker([new OpenAPIInvoker()], { contextStore: store });
-    const iface = await fetch();
-
-    const result = await invokeListItems(opInvoker, iface);
-    expect(result.error).toBeDefined();
-    expect(result.error!.code).toBe("auth_required");
-  });
-
-  it("skips prompt when credentials are pre-stored", async () => {
-    const store = new MemoryStore();
-    let promptCount = 0;
-
-    const callbacks: PlatformCallbacks = {
-      prompt: async () => {
-        promptCount++;
-        return "should-not-be-called";
+  it("does not consult the resolver when caller context suffices", async () => {
+    let resolves = 0;
+    const opInvoker = new OperationInvoker([new OpenAPIInvoker()], {
+      contextResolver: (_details: ContextRequiredDetails) => {
+        resolves++;
+        return null;
       },
-    };
+    });
+    const iface = await fetchIface();
 
-    const contextKey = normalizeContextKey(`http://127.0.0.1:${port}`);
-    await store.set(contextKey, { bearerToken: SECRET });
+    const call = opInvoker.invoke({
+      interface: iface,
+      operation: "listItems",
+      context: { bearerToken: SECRET },
+    });
 
-    const opInvoker = new OperationInvoker(
-      [new OpenAPIInvoker()],
-      { contextStore: store, platformCallbacks: callbacks },
-    );
-    const iface = await fetch();
+    await expect(single(call.outputs)).resolves.toEqual(ITEMS);
+    expect(resolves).toBe(0);
+  });
 
-    const result = await invokeListItems(opInvoker, iface);
-    expect(result.error).toBeUndefined();
-    expect(result.output).toEqual(ITEMS);
-    expect(promptCount).toBe(0);
+  it("surfaces ERR_AUTH_REQUIRED when the service rejects resolved credentials", async () => {
+    const store = new MemoryStore();
+    await store.set(contextKey(), { bearerToken: "wrong-token" });
+
+    const opInvoker = new OperationInvoker([new OpenAPIInvoker()], {
+      contextResolver: storeContextResolver(store),
+    });
+    const iface = await fetchIface();
+
+    const call = opInvoker.invoke({ interface: iface, operation: "listItems" });
+    await expect(call.closed).rejects.toMatchObject({
+      code: ERR_AUTH_REQUIRED,
+      details: { status: 401 },
+    });
   });
 
   it("isolated stores do not share credentials", async () => {
     const store1 = new MemoryStore();
     const store2 = new MemoryStore();
-    const contextKey = normalizeContextKey(`http://127.0.0.1:${port}`);
-    await store1.set(contextKey, { bearerToken: SECRET });
+    await store1.set(contextKey(), { bearerToken: SECRET });
 
-    const opInvoker1 = new OperationInvoker([new OpenAPIInvoker()], { contextStore: store1 });
-    const opInvoker2 = new OperationInvoker([new OpenAPIInvoker()], { contextStore: store2 });
-    const iface = await fetch();
+    const opInvoker1 = new OperationInvoker([new OpenAPIInvoker()], {
+      contextResolver: storeContextResolver(store1),
+    });
+    const opInvoker2 = new OperationInvoker([new OpenAPIInvoker()], {
+      contextResolver: storeContextResolver(store2),
+    });
+    const iface = await fetchIface();
 
-    const result1 = await invokeListItems(opInvoker1, iface);
-    expect(result1.error).toBeUndefined();
-    expect(result1.output).toEqual(ITEMS);
+    const call1 = opInvoker1.invoke({ interface: iface, operation: "listItems" });
+    await expect(single(call1.outputs)).resolves.toEqual(ITEMS);
 
-    const result2 = await invokeListItems(opInvoker2, iface);
-    expect(result2.error).toBeDefined();
-    expect(result2.error!.code).toBe("auth_required");
+    const call2 = opInvoker2.invoke({ interface: iface, operation: "listItems" });
+    await expect(call2.closed).rejects.toMatchObject({ code: CONTEXT_REQUIRED });
+  });
+
+  it("prepareBinding reports the challenge once the document is cached", async () => {
+    const invoker = new OpenAPIInvoker();
+    const opInvoker = new OperationInvoker([invoker]);
+    const iface = await fetchIface();
+
+    const args = {
+      source: { format: "openapi@3.0", location: specURL },
+      ref: "#/paths/~1items/get",
+    };
+
+    // Nothing cached yet: preflight declines rather than fetching.
+    await expect(invoker.prepareBinding(args)).resolves.toBeNull();
+
+    // A (challenged) invocation loads and caches the document.
+    await opInvoker.invoke({ interface: iface, operation: "listItems" }).closed.catch(() => {});
+
+    await expect(invoker.prepareBinding(args)).resolves.toMatchObject({
+      key: contextKey(),
+      alternatives: [{ requirements: [{ type: "auth.bearer" }] }],
+    });
+
+    await expect(
+      invoker.prepareBinding({ ...args, context: { bearerToken: SECRET } }),
+    ).resolves.toBeNull();
   });
 });

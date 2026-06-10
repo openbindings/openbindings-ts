@@ -1,25 +1,48 @@
-import type {
-  BindingInvocationInput,
-  InvocationOutput,
-} from "@openbindings/sdk";
+/**
+ * AsyncAPI binding execution over the cardinality-agnostic invocation handle.
+ *
+ * One entrypoint ({@link runBinding}) drives every channel shape against the
+ * binding-facing {@link BindingHandle}:
+ *
+ *   - send + http/https     unary HTTP POST: first input -> request body,
+ *                           response -> single output
+ *   - send + ws/wss         client-streaming publish: every input -> one
+ *                           socket frame; closing input closes the call
+ *   - receive + http/https  SSE subscribe: server events -> outputs
+ *   - receive + ws/wss      WebSocket subscribe (bidi-capable): socket
+ *                           frames -> outputs, caller inputs -> socket frames
+ *
+ * All pre-dispatch failures (bad ref, missing server, missing context) are
+ * raised via `fireError` BEFORE any network I/O, per the binding-author
+ * contract.
+ */
+
 import {
+  InvocationError,
+  contextRequiredError,
+  contextSatisfies,
+  normalizeEndpoint,
   maybeJSON,
   contextBearerToken,
   contextApiKey,
   contextBasicAuth,
+  contextString,
   contextHeaders,
   contextCookies,
   contextMetadata,
-  normalizeContextKey,
   httpErrorCode,
   ERR_INVALID_REF,
-  ERR_SOURCE_LOAD_FAILED,
   ERR_SOURCE_CONFIG_ERROR,
   ERR_REF_NOT_FOUND,
-  ERR_EXECUTION_FAILED,
+  ERR_MISSING_INPUT,
   ERR_CONNECT_FAILED,
   ERR_RESPONSE_ERROR,
   ERR_STREAM_ERROR,
+  type BindingHandle,
+  type BindingInvocationArgs,
+  type ContextAlternative,
+  type ContextRequiredDetails,
+  type Metadata,
 } from "@openbindings/sdk";
 import type {
   AsyncAPIDocument,
@@ -27,146 +50,109 @@ import type {
   AsyncAPISecurityScheme,
 } from "./asyncapi-types.js";
 import { isSecurityScheme } from "./asyncapi-types.js";
-import { parseAsyncAPIDocument, parseRef, errorMessage } from "./util.js";
-import type { WSPool } from "./ws-pool.js";
+import { parseRef, errorMessage } from "./util.js";
+import type { PooledWS, WSPool } from "./ws-pool.js";
 
 const MAX_RESPONSE_BYTES = 10 * 1024 * 1024;
 
-export async function invokeBinding(
-  input: BindingInvocationInput,
-  options?: { signal?: AbortSignal },
-  preloadedDoc?: AsyncAPIDocument,
-): Promise<InvocationOutput> {
-  const start = performance.now();
+type Handle = BindingHandle<unknown, unknown>;
 
-  let doc: AsyncAPIDocument;
-  if (preloadedDoc) {
-    doc = preloadedDoc;
-  } else {
-    try {
-      doc = await parseAsyncAPIDocument(input.source.location, input.source.content, options, input.fetch);
-    } catch (e: unknown) {
-      return failedOutput(start, ERR_SOURCE_LOAD_FAILED, errorMessage(e));
-    }
-  }
+// ---------------------------------------------------------------------------
+// Entry point
+// ---------------------------------------------------------------------------
 
+/**
+ * Resolves the operation, checks runtime context, and dispatches to the
+ * protocol-specific runner. Terminates the handle exactly once.
+ */
+export async function runBinding(
+  args: BindingInvocationArgs,
+  h: Handle,
+  doc: AsyncAPIDocument,
+  wsPool: WSPool,
+): Promise<void> {
   let opID: string;
   try {
-    opID = parseRef(input.ref);
+    opID = parseRef(args.ref);
   } catch (e: unknown) {
-    return failedOutput(start, ERR_INVALID_REF, errorMessage(e));
+    h.fireError(new InvocationError(ERR_INVALID_REF, errorMessage(e)));
+    return;
   }
 
-  const asyncOp = findOperation(doc, opID);
+  const asyncOp = (doc.operations ?? {})[opID];
   if (!asyncOp) {
-    return failedOutput(start, ERR_REF_NOT_FOUND, `operation "${opID}" not in AsyncAPI doc`);
+    h.fireError(
+      new InvocationError(ERR_REF_NOT_FOUND, `operation "${opID}" not in AsyncAPI doc`),
+    );
+    return;
   }
 
-  let serverURL: string, protocol: string;
+  let serverURL: string;
+  let protocol: string;
   try {
-    ({ url: serverURL, protocol } = resolveServer(doc, input.context));
+    ({ url: serverURL, protocol } = resolveServer(doc, args.context));
   } catch (e: unknown) {
-    return failedOutput(start, ERR_SOURCE_CONFIG_ERROR, errorMessage(e));
+    h.fireError(new InvocationError(ERR_SOURCE_CONFIG_ERROR, errorMessage(e)));
+    return;
+  }
+
+  // Context negotiation: challenge BEFORE any connection is opened.
+  const required = requiredContext(doc, asyncOp, serverURL, args.context);
+  if (required) {
+    h.fireError(
+      contextRequiredError(
+        `operation "${opID}" requires credentials the context does not provide`,
+        required,
+      ),
+    );
+    return;
   }
 
   const address = asyncOp.channel?.address ?? "";
 
   switch (asyncOp.action) {
     case "receive":
-      return invokeReceive(serverURL, protocol, address, doc, asyncOp, input, start, options);
+      if (protocol === "ws" || protocol === "wss") {
+        await runWSReceive(wsPool, serverURL, address, doc, asyncOp, args, h);
+      } else if (protocol === "http" || protocol === "https") {
+        await runSSEReceive(serverURL, address, doc, asyncOp, args, h);
+      } else {
+        h.fireError(
+          new InvocationError(
+            ERR_SOURCE_CONFIG_ERROR,
+            `receive not supported for protocol "${protocol}" (supported: http, https, ws, wss)`,
+          ),
+        );
+      }
+      return;
     case "send":
-      return invokeSend(serverURL, protocol, address, doc, asyncOp, input, start, options);
+      if (protocol === "ws" || protocol === "wss") {
+        await runWSSend(wsPool, serverURL, address, doc, asyncOp, args, h);
+      } else if (protocol === "http" || protocol === "https") {
+        await runHTTPSend(serverURL, address, doc, asyncOp, args, h);
+      } else {
+        h.fireError(
+          new InvocationError(
+            ERR_SOURCE_CONFIG_ERROR,
+            `send not supported for protocol "${protocol}" (supported: http, https, ws, wss)`,
+          ),
+        );
+      }
+      return;
     default:
-      return failedOutput(start, ERR_EXECUTION_FAILED, `unknown action "${asyncOp.action}"`);
-  }
-}
-
-export async function* subscribeBinding(
-  input: BindingInvocationInput,
-  options?: { signal?: AbortSignal },
-  preloadedDoc?: AsyncAPIDocument,
-  wsPool?: WSPool,
-): AsyncIterable<InvocationOutput> {
-  let doc: AsyncAPIDocument;
-  if (preloadedDoc) {
-    doc = preloadedDoc;
-  } else {
-    try {
-      doc = await parseAsyncAPIDocument(input.source.location, input.source.content, options, input.fetch);
-    } catch (e: unknown) {
-      yield { error: { code: ERR_SOURCE_LOAD_FAILED, message: errorMessage(e) } };
-      return;
-    }
-  }
-
-  let opID: string;
-  try {
-    opID = parseRef(input.ref);
-  } catch (e: unknown) {
-    yield { error: { code: ERR_INVALID_REF, message: errorMessage(e) } };
-    return;
-  }
-
-  const asyncOp = findOperation(doc, opID);
-  if (!asyncOp) {
-    yield { error: { code: ERR_REF_NOT_FOUND, message: `operation "${opID}" not in AsyncAPI doc` } };
-    return;
-  }
-
-  let serverURL: string, protocol: string;
-  try {
-    ({ url: serverURL, protocol } = resolveServer(doc, input.context));
-  } catch (e: unknown) {
-    yield { error: { code: ERR_SOURCE_CONFIG_ERROR, message: errorMessage(e) } };
-    return;
-  }
-
-  const address = asyncOp.channel?.address ?? "";
-
-  if (asyncOp.action === "receive") {
-    // Server pushes to client (SSE or WebSocket listen).
-    if (protocol === "ws" || protocol === "wss") {
-      yield* wsPool
-        ? pooledStreamWS(wsPool, serverURL, address, doc, asyncOp, input, options)
-        : streamWS(serverURL, address, doc, asyncOp, input, options);
-    } else if (protocol === "http" || protocol === "https") {
-      yield* streamSSE(serverURL, address, doc, asyncOp, input, options);
-    } else {
-      yield { error: { code: ERR_SOURCE_CONFIG_ERROR, message: `streaming not supported for protocol "${protocol}" (supported: http, https, ws, wss)` } };
-      return;
-    }
-  } else if (asyncOp.action === "send") {
-    // Client sends a message on a shared WebSocket (fire-and-forget).
-    if (protocol === "ws" || protocol === "wss") {
-      yield* wsPool
-        ? pooledSendWS(wsPool, serverURL, address, input, options)
-        : streamWS(serverURL, address, doc, asyncOp, input, options);
-    } else {
-      yield { error: { code: ERR_SOURCE_CONFIG_ERROR, message: `streaming for "send" action requires ws or wss protocol (got "${protocol}")` } };
-      return;
-    }
-  } else {
-    yield { error: { code: ERR_SOURCE_CONFIG_ERROR, message: `unknown action "${asyncOp.action}"` } };
-    return;
+      h.fireError(
+        new InvocationError(
+          ERR_SOURCE_CONFIG_ERROR,
+          `unknown action "${(asyncOp as { action: string }).action}"`,
+        ),
+      );
   }
 }
 
 // ---------------------------------------------------------------------------
-// Helpers
+// Server resolution
 // ---------------------------------------------------------------------------
 
-function findOperation(
-  doc: AsyncAPIDocument,
-  opID: string,
-): AsyncAPIOperation | undefined {
-  const ops = doc.operations ?? {};
-  return ops[opID];
-}
-
-/**
- * Extracts the server origin from an AsyncAPI doc and normalizes it as a
- * stable context store key.
- */
 const SUPPORTED_PROTOCOLS = new Set(["http", "https", "ws", "wss"]);
 
 function pickDocServer(doc: AsyncAPIDocument): { url: string; protocol: string } | null {
@@ -185,12 +171,7 @@ function pickDocServer(doc: AsyncAPIDocument): { url: string; protocol: string }
   return null;
 }
 
-export function resolveAsyncAPIServerKey(doc: AsyncAPIDocument): string {
-  const server = pickDocServer(doc);
-  return server ? normalizeContextKey(server.url.replace(/\/+$/, "")) : "";
-}
-
-function resolveServer(
+export function resolveServer(
   doc: AsyncAPIDocument,
   ctx?: Record<string, unknown>,
 ): { url: string; protocol: string } {
@@ -210,7 +191,7 @@ function resolveServer(
 }
 
 // ---------------------------------------------------------------------------
-// Security
+// Context requirements (CONTEXT_REQUIRED negotiation)
 // ---------------------------------------------------------------------------
 
 function resolveSecuritySchemes(
@@ -237,6 +218,62 @@ function resolveSecuritySchemes(
   return [];
 }
 
+/** Maps an AsyncAPI security scheme to a standard requirement family, or null when unknown. */
+function requirementType(scheme: AsyncAPISecurityScheme): string | null {
+  switch (scheme.type) {
+    case "http": {
+      const s = (scheme.scheme ?? "").toLowerCase();
+      if (s === "bearer") return "auth.bearer";
+      if (s === "basic") return "auth.basic";
+      return null;
+    }
+    case "httpBearer":
+      return "auth.bearer";
+    case "userPassword":
+      return "auth.basic";
+    case "apiKey":
+    case "httpApiKey":
+      return "auth.apiKey";
+    case "oauth2":
+      return "auth.oauth2";
+    default:
+      return null;
+  }
+}
+
+/**
+ * Computes the context the binding requires for this operation, or null when
+ * the provided context already satisfies it (or the doc declares nothing
+ * checkable). Side-effect-free; shared by runBinding and prepareBinding.
+ */
+export function requiredContext(
+  doc: AsyncAPIDocument,
+  asyncOp: AsyncAPIOperation,
+  serverURL: string,
+  ctx?: Record<string, unknown>,
+): ContextRequiredDetails | null {
+  const schemes = resolveSecuritySchemes(doc, asyncOp);
+  const alternatives: ContextAlternative[] = [];
+  for (const scheme of schemes) {
+    const type = requirementType(scheme);
+    if (!type) continue; // unknown scheme family: not checkable, not enforced
+    const requirement: ContextAlternative["requirements"][number] = { type };
+    if (scheme.description) requirement.description = scheme.description;
+    alternatives.push({ requirements: [requirement] });
+  }
+  if (alternatives.length === 0) return null;
+
+  const details: ContextRequiredDetails = {
+    key: normalizeEndpoint(serverURL),
+    alternatives,
+  };
+  if (ctx && contextSatisfies(ctx, details)) return null;
+  return details;
+}
+
+// ---------------------------------------------------------------------------
+// Credential application
+// ---------------------------------------------------------------------------
 
 function applyCredentialsViaSchemes(
   headers: Headers,
@@ -309,6 +346,14 @@ function applyCredentialsViaSchemes(
         }
         break;
       }
+      case "oauth2": {
+        const token = contextBearerToken(ctx) || contextString(ctx, "accessToken");
+        if (token) {
+          headers.set("Authorization", `Bearer ${token}`);
+          applied = true;
+        }
+        break;
+      }
       case "userPassword": {
         const basic = contextBasicAuth(ctx);
         if (basic) {
@@ -373,166 +418,57 @@ function applyContext(
 }
 
 // ---------------------------------------------------------------------------
-// Invoke: Receive (SSE)
+// Receive over HTTP: SSE subscribe
 // ---------------------------------------------------------------------------
 
-async function invokeReceive(
+async function runSSEReceive(
   serverURL: string,
-  protocol: string,
   address: string,
   doc: AsyncAPIDocument,
   asyncOp: AsyncAPIOperation,
-  input: BindingInvocationInput,
-  start: number,
-  options?: { signal?: AbortSignal },
-): Promise<InvocationOutput> {
-  let maxEvents = 1;
-  if (input.input && typeof input.input === "object" && !Array.isArray(input.input)) {
-    const m = input.input as Record<string, unknown>;
-    if (typeof m["maxEvents"] === "number" && m["maxEvents"] > 0) {
-      maxEvents = m["maxEvents"];
-    }
-  }
+  args: BindingInvocationArgs,
+  h: Handle,
+): Promise<void> {
+  // Server -> client: the channel takes no caller input.
+  void h.closeInput();
 
-  if (protocol !== "http" && protocol !== "https") {
-    return failedOutput(start, ERR_SOURCE_CONFIG_ERROR,
-      `receive not supported for protocol "${protocol}" (supported: http, https)`);
-  }
-
-  return invokeSSESubscribe(serverURL, address, maxEvents, doc, asyncOp, input, start, options);
-}
-
-async function invokeSend(
-  serverURL: string,
-  protocol: string,
-  address: string,
-  doc: AsyncAPIDocument,
-  asyncOp: AsyncAPIOperation,
-  input: BindingInvocationInput,
-  start: number,
-  options?: { signal?: AbortSignal },
-): Promise<InvocationOutput> {
-  if (protocol !== "http" && protocol !== "https") {
-    return failedOutput(start, ERR_SOURCE_CONFIG_ERROR,
-      `send not supported for protocol "${protocol}" (supported: http, https)`);
-  }
-
-  return invokeHTTPSend(serverURL, address, doc, asyncOp, input, start, options);
-}
-
-async function invokeSSESubscribe(
-  serverURL: string,
-  address: string,
-  maxEvents: number,
-  doc: AsyncAPIDocument,
-  asyncOp: AsyncAPIOperation,
-  input: BindingInvocationInput,
-  start: number,
-  options?: { signal?: AbortSignal },
-): Promise<InvocationOutput> {
   let url = `${serverURL}/${address.replace(/^\/+/, "")}`;
-
   const headers = new Headers({ Accept: "text/event-stream" });
-  const authQueryParams = applyContext(headers, doc, asyncOp, input.context);
+  const authQueryParams = applyContext(headers, doc, asyncOp, args.context);
   if (authQueryParams) {
     const sep = url.includes("?") ? "&" : "?";
     url += sep + new URLSearchParams(authQueryParams).toString();
   }
 
-  const doFetch = input.fetch ?? fetch;
+  const doFetch = args.fetch ?? fetch;
   let resp: Response;
   try {
-    resp = await doFetch(url, { headers, signal: options?.signal });
+    resp = await doFetch(url, { headers, signal: h.signal });
   } catch (e: unknown) {
-    return failedOutput(start, ERR_CONNECT_FAILED, errorMessage(e));
+    if (h.signal.aborted) return; // cancellation is already terminal
+    h.fireError(new InvocationError(ERR_CONNECT_FAILED, errorMessage(e)));
+    return;
   }
 
   if (resp.status < 200 || resp.status >= 300) {
-    return httpErrorOutput(start, resp.status, resp.statusText);
-  }
-
-  const events: unknown[] = [];
-  const reader = resp.body?.getReader();
-  if (!reader) {
-    return failedOutput(start, ERR_CONNECT_FAILED, "no response body");
-  }
-
-  const decoder = new TextDecoder();
-  let buffer = "";
-  let dataLines: string[] = [];
-  let totalBytes = 0;
-
-  outer: while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-
-    totalBytes += value.byteLength;
-    if (totalBytes > MAX_RESPONSE_BYTES) {
-      reader.cancel().catch(() => {});
-      return failedOutput(start, ERR_RESPONSE_ERROR, `SSE stream exceeds ${MAX_RESPONSE_BYTES} byte limit`);
-    }
-
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split("\n");
-    buffer = lines.pop()!;
-
-    for (const line of lines) {
-      if (line.startsWith("data:")) {
-        dataLines.push(line.slice(5).trim());
-        continue;
-      }
-      if (line === "" && dataLines.length > 0) {
-        events.push(parseSSEPayload(dataLines));
-        dataLines = [];
-        if (events.length >= maxEvents) break outer;
-      }
-    }
-  }
-
-  if (dataLines.length > 0) {
-    events.push(parseSSEPayload(dataLines));
-  }
-
-  reader.cancel().catch(() => {});
-
-  const output = events.length === 1 ? events[0] : events;
-  return {
-    output,
-    status: resp.status,
-    durationMs: Math.round(performance.now() - start),
-  };
-}
-
-async function* streamSSE(
-  serverURL: string,
-  address: string,
-  doc: AsyncAPIDocument,
-  asyncOp: AsyncAPIOperation,
-  input: BindingInvocationInput,
-  options?: { signal?: AbortSignal },
-): AsyncIterable<InvocationOutput> {
-  let url = `${serverURL}/${address.replace(/^\/+/, "")}`;
-
-  const headers = new Headers({ Accept: "text/event-stream" });
-  const authQueryParams = applyContext(headers, doc, asyncOp, input.context);
-  if (authQueryParams) {
-    const sep = url.includes("?") ? "&" : "?";
-    url += sep + new URLSearchParams(authQueryParams).toString();
-  }
-
-  const doFetch = input.fetch ?? fetch;
-  const resp = await doFetch(url, { headers, signal: options?.signal });
-
-  if (resp.status < 200 || resp.status >= 300) {
-    yield { error: { code: ERR_CONNECT_FAILED, message: `SSE endpoint returned HTTP ${resp.status}` } };
+    const body = await readErrorBody(resp);
+    h.fireError(
+      new InvocationError(
+        httpErrorCode(resp.status),
+        `HTTP ${resp.status} ${resp.statusText}`,
+        { status: resp.status, body },
+      ),
+    );
     return;
   }
 
   const reader = resp.body?.getReader();
   if (!reader) {
-    yield { error: { code: ERR_CONNECT_FAILED, message: "no response body" } };
+    h.fireError(new InvocationError(ERR_CONNECT_FAILED, "no response body"));
     return;
   }
+
+  h.setHeader(headersToMetadata(resp.headers));
 
   const decoder = new TextDecoder();
   let buffer = "";
@@ -546,7 +482,12 @@ async function* streamSSE(
 
       totalBytes += value.byteLength;
       if (totalBytes > MAX_RESPONSE_BYTES) {
-        yield { error: { code: ERR_RESPONSE_ERROR, message: `SSE stream exceeds ${MAX_RESPONSE_BYTES} byte limit` } };
+        h.fireError(
+          new InvocationError(
+            ERR_RESPONSE_ERROR,
+            `SSE stream exceeds ${MAX_RESPONSE_BYTES} byte limit`,
+          ),
+        );
         return;
       }
 
@@ -560,287 +501,101 @@ async function* streamSSE(
           continue;
         }
         if (line === "" && dataLines.length > 0) {
-          yield { output: parseSSEPayload(dataLines) };
+          // Throws if the invocation terminated while parked: stop reading.
+          await h.emitOutput(parseSSEPayload(dataLines));
           dataLines = [];
         }
       }
     }
 
     if (dataLines.length > 0) {
-      yield { output: parseSSEPayload(dataLines) };
+      await h.emitOutput(parseSSEPayload(dataLines));
     }
+    h.closeOutput();
   } catch (e: unknown) {
-    if (options?.signal?.aborted) return;
-    yield { error: { code: ERR_STREAM_ERROR, message: errorMessage(e) } };
+    // emitOutput rethrows the terminal error (fireError is then a no-op);
+    // anything else is a genuine mid-stream failure.
+    h.fireError(
+      e instanceof InvocationError
+        ? e
+        : new InvocationError(ERR_STREAM_ERROR, errorMessage(e)),
+    );
   } finally {
     reader.cancel().catch(() => {});
   }
 }
 
 // ---------------------------------------------------------------------------
-// Invoke: WebSocket
+// Send over HTTP: unary POST
 // ---------------------------------------------------------------------------
 
-async function* streamWS(
+async function runHTTPSend(
   serverURL: string,
   address: string,
   doc: AsyncAPIDocument,
   asyncOp: AsyncAPIOperation,
-  input: BindingInvocationInput,
-  options?: { signal?: AbortSignal },
-): AsyncIterable<InvocationOutput> {
-  const wsURL = new URL(`/${address.replace(/^\/+/, "")}`, serverURL);
-
-  // Apply query-param credentials (e.g. apiKey in query) to the WebSocket URL.
-  // Note: browser WebSocket API does not support custom headers, so header-based
-  // auth is handled via the message body (bearer token) instead.
-  const tempHeaders = new Headers();
-  const authQueryParams = applyContext(tempHeaders, doc, asyncOp, input.context);
-  if (authQueryParams) {
-    for (const [k, v] of Object.entries(authQueryParams)) {
-      wsURL.searchParams.set(k, v);
-    }
-  }
-
-  const ws = new WebSocket(wsURL.toString());
-
-  const queue: InvocationOutput[] = [];
-  let resolve: (() => void) | undefined;
-  let done = false;
-
-  ws.addEventListener("message", (ev) => {
-    try {
-      const parsed = JSON.parse(String(ev.data));
-      if (parsed.error) {
-        queue.push({ error: parsed.error });
-      } else if (parsed.data !== undefined) {
-        queue.push({ output: parsed.data });
-      } else {
-        queue.push({ output: parsed });
-      }
-    } catch {
-      queue.push({ output: String(ev.data) });
-    }
-    resolve?.();
-  });
-
-  ws.addEventListener("close", () => {
-    done = true;
-    resolve?.();
-  });
-
-  ws.addEventListener("error", (ev) => {
-    queue.push({
-      error: { code: ERR_CONNECT_FAILED, message: `WebSocket error: ${String(ev)}` },
-    });
-    done = true;
-    resolve?.();
-  });
-
-  await new Promise<void>((r) => {
-    ws.addEventListener("open", () => {
-      const payload: Record<string, unknown> = {};
-      if (input.input !== undefined && typeof input.input === "object" && input.input !== null) {
-        Object.assign(payload, input.input);
-      }
-      const bearerToken = input.context ? contextBearerToken(input.context) : undefined;
-      if (bearerToken) {
-        payload.bearerToken = bearerToken;
-      }
-      ws.send(JSON.stringify(payload));
-      r();
-    });
-    ws.addEventListener("error", () => r());
-  });
-
-  const onAbort = () => {
-    ws.close(1000, "aborted");
-    done = true;
-    resolve?.();
-  };
-  options?.signal?.addEventListener("abort", onAbort);
-
-  try {
-    while (true) {
-      while (queue.length > 0) {
-        yield queue.shift()!;
-      }
-      if (done) break;
-      await new Promise<void>((r) => { resolve = r; });
-    }
-  } finally {
-    options?.signal?.removeEventListener("abort", onAbort);
-    if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
-      ws.close(1000);
-    }
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Pooled WebSocket: receive (long-lived stream via shared connection)
-// ---------------------------------------------------------------------------
-
-async function* pooledStreamWS(
-  pool: WSPool,
-  serverURL: string,
-  address: string,
-  doc: AsyncAPIDocument,
-  asyncOp: AsyncAPIOperation,
-  input: BindingInvocationInput,
-  options?: { signal?: AbortSignal },
-): AsyncIterable<InvocationOutput> {
-  let pooled;
-  try {
-    pooled = await pool.acquire(serverURL, address);
-  } catch (e: unknown) {
-    yield { error: { code: ERR_CONNECT_FAILED, message: errorMessage(e) } };
+  args: BindingInvocationArgs,
+  h: Handle,
+): Promise<void> {
+  // Unary: the first input is the message payload.
+  const first = await readFirstInput(h);
+  if (!first.ok) {
+    h.fireError(
+      new InvocationError(ERR_MISSING_INPUT, "send operation requires an input message"),
+    );
     return;
   }
+  void h.closeInput();
 
-  // Send the initial payload (same as unpooled streamWS on-open behavior).
-  const payload: Record<string, unknown> = {};
-  if (input.input !== undefined && typeof input.input === "object" && input.input !== null) {
-    Object.assign(payload, input.input);
-  }
-  const bearerToken = input.context ? contextBearerToken(input.context) : undefined;
-  if (bearerToken) {
-    payload.bearerToken = bearerToken;
-  }
-  if (Object.keys(payload).length > 0) {
-    pooled.send(JSON.stringify(payload));
-  }
-
-  const queue: InvocationOutput[] = [];
-  let resolve: (() => void) | undefined;
-  let done = false;
-
-  const removeMsg = pooled.onMessage((event) => {
-    queue.push(event);
-    resolve?.();
-  });
-
-  const removeClose = pooled.onClose(() => {
-    done = true;
-    resolve?.();
-  });
-
-  const onAbort = () => {
-    done = true;
-    resolve?.();
-  };
-  options?.signal?.addEventListener("abort", onAbort);
-
-  try {
-    while (true) {
-      while (queue.length > 0) {
-        yield queue.shift()!;
-      }
-      if (done) break;
-      await new Promise<void>((r) => { resolve = r; });
-    }
-  } finally {
-    options?.signal?.removeEventListener("abort", onAbort);
-    removeMsg();
-    removeClose();
-    pooled.release();
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Pooled WebSocket: send (fire-and-forget on shared connection)
-// ---------------------------------------------------------------------------
-
-async function* pooledSendWS(
-  pool: WSPool,
-  serverURL: string,
-  address: string,
-  input: BindingInvocationInput,
-  options?: { signal?: AbortSignal },
-): AsyncIterable<InvocationOutput> {
-  let pooled;
-  try {
-    pooled = await pool.acquire(serverURL, address);
-  } catch (e: unknown) {
-    yield { error: { code: ERR_CONNECT_FAILED, message: errorMessage(e) } };
-    return;
-  }
-
-  try {
-    const payload: Record<string, unknown> = {};
-    if (input.input !== undefined && typeof input.input === "object" && input.input !== null) {
-      Object.assign(payload, input.input);
-    }
-    pooled.send(JSON.stringify(payload));
-  } finally {
-    pooled.release();
-  }
-  // Fire-and-forget: no events to yield.
-}
-
-// ---------------------------------------------------------------------------
-// Invoke: HTTP Send (POST)
-// ---------------------------------------------------------------------------
-
-async function invokeHTTPSend(
-  serverURL: string,
-  address: string,
-  doc: AsyncAPIDocument,
-  asyncOp: AsyncAPIOperation,
-  input: BindingInvocationInput,
-  start: number,
-  options?: { signal?: AbortSignal },
-): Promise<InvocationOutput> {
   let url = `${serverURL}/${address.replace(/^\/+/, "")}`;
-
-  const body = input.input != null ? JSON.stringify(input.input) : "{}";
+  const body = first.value != null ? JSON.stringify(first.value) : "{}";
 
   const headers = new Headers({
     "Content-Type": "application/json",
     Accept: "application/json",
   });
-  const authQueryParams = applyContext(headers, doc, asyncOp, input.context);
+  const authQueryParams = applyContext(headers, doc, asyncOp, args.context);
   if (authQueryParams) {
     const sep = url.includes("?") ? "&" : "?";
     url += sep + new URLSearchParams(authQueryParams).toString();
   }
 
-  const doFetch = input.fetch ?? fetch;
+  const doFetch = args.fetch ?? fetch;
   let resp: Response;
   try {
-    resp = await doFetch(url, { method: "POST", headers, body, signal: options?.signal });
+    resp = await doFetch(url, { method: "POST", headers, body, signal: h.signal });
   } catch (e: unknown) {
-    return failedOutput(start, ERR_EXECUTION_FAILED, errorMessage(e));
+    if (h.signal.aborted) return;
+    h.fireError(new InvocationError(ERR_CONNECT_FAILED, errorMessage(e)));
+    return;
   }
-
-  const durationMs = Math.round(performance.now() - start);
 
   if (resp.status >= 400) {
-    let errorBody: unknown;
-    try {
-      const text = await readResponseText(resp, MAX_RESPONSE_BYTES);
-      if (text && maybeJSON(text)) {
-        try { errorBody = JSON.parse(text); } catch { errorBody = text; }
-      } else if (text) {
-        errorBody = text;
-      }
-    } catch { /* ignore read errors on error responses */ }
-    return {
-      output: errorBody,
-      status: resp.status,
-      durationMs: Math.round(performance.now() - start),
-      error: { code: httpErrorCode(resp.status), message: `HTTP ${resp.status} ${resp.statusText}` },
-    };
+    const errBody = await readErrorBody(resp);
+    h.fireError(
+      new InvocationError(
+        httpErrorCode(resp.status),
+        `HTTP ${resp.status} ${resp.statusText}`,
+        { status: resp.status, body: errBody },
+      ),
+    );
+    return;
   }
 
+  h.setHeader(headersToMetadata(resp.headers));
+
   if (resp.status === 202 || resp.status === 204) {
-    return { status: resp.status, durationMs };
+    // Accepted with no payload: a publish acknowledgment, not an output.
+    h.closeOutput();
+    return;
   }
 
   let respText: string;
   try {
     respText = await readResponseText(resp, MAX_RESPONSE_BYTES);
   } catch (e: unknown) {
-    return failedOutput(start, ERR_RESPONSE_ERROR, errorMessage(e));
+    h.fireError(new InvocationError(ERR_RESPONSE_ERROR, errorMessage(e)));
+    return;
   }
 
   let output: unknown;
@@ -854,12 +609,238 @@ async function invokeHTTPSend(
     output = respText;
   }
 
-  return { output, status: resp.status, durationMs };
+  if (output !== undefined) await h.emitOutput(output);
+  h.closeOutput();
+}
+
+// ---------------------------------------------------------------------------
+// WebSocket frames
+// ---------------------------------------------------------------------------
+
+type WSFrame =
+  | { kind: "output"; value: unknown }
+  | { kind: "error"; error: unknown; message: string };
+
+/**
+ * Interprets one socket frame. `{error}` frames are terminal stream errors;
+ * `{data}` frames unwrap to the payload; everything else passes through.
+ */
+function parseWSFrame(raw: string): WSFrame {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return { kind: "output", value: raw };
+  }
+  if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+    const obj = parsed as Record<string, unknown>;
+    if (obj["error"]) {
+      const err = obj["error"];
+      const message =
+        err && typeof err === "object" &&
+        typeof (err as Record<string, unknown>)["message"] === "string"
+          ? ((err as Record<string, unknown>)["message"] as string)
+          : "server reported an error";
+      return { kind: "error", error: err, message };
+    }
+    if (obj["data"] !== undefined) {
+      return { kind: "output", value: obj["data"] };
+    }
+  }
+  return { kind: "output", value: parsed };
+}
+
+function buildWSURL(
+  serverURL: string,
+  address: string,
+  doc: AsyncAPIDocument,
+  asyncOp: AsyncAPIOperation,
+  ctx?: Record<string, unknown>,
+): string {
+  const url = new URL(`/${address.replace(/^\/+/, "")}`, serverURL);
+  // Apply query-param credentials (e.g. apiKey in query) to the WebSocket URL.
+  // Browser WebSocket cannot set handshake headers, so header-based auth is
+  // handled via the first-frame bearer convention instead.
+  const tempHeaders = new Headers();
+  const authQueryParams = applyContext(tempHeaders, doc, asyncOp, ctx);
+  if (authQueryParams) {
+    for (const [k, v] of Object.entries(authQueryParams)) {
+      url.searchParams.set(k, v);
+    }
+  }
+  return url.toString();
+}
+
+// ---------------------------------------------------------------------------
+// Receive over WebSocket: subscribe (bidi-capable) on a pooled socket
+// ---------------------------------------------------------------------------
+
+async function runWSReceive(
+  pool: WSPool,
+  serverURL: string,
+  address: string,
+  doc: AsyncAPIDocument,
+  asyncOp: AsyncAPIOperation,
+  args: BindingInvocationArgs,
+  h: Handle,
+): Promise<void> {
+  let pooled: PooledWS;
+  try {
+    pooled = await pool.acquire(serverURL, address, {
+      buildURL: (base, addr) => buildWSURL(base, addr, doc, asyncOp, args.context),
+      signal: h.signal,
+    });
+  } catch (e: unknown) {
+    if (h.signal.aborted) return;
+    h.fireError(new InvocationError(ERR_CONNECT_FAILED, errorMessage(e)));
+    return;
+  }
+
+  // First-frame bearer convention: browsers cannot set headers on WebSocket
+  // upgrades, so the token travels in the first message body.
+  const bearer = contextBearerToken(args.context);
+  if (bearer) pooled.send(JSON.stringify({ bearerToken: bearer }));
+
+  const frames: WSFrame[] = [];
+  let socketClosed = false;
+  let socketError: Error | undefined;
+  let wake: (() => void) | undefined;
+  const notify = () => wake?.();
+
+  const removeMsg = pooled.onMessage((data) => {
+    frames.push(parseWSFrame(data));
+    notify();
+  });
+  const removeClose = pooled.onClose((err) => {
+    socketClosed = true;
+    socketError = err;
+    notify();
+  });
+  const onAbort = () => notify();
+  h.signal.addEventListener("abort", onAbort);
+
+  // Socket -> outputs. Owns the terminal transition.
+  const outputPump = async (): Promise<void> => {
+    while (true) {
+      while (frames.length > 0) {
+        const frame = frames.shift()!;
+        if (frame.kind === "error") {
+          h.fireError(new InvocationError(ERR_STREAM_ERROR, frame.message, { error: frame.error }));
+          return;
+        }
+        // Throws if the invocation terminated while parked: stop emitting.
+        await h.emitOutput(frame.value);
+      }
+      if (h.signal.aborted) return;
+      if (socketClosed) {
+        if (socketError) {
+          h.fireError(new InvocationError(ERR_STREAM_ERROR, socketError.message));
+        } else {
+          h.closeOutput();
+        }
+        return;
+      }
+      await new Promise<void>((r) => {
+        wake = r;
+      });
+      wake = undefined;
+    }
+  };
+
+  // Inputs -> socket. Lets callers push subscription/control frames; closing
+  // input does NOT end the subscription (outputs keep flowing).
+  const inputPump = async (): Promise<void> => {
+    try {
+      for await (const msg of h.inputs()) {
+        pooled.send(JSON.stringify(msg));
+      }
+    } catch {
+      // Invocation terminated; the output pump owns the terminal transition.
+    }
+  };
+
+  try {
+    await Promise.all([
+      outputPump().catch((e: unknown) => {
+        h.fireError(
+          e instanceof InvocationError
+            ? e
+            : new InvocationError(ERR_STREAM_ERROR, errorMessage(e)),
+        );
+      }),
+      inputPump(),
+    ]);
+  } finally {
+    h.signal.removeEventListener("abort", onAbort);
+    removeMsg();
+    removeClose();
+    pooled.release();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Send over WebSocket: client-streaming publish on a pooled socket
+// ---------------------------------------------------------------------------
+
+async function runWSSend(
+  pool: WSPool,
+  serverURL: string,
+  address: string,
+  doc: AsyncAPIDocument,
+  asyncOp: AsyncAPIOperation,
+  args: BindingInvocationArgs,
+  h: Handle,
+): Promise<void> {
+  let pooled: PooledWS;
+  try {
+    pooled = await pool.acquire(serverURL, address, {
+      buildURL: (base, addr) => buildWSURL(base, addr, doc, asyncOp, args.context),
+      signal: h.signal,
+    });
+  } catch (e: unknown) {
+    if (h.signal.aborted) return;
+    h.fireError(new InvocationError(ERR_CONNECT_FAILED, errorMessage(e)));
+    return;
+  }
+
+  try {
+    // Every input is one frame; the loop ends cleanly when the caller closes
+    // input, and throws if the invocation terminates.
+    for await (const msg of h.inputs()) {
+      pooled.send(JSON.stringify(msg));
+    }
+    h.closeOutput();
+  } catch (e: unknown) {
+    h.fireError(
+      e instanceof InvocationError
+        ? e
+        : new InvocationError(ERR_STREAM_ERROR, errorMessage(e)),
+    );
+  } finally {
+    pooled.release();
+  }
 }
 
 // ---------------------------------------------------------------------------
 // Utilities
 // ---------------------------------------------------------------------------
+
+async function readFirstInput(
+  h: Handle,
+): Promise<{ ok: true; value: unknown } | { ok: false }> {
+  for await (const v of h.inputs()) {
+    return { ok: true, value: v };
+  }
+  return { ok: false };
+}
+
+function headersToMetadata(headers: Headers): Metadata {
+  const md: Metadata = {};
+  headers.forEach((value, key) => {
+    md[key] = [value];
+  });
+  return md;
+}
 
 function parseSSEPayload(dataLines: string[]): unknown {
   const raw = dataLines.join("\n");
@@ -867,6 +848,23 @@ function parseSSEPayload(dataLines: string[]): unknown {
     return JSON.parse(raw);
   } catch {
     return raw;
+  }
+}
+
+async function readErrorBody(resp: Response): Promise<unknown> {
+  try {
+    const text = await readResponseText(resp, MAX_RESPONSE_BYTES);
+    if (!text) return undefined;
+    if (maybeJSON(text)) {
+      try {
+        return JSON.parse(text);
+      } catch {
+        return text;
+      }
+    }
+    return text;
+  } catch {
+    return undefined;
   }
 }
 
@@ -894,24 +892,4 @@ async function readResponseText(resp: Response, maxBytes: number): Promise<strin
   }
 
   return chunks.join("");
-}
-
-function failedOutput(startMs: number, code: string, message: string): InvocationOutput {
-  return {
-    status: 1,
-    durationMs: Math.round(performance.now() - startMs),
-    error: { code, message },
-  };
-}
-
-function httpErrorOutput(startMs: number, statusCode: number, statusText: string): InvocationOutput {
-  return {
-    output: undefined,
-    status: statusCode,
-    durationMs: Math.round(performance.now() - startMs),
-    error: {
-      code: httpErrorCode(statusCode),
-      message: `HTTP ${statusCode} ${statusText}`,
-    },
-  };
 }

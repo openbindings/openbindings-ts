@@ -204,16 +204,13 @@ describe("convertToInterface", () => {
     expect(iface.sources?.["openapi"].location).toBe("https://example.com/api.json");
   });
 
-  it("populates security from bearer auth scheme", async () => {
+  it("does not emit a security section (auth is negotiated at invoke time)", async () => {
     const spec = {
       openapi: "3.0.0",
       info: { title: "Secure API" },
       components: {
         securitySchemes: {
-          bearerAuth: {
-            type: "http",
-            scheme: "bearer",
-          },
+          bearerAuth: { type: "http", scheme: "bearer" },
         },
       },
       security: [{ bearerAuth: [] }],
@@ -228,191 +225,10 @@ describe("convertToInterface", () => {
     };
     const iface = await convertToInterface(undefined, spec);
 
-    expect(iface.security).toBeDefined();
-    expect(iface.security!["bearerAuth"]).toEqual([
-      { type: "bearer" },
-    ]);
-    expect(iface.bindings!["listItems.openapi"].security).toBe("bearerAuth");
-  });
-
-  it("populates security from apiKey scheme", async () => {
-    const spec = {
-      openapi: "3.0.0",
-      info: { title: "API Key API" },
-      components: {
-        securitySchemes: {
-          apiKey: {
-            type: "apiKey",
-            name: "X-API-Key",
-            in: "header",
-          },
-        },
-      },
-      security: [{ apiKey: [] }],
-      paths: {
-        "/data": {
-          get: {
-            operationId: "getData",
-            responses: { "200": { description: "OK" } },
-          },
-        },
-      },
-    };
-    const iface = await convertToInterface(undefined, spec);
-
-    expect(iface.security!["apiKey"]).toEqual([
-      { type: "apiKey", name: "X-API-Key", in: "header" },
-    ]);
-    expect(iface.bindings!["getData.openapi"].security).toBe("apiKey");
-  });
-
-  it("populates security from oauth2 scheme", async () => {
-    const spec = {
-      openapi: "3.0.0",
-      info: { title: "OAuth API" },
-      components: {
-        securitySchemes: {
-          oauth: {
-            type: "oauth2",
-            flows: {
-              authorizationCode: {
-                authorizationUrl: "https://auth.example.com/authorize",
-                tokenUrl: "https://auth.example.com/token",
-                scopes: {
-                  "read:data": "Read data",
-                  "write:data": "Write data",
-                },
-              },
-            },
-          },
-        },
-      },
-      security: [{ oauth: [] }],
-      paths: {
-        "/resource": {
-          get: {
-            operationId: "getResource",
-            responses: { "200": { description: "OK" } },
-          },
-        },
-      },
-    };
-    const iface = await convertToInterface(undefined, spec);
-
-    expect(iface.security!["oauth"]).toEqual([
-      {
-        type: "oauth2",
-        authorizeUrl: "https://auth.example.com/authorize",
-        tokenUrl: "https://auth.example.com/token",
-        scopes: ["read:data", "write:data"],
-      },
-    ]);
-  });
-
-  it("uses operation-level security over document-level", async () => {
-    const spec = {
-      openapi: "3.0.0",
-      info: { title: "Mixed Security" },
-      components: {
-        securitySchemes: {
-          bearerAuth: { type: "http", scheme: "bearer" },
-          apiKey: { type: "apiKey", name: "key", in: "query" },
-        },
-      },
-      security: [{ bearerAuth: [] }],
-      paths: {
-        "/public": {
-          get: {
-            operationId: "publicOp",
-            security: [{}],
-            responses: { "200": { description: "OK" } },
-          },
-        },
-        "/special": {
-          get: {
-            operationId: "specialOp",
-            security: [{ apiKey: [] }],
-            responses: { "200": { description: "OK" } },
-          },
-        },
-        "/default": {
-          get: {
-            operationId: "defaultOp",
-            responses: { "200": { description: "OK" } },
-          },
-        },
-      },
-    };
-    const iface = await convertToInterface(undefined, spec);
-
-    // Public operation has empty security, so no security ref.
-    expect(iface.bindings!["publicOp.openapi"].security).toBeUndefined();
-
-    // Special operation uses apiKey.
-    expect(iface.bindings!["specialOp.openapi"].security).toBe("apiKey");
-
-    // Default operation inherits doc-level bearerAuth.
-    expect(iface.bindings!["defaultOp.openapi"].security).toBe("bearerAuth");
-  });
-
-  it("handles openIdConnect as bearer", async () => {
-    const spec = {
-      openapi: "3.0.0",
-      info: { title: "OIDC API" },
-      components: {
-        securitySchemes: {
-          oidc: {
-            type: "openIdConnect",
-            openIdConnectUrl: "https://example.com/.well-known/openid-configuration",
-          },
-        },
-      },
-      security: [{ oidc: [] }],
-      paths: {
-        "/me": {
-          get: {
-            operationId: "getMe",
-            responses: { "200": { description: "OK" } },
-          },
-        },
-      },
-    };
-    const iface = await convertToInterface(undefined, spec);
-
-    expect(iface.security!["oidc"]).toEqual([
-      { type: "bearer", description: "OpenID Connect" },
-    ]);
-  });
-
-  it("combines multiple security schemes into a single key", async () => {
-    const spec = {
-      openapi: "3.0.0",
-      info: { title: "Multi Auth" },
-      components: {
-        securitySchemes: {
-          bearerAuth: { type: "http", scheme: "bearer" },
-          apiKey: { type: "apiKey", name: "key", in: "header" },
-        },
-      },
-      security: [{ bearerAuth: [] }, { apiKey: [] }],
-      paths: {
-        "/data": {
-          get: {
-            operationId: "getData",
-            responses: { "200": { description: "OK" } },
-          },
-        },
-      },
-    };
-    const iface = await convertToInterface(undefined, spec);
-
-    expect(iface.security!["apiKey+bearerAuth"]).toBeDefined();
-    expect(iface.bindings!["getData.openapi"].security).toBe("apiKey+bearerAuth");
-  });
-
-  it("skips security when no securitySchemes defined", async () => {
-    const iface = await convertToInterface(undefined, MINIMAL_SPEC);
+    // Security schemes stay in the OpenAPI source; the binding invoker
+    // derives requirements from them at invoke time (CONTEXT_REQUIRED).
     expect(iface.security).toBeUndefined();
+    expect(iface.bindings!["listItems.openapi"].security).toBeUndefined();
   });
 });
 

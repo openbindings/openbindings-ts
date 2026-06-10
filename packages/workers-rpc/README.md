@@ -19,20 +19,25 @@ This package wraps that mechanism as a `BindingInvoker`. The dispatch is local t
 The invoker is constructed per-request because `env` is request-scoped on Workers:
 
 ```typescript
-import { OperationInvoker } from "@openbindings/sdk";
+import { OperationInvoker, single } from "@openbindings/sdk";
 import { WorkersRpcInvoker } from "@openbindings/workers-rpc";
-import { MyServiceInvoker } from "./generated/my-service-invoker.js";
+import { createMyServiceInvoker } from "./generated/my-service-invoker.js";
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext) {
-    const operationInvoker = new OperationInvoker([
+    const base = new OperationInvoker([
       new WorkersRpcInvoker({ binding: env.MY_SERVICE }),
     ]);
-    const myService = new MyServiceInvoker(operationInvoker);
+    // For workers-rpc the OBI is embedded in the codegen output — the typed
+    // invoker defaults to that contract; there is no remote /.well-known
+    // endpoint.
+    const myService = createMyServiceInvoker(base);
 
-    // For workers-rpc the OBI is embedded in the codegen output as
-    // `MyServiceInvoker.CONTRACT` — there is no remote /.well-known endpoint.
-    const result = await myService.someMethod(MyServiceInvoker.CONTRACT, { foo: "bar" });
+    // One call shape for every cardinality: write input through the handle,
+    // read outputs from it. `single` asserts exactly one output (unary).
+    const call = myService.someMethod();
+    await call.write({ foo: "bar" });
+    const result = await single(call.outputs);
     return Response.json(result);
   },
 };
@@ -65,17 +70,17 @@ export default {
 }
 ```
 
-`workers-rpc://` is a convention indicating a non-HTTP source whose OBI is embedded in the codegen output rather than fetched from `/.well-known/openbindings`. Callers pass `<Name>Invoker.CONTRACT` (the embedded OBI) to typed-invoker methods directly.
+`workers-rpc://` is a convention indicating a non-HTTP source whose OBI is embedded in the codegen output rather than fetched from `/.well-known/openbindings`. The generated typed invoker binds the embedded contract by default.
 
 ## Error model
 
-Errors thrown by the target Worker's RPC method propagate across the binding boundary as `Error` instances (the structured-clone algorithm preserves `name` and `message`). The invoker catches them and yields an `InvocationOutput` with `error.code = "execution_failed"` and ends the stream. Custom error subclasses are flattened to the base `Error` shape — if the target wants to communicate structured error info, return a discriminated-union result type from the method instead of throwing.
+Errors thrown by the target Worker's RPC method propagate across the binding boundary as `Error` instances (the structured-clone algorithm preserves `name` and `message`). The invoker catches them and terminates the invocation with an `InvocationError` whose `code` is `ERR_EXECUTION_FAILED` — observable on `call.closed` (rejection) or as the throw from iterating `call.outputs`. Custom error subclasses are flattened to the base `Error` shape — if the target wants to communicate structured error info, return a discriminated-union result type from the method instead of throwing.
 
-`durationMs` is populated on every event (success and error) for observability.
+Pre-dispatch failures terminate before any call is made: an empty `ref` is `ERR_INVALID_REF`; a `ref` that doesn't resolve to a method on the bound entrypoint is `ERR_REF_NOT_FOUND`.
 
 ## Streaming
 
-Workers RPC supports streaming via async iterables, but this invoker currently treats every method as unary (one yield per call). Streaming support could be added later by detecting iterable returns and yielding multiple events. File an issue if you need it.
+Workers RPC supports streaming via async iterables, but this invoker currently treats every method as unary (one output per call). Streaming support could be added later by detecting iterable returns and emitting one output per item. File an issue if you need it.
 
 ## Trust model
 
@@ -83,10 +88,10 @@ There's no auth handshake. The Cloudflare runtime is the trust boundary — only
 
 ## How it works
 
-1. The invoker receives a `BindingInvocationInput` with a `workers-rpc` source.
-2. It looks up `input.ref` as a property on the bound service stub.
-3. If the lookup yields a function, the invoker calls it with `input.input` as the single argument.
-4. The return value is yielded as `InvocationOutput.output`. Errors thrown by the method are caught and yielded as `error.code = "execution_failed"`.
+1. The invoker receives `BindingInvocationArgs` with a `workers-rpc` source and returns the `Invocation` handle synchronously; the dispatch is scheduled on a microtask.
+2. It looks up `args.ref` as a property on the bound service stub (failing with `ERR_INVALID_REF` / `ERR_REF_NOT_FOUND` before any call).
+3. It reads the caller's first `write` from the handle and calls the method with it as the single argument (or with no arguments if the input side closed empty), then closes the input side so the caller never has to.
+4. The return value is emitted as the one output and the output side closes. Errors thrown by the method terminate the invocation with `ERR_EXECUTION_FAILED`.
 
 Method invocation uses plain property access (`this.binding[methodName](...)`) rather than `Function.prototype.call`. Cloudflare's ServiceStub Proxy returns a dispatch function with the stub captured in a closure; `.call(stub, ...)` makes the runtime try to serialize the stub itself, which fails because ServiceStubs are intentionally non-serializable.
 

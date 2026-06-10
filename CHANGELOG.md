@@ -4,6 +4,57 @@
 
 ### Changed
 
+- **Invocation is now a cardinality-agnostic handle.** `BindingInvoker.invokeBinding`
+  and `OperationInvoker.invoke` return an `Invocation<I, O>` synchronously instead
+  of an `AsyncIterable<InvocationOutput>`: the caller writes input messages
+  (`write`/`close`), consumes `outputs` (a standard single-consumer
+  `AsyncIterable<O>`), and observes lifecycle via `closed`, `header`, `trailer()`,
+  and `cancel()`. One call shape serves unary, server-streaming, client-streaming,
+  and bidirectional bindings; cardinality lives in the binding, never in the
+  signature. Bindings implement the push-side `BindingHandle` (`inputs()`,
+  `closeInput`, `emitOutput`, `closeOutput`, `fireError`, `signal`,
+  `setHeader`/`setTrailer`) over the shared `InvocationImpl`, which owns bounded
+  buffers with block-on-full backpressure in both directions, lossless in-order
+  exactly-once delivery, drain-before-terminal ordering, and acquire-once output
+  consumption (`ERR_ALREADY_CONSUMED`). The one blessed terminal is the free
+  function `single(outputs)` — strict, short-circuiting "exactly one"
+  (`ERR_EXPECTED_SINGLE`). The `InvocationOutput` envelope and its
+  `status`/`durationMs` fields are gone: outputs are bare values of the
+  operation's output type; transport facts surface via `header` metadata and
+  error `details`.
+  - `BindingInvocationInput` → `BindingInvocationArgs` (`{source, ref, binding?,
+    context?, interface?, inputSchema?, signal?, fetch?}`; no `input`, no
+    `security`, no `store`, no `callbacks`); `OperationInvocationInput` →
+    `OperationInvocationArgs` (input flows through the handle).
+  - OBI-T-07 failures are terminal AND reject the offending `write` with the same
+    `InvocationError`; OBI-T-08 failures are terminal and the invalid value is
+    not emitted (previously surfaced data-alongside-error). Transforms evaluate
+    per message in both directions.
+  - `invoke` throws synchronously on wiring errors (unknown operation, binding
+    key, or source); runtime outcomes travel on the handle.
+  - `InvocationError` is now a class extending `Error`.
+
+- **Error-code wire values are now SCREAMING_SNAKE with the `ERR_` prefix**
+  (`"cancelled"` → `"ERR_CANCELLED"`, etc.), plus the un-prefixed negotiation
+  signal `CONTEXT_REQUIRED`, matching the `openbindings.binding-invoker` role and
+  the Go SDK in lockstep. New codes: `ERR_ALREADY_CONSUMED`, `ERR_EXPECTED_SINGLE`,
+  `ERR_INPUT_CLOSED`, `ERR_INVOCATION_CLOSED`, `ERR_TOO_MANY_INPUTS`,
+  `ERR_MISSING_INPUT`, `ERR_PROTOCOL`, `ERR_TRANSPORT_CLOSED`, `ERR_RUNTIME`.
+  Consumers switching on `code` values must update.
+
+- **Authentication is negotiated context, not a document field.** Bindings that
+  need missing runtime context terminate with `CONTEXT_REQUIRED` (details:
+  `ContextRequiredDetails` — `key` + disjunctive `alternatives` over conjunctive
+  `requirements`, families `auth.bearer`/`auth.apiKey`/`auth.basic`/`auth.oauth2`)
+  BEFORE any observable side effect. The operation invoker resolves challenges
+  via a composition-time `contextResolver`, re-driving the binding against the
+  same input buffer (the already-forwarded prefix is replayed; once a binding
+  shows observable progress the challenge surfaces instead). Invokers that can
+  derive requirements from their source implement the side-effect-free
+  `prepareBinding` preflight; `storeContextResolver(store)` composes the
+  binding-invoker and context-store roles. `OperationInvoker.withRuntime` now
+  takes `(contextResolver?, fetch?)`.
+
 - **Renamed binding "executor" terminology to "invoker" / "invoke"** to align with the OpenBindings spec 0.2.0 rename. Pre-1.0 hard rename, no deprecated aliases. Both layers — the per-format component and the orchestrator — use the `Invoker` class name, with the verb `invoke` shared across them.
   - Classes: `BindingExecutor` (interface) → `BindingInvoker`; `OperationExecutor` → `OperationInvoker`; per-format `*Executor` classes → `*Invoker` (e.g., `OpenAPIExecutor` → `OpenAPIInvoker`, `MCPExecutor` → `MCPInvoker`, `AsyncAPIExecutor` → `AsyncAPIInvoker`, `WorkersRpcExecutor` → `WorkersRpcInvoker`, `GraphQLExecutor` → `GraphQLInvoker`); `OperationExecutorOptions` → `OperationInvokerOptions`; `WorkersRpcExecutorOptions` → `WorkersRpcInvokerOptions`.
   - Types: `BindingExecutionInput` → `BindingInvocationInput`; `OperationExecutionInput` → `OperationInvocationInput`; `ExecuteOutput`/`ExecuteError`/`ExecuteSource`/`ExecutionOptions` → `InvocationOutput`/`InvocationError`/`InvocationSource`/`InvocationOptions`.
@@ -46,6 +97,24 @@
   reference tooling, not spec primitives.
 
 ### Removed
+
+- **The `security` surface, per spec 0.2.0**: the OBI `security` section,
+  `BindingEntry.security`, `SecurityMethod`, `resolveSecurity`,
+  `AuthCancelledError`, and the security-reference validation. Credentials are
+  never part of an OBI document; they are context, supplied per call or resolved
+  through the `CONTEXT_REQUIRED` protocol. Format invokers derive auth
+  requirements from their source artifacts (e.g. OpenAPI `securitySchemes`) and
+  read credentials from context's well-known fields. `PlatformCallbacks`/
+  `ContextStore` are no longer threaded through binding invocations; interactive
+  resolution lives in the app's `contextResolver`.
+
+- **`ERR_INVALID_INPUT`** (use `ERR_VALIDATION_FAILED`) and the lowercase
+  error-code wire values.
+
+- **Stale conformance rule IDs**: validation messages and docs now cite the
+  spec's numbering (`OBI-D-16` → `OBI-D-13`, `OBI-T-13` → `OBI-T-12`), and the
+  bundled `openbindings.schema.json` is synced from the spec repo's 0.2.0
+  schema.
 
 - **`InterfaceClient`.** The class and its associated
   `InterfaceClientOptions`/`OperationEntry` types are gone. Generated typed

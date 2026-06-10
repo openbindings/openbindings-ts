@@ -1,28 +1,34 @@
 import { describe, it, expect } from "vitest";
-import type { BindingInvocationInput } from "@openbindings/sdk";
+import type { BindingInvocationArgs } from "@openbindings/sdk";
 import {
   ERR_INVALID_REF,
   ERR_REF_NOT_FOUND,
   ERR_EXECUTION_FAILED,
   ERR_CANCELLED,
+  single,
 } from "@openbindings/sdk";
 import { WorkersRpcInvoker, type WorkersRpcBinding } from "./invoker.js";
 import { FORMAT_TOKEN } from "./constants.js";
 
-// Helper: drain the invoker's async iterable into a single result.
-async function drain(it: AsyncIterable<unknown>): Promise<unknown[]> {
-  const out: unknown[] = [];
-  for await (const event of it) out.push(event);
-  return out;
-}
-
-// Helper: minimal BindingInvocationInput for the tests.
-function input(ref: string, payload: unknown): BindingInvocationInput {
+// Helper: minimal BindingInvocationArgs for the tests.
+function args(ref: string, extra?: Partial<BindingInvocationArgs>): BindingInvocationArgs {
   return {
     source: { format: FORMAT_TOKEN, location: "workers-rpc://test" },
     ref,
-    input: payload,
+    ...extra,
   };
+}
+
+// Helper: drive a unary call through the handle — write one input, take the
+// single output.
+async function callOnce(
+  invoker: WorkersRpcInvoker,
+  ref: string,
+  input: unknown,
+): Promise<unknown> {
+  const call = invoker.invokeBinding(args(ref));
+  await call.write(input);
+  return single(call.outputs);
 }
 
 describe("WorkersRpcInvoker.formats", () => {
@@ -36,7 +42,7 @@ describe("WorkersRpcInvoker.formats", () => {
 });
 
 describe("WorkersRpcInvoker.invokeBinding — happy path", () => {
-  it("calls the named method on the binding and yields the result", async () => {
+  it("calls the named method on the binding and emits the result", async () => {
     let receivedArg: unknown = undefined;
     const binding: WorkersRpcBinding = {
       mintToken: async (arg: unknown) => {
@@ -45,12 +51,9 @@ describe("WorkersRpcInvoker.invokeBinding — happy path", () => {
       },
     };
     const invoker = new WorkersRpcInvoker({ binding });
-    const events = await drain(invoker.invokeBinding(input("mintToken", { user: "matt" })));
+    const out = await callOnce(invoker, "mintToken", { user: "matt" });
 
-    expect(events).toHaveLength(1);
-    const ev = events[0] as { output?: unknown; durationMs?: number };
-    expect(ev.output).toEqual({ ok: true, access_token: "tok-123" });
-    expect(typeof ev.durationMs).toBe("number");
+    expect(out).toEqual({ ok: true, access_token: "tok-123" });
     expect(receivedArg).toEqual({ user: "matt" });
   });
 
@@ -59,8 +62,37 @@ describe("WorkersRpcInvoker.invokeBinding — happy path", () => {
       ping: () => "pong",
     };
     const invoker = new WorkersRpcInvoker({ binding });
-    const events = await drain(invoker.invokeBinding(input("ping", undefined)));
-    expect((events[0] as { output?: unknown }).output).toBe("pong");
+    const out = await callOnce(invoker, "ping", undefined);
+    expect(out).toBe("pong");
+  });
+
+  it("calls with no arguments when the input side closes empty", async () => {
+    let argCount = -1;
+    const binding: WorkersRpcBinding = {
+      ping: function (...fnArgs: unknown[]) {
+        argCount = fnArgs.length;
+        return "pong";
+      },
+    };
+    const invoker = new WorkersRpcInvoker({ binding });
+    const call = invoker.invokeBinding(args("ping"));
+    await call.close(); // no input written
+    const out = await single(call.outputs);
+    expect(out).toBe("pong");
+    expect(argCount).toBe(0);
+  });
+
+  it("closes the input side after the first read (caller never has to close)", async () => {
+    const binding: WorkersRpcBinding = {
+      echo: (x: unknown) => x,
+    };
+    const invoker = new WorkersRpcInvoker({ binding });
+    const call = invoker.invokeBinding(args("echo"));
+    await call.write("hello");
+    // No call.close() — the binding closes input after the unary read.
+    const out = await single(call.outputs);
+    expect(out).toBe("hello");
+    await expect(call.closed).resolves.toBeUndefined();
   });
 
   it("passes the structured input through unchanged (no JSON round-trip)", async () => {
@@ -76,7 +108,7 @@ describe("WorkersRpcInvoker.invokeBinding — happy path", () => {
       },
     };
     const invoker = new WorkersRpcInvoker({ binding });
-    await drain(invoker.invokeBinding(input("echo", { date, bytes })));
+    await callOnce(invoker, "echo", { date, bytes });
     const r = received as { date: Date; bytes: Uint8Array };
     expect(r.date).toBe(date); // identity, not just equality
     expect(r.bytes).toBe(bytes);
@@ -84,48 +116,52 @@ describe("WorkersRpcInvoker.invokeBinding — happy path", () => {
 });
 
 describe("WorkersRpcInvoker.invokeBinding — errors", () => {
-  it("yields invalid_ref when the ref is empty", async () => {
+  it("terminates with ERR_INVALID_REF when the ref is empty (before any input)", async () => {
     const invoker = new WorkersRpcInvoker({ binding: { foo: () => 1 } });
-    const events = await drain(invoker.invokeBinding(input("", undefined)));
-    expect(events).toHaveLength(1);
-    const ev = events[0] as { error?: { code: string } };
-    expect(ev.error?.code).toBe(ERR_INVALID_REF);
+    const call = invoker.invokeBinding(args(""));
+    // No write: pre-dispatch classification fires without consuming input.
+    await expect(call.closed).rejects.toMatchObject({ code: ERR_INVALID_REF });
   });
 
-  it("yields ref_not_found when the binding has no such method", async () => {
+  it("terminates with ERR_REF_NOT_FOUND when the binding has no such method", async () => {
     const invoker = new WorkersRpcInvoker({ binding: { knownMethod: () => 1 } });
-    const events = await drain(invoker.invokeBinding(input("missingMethod", undefined)));
-    const ev = events[0] as { error?: { code: string; message: string } };
-    expect(ev.error?.code).toBe(ERR_REF_NOT_FOUND);
-    expect(ev.error?.message).toContain("missingMethod");
+    const call = invoker.invokeBinding(args("missingMethod"));
+    await expect(call.closed).rejects.toMatchObject({
+      code: ERR_REF_NOT_FOUND,
+      message: expect.stringContaining("missingMethod"),
+    });
   });
 
-  it("propagates thrown errors as execution_failed events", async () => {
+  it("propagates thrown errors as a terminal ERR_EXECUTION_FAILED", async () => {
     const binding: WorkersRpcBinding = {
       explode: () => {
         throw new Error("kaboom");
       },
     };
     const invoker = new WorkersRpcInvoker({ binding });
-    const events = await drain(invoker.invokeBinding(input("explode", undefined)));
-    const ev = events[0] as { error?: { code: string; message: string; details?: unknown } };
-    expect(ev.error?.code).toBe(ERR_EXECUTION_FAILED);
-    expect(ev.error?.message).toBe("kaboom");
-    expect((ev.error?.details as { name?: string } | undefined)?.name).toBe("Error");
+    const call = invoker.invokeBinding(args("explode"));
+    await call.write(undefined);
+    await expect(call.closed).rejects.toMatchObject({
+      code: ERR_EXECUTION_FAILED,
+      message: "kaboom",
+      details: { name: "Error" },
+    });
   });
 
-  it("propagates async errors as execution_failed events", async () => {
+  it("propagates async errors as a terminal ERR_EXECUTION_FAILED", async () => {
     const binding: WorkersRpcBinding = {
       asyncExplode: async () => {
         throw new TypeError("async kaboom");
       },
     };
     const invoker = new WorkersRpcInvoker({ binding });
-    const events = await drain(invoker.invokeBinding(input("asyncExplode", undefined)));
-    const ev = events[0] as { error?: { code: string; message: string; details?: { name?: string } } };
-    expect(ev.error?.code).toBe(ERR_EXECUTION_FAILED);
-    expect(ev.error?.message).toBe("async kaboom");
-    expect(ev.error?.details?.name).toBe("TypeError");
+    const call = invoker.invokeBinding(args("asyncExplode"));
+    await call.write(undefined);
+    await expect(call.closed).rejects.toMatchObject({
+      code: ERR_EXECUTION_FAILED,
+      message: "async kaboom",
+      details: { name: "TypeError" },
+    });
   });
 
   it("respects an aborted signal before dispatch", async () => {
@@ -139,23 +175,23 @@ describe("WorkersRpcInvoker.invokeBinding — errors", () => {
     const invoker = new WorkersRpcInvoker({ binding });
     const ac = new AbortController();
     ac.abort();
-    const events = await drain(
-      invoker.invokeBinding(input("slow", undefined), { signal: ac.signal }),
-    );
+    const call = invoker.invokeBinding(args("slow", { signal: ac.signal }));
+    await expect(call.closed).rejects.toMatchObject({ code: ERR_CANCELLED });
     expect(called).toBe(false);
-    const ev = events[0] as { error?: { code: string } };
-    expect(ev.error?.code).toBe(ERR_CANCELLED);
   });
 });
 
-describe("WorkersRpcInvoker — single-event semantics", () => {
-  it("yields exactly one event per call (unary semantics)", async () => {
+describe("WorkersRpcInvoker — single-output semantics", () => {
+  it("emits exactly one output per call (unary semantics)", async () => {
     const invoker = new WorkersRpcInvoker({ binding: { echo: (x: unknown) => x } });
-    const events = await drain(invoker.invokeBinding(input("echo", "hello")));
-    expect(events).toHaveLength(1);
+    const call = invoker.invokeBinding(args("echo"));
+    await call.write("hello");
+    const outs: unknown[] = [];
+    for await (const out of call.outputs) outs.push(out);
+    expect(outs).toEqual(["hello"]);
   });
 
-  it("yields exactly one event on error", async () => {
+  it("emits no output on error (the failure is terminal)", async () => {
     const invoker = new WorkersRpcInvoker({
       binding: {
         boom: () => {
@@ -163,8 +199,15 @@ describe("WorkersRpcInvoker — single-event semantics", () => {
         },
       },
     });
-    const events = await drain(invoker.invokeBinding(input("boom", undefined)));
-    expect(events).toHaveLength(1);
+    const call = invoker.invokeBinding(args("boom"));
+    await call.write(undefined);
+    const outs: unknown[] = [];
+    await expect(
+      (async () => {
+        for await (const out of call.outputs) outs.push(out);
+      })(),
+    ).rejects.toMatchObject({ code: ERR_EXECUTION_FAILED });
+    expect(outs).toEqual([]);
   });
 });
 
@@ -219,11 +262,11 @@ describe("WorkersRpcInvoker — Cloudflare ServiceStub Proxy compatibility", () 
     const invoker = new WorkersRpcInvoker({
       binding: fakeStub as unknown as WorkersRpcBinding,
     });
-    const events = await drain(invoker.invokeBinding(input("ping", { msg: "hi" })));
+    const out = await callOnce(invoker, "ping", { msg: "hi" });
 
     expect(invokedAsProperty).toBe(true);
     expect(receivedArg).toEqual({ msg: "hi" });
-    expect((events[0] as { output?: unknown }).output).toEqual({ echoed: { msg: "hi" } });
+    expect(out).toEqual({ echoed: { msg: "hi" } });
   });
 
   it("does not pass the binding as `this` to the dispatched method", async () => {
@@ -261,7 +304,7 @@ describe("WorkersRpcInvoker — Cloudflare ServiceStub Proxy compatibility", () 
     const invoker = new WorkersRpcInvoker({
       binding: fakeStub as unknown as WorkersRpcBinding,
     });
-    await drain(invoker.invokeBinding(input("checkThis", null)));
+    await callOnce(invoker, "checkThis", null);
 
     // With property-access invocation, `this` is the proxy itself.
     // The previous broken implementation used method.call(this.binding,

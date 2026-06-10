@@ -29,22 +29,51 @@ The invoker declares `asyncapi@^3.0.0` — it handles any AsyncAPI 3.x spec.
 
 ### Invoke a binding
 
-```typescript
-const invoker = new AsyncAPIInvoker();
+`invokeBinding` returns a cardinality-agnostic `Invocation` handle: inputs go
+in through `write`, outputs come out of the `outputs` async iterable, and
+terminal failures reject `closed` (and the iteration) with an
+`InvocationError`.
 
-for await (const event of invoker.invokeBinding({
-  source: {
-    format: "asyncapi@3.0",
-    location: "https://api.example.com/asyncapi.json",
-  },
+```typescript
+import { single } from "@openbindings/sdk";
+
+const invoker = new AsyncAPIInvoker();
+const source = {
+  format: "asyncapi@3.0",
+  location: "https://api.example.com/asyncapi.json",
+};
+
+// send over HTTP (unary): one input message, one response output
+const call = invoker.invokeBinding({
+  source,
   ref: "#/operations/sendMessage",
-  input: { text: "hello" },
   context: { bearerToken: "tok_123" },
-})) {
-  if (event.error) console.error(event.error.message);
-  else console.log(event.output);
+});
+await call.write({ text: "hello" });
+const out = await single(call.outputs);
+
+// receive (SSE or WebSocket subscribe): iterate the outputs
+const sub = invoker.invokeBinding({
+  source,
+  ref: "#/operations/receiveEvents",
+  context: { bearerToken: "tok_123" },
+});
+for await (const event of sub.outputs) {
+  console.log(event);
 }
+
+// send over WebSocket (client-streaming publish): write N frames, then close
+const pub = invoker.invokeBinding({ source, ref: "#/operations/publishTicks" });
+await pub.write({ tick: 1 });
+await pub.write({ tick: 2 });
+await pub.close();
+await pub.closed;
 ```
+
+When the AsyncAPI document declares security the provided context cannot
+satisfy, the invocation terminates with a `CONTEXT_REQUIRED` challenge before
+any connection is opened; `prepareBinding` performs the same check
+side-effect-free.
 
 ### Create an interface from an AsyncAPI spec
 
@@ -65,21 +94,26 @@ const iface = await creator.createInterface({
 
 1. Parses the AsyncAPI document (YAML or JSON) and resolves all `$ref` pointers
 2. Resolves the operation by ref, determines server URL and protocol
-3. Dispatches based on action and protocol:
-   - **receive + http/https**: SSE event stream
-   - **receive + ws/wss**: WebSocket stream
-   - **send + http/https**: HTTP POST (unary)
-   - **send + ws/wss**: WebSocket stream (bidirectional)
+3. Checks declared security against the provided context; challenges
+   `CONTEXT_REQUIRED` before any connection when it cannot be satisfied
+4. Dispatches based on action and protocol:
+   - **receive + http/https**: SSE subscribe — each event is one output
+   - **receive + ws/wss**: WebSocket subscribe — each frame is one output;
+     caller inputs are forwarded to the socket as control/subscription frames
+   - **send + http/https**: HTTP POST (unary) — first input is the message,
+     the response body is the single output
+   - **send + ws/wss**: client-streaming publish — each input is one frame;
+     closing input completes the call
 
 ### Credential application
 
-Credentials are applied based on the AsyncAPI spec's security configuration:
+Credentials are read from the well-known context fields and applied per the
+AsyncAPI spec's security configuration:
 
-- **`http` + `bearer`**: Sets `Authorization: Bearer <token>` from `bearerToken` context field
-- **`http` + `basic`**: Sets `Authorization: Basic <encoded>` from `basic.username`/`basic.password` context fields
-- **`apiKey`**: Places the `apiKey` context field in the header, query param, or cookie as the spec declares
-- **`httpBearer`**: Same as http+bearer
-- **`userPassword`**: Maps to basic auth
+- **`http` + `bearer`** / **`httpBearer`**: Sets `Authorization: Bearer <token>` from `bearerToken` context field
+- **`http` + `basic`** / **`userPassword`**: Sets `Authorization: Basic <encoded>` from `basic.username`/`basic.password` context fields
+- **`apiKey`** / **`httpApiKey`**: Places the `apiKey` context field in the header, query param, or cookie as the spec declares
+- **`oauth2`**: Sets `Authorization: Bearer <token>` from `bearerToken` or `accessToken`
 
 When no security schemes are defined, falls back to bearer -> basic -> apiKey in that order.
 
@@ -99,7 +133,7 @@ Converts an AsyncAPI 3.x document into an OBI by:
 | Protocol | Receive (subscribe) | Send (publish) |
 |----------|-------------------|----------------|
 | HTTP/HTTPS | SSE streaming | POST (unary) |
-| WS/WSS | WebSocket streaming | WebSocket streaming |
+| WS/WSS | WebSocket streaming (bidi-capable) | WebSocket client-streaming |
 
 ## License
 

@@ -1,14 +1,16 @@
 import type {
+  BindingInvocationArgs,
   BindingInvoker,
-  BindingInvocationInput,
-  InvocationOutput,
   FormatInfo,
+  Invocation,
 } from "@openbindings/sdk";
 import {
+  ERR_EXECUTION_FAILED,
   ERR_INVALID_REF,
   ERR_REF_NOT_FOUND,
-  ERR_EXECUTION_FAILED,
-  ERR_CANCELLED,
+  ERR_RUNTIME,
+  InvocationError,
+  InvocationImpl,
 } from "@openbindings/sdk";
 import { FORMAT_TOKEN } from "./constants.js";
 
@@ -47,19 +49,21 @@ export interface WorkersRpcInvokerOptions {
  * Usage from a Worker:
  *
  * ```ts
- * import { OperationInvoker } from "@openbindings/sdk";
+ * import { OperationInvoker, single } from "@openbindings/sdk";
  * import { WorkersRpcInvoker } from "@openbindings/workers-rpc";
- * import { MyServiceInvoker } from "./generated/my-service-invoker.js";
+ * import { createMyServiceInvoker } from "./generated/my-service-invoker.js";
  *
  * export default {
  *   async fetch(request, env, ctx) {
- *     const operationInvoker = new OperationInvoker([
+ *     const base = new OperationInvoker([
  *       new WorkersRpcInvoker({ binding: env.MY_SERVICE }),
  *     ]);
- *     const myService = new MyServiceInvoker(operationInvoker);
- *     // workers-rpc OBIs are embedded in the codegen output — pass the
- *     // static CONTRACT instead of fetching from a remote URL.
- *     const result = await myService.someMethod(MyServiceInvoker.CONTRACT, { foo: "bar" });
+ *     // workers-rpc OBIs are embedded in the codegen output — the typed
+ *     // invoker defaults to the embedded contract.
+ *     const myService = createMyServiceInvoker(base);
+ *     const call = myService.someMethod();
+ *     await call.write({ foo: "bar" });
+ *     const result = await single(call.outputs);
  *     // ...
  *   }
  * };
@@ -77,17 +81,17 @@ export interface WorkersRpcInvokerOptions {
  *
  * Error model: errors thrown by the target Worker's RPC method propagate
  * across the binding boundary as Error instances (with `name` and `message`
- * preserved by the structured-clone algorithm). The invoker catches them,
- * yields a `InvocationOutput` with `error.code = "execution_failed"`, and ends
- * the stream. Custom error subclasses are flattened to the base Error shape;
- * if the target wants to communicate structured error info, it should
- * return a discriminated-union result type from the method instead of
+ * preserved by the structured-clone algorithm). The invoker catches them and
+ * terminates the invocation with an `InvocationError` whose `code` is
+ * `ERR_EXECUTION_FAILED`. Custom error subclasses are flattened to the base
+ * Error shape; if the target wants to communicate structured error info, it
+ * should return a discriminated-union result type from the method instead of
  * throwing.
  *
  * Streaming: Workers RPC supports streaming via async iterables, but this
- * invoker currently treats every method as unary (one yield per call).
+ * invoker currently treats every method as unary (one output per call).
  * Streaming support could be added later by detecting iterable returns and
- * yielding multiple events.
+ * emitting multiple outputs.
  */
 export class WorkersRpcInvoker implements BindingInvoker {
   private readonly binding: WorkersRpcBinding;
@@ -103,54 +107,76 @@ export class WorkersRpcInvoker implements BindingInvoker {
 
   /**
    * Invokes a single binding by calling the corresponding method on the
-   * service binding object and yielding the result (or error) as a single
-   * InvocationOutput.
+   * service binding object and emitting its return value as the one output.
+   *
+   * The handle is returned synchronously and creation is inert: the actual
+   * dispatch is scheduled on a microtask. Pre-dispatch failures (bad ref,
+   * missing method) terminate the invocation before any call is made.
    *
    * The `ref` field of the binding entry is interpreted as the literal
    * method name on the WorkerEntrypoint class. There is no path encoding,
    * URL, or HTTP method — the ref IS the method name.
    *
-   * The `input` field is passed as the single argument to the method.
-   * Workers RPC's structured-clone serialization handles object/array/etc.
-   * shapes; consumers should not pre-stringify.
+   * Input flows through the handle: the binding reads the caller's first
+   * `write` and passes it as the single argument to the method. If the
+   * input side closes without a message, the method is called with no
+   * arguments. Workers RPC's structured-clone serialization handles
+   * object/array/etc. shapes; consumers should not pre-stringify.
    */
-  async *invokeBinding(
-    input: BindingInvocationInput,
-    options?: { signal?: AbortSignal },
-  ): AsyncIterable<InvocationOutput> {
-    const start = Date.now();
-    const methodName = input.ref;
+  invokeBinding<I = unknown, O = unknown>(args: BindingInvocationArgs): Invocation<I, O> {
+    const inv = new InvocationImpl<unknown, unknown>({ signal: args.signal });
+    queueMicrotask(() =>
+      this.run(args, inv).catch((err) => {
+        inv.fireError(
+          err instanceof InvocationError
+            ? err
+            : new InvocationError(
+                ERR_RUNTIME,
+                err instanceof Error ? err.message : String(err),
+              ),
+        );
+      }),
+    );
+    return inv as Invocation<I, O>;
+  }
+
+  private async run(
+    args: BindingInvocationArgs,
+    inv: InvocationImpl<unknown, unknown>,
+  ): Promise<void> {
+    const methodName = args.ref;
 
     if (typeof methodName !== "string" || methodName.length === 0) {
-      yield {
-        error: {
-          code: ERR_INVALID_REF,
-          message: "workers-rpc binding ref must be a non-empty string (the method name on the WorkerEntrypoint class)",
-        },
-        durationMs: Date.now() - start,
-      };
+      inv.fireError(
+        new InvocationError(
+          ERR_INVALID_REF,
+          "workers-rpc binding ref must be a non-empty string (the method name on the WorkerEntrypoint class)",
+        ),
+      );
       return;
     }
 
     const method = this.binding[methodName];
     if (typeof method !== "function") {
-      yield {
-        error: {
-          code: ERR_REF_NOT_FOUND,
-          message: `The bound Worker entrypoint does not expose method "${methodName}". Check the WorkerEntrypoint class on the target Worker and the wrangler.toml entrypoint declaration.`,
-        },
-        durationMs: Date.now() - start,
-      };
+      inv.fireError(
+        new InvocationError(
+          ERR_REF_NOT_FOUND,
+          `The bound Worker entrypoint does not expose method "${methodName}". Check the WorkerEntrypoint class on the target Worker and the wrangler.toml entrypoint declaration.`,
+        ),
+      );
       return;
     }
 
-    if (options?.signal?.aborted) {
-      yield {
-        error: { code: ERR_CANCELLED, message: "Request aborted before dispatch" },
-        durationMs: Date.now() - start,
-      };
-      return;
-    }
+    // Unary: read the caller's first (and only) input from the handle. A
+    // clean close with no message means a no-argument call. Then close the
+    // input side so the caller never has to.
+    const first = await readFirst(inv.inputs());
+    void inv.closeInput();
+
+    // Service bindings have no abort plumbing, so checking before dispatch
+    // is the practical cancellation point. When the signal is aborted the
+    // handle has already fired ERR_CANCELLED; just stop.
+    if (inv.signal.aborted) return;
 
     let result: unknown;
     try {
@@ -169,22 +195,30 @@ export class WorkersRpcInvoker implements BindingInvoker {
       // Object.keys(stub) returns [] because the Proxy hides the method
       // names -- `typeof method === "function"` above still works
       // because Proxy's get trap returns the dispatch function.
-      result = await this.binding[methodName](input.input);
+      result = first.done
+        ? await this.binding[methodName]()
+        : await this.binding[methodName](first.value);
     } catch (err: unknown) {
-      yield {
-        error: {
-          code: ERR_EXECUTION_FAILED,
-          message: err instanceof Error ? err.message : String(err),
-          details: err instanceof Error ? { name: err.name } : undefined,
-        },
-        durationMs: Date.now() - start,
-      };
+      inv.fireError(
+        new InvocationError(
+          ERR_EXECUTION_FAILED,
+          err instanceof Error ? err.message : String(err),
+          err instanceof Error ? { name: err.name } : undefined,
+        ),
+      );
       return;
     }
 
-    yield {
-      output: result,
-      durationMs: Date.now() - start,
-    };
+    await inv.emitOutput(result);
+    inv.closeOutput();
   }
+}
+
+/**
+ * Reads the first message from the binding side of the handle. A `done`
+ * result means the input side closed without a message (a no-argument
+ * call); a terminal invocation error propagates as a rejection.
+ */
+async function readFirst<T>(it: AsyncIterable<T>): Promise<IteratorResult<T, void>> {
+  return it[Symbol.asyncIterator]().next();
 }

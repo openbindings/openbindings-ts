@@ -1,30 +1,63 @@
 import {
-  ERR_AUTH_REQUIRED,
   ERR_INVALID_REF,
   ERR_REF_NOT_FOUND,
+  ERR_RUNTIME,
   ERR_SOURCE_LOAD_FAILED,
+  InvocationError,
+  InvocationImpl,
   NoSourcesError,
-  resolveSecurity,
   buildAuthHeaders,
   normalizeEndpoint,
+  type BindingInvocationArgs,
   type BindingInvoker,
-  type InterfaceCreator,
-  type SourceInspector,
-  type BindingInvocationInput,
   type CreateInput,
-  type OBInterface,
-  type InvocationOutput,
   type FormatInfo,
+  type InterfaceCreator,
+  type Invocation,
+  type OBInterface,
   type Source,
   type SourceInspection,
+  type SourceInspector,
 } from "@openbindings/sdk";
 import { FORMAT_TOKEN } from "./constants.js";
-import { parseRef, introspect, buildQuery, invokeGraphQL, subscribeGraphQL, isAuthError, parseIntrospectionContent } from "./invoke.js";
-import type { IntrospectionSchema } from "./introspection.js";
+import {
+  buildQueryFromIntrospection,
+  inputToVariablesPassthrough,
+  introspect,
+  invokeGraphQL,
+  isAuthError,
+  parseIntrospectionContent,
+  parseRef,
+  queryFromSchema,
+  resolveField,
+  schemaDeclaresVariables,
+  subscribeGraphQL,
+} from "./invoke.js";
+import type { Field, IntrospectionSchema } from "./introspection.js";
 import { buildTypeMap, rootTypeName } from "./introspection.js";
 import { convertToInterface } from "./create.js";
 
-/** Invokes GraphQL bindings via HTTP POST with introspection-driven query construction. */
+function errMsg(e: unknown): string {
+  return e instanceof Error ? e.message : String(e);
+}
+
+/** Reads the first input from the handle, or undefined when input closes without one. */
+async function readFirst<T>(it: AsyncIterable<T>): Promise<T | undefined> {
+  for await (const v of it) return v;
+  return undefined;
+}
+
+/**
+ * Invokes GraphQL bindings via HTTP POST (queries/mutations) or the
+ * graphql-transport-ws WebSocket protocol (subscriptions), with
+ * introspection-driven query construction.
+ *
+ * `invokeBinding` returns the Invocation handle synchronously; the GraphQL
+ * variables object is the operation's single input message, read from the
+ * handle. Fields that take no arguments use the no-input recipe (input is
+ * closed on entry and the request dispatches with empty variables), so
+ * callers never have to write or close.
+ */
 export class GraphQLInvoker implements BindingInvoker {
   private readonly schemaCache = new Map<string, IntrospectionSchema>();
 
@@ -32,89 +65,103 @@ export class GraphQLInvoker implements BindingInvoker {
     return [{ token: FORMAT_TOKEN, description: "GraphQL APIs" }];
   }
 
-  async *invokeBinding(
-    input: BindingInvocationInput,
-    options?: { signal?: AbortSignal },
-  ): AsyncIterable<InvocationOutput> {
-    // Validate ref early.
+  invokeBinding<I = unknown, O = unknown>(args: BindingInvocationArgs): Invocation<I, O> {
+    const inv = new InvocationImpl<unknown, unknown>({ signal: args.signal });
+    queueMicrotask(() =>
+      this.run(args, inv).catch((err: unknown) => {
+        inv.fireError(
+          err instanceof InvocationError
+            ? err
+            : new InvocationError(ERR_RUNTIME, errMsg(err)),
+        );
+      }),
+    );
+    return inv as Invocation<I, O>;
+  }
+
+  private async run(args: BindingInvocationArgs, inv: InvocationImpl<unknown, unknown>): Promise<void> {
+    // Pre-dispatch validation: fail before any network I/O.
     let rootType: string, fieldName: string;
     try {
-      ({ rootType, fieldName } = parseRef(input.ref));
+      ({ rootType, fieldName } = parseRef(args.ref));
     } catch (e: unknown) {
-      yield { error: { code: ERR_INVALID_REF, message: e instanceof Error ? e.message : String(e) } };
-      return;
+      throw new InvocationError(ERR_INVALID_REF, errMsg(e));
     }
 
-    if (!input.source.location) {
-      yield { error: { code: ERR_SOURCE_LOAD_FAILED, message: "GraphQL source requires a location (endpoint URL)" } };
-      return;
+    if (!args.source.location) {
+      throw new InvocationError(ERR_SOURCE_LOAD_FAILED, "GraphQL source requires a location (endpoint URL)");
     }
 
-    const enriched = await this.resolveStoreContext(input);
-    const headers = buildAuthHeaders(enriched.context);
-    const fetchFn = enriched.fetch ?? fetch;
-    const url = enriched.source.location!;
+    const url = args.source.location;
+    const headers = buildAuthHeaders(args.context);
+    const fetchFn = args.fetch ?? fetch;
 
-    // Load schema: inline content or network introspection (cached).
-    let schema: IntrospectionSchema;
-    if (enriched.source.content != null) {
-      try {
-        schema = parseIntrospectionContent(enriched.source.content);
-      } catch (e: unknown) {
-        yield { error: { code: ERR_SOURCE_LOAD_FAILED, message: `parse inline GraphQL content: ${e instanceof Error ? e.message : String(e)}` } };
-        return;
-      }
+    // Resolve the query plan. A prebuilt _query const from the operation's
+    // input schema dispatches without loading the schema; otherwise the
+    // field is resolved from inline content or (cached) network introspection.
+    let wantsInput: boolean;
+    let buildFor: (input: unknown) => { query: string; variables: Record<string, unknown> | undefined };
+
+    const prebuilt = queryFromSchema(args.inputSchema);
+    if (prebuilt) {
+      wantsInput = schemaDeclaresVariables(args.inputSchema);
+      buildFor = (input) => ({ query: prebuilt, variables: inputToVariablesPassthrough(input) });
     } else {
-      try {
-        schema = await this.cachedIntrospect(url, headers, fetchFn, options?.signal);
-      } catch (e: unknown) {
-        if (isAuthError(e)) {
-          yield { error: { code: ERR_AUTH_REQUIRED, message: e instanceof Error ? e.message : String(e) } };
-        } else {
-          yield { error: { code: ERR_SOURCE_LOAD_FAILED, message: e instanceof Error ? e.message : String(e) } };
+      let schema: IntrospectionSchema;
+      if (args.source.content != null) {
+        try {
+          schema = parseIntrospectionContent(args.source.content);
+        } catch (e: unknown) {
+          throw new InvocationError(ERR_SOURCE_LOAD_FAILED, `parse inline GraphQL content: ${errMsg(e)}`);
         }
-        return;
+      } else {
+        try {
+          schema = await this.cachedIntrospect(url, headers, fetchFn, inv.signal);
+        } catch (e: unknown) {
+          if (isAuthError(e)) throw e;
+          throw new InvocationError(ERR_SOURCE_LOAD_FAILED, errMsg(e));
+        }
       }
+
+      let field: Field;
+      try {
+        field = resolveField(schema, rootType, fieldName);
+      } catch (e: unknown) {
+        throw new InvocationError(ERR_REF_NOT_FOUND, errMsg(e));
+      }
+      wantsInput = field.args.length > 0;
+      buildFor = (input) => buildQueryFromIntrospection(schema, rootType, fieldName, input);
     }
 
-    // Build query.
-    let query: string;
-    let variables: Record<string, unknown> | undefined;
-    try {
-      ({ query, variables } = buildQuery(schema, rootType, fieldName, enriched.input, enriched.inputSchema));
-    } catch (e: unknown) {
-      yield { error: { code: ERR_REF_NOT_FOUND, message: e instanceof Error ? e.message : String(e) } };
-      return;
+    // The GraphQL variables object is the single input message, read from
+    // the handle. No-argument fields skip the read entirely; a caller that
+    // closes without writing dispatches with empty variables.
+    let input: unknown = {};
+    if (wantsInput) {
+      input = (await readFirst(inv.inputs())) ?? {};
     }
+    void inv.closeInput();
 
-    // Subscriptions use WebSocket streaming.
+    const { query, variables } = buildFor(input);
+
+    // Subscriptions stream over WebSocket.
     if (rootType === "Subscription") {
-      yield* subscribeGraphQL(url, query, variables, headers, options?.signal);
+      for await (const ev of subscribeGraphQL(url, query, variables, headers, inv.signal)) {
+        // Always await: a rejection means the invocation terminated, and the
+        // for-await teardown closes the WebSocket via the generator's finally.
+        await inv.emitOutput(ev);
+      }
+      inv.closeOutput();
       return;
     }
 
-    // Invoke query/mutation via HTTP.
-    let result = await invokeGraphQL(url, query, variables, fieldName, headers, fetchFn, options?.signal);
-
-    // Auth retry.
-    if (result.error?.code === ERR_AUTH_REQUIRED && enriched.security?.length && enriched.callbacks) {
-      const creds = await resolveSecurity(enriched.security, enriched.callbacks, enriched.fetch);
-      if (creds) {
-        const retryContext = { ...enriched.context, ...creds };
-        if (enriched.store) {
-          const key = normalizeEndpoint(url);
-          if (key) try { await enriched.store.set(key, retryContext); } catch { /* ignore */ }
-        }
-        const retryHeaders = buildAuthHeaders(retryContext);
-        result = await invokeGraphQL(url, query, variables, fieldName, retryHeaders, fetchFn, options?.signal);
-      }
-    }
-
-    if (result.error) {
-      yield { error: result.error, status: result.status, durationMs: result.durationMs };
-    } else {
-      yield { output: result.output, status: result.status, durationMs: result.durationMs };
-    }
+    // Queries and mutations dispatch one HTTP POST.
+    const { data, headers: responseHeaders } = await invokeGraphQL(
+      url, query, variables, fieldName, headers, fetchFn, inv.signal,
+    );
+    inv.setHeader(responseHeaders);
+    await inv.emitOutput(data);
+    inv.closeOutput();
   }
 
   private async cachedIntrospect(
@@ -129,19 +176,6 @@ export class GraphQLInvoker implements BindingInvoker {
     const schema = await introspect(url, headers, fetchFn, signal);
     this.schemaCache.set(key, schema);
     return schema;
-  }
-
-  private async resolveStoreContext(input: BindingInvocationInput): Promise<BindingInvocationInput> {
-    if (!input.store || !input.source.location) return input;
-    const key = normalizeEndpoint(input.source.location);
-    if (!key) return input;
-    let stored: Record<string, unknown> | null;
-    try { stored = await input.store.get(key); } catch { return input; }
-    if (!stored) return input;
-    const merged = input.context && Object.keys(input.context).length > 0
-      ? { ...stored, ...input.context }
-      : stored;
-    return { ...input, context: merged };
   }
 }
 

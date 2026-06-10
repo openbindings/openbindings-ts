@@ -2,20 +2,27 @@ import type {
   BindingInvoker,
   InterfaceCreator,
   SourceInspector,
-  BindingInvocationInput,
+  BindingInvocationArgs,
+  ContextRequiredDetails,
   CreateInput,
+  Invocation,
   OBInterface,
   Source,
-  InvocationOutput,
   FormatInfo,
   SourceInspection,
 } from "@openbindings/sdk";
-import { NoSourcesError, ERR_SOURCE_LOAD_FAILED, ERR_REF_NOT_FOUND, ERR_AUTH_REQUIRED, resolveSecurity } from "@openbindings/sdk";
+import {
+  InvocationError,
+  InvocationImpl,
+  NoSourcesError,
+  ERR_RUNTIME,
+  ERR_SOURCE_LOAD_FAILED,
+} from "@openbindings/sdk";
 import type { AsyncAPIDocument } from "./asyncapi-types.js";
 import { FORMAT_TOKEN } from "./constants.js";
-import { invokeBinding, subscribeBinding, resolveAsyncAPIServerKey } from "./invoke.js";
+import { runBinding, requiredContext, resolveServer } from "./invoke.js";
 import { convertToInterface } from "./create.js";
-import { parseAsyncAPIDocument, parseRef } from "./util.js";
+import { parseAsyncAPIDocument, parseRef, errorMessage } from "./util.js";
 import { WSPool } from "./ws-pool.js";
 
 // ---------------------------------------------------------------------------
@@ -53,107 +60,75 @@ export class AsyncAPIInvoker implements BindingInvoker {
     return [{ token: FORMAT_TOKEN, description: "AsyncAPI 3.x event-driven APIs" }];
   }
 
-  /** Invokes a single binding, yielding stream events for the result. */
-  async *invokeBinding(
-    input: BindingInvocationInput,
-    options?: { signal?: AbortSignal },
-  ): AsyncIterable<InvocationOutput> {
-    let doc: AsyncAPIDocument;
-    try {
-      doc = await loadDoc(this.docCache, input.source.location, input.source.content, options, input.fetch);
-    } catch (e: unknown) {
-      yield { error: { code: ERR_SOURCE_LOAD_FAILED, message: e instanceof Error ? e.message : String(e) } };
-      return;
-    }
-    const enriched = await this.resolveStoreContext(input, doc);
-
-    // Determine action and protocol to decide streaming vs unary path
-    const opID = parseRef(input.ref);
-    const ops = doc.operations ?? {};
-    const asyncOp = ops[opID];
-    if (!asyncOp) {
-      yield { error: { code: ERR_REF_NOT_FOUND, message: `operation "${opID}" not in AsyncAPI doc` } };
-      return;
-    }
-
-    // Resolve server info for protocol detection
-    let protocol = "http";
-    try {
-      const servers = doc.servers ?? {};
-      const sorted = Object.entries(servers).sort(([a], [b]) => a.localeCompare(b));
-      for (const [, server] of sorted) {
-        const proto = server.protocol.toLowerCase();
-        if (["http", "https", "ws", "wss"].includes(proto)) {
-          protocol = proto;
-          break;
-        }
-      }
-    } catch {
-      // fall through to default
-    }
-
-    const isStreaming =
-      asyncOp.action === "receive" ||
-      (asyncOp.action === "send" && (protocol === "ws" || protocol === "wss"));
-
-    if (isStreaming) {
-      // Streaming path — delegate to subscribeBinding which returns AsyncIterable<InvocationOutput>
-      yield* subscribeBinding(enriched, options, doc, this.wsPool);
-    } else {
-      // Unary path — call invokeBinding which returns Promise<InvocationOutput>
-      let result = await invokeBinding(enriched, options, doc);
-
-      if (result.error?.code === ERR_AUTH_REQUIRED && enriched.security?.length && enriched.callbacks) {
-        const creds = await resolveSecurity(enriched.security, enriched.callbacks, enriched.fetch);
-        if (creds) {
-          const retryInput = {
-            ...enriched,
-            context: { ...enriched.context, ...creds },
-          };
-          if (retryInput.store) {
-            const key = resolveAsyncAPIServerKey(doc);
-            if (key) {
-              try { await retryInput.store.set(key, retryInput.context!); } catch {}
-            }
-          }
-          result = await invokeBinding(retryInput, options, doc);
-        }
-      }
-
-      if (result.error) {
-        yield { error: result.error, status: result.status, durationMs: result.durationMs };
-      } else {
-        yield { output: result.output, status: result.status, durationMs: result.durationMs };
-      }
-    }
+  /**
+   * Invokes a single binding, returning the invocation handle synchronously.
+   * Construction is inert; the binding's work is scheduled asynchronously
+   * and all pre-dispatch failures (including CONTEXT_REQUIRED) are raised
+   * before any observable side effect.
+   */
+  invokeBinding<I = unknown, O = unknown>(args: BindingInvocationArgs): Invocation<I, O> {
+    const inv = new InvocationImpl<unknown, unknown>({ signal: args.signal });
+    queueMicrotask(() =>
+      this.run(args, inv).catch((err: unknown) => {
+        inv.fireError(
+          err instanceof InvocationError
+            ? err
+            : new InvocationError(ERR_RUNTIME, errorMessage(err)),
+        );
+      }),
+    );
+    return inv as Invocation<I, O>;
   }
 
   /**
-   * Derives the context key from the AsyncAPI doc, looks up stored context,
-   * and merges with any developer-supplied context. Dev context wins.
+   * Side-effect-free preflight: reports the context this binding would
+   * require, or null when the binding can proceed (or the answer is not
+   * knowable without network I/O). Only inline source content and the warm
+   * doc cache are consulted; nothing is fetched.
    */
-  private async resolveStoreContext(
-    input: BindingInvocationInput,
-    doc: AsyncAPIDocument,
-  ): Promise<BindingInvocationInput> {
-    if (!input.store) return input;
-
-    const key = resolveAsyncAPIServerKey(doc);
-    if (!key) return input;
-
-    let stored: Record<string, unknown> | null;
-    try {
-      stored = await input.store.get(key);
-    } catch {
-      return input;
+  async prepareBinding(args: BindingInvocationArgs): Promise<ContextRequiredDetails | null> {
+    let doc: AsyncAPIDocument | undefined;
+    if (args.source.content != null) {
+      try {
+        doc = await parseAsyncAPIDocument(args.source.location, args.source.content);
+      } catch {
+        return null;
+      }
+    } else if (args.source.location) {
+      doc = this.docCache.get(args.source.location);
     }
-    if (!stored) return input;
+    if (!doc) return null;
 
-    const merged = input.context && Object.keys(input.context).length > 0
-      ? { ...stored, ...input.context }
-      : stored;
+    try {
+      const opID = parseRef(args.ref);
+      const asyncOp = (doc.operations ?? {})[opID];
+      if (!asyncOp) return null;
+      const { url: serverURL } = resolveServer(doc, args.context);
+      return requiredContext(doc, asyncOp, serverURL, args.context);
+    } catch {
+      return null;
+    }
+  }
 
-    return { ...input, context: merged };
+  private async run(
+    args: BindingInvocationArgs,
+    inv: InvocationImpl<unknown, unknown>,
+  ): Promise<void> {
+    let doc: AsyncAPIDocument;
+    try {
+      doc = await loadDoc(
+        this.docCache,
+        args.source.location,
+        args.source.content,
+        { signal: inv.signal },
+        args.fetch,
+      );
+    } catch (e: unknown) {
+      if (inv.signal.aborted) return;
+      inv.fireError(new InvocationError(ERR_SOURCE_LOAD_FAILED, errorMessage(e)));
+      return;
+    }
+    await runBinding(args, inv, doc, this.wsPool);
   }
 }
 

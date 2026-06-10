@@ -25,9 +25,8 @@
  *     amplification vector.
  */
 import type {
-  BindingInvocationInput,
-  InvocationOutput,
-  OperationInvocationInput,
+  BindingHandle,
+  BindingInvocationArgs,
   OperationInvoker,
   TransformEvaluator,
 } from "@openbindings/sdk";
@@ -36,6 +35,7 @@ import {
   ERR_MAP_NOT_ARRAY,
   ERR_OPERATION_GRAPH_EXIT,
   ERR_VALIDATION_FAILED,
+  InvocationError,
   isTransformEvaluatorWithBindings,
 } from "@openbindings/sdk";
 import type { Graph, Node } from "./types.js";
@@ -60,10 +60,9 @@ export const MAX_EVENTS = 100_000;
 export const MAX_ERROR_DEPTH = 32;
 
 /**
- * A FIFO async queue used both for outbound events to the caller and for
- * per-node mailboxes. `push` is non-blocking; `next` resolves when an item
- * arrives. `close` signals end-of-stream; subsequent `next` calls return
- * `{ done: true }` once the buffer drains.
+ * A FIFO async queue used for per-node mailboxes. `push` is non-blocking;
+ * `next` resolves when an item arrives. `close` signals end-of-stream;
+ * subsequent `next` calls return `{ done: true }` once the buffer drains.
  */
 export class AsyncQueue<T> implements AsyncIterable<T> {
   private readonly buffer: T[] = [];
@@ -107,19 +106,23 @@ export class AsyncQueue<T> implements AsyncIterable<T> {
 interface EngineDeps {
   graph: Graph;
   invoker: OperationInvoker;
-  bindingIn: BindingInvocationInput;
+  /** The binding invocation that started this graph (carries interface/context). */
+  args: BindingInvocationArgs;
+  /** The graph's initial input event data (already read off the handle). */
+  input: unknown;
   transform?: TransformEvaluator;
   schemas: SchemaCache;
 }
 
 /**
- * Runs a single operation graph invocation. Spawn-once: call {@link run}
- * once and consume the returned async iterable.
+ * Runs a single operation graph invocation against a {@link BindingHandle}.
+ * Spawn-once: call {@link run} once; it resolves when the graph has
+ * terminated (normal completion, exit node, error, or cancellation).
  */
 export class Engine {
   private readonly graph: Graph;
   private readonly invoker: OperationInvoker;
-  private readonly bindingIn: BindingInvocationInput;
+  private readonly args: BindingInvocationArgs;
   private readonly transform?: TransformEvaluator;
   private readonly schemas: SchemaCache;
   private readonly origInput: unknown;
@@ -128,7 +131,7 @@ export class Engine {
   private readonly inEdges = new Map<string, string[]>();
   private inputKey = "";
 
-  private readonly output = new AsyncQueue<InvocationOutput>();
+  private handle!: BindingHandle<unknown, unknown>;
   private exitFlag = false;
   private inflight = 0;
   private eventCount = 0;
@@ -147,10 +150,10 @@ export class Engine {
   constructor(deps: EngineDeps) {
     this.graph = deps.graph;
     this.invoker = deps.invoker;
-    this.bindingIn = deps.bindingIn;
+    this.args = deps.args;
     this.transform = deps.transform;
     this.schemas = deps.schemas;
-    this.origInput = deps.bindingIn.input;
+    this.origInput = deps.input;
 
     for (const e of this.graph.edges ?? []) {
       const o = this.outEdges.get(e.from);
@@ -166,41 +169,31 @@ export class Engine {
   }
 
   /**
-   * Runs the graph and returns the outbound stream. The caller MUST consume
-   * the returned iterable; abandonment will leak the worker tasks.
+   * Runs the graph, emitting outputs on `handle` and terminating it
+   * (`closeOutput` on completion, `fireError` on terminal failure).
+   * Cancellation arrives via `handle.signal` and aborts execution.
    */
-  run(signal?: AbortSignal): AsyncIterable<InvocationOutput> {
-    void this.start(signal);
-    return this.output;
-  }
+  async run(handle: BindingHandle<unknown, unknown>): Promise<void> {
+    this.handle = handle;
 
-  private async start(signal?: AbortSignal): Promise<void> {
-    // Validate before executing. When `interface` is absent on the input
+    // Validate before executing. When `interface` is absent on the args
     // (direct binding invocation via host), skip the operation-key check —
     // bad references will fail at runtime.
     let opKeys: Set<string> | undefined;
-    if (this.bindingIn.interface) {
-      opKeys = new Set(Object.keys(this.bindingIn.interface.operations));
+    if (this.args.interface) {
+      opKeys = new Set(Object.keys(this.args.interface.operations));
     }
     try {
       validate(this.graph, opKeys);
     } catch (err) {
-      this.output.push({
-        error: {
-          code: ERR_VALIDATION_FAILED,
-          message: (err as Error).message,
-        },
-      });
-      this.finishOnce();
+      handle.fireError(new InvocationError(ERR_VALIDATION_FAILED, (err as Error).message));
       return;
     }
 
-    // Tie the external abort signal to ours.
-    if (signal) {
-      if (signal.aborted) this.abortController.abort();
-      else signal.addEventListener("abort", () => this.abortController.abort(), { once: true });
-    }
-    // When abort fires (from exit node, event-limit, or external signal),
+    // Tie the invocation's cancellation signal to ours.
+    if (handle.signal.aborted) this.abortController.abort();
+    else handle.signal.addEventListener("abort", () => this.abortController.abort(), { once: true });
+    // When abort fires (from exit node, event-limit, or cancellation),
     // close all mailboxes so workers waiting on next() can exit.
     this.abortController.signal.addEventListener("abort", () => this.shutdown(), { once: true });
 
@@ -226,6 +219,9 @@ export class Engine {
 
     await Promise.all(workers);
     this.finishOnce();
+    // Normal completion. A no-op when a terminal error already fired
+    // (exit error, event limit, cancellation).
+    handle.closeOutput();
   }
 
   private async runNode(key: string, node: Node): Promise<void> {
@@ -251,10 +247,9 @@ export class Engine {
     this.shutdown();
   }
 
-  /** Closes mailboxes and the output stream. Idempotent. */
+  /** Closes all mailboxes. Idempotent. */
   private shutdown(): void {
     for (const mb of this.mailboxes.values()) mb.close();
-    this.output.close();
   }
 
   private incInflight(): void {
@@ -264,6 +259,20 @@ export class Engine {
   private decInflight(): void {
     this.inflight--;
     if (this.inflight === 0) this.finishOnce();
+  }
+
+  /**
+   * Emits one output on the handle, honoring backpressure. A rejected emit
+   * means the invocation terminated (cancelled or abandoned); stop the
+   * engine — there is no one left to deliver to.
+   */
+  private async emitToCaller(data: unknown): Promise<void> {
+    try {
+      await this.handle.emitOutput(data);
+    } catch {
+      this.exitFlag = true;
+      this.abortController.abort();
+    }
   }
 
   private sendToNode(toKey: string, ev: GraphEvent): void {
@@ -360,12 +369,12 @@ export class Engine {
     // Event amplification bound.
     if (++this.eventCount > MAX_EVENTS) {
       this.exitFlag = true;
-      this.output.push({
-        error: {
-          code: ERR_EVENT_LIMIT_EXCEEDED,
-          message: `exceeded maximum event count (${MAX_EVENTS})`,
-        },
-      });
+      this.handle.fireError(
+        new InvocationError(
+          ERR_EVENT_LIMIT_EXCEEDED,
+          `exceeded maximum event count (${MAX_EVENTS})`,
+        ),
+      );
       this.abortController.abort();
       return;
     }
@@ -377,21 +386,17 @@ export class Engine {
         return;
 
       case "output":
-        this.output.push({ output: ev.data });
+        await this.emitToCaller(ev.data);
         return;
 
       case "exit": {
         this.exitFlag = true;
-        const isError = node.error === true;
-        if (isError) {
-          this.output.push({
-            error: {
-              code: ERR_OPERATION_GRAPH_EXIT,
-              message: stringify(ev.data),
-            },
-          });
+        if (node.error === true) {
+          this.handle.fireError(
+            new InvocationError(ERR_OPERATION_GRAPH_EXIT, stringify(ev.data)),
+          );
         } else {
-          this.output.push({ output: ev.data });
+          await this.emitToCaller(ev.data);
         }
         this.abortController.abort();
         return;
@@ -446,32 +451,45 @@ export class Engine {
     }
 
     // Per-call AbortController so a timeout cancels just this operation.
+    // Tied to the engine's controller so cancelling the graph cancels
+    // in-flight sub-operations.
     const opCtrl = new AbortController();
     const onAbort = (): void => opCtrl.abort();
     this.abortController.signal.addEventListener("abort", onAbort, { once: true });
+    if (this.abortController.signal.aborted) opCtrl.abort();
     let timer: ReturnType<typeof setTimeout> | undefined;
     if (node.timeout !== undefined) {
       timer = setTimeout(() => opCtrl.abort(), node.timeout);
     }
 
     try {
-      const input: OperationInvocationInput = {
-        interface: this.bindingIn.interface!,
+      // invoke throws synchronously on wiring/document errors (unknown
+      // operation, binding, or source); those route to onError like any
+      // other node failure.
+      const call = this.invoker.invoke({
+        interface: this.args.interface!,
         operation: node.operation!,
-        input: ev.data,
-        context: this.bindingIn.context,
-      };
-      const stream = this.invoker.invoke(input, { signal: opCtrl.signal });
-      for await (const streamEv of stream) {
+        context: this.args.context,
+        signal: opCtrl.signal,
+      });
+      // One initial event in; close is idempotent and safe even when the
+      // binding already closed input (no-input / unary). Rejections here
+      // are expected noise — terminal failures surface on the outputs
+      // iteration below.
+      try {
+        if (ev.data !== undefined) await call.write(ev.data);
+        await call.close();
+      } catch {
+        /* surfaces via outputs */
+      }
+      for await (const out of call.outputs) {
+        // Abandoning the iteration (exit fired) cancels the sub-call via
+        // the iterator's return().
         if (this.exitFlag) return;
-        if (streamEv.error) {
-          this.sendError(key, streamEv.error.message, ev.data, ev.lineage, ev.errorDepth);
-          continue;
-        }
         this.sendDownstream(
           key,
           newEvent({
-            data: streamEv.output,
+            data: out,
             source: key,
             lineage: copyLineage(lineage),
           }),

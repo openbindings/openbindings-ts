@@ -17,31 +17,44 @@
  *   - When refCount hits 0, an idle timer starts (default 30s).
  *   - If no new acquire() arrives before the timer fires, the socket
  *     is closed and evicted.
+ *
+ * The pool is transport-only: it delivers raw frame strings and never
+ * interprets payloads. An acquire may carry an AbortSignal; aborting
+ * while the dial is in flight rejects the acquire, and the socket — if
+ * it lands later — is parked for reuse and reaped by the idle timer.
  */
-
-import type { InvocationOutput } from "@openbindings/sdk";
 
 const DEFAULT_IDLE_TIMEOUT_MS = 30_000;
 
 export interface PooledWS {
   /** The underlying WebSocket. */
   ws: WebSocket;
-  /** Add a message listener. Returns a removal function. */
-  onMessage(handler: (event: InvocationOutput) => void): () => void;
-  /** Add a close/error listener. Returns a removal function. */
-  onClose(handler: () => void): () => void;
-  /** Send a message on the shared socket. */
+  /** Add a raw-frame listener. Returns a removal function. */
+  onMessage(handler: (data: string) => void): () => void;
+  /**
+   * Add a close listener; called with an Error for socket errors and with
+   * undefined for a clean close. Returns a removal function.
+   */
+  onClose(handler: (err?: Error) => void): () => void;
+  /** Send a frame on the shared socket. */
   send(data: string): void;
   /** Release this reference. Starts idle timer if last ref. */
   release(): void;
+}
+
+export interface AcquireOptions {
+  /** Custom URL builder (e.g. to add query-param credentials). */
+  buildURL?: (base: string, addr: string) => string;
+  /** Aborts a dial in flight; the acquire rejects with the signal's reason. */
+  signal?: AbortSignal;
 }
 
 interface PoolEntry {
   ws: WebSocket;
   refCount: number;
   idleTimer: ReturnType<typeof setTimeout> | null;
-  messageHandlers: Set<(event: InvocationOutput) => void>;
-  closeHandlers: Set<() => void>;
+  messageHandlers: Set<(data: string) => void>;
+  closeHandlers: Set<(err?: Error) => void>;
   ready: Promise<void>;
   key: string;
 }
@@ -62,11 +75,14 @@ export class WSPool {
   async acquire(
     serverURL: string,
     address: string,
-    buildURL?: (base: string, addr: string) => string,
+    options: AcquireOptions = {},
   ): Promise<PooledWS> {
+    const { buildURL, signal } = options;
+    if (signal?.aborted) throw abortError(signal);
+
     const key = `${serverURL}|${address}`;
 
-    // Fast path: reuse existing connection.
+    // Fast path: reuse existing connection (already ready by construction).
     const existing = this.conns.get(key);
     if (existing && existing.ws.readyState <= WebSocket.OPEN) {
       if (existing.idleTimer !== null) {
@@ -81,7 +97,7 @@ export class WSPool {
     // Check if another call is already creating this connection.
     const pending = this.creating.get(key);
     if (pending) {
-      const entry = await pending;
+      const entry = await abortable(pending, signal);
       entry.refCount++;
       return this.wrap(entry);
     }
@@ -92,12 +108,30 @@ export class WSPool {
 
     let entry: PoolEntry;
     try {
-      entry = await createPromise;
-    } finally {
-      this.creating.delete(key);
+      entry = await abortable(createPromise, signal);
+    } catch (e: unknown) {
+      if (signal?.aborted) {
+        // The dial continues in the background: park the socket for reuse
+        // when it lands and let the idle timer reap it.
+        void createPromise
+          .then((late) => {
+            this.creating.delete(key);
+            if (!this.conns.has(key)) {
+              this.conns.set(key, late);
+              this.startIdleTimer(late);
+            }
+          })
+          .catch(() => {
+            this.creating.delete(key);
+          });
+      } else {
+        this.creating.delete(key);
+      }
+      throw e;
     }
 
-    entry.refCount = 1;
+    this.creating.delete(key);
+    entry.refCount++;
     this.conns.set(key, entry);
     return this.wrap(entry);
   }
@@ -114,38 +148,26 @@ export class WSPool {
 
     const ws = new WebSocket(url);
 
-    const messageHandlers = new Set<(event: InvocationOutput) => void>();
-    const closeHandlers = new Set<() => void>();
+    const messageHandlers = new Set<(data: string) => void>();
+    const closeHandlers = new Set<(err?: Error) => void>();
 
     ws.addEventListener("message", (ev) => {
-      let event: InvocationOutput;
-      try {
-        const parsed = JSON.parse(String(ev.data));
-        if (parsed.error) {
-          event = { error: parsed.error };
-        } else if (parsed.data !== undefined) {
-          event = { output: parsed.data };
-        } else {
-          event = { output: parsed };
-        }
-      } catch {
-        event = { output: String(ev.data) };
-      }
+      const data = typeof ev.data === "string" ? ev.data : String(ev.data);
       for (const handler of messageHandlers) {
-        handler(event);
+        handler(data);
       }
     });
 
     ws.addEventListener("close", () => {
       for (const handler of closeHandlers) {
-        handler();
+        handler(undefined);
       }
       this.conns.delete(key);
     });
 
     ws.addEventListener("error", () => {
       for (const handler of closeHandlers) {
-        handler();
+        handler(new Error("WebSocket error"));
       }
       this.conns.delete(key);
     });
@@ -169,18 +191,36 @@ export class WSPool {
     return entry;
   }
 
+  private startIdleTimer(entry: PoolEntry): void {
+    if (entry.refCount > 0) return;
+    entry.idleTimer = setTimeout(() => {
+      entry.idleTimer = null;
+      const current = this.conns.get(entry.key);
+      if (current === entry && entry.refCount <= 0) {
+        this.conns.delete(entry.key);
+        if (entry.ws.readyState === WebSocket.OPEN || entry.ws.readyState === WebSocket.CONNECTING) {
+          entry.ws.close(1000, "idle timeout");
+        }
+      }
+    }, this.idleTimeoutMs);
+  }
+
   private wrap(entry: PoolEntry): PooledWS {
     return {
       ws: entry.ws,
 
-      onMessage(handler: (event: InvocationOutput) => void): () => void {
+      onMessage(handler: (data: string) => void): () => void {
         entry.messageHandlers.add(handler);
-        return () => { entry.messageHandlers.delete(handler); };
+        return () => {
+          entry.messageHandlers.delete(handler);
+        };
       },
 
-      onClose(handler: () => void): () => void {
+      onClose(handler: (err?: Error) => void): () => void {
         entry.closeHandlers.add(handler);
-        return () => { entry.closeHandlers.delete(handler); };
+        return () => {
+          entry.closeHandlers.delete(handler);
+        };
       },
 
       send(data: string): void {
@@ -191,17 +231,7 @@ export class WSPool {
 
       release: () => {
         entry.refCount--;
-        if (entry.refCount <= 0) {
-          entry.idleTimer = setTimeout(() => {
-            const current = this.conns.get(entry.key);
-            if (current === entry) {
-              this.conns.delete(entry.key);
-              if (entry.ws.readyState === WebSocket.OPEN || entry.ws.readyState === WebSocket.CONNECTING) {
-                entry.ws.close(1000, "idle timeout");
-              }
-            }
-          }, this.idleTimeoutMs);
-        }
+        this.startIdleTimer(entry);
       },
     };
   }
@@ -218,4 +248,33 @@ export class WSPool {
     }
     this.conns.clear();
   }
+}
+
+// ---------------------------------------------------------------------------
+// Abort helpers
+// ---------------------------------------------------------------------------
+
+function abortError(signal: AbortSignal): Error {
+  return signal.reason instanceof Error
+    ? signal.reason
+    : new Error("WebSocket acquire aborted");
+}
+
+function abortable<T>(p: Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (!signal) return p;
+  if (signal.aborted) return Promise.reject(abortError(signal));
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(abortError(signal));
+    signal.addEventListener("abort", onAbort, { once: true });
+    p.then(
+      (v) => {
+        signal.removeEventListener("abort", onAbort);
+        resolve(v);
+      },
+      (e: unknown) => {
+        signal.removeEventListener("abort", onAbort);
+        reject(e instanceof Error ? e : new Error(String(e)));
+      },
+    );
+  });
 }

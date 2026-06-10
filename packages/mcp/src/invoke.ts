@@ -1,13 +1,22 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import type { InvocationOutput } from "@openbindings/sdk";
 import {
-  ERR_INVALID_REF,
-  ERR_INVALID_INPUT,
-  ERR_EXECUTION_FAILED,
+  StreamableHTTPClientTransport,
+  StreamableHTTPError,
+} from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { McpError } from "@modelcontextprotocol/sdk/types.js";
+import {
+  InvocationError,
+  buildAuthHeaders,
+  httpErrorCode,
+  ERR_CANCELLED,
   ERR_CONNECT_FAILED,
-  ERR_AUTH_REQUIRED,
-  ERR_PERMISSION_DENIED,
+  ERR_EXECUTION_FAILED,
+  ERR_INVALID_REF,
+  ERR_SOURCE_CONFIG_ERROR,
+  ERR_VALIDATION_FAILED,
+  type BindingHandle,
+  type BindingInvocationArgs,
+  type Metadata,
 } from "@openbindings/sdk";
 import { CLIENT_NAME, CLIENT_VERSION } from "./constants.js";
 
@@ -25,165 +34,257 @@ export function parseRef(ref: string): { entityType: string; name: string } {
   return { entityType, name };
 }
 
-/**
- * Connect to an MCP server, returning a Client instance.
- * The caller is responsible for closing the client.
- */
-async function connect(
-  url: string,
-  headers: Record<string, string>,
-  signal?: AbortSignal,
-): Promise<Client> {
-  const requestInit: RequestInit = {};
-  if (Object.keys(headers).length > 0) {
-    requestInit.headers = headers;
-  }
-
-  const transport = new StreamableHTTPClientTransport(new URL(url), { requestInit });
-  const client = new Client({ name: CLIENT_NAME, version: CLIENT_VERSION });
-  await client.connect(transport);
-  return client;
+/** Reads the first input, or undefined when the input side closes empty. */
+async function readFirst<T>(it: AsyncIterable<T>): Promise<T | undefined> {
+  for await (const v of it) return v;
+  return undefined;
 }
 
-/** Invoke a tool call. */
-async function invokeTool(
+/**
+ * Maps a thrown error to an InvocationError. JSON-RPC errors carry the MCP
+ * error code/data in details; HTTP-status errors map via httpErrorCode;
+ * anything else falls back to the phase's code (ERR_CONNECT_FAILED during
+ * the initialize handshake, ERR_EXECUTION_FAILED during dispatch).
+ */
+function mapError(e: unknown, signal: AbortSignal, fallback: string): InvocationError {
+  if (e instanceof InvocationError) return e;
+  if (signal.aborted) {
+    return new InvocationError(ERR_CANCELLED, "invocation cancelled");
+  }
+  const msg = e instanceof Error ? e.message : String(e);
+  if (e instanceof McpError) {
+    return new InvocationError(ERR_EXECUTION_FAILED, msg, { code: e.code, data: e.data });
+  }
+  if (e instanceof StreamableHTTPError && typeof e.code === "number" && e.code > 0) {
+    return new InvocationError(httpErrorCode(e.code), msg, { status: e.code });
+  }
+  return new InvocationError(fallback, msg);
+}
+
+/**
+ * Runs one MCP binding invocation against the handle. Each call opens a
+ * fresh MCP session (Streamable HTTP), dispatches the entity call, emits
+ * outputs (progress notifications first, then the result), and closes.
+ *
+ * Pre-dispatch failures (bad ref, missing endpoint, non-object input) fire
+ * BEFORE any network I/O.
+ */
+export async function runMCPBinding(
+  args: BindingInvocationArgs,
+  inv: BindingHandle<unknown, unknown>,
+): Promise<void> {
+  // --- Pre-dispatch validation: no network I/O has happened yet. ---
+  let entityType: string;
+  let name: string;
+  try {
+    ({ entityType, name } = parseRef(args.ref));
+  } catch (e: unknown) {
+    inv.fireError(
+      new InvocationError(ERR_INVALID_REF, e instanceof Error ? e.message : String(e)),
+    );
+    return;
+  }
+
+  const location = args.source.location;
+  if (!location) {
+    inv.fireError(
+      new InvocationError(ERR_SOURCE_CONFIG_ERROR, "MCP source requires a location (endpoint URL)"),
+    );
+    return;
+  }
+
+  // --- Collect input from the handle. ---
+  // Tools and prompts take one named-arguments object; resource reads take
+  // no input. Close input as early as possible so callers never have to.
+  let input: Record<string, unknown> = {};
+  if (entityType === "resources") {
+    void inv.closeInput();
+  } else {
+    const first = await readFirst(inv.inputs());
+    void inv.closeInput();
+    if (first != null) {
+      if (typeof first !== "object" || Array.isArray(first)) {
+        inv.fireError(
+          new InvocationError(
+            ERR_VALIDATION_FAILED,
+            `MCP ${entityType === "tools" ? "tool" : "prompt"} input must be an object, got ${typeof first}`,
+          ),
+        );
+        return;
+      }
+      input = first as Record<string, unknown>;
+    }
+  }
+
+  if (inv.signal.aborted) return; // already terminal via ERR_CANCELLED
+
+  // --- Connect: the MCP initialize handshake is the first network I/O. ---
+  const authHeaders = buildAuthHeaders(args.context);
+  const baseFetch = args.fetch ?? globalThis.fetch;
+
+  // Capture HTTP response headers from POSTs (initialize, then the entity
+  // call) so the latest capture at first-emit time is the call's response.
+  let responseHeaders: Metadata = {};
+  const captureFetch = async (url: string | URL, init?: RequestInit): Promise<Response> => {
+    const response = await baseFetch(url, init);
+    if (init?.method === "POST") {
+      const md: Metadata = {};
+      response.headers.forEach((value, key) => {
+        (md[key] ??= []).push(value);
+      });
+      responseHeaders = md;
+    }
+    return response;
+  };
+
+  const transport = new StreamableHTTPClientTransport(new URL(location), {
+    fetch: captureFetch,
+    ...(Object.keys(authHeaders).length > 0 ? { requestInit: { headers: authHeaders } } : {}),
+  });
+  const client = new Client({ name: CLIENT_NAME, version: CLIENT_VERSION });
+
+  try {
+    await client.connect(transport, { signal: inv.signal });
+  } catch (e: unknown) {
+    inv.fireError(mapError(e, inv.signal, ERR_CONNECT_FAILED));
+    return;
+  }
+
+  // setHeader must precede the first emit and may only happen once.
+  let headerSet = false;
+  const setHeaderOnce = (): void => {
+    if (headerSet) return;
+    headerSet = true;
+    inv.setHeader(responseHeaders);
+  };
+
+  // --- Dispatch. ---
+  try {
+    switch (entityType) {
+      case "tools":
+        await runTool(client, name, input, inv, setHeaderOnce);
+        break;
+      case "resources":
+        await runResource(client, name, inv, setHeaderOnce);
+        break;
+      case "prompts":
+        await runPrompt(client, name, input, inv, setHeaderOnce);
+        break;
+    }
+  } catch (e: unknown) {
+    inv.fireError(mapError(e, inv.signal, ERR_EXECUTION_FAILED));
+  } finally {
+    try { await client.close(); } catch { /* ignore close errors */ }
+  }
+}
+
+/**
+ * Invoke a tool call. Progress notifications stream as outputs ahead of the
+ * final result -- multiple outputs are first-class on the handle.
+ */
+async function runTool(
   client: Client,
   toolName: string,
-  input: unknown,
-): Promise<InvocationOutput> {
-  const start = performance.now();
+  toolArgs: Record<string, unknown>,
+  inv: BindingHandle<unknown, unknown>,
+  setHeaderOnce: () => void,
+): Promise<void> {
+  // Progress callbacks are synchronous; chain the emits so they stay
+  // ordered and observe emitOutput's backpressure without a side buffer.
+  let progressChain: Promise<void> = Promise.resolve();
 
-  if (input != null && (typeof input !== "object" || Array.isArray(input))) {
-    return {
-      status: 1,
-      durationMs: Math.round(performance.now() - start),
-      error: { code: ERR_INVALID_INPUT, message: `tool input must be an object, got ${typeof input}` },
-    };
-  }
-  const args = (input as Record<string, unknown>) ?? {};
-
-  const result = await client.callTool({ name: toolName, arguments: args });
-  const durationMs = Math.round(performance.now() - start);
+  const result = await client.callTool(
+    { name: toolName, arguments: toolArgs },
+    undefined,
+    {
+      signal: inv.signal,
+      onprogress: (progress) => {
+        progressChain = progressChain
+          .then(() => {
+            setHeaderOnce();
+            return inv.emitOutput(progress);
+          })
+          .catch(() => { /* invocation terminated; stop emitting */ });
+      },
+    },
+  );
+  await progressChain;
 
   if (result.isError) {
-    return {
-      status: 1,
-      durationMs,
-      error: { code: ERR_EXECUTION_FAILED, message: extractContent(result.content) },
-    };
+    throw new InvocationError(ERR_EXECUTION_FAILED, extractContent(result.content));
   }
 
   // Prefer structuredContent if available.
   const output = result.structuredContent ?? parseContent(result.content);
-  return { output, status: 0, durationMs };
+  setHeaderOnce();
+  await inv.emitOutput(output);
+  inv.closeOutput();
 }
 
 /** Read an MCP resource. */
-async function invokeResource(
+async function runResource(
   client: Client,
   uri: string,
-): Promise<InvocationOutput> {
-  const start = performance.now();
-  const result = await client.readResource({ uri });
-  const durationMs = Math.round(performance.now() - start);
+  inv: BindingHandle<unknown, unknown>,
+  setHeaderOnce: () => void,
+): Promise<void> {
+  const result = await client.readResource({ uri }, { signal: inv.signal });
 
+  let output: unknown;
   const contents = result.contents;
   if (!contents || contents.length === 0) {
-    return { output: null, status: 0, durationMs };
-  }
-
-  if (contents.length === 1) {
+    output = null;
+  } else if (contents.length === 1) {
     const c = contents[0];
     const text = "text" in c ? (c as { text: string }).text : undefined;
     if (text) {
       try {
-        return { output: JSON.parse(text), status: 0, durationMs };
+        output = JSON.parse(text);
       } catch {
-        return { output: text, status: 0, durationMs };
+        output = text;
       }
+    } else {
+      output = c;
     }
-    return { output: c, status: 0, durationMs };
+  } else {
+    output = contents;
   }
 
-  return { output: contents, status: 0, durationMs };
+  setHeaderOnce();
+  await inv.emitOutput(output);
+  inv.closeOutput();
 }
 
 /** Get an MCP prompt. */
-async function invokePrompt(
+async function runPrompt(
   client: Client,
   promptName: string,
-  input: unknown,
-): Promise<InvocationOutput> {
-  const start = performance.now();
-
+  promptInput: Record<string, unknown>,
+  inv: BindingHandle<unknown, unknown>,
+  setHeaderOnce: () => void,
+): Promise<void> {
   // Prompt arguments must be Record<string, string>.
-  let args: Record<string, string> | undefined;
-  if (input != null && typeof input === "object" && !Array.isArray(input)) {
-    args = {};
-    for (const [k, v] of Object.entries(input)) {
-      args[k] = String(v);
+  let promptArgs: Record<string, string> | undefined;
+  if (Object.keys(promptInput).length > 0) {
+    promptArgs = {};
+    for (const [k, v] of Object.entries(promptInput)) {
+      promptArgs[k] = String(v);
     }
   }
 
-  const result = await client.getPrompt({ name: promptName, arguments: args });
-  const durationMs = Math.round(performance.now() - start);
+  const result = await client.getPrompt(
+    { name: promptName, arguments: promptArgs },
+    { signal: inv.signal },
+  );
 
   const output: Record<string, unknown> = { messages: result.messages };
   if (result.description) {
     output.description = result.description;
   }
-  return { output, status: 0, durationMs };
-}
 
-/**
- * Invoke a binding against an MCP server. Each call creates a fresh session.
- */
-export async function invokeMCPBinding(
-  url: string,
-  ref: string,
-  input: unknown,
-  headers: Record<string, string>,
-  signal?: AbortSignal,
-): Promise<InvocationOutput> {
-  const { entityType, name } = parseRef(ref);
-
-  const start = performance.now();
-  let client: Client;
-  try {
-    client = await connect(url, headers, signal);
-  } catch (e: unknown) {
-    const durationMs = Math.round(performance.now() - start);
-    const msg = e instanceof Error ? e.message : String(e);
-    if (msg.includes("401") || msg.includes("Unauthorized")) {
-      return { status: 401, durationMs, error: { code: ERR_AUTH_REQUIRED, message: msg } };
-    }
-    if (msg.includes("403") || msg.includes("Forbidden")) {
-      return { status: 403, durationMs, error: { code: ERR_PERMISSION_DENIED, message: msg } };
-    }
-    return { status: 1, durationMs, error: { code: ERR_CONNECT_FAILED, message: msg } };
-  }
-
-  try {
-    switch (entityType) {
-      case "tools":
-        return await invokeTool(client, name, input);
-      case "resources":
-        return await invokeResource(client, name);
-      case "prompts":
-        return await invokePrompt(client, name, input);
-      default:
-        return {
-          status: 1,
-          durationMs: 0,
-          error: { code: ERR_INVALID_REF, message: `unknown entity type "${entityType}"` },
-        };
-    }
-  } catch (e: unknown) {
-    const msg = e instanceof Error ? e.message : String(e);
-    return { status: 1, durationMs: Math.round(performance.now() - start), error: { code: ERR_EXECUTION_FAILED, message: msg } };
-  } finally {
-    try { await client.close(); } catch { /* ignore close errors */ }
-  }
+  setHeaderOnce();
+  await inv.emitOutput(output);
+  inv.closeOutput();
 }
 
 /** Extract text from MCP content array for error messages. */

@@ -53,29 +53,23 @@ for (const [name, op] of Object.entries(iface.operations)) {
 ### Resolve and invoke operations
 
 ```typescript
-import { OperationInvoker, MemoryStore, fetchInterface } from "@openbindings/sdk";
+import { OperationInvoker, MemoryStore, storeContextResolver, fetchInterface } from "@openbindings/sdk";
 import { OpenAPIInvoker } from "@openbindings/openapi";
 
 // Create an operation invoker with format support
 const operationInvoker = new OperationInvoker(
   [new OpenAPIInvoker()],
-  { contextStore: new MemoryStore() },
+  { contextResolver: storeContextResolver(new MemoryStore()) },
 );
 
 // Fetch the live OBI from the target's well-known endpoint
 const iface = await fetchInterface("https://api.example.com");
 
-// Invoke an operation — everything is a stream
-for await (const event of operationInvoker.invoke({
-  interface: iface,
-  operation: "listItems",
-  input: { limit: 10 },
-})) {
-  if (event.error) {
-    console.error(event.error.message);
-    break;
-  }
-  console.log(event.output);
+// Invoke an operation — one handle shape for every cardinality
+const call = operationInvoker.invoke({ interface: iface, operation: "listItems" });
+await call.write({ limit: 10 });
+for await (const item of call.outputs) {
+  console.log(item);
 }
 ```
 
@@ -94,18 +88,39 @@ for (const issue of issues) {
 
 ## Invocation model
 
-Every operation returns an `AsyncGenerator<InvocationOutput>`. A unary operation yields one event. A streaming operation yields many. The consumer code is the same for both:
+Every operation returns a cardinality-agnostic `Invocation<I, O>` handle: the
+caller writes input messages until done; the invocation yields output messages
+until done. One shape serves unary, server-streaming, client-streaming, and
+bidirectional bindings — cardinality is a property of the selected binding,
+never of the call signature:
 
 ```typescript
-for await (const event of operationInvoker.invoke({
-  interface: iface,
-  operation: "listItems",
-  input: { limit: 10 },
-})) {
-  if (event.error) { /* handle */ }
-  console.log(event.output);
+const call = operationInvoker.invoke({ interface: iface, operation: "listItems" });
+await call.write({ limit: 10 }); // unary: the binding closes input after one read
+
+for await (const item of call.outputs) {
+  console.log(item); // bare output values; terminal failures throw InvocationError
 }
 ```
+
+For an operation you are confident yields exactly one output, the one blessed
+terminal is `single` — strict and short-circuiting (`ERR_EXPECTED_SINGLE` on
+zero or more than one):
+
+```typescript
+import { single } from "@openbindings/sdk";
+
+const call = operationInvoker.invoke({ interface: iface, operation: "getItem" });
+await call.write({ id: "item_1" });
+const item = await single(call.outputs);
+```
+
+Client-streaming and bidirectional callers own `close()` (and drive input and
+output from separate async contexts); lifecycle is observable via `closed`,
+leading/trailing metadata via `header`/`trailer()`, and termination via
+`cancel()`. Missing runtime context (credentials, configuration) surfaces as a
+`CONTEXT_REQUIRED` terminal error raised before any side effect, resolved by
+the operation invoker's `contextResolver` when one is configured.
 
 ## Binding invokers
 
@@ -125,7 +140,7 @@ Invokers implement `BindingInvoker`. Interface creators (which synthesize OBIs f
 Context is stored per host, not per request. The context key is `host[:port]` — scheme-agnostic, so `http://`, `https://`, and `ws://` for the same host share context:
 
 ```typescript
-import { MemoryStore, normalizeContextKey } from "@openbindings/sdk";
+import { MemoryStore, normalizeContextKey, storeContextResolver } from "@openbindings/sdk";
 
 const store = new MemoryStore();
 const key = normalizeContextKey("https://api.example.com/v1/users");
@@ -133,7 +148,13 @@ const key = normalizeContextKey("https://api.example.com/v1/users");
 await store.set(key, { bearerToken: "tok_123" });
 ```
 
-Binding invokers read from the context store automatically when it's configured on the `OperationInvoker`.
+A binding that needs context it wasn't given raises a `CONTEXT_REQUIRED`
+challenge before any side effect; the operation invoker resolves challenges
+through its configured `contextResolver` and re-drives the binding.
+`storeContextResolver(store)` is the store-backed resolver — the composition
+of the binding-invoker and context-store roles. Apps that resolve
+interactively (prompts, browser redirects, keychains) supply their own
+resolver instead.
 
 ## Schema compatibility profile
 

@@ -122,7 +122,7 @@ describe("convertToInterface", () => {
     expect(recvOp.output!.type).toBe("object");
   });
 
-  it("populates security from operation security requirements", async () => {
+  it("omits security metadata (credentials are runtime context, not OBI surface)", async () => {
     const specWithSecurity = {
       asyncapi: "3.0.0",
       info: { title: "Secure API", version: "1.0.0" },
@@ -156,14 +156,7 @@ describe("convertToInterface", () => {
     const doc = await parsedDoc(specWithSecurity);
     const iface = await convertToInterface(undefined, doc);
 
-    expect(iface.security).toBeDefined();
-    expect(iface.bindings!["sendMessage.asyncapi"].security).toBeDefined();
-  });
-
-  it("skips security when no security schemes", async () => {
-    const doc = await parsedDoc(MINIMAL_DOC);
-    const iface = await convertToInterface(undefined, doc);
-
-    expect(iface.security).toBeUndefined();
+    expect(Object.keys(iface)).not.toContain("security");
+    expect(Object.keys(iface.bindings!["sendMessage.asyncapi"])).not.toContain("security");
   });
 });

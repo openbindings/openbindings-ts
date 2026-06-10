@@ -8,8 +8,8 @@
  * binding declared in `wrangler.toml`.
  *
  * The invoker implements the standard `BindingInvoker` interface from
- * `@openbindings/sdk` and slots into any OB codegen client. The codegen
- * client is generated from an OBI document whose source declares
+ * `@openbindings/sdk` and slots into any OB codegen typed invoker. The
+ * typed invoker is generated from an OBI document whose source declares
  * `format: "workers-rpc@^1.0.0"` and whose binding entries' `ref` field
  * is the method name on the WorkerEntrypoint class.
  *

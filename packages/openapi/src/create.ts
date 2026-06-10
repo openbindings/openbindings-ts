@@ -1,4 +1,4 @@
-import type { OBInterface, Operation, BindingEntry, JSONSchema, Source, SecurityMethod } from "@openbindings/sdk";
+import type { OBInterface, Operation, BindingEntry, JSONSchema, Source } from "@openbindings/sdk";
 import { MAX_TESTED_VERSION, detectFormatVersion, dereference } from "@openbindings/sdk";
 import yaml from "js-yaml";
 import type {
@@ -8,8 +8,6 @@ import type {
   OpenAPIParameter,
   OpenAPIRequestBody,
   OpenAPIResponse,
-  OpenAPISecurityScheme,
-  OpenAPIOAuthFlow,
 } from "./types.js";
 import { DEFAULT_SOURCE_NAME } from "./constants.js";
 import { translateSchemaDialect } from "./translate.js";
@@ -102,8 +100,6 @@ export async function convertToInterface(
       };
     }
   }
-
-  populateSecurity(doc, iface);
 
   return iface;
 }
@@ -215,142 +211,4 @@ function preferJsonMediaType(content: Record<string, OpenAPIMediaType>): OpenAPI
 
 function sortedEntries(obj: Record<string, unknown>): [string, unknown][] {
   return Object.entries(obj).sort(([a], [b]) => a.localeCompare(b));
-}
-
-/**
- * Reads security schemes from the OpenAPI doc and populates iface.security
- * and each binding's security field.
- */
-function populateSecurity(doc: OpenAPIDocument, iface: OBInterface): void {
-  const components = doc.components as Record<string, unknown> | undefined;
-  if (!components) return;
-  const securitySchemes = components.securitySchemes as Record<string, OpenAPISecurityScheme> | undefined;
-  if (!securitySchemes || Object.keys(securitySchemes).length === 0) return;
-
-  // Convert all security schemes to SecurityMethod.
-  const schemeMethods: Record<string, SecurityMethod> = {};
-  for (const [name, scheme] of Object.entries(securitySchemes)) {
-    if (!scheme || typeof scheme !== "object") continue;
-    schemeMethods[name] = convertSecurityScheme(scheme);
-  }
-  if (Object.keys(schemeMethods).length === 0) return;
-
-  if (!doc.paths) return;
-
-  const securityEntries: Record<string, SecurityMethod[]> = {};
-  const usedKeys = new Set<string>();
-
-  // Document-level security requirements.
-  const docSecurity = doc.security as Array<Record<string, unknown>> | undefined;
-
-  for (const [pathStr, pathItemRaw] of sortedEntries(doc.paths)) {
-    if (pathStr.startsWith("x-") || !pathItemRaw || typeof pathItemRaw !== "object") continue;
-    const pathItem = pathItemRaw as Record<string, unknown>;
-
-    for (const method of HTTP_METHODS) {
-      const op = pathItem[method];
-      if (!op || typeof op !== "object") continue;
-      const opObj = op as OpenAPIOperation;
-
-      const opKey = deriveOperationKey(opObj, pathStr, method, usedKeys);
-      usedKeys.add(opKey);
-      const bindingKey = `${opKey}.${DEFAULT_SOURCE_NAME}`;
-
-      // Operation-level security overrides document-level.
-      const opSecurity = (opObj as Record<string, unknown>).security as
-        | Array<Record<string, unknown>>
-        | undefined;
-      const requirements = opSecurity ?? docSecurity;
-      if (!requirements || requirements.length === 0) continue;
-
-      // Collect scheme names from all requirements.
-      const schemeNames: string[] = [];
-      for (const req of requirements) {
-        for (const schemeName of Object.keys(req)) {
-          schemeNames.push(schemeName);
-        }
-      }
-      if (schemeNames.length === 0) {
-        // Empty security requirement means explicitly public.
-        continue;
-      }
-      schemeNames.sort();
-
-      const secKey = schemeNames.join("+");
-
-      // Build the security entry if not already present.
-      if (!securityEntries[secKey]) {
-        const methods: SecurityMethod[] = [];
-        for (const name of schemeNames) {
-          if (schemeMethods[name]) {
-            methods.push(schemeMethods[name]);
-          }
-        }
-        if (methods.length === 0) continue;
-        securityEntries[secKey] = methods;
-      }
-
-      // Link the binding.
-      const binding = iface.bindings?.[bindingKey];
-      if (binding) {
-        binding.security = secKey;
-      }
-    }
-  }
-
-  if (Object.keys(securityEntries).length > 0) {
-    iface.security = securityEntries;
-  }
-}
-
-/** Converts an OpenAPI security scheme to an OBI SecurityMethod. */
-function convertSecurityScheme(s: OpenAPISecurityScheme): SecurityMethod {
-  switch (s.type) {
-    case "http": {
-      const scheme = (s.scheme ?? "").toLowerCase();
-      switch (scheme) {
-        case "bearer":
-          return { type: "bearer", description: s.description || undefined };
-        case "basic":
-          return { type: "basic", description: s.description || undefined };
-        default:
-          return { type: s.scheme ?? s.type, description: s.description || undefined };
-      }
-    }
-
-    case "oauth2": {
-      const m: SecurityMethod = { type: "oauth2", description: s.description || undefined };
-      if (s.flows) {
-        // Use the first non-null flow, in preference order.
-        const flow: OpenAPIOAuthFlow | undefined =
-          s.flows.authorizationCode ??
-          s.flows.implicit ??
-          s.flows.clientCredentials ??
-          s.flows.password;
-        if (flow) {
-          if (flow.authorizationUrl) m.authorizeUrl = flow.authorizationUrl;
-          if (flow.tokenUrl) m.tokenUrl = flow.tokenUrl;
-          if (flow.scopes) {
-            const scopes = Object.keys(flow.scopes).sort();
-            if (scopes.length > 0) m.scopes = scopes;
-          }
-        }
-      }
-      return m;
-    }
-
-    case "apiKey":
-      return {
-        type: "apiKey",
-        description: s.description || undefined,
-        name: s.name,
-        in: s.in,
-      };
-
-    case "openIdConnect":
-      return { type: "bearer", description: "OpenID Connect" };
-
-    default:
-      return { type: s.type, description: s.description || undefined };
-  }
 }

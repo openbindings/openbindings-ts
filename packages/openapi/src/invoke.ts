@@ -1,96 +1,160 @@
-import type {
-  BindingInvocationInput,
-  InvocationOutput,
-} from "@openbindings/sdk";
 import {
+  InvocationError,
+  contextRequiredError,
+  contextSatisfies,
   maybeJSON,
   isHttpUrl,
   contextBearerToken,
   contextApiKey,
   contextBasicAuth,
+  contextString,
   contextHeaders,
   contextCookies,
   contextMetadata,
-  normalizeContextKey,
+  normalizeEndpoint,
   httpErrorCode,
   ERR_INVALID_REF,
-  ERR_SOURCE_LOAD_FAILED,
   ERR_SOURCE_CONFIG_ERROR,
   ERR_REF_NOT_FOUND,
   ERR_EXECUTION_FAILED,
   ERR_RESPONSE_ERROR,
+  ERR_MISSING_INPUT,
+  type BindingHandle,
+  type BindingInvocationArgs,
+  type ContextAlternative,
+  type ContextRequirement,
+  type ContextRequiredDetails,
+  type Metadata,
 } from "@openbindings/sdk";
-import type { OpenAPIDocument, OpenAPIOperation, OpenAPIParameter } from "./types.js";
-import { errorMessage, loadOpenAPIDocument, mergeParameters, parseRef } from "./util.js";
+import type {
+  OpenAPIDocument,
+  OpenAPIOperation,
+  OpenAPIParameter,
+  OpenAPISecurityScheme,
+} from "./types.js";
+import { errorMessage, mergeParameters, parseRef } from "./util.js";
 
 const MAX_RESPONSE_BYTES = 10 * 1024 * 1024;
 
-/** Invokes an OpenAPI binding by resolving the ref, building the HTTP request, and returning the response. */
-export async function invokeBinding(
-  input: BindingInvocationInput,
-  options?: { signal?: AbortSignal },
-  preloadedDoc?: OpenAPIDocument,
-): Promise<InvocationOutput> {
-  const start = performance.now();
-
-  let doc: OpenAPIDocument;
-  if (preloadedDoc) {
-    doc = preloadedDoc;
-  } else {
-    try {
-      doc = await loadOpenAPIDocument(input.source.location, input.source.content, options, input.fetch);
-    } catch (e: unknown) {
-      return failedOutput(start, ERR_SOURCE_LOAD_FAILED, errorMessage(e));
-    }
-  }
-
+/**
+ * Drives one OpenAPI binding invocation over the binding-facing handle:
+ * resolves the ref against the document, derives auth requirements, reads
+ * the input message (if any) from the handle, performs the HTTP request,
+ * and emits the parsed response body.
+ *
+ * Every pre-dispatch failure (bad ref, missing server URL, unresolvable
+ * operation, missing context) terminates the handle BEFORE any network
+ * side effect, so a no-input-consumed retry is safe.
+ */
+export async function runBinding(
+  args: BindingInvocationArgs,
+  inv: BindingHandle<unknown, unknown>,
+  doc: OpenAPIDocument,
+): Promise<void> {
   let path: string, method: string;
   try {
-    ({ path, method } = parseRef(input.ref));
+    ({ path, method } = parseRef(args.ref));
   } catch (e: unknown) {
-    return failedOutput(start, ERR_INVALID_REF, errorMessage(e));
+    inv.fireError(new InvocationError(ERR_INVALID_REF, errorMessage(e)));
+    return;
   }
 
   let baseURL: string;
   try {
-    baseURL = resolveBaseURLWithLocation(doc, input.context, input.source.location);
+    baseURL = resolveRequestBaseURL(doc, args.context, args.source.location);
   } catch (e: unknown) {
-    return failedOutput(start, ERR_SOURCE_CONFIG_ERROR, errorMessage(e));
+    inv.fireError(new InvocationError(ERR_SOURCE_CONFIG_ERROR, errorMessage(e)));
+    return;
   }
 
   if (!doc.paths) {
-    return failedOutput(start, ERR_SOURCE_CONFIG_ERROR, "OpenAPI document has no paths defined");
+    inv.fireError(
+      new InvocationError(ERR_SOURCE_CONFIG_ERROR, "OpenAPI document has no paths defined"),
+    );
+    return;
   }
   const pathItem = doc.paths[path];
   if (!pathItem) {
-    return failedOutput(start, ERR_REF_NOT_FOUND, `path "${path}" not in OpenAPI doc`);
+    inv.fireError(new InvocationError(ERR_REF_NOT_FOUND, `path "${path}" not in OpenAPI doc`));
+    return;
   }
   const op = pathItem[method] as OpenAPIOperation | undefined;
   if (!op) {
-    return failedOutput(start, ERR_REF_NOT_FOUND, `method "${method}" not in path "${path}"`);
+    inv.fireError(
+      new InvocationError(ERR_REF_NOT_FOUND, `method "${method}" not in path "${path}"`),
+    );
+    return;
   }
 
-  return doHTTPRequest(doc, op, pathItem, path, method, baseURL, input, start, options);
+  // Context negotiation: challenge before any input is depended on and
+  // before any request is dispatched.
+  const details = requiredContext(doc, op, args.context, baseURL);
+  if (details) {
+    inv.fireError(contextRequiredError(requirementSummary(details), details));
+    return;
+  }
+
+  // ----- Input (flows through the handle, not the args) -----
+  const allParams = mergeParameters(pathItem.parameters, op.parameters);
+  const takesInput = allParams.length > 0 || op.requestBody != null;
+
+  let inputMap: Record<string, unknown>;
+  if (!takesInput) {
+    // No-input operation: close input on entry so the caller never has to,
+    // and dispatch immediately.
+    void inv.closeInput();
+    inputMap = {};
+  } else {
+    const first = await readFirst(inv.inputs());
+    void inv.closeInput();
+    if (first === undefined) {
+      if (requiresInput(allParams, op)) {
+        inv.fireError(
+          new InvocationError(
+            ERR_MISSING_INPUT,
+            `operation "${method} ${path}" requires an input message`,
+          ),
+        );
+        return;
+      }
+      inputMap = {};
+    } else {
+      inputMap = asInputRecord(first);
+    }
+  }
+
+  await doHTTPRequest(doc, op, allParams, path, method, baseURL, inputMap, args, inv);
+}
+
+/** Reads the first input message from the handle, or undefined when the input side closed bare. */
+async function readFirst<T>(inputs: AsyncIterable<T>): Promise<T | undefined> {
+  for await (const v of inputs) {
+    return v;
+  }
+  return undefined;
+}
+
+/** True when the operation cannot be dispatched without an input message. */
+function requiresInput(params: OpenAPIParameter[], op: OpenAPIOperation): boolean {
+  return params.some((p) => p?.required === true) || op.requestBody?.required === true;
 }
 
 async function doHTTPRequest(
   doc: OpenAPIDocument,
   op: OpenAPIOperation,
-  pathItem: Record<string, unknown>,
+  allParams: OpenAPIParameter[],
   pathTemplate: string,
   method: string,
   baseURL: string,
-  input: BindingInvocationInput,
-  start: number,
-  options?: { signal?: AbortSignal },
-): Promise<InvocationOutput> {
-  const allParams = mergeParameters(
-    pathItem["parameters"] as OpenAPIParameter[] | undefined,
-    op.parameters,
+  inputMap: Record<string, unknown>,
+  args: BindingInvocationArgs,
+  inv: BindingHandle<unknown, unknown>,
+): Promise<void> {
+  const { resolvedPath, query, headers: headerParams, body } = classifyInput(
+    allParams,
+    inputMap,
+    pathTemplate,
   );
-  const inputMap = asInputRecord(input.input);
-
-  const { resolvedPath, query, headers: headerParams, body } = classifyInput(allParams, inputMap, pathTemplate);
 
   let reqURL = baseURL + resolvedPath;
   if (Object.keys(query).length > 0) {
@@ -108,7 +172,7 @@ async function doHTTPRequest(
     fetchHeaders.set(k, String(v));
   }
 
-  const authQueryParams = applyContext(fetchHeaders, doc, op, input.context);
+  const authQueryParams = applyContext(fetchHeaders, doc, op, args.context);
   if (authQueryParams) {
     const sep = reqURL.includes("?") ? "&" : "?";
     reqURL += sep + new URLSearchParams(authQueryParams).toString();
@@ -127,27 +191,27 @@ async function doHTTPRequest(
     }
   }
 
-  const doFetch = input.fetch ?? fetch;
+  const doFetch = args.fetch ?? fetch;
   let resp: Response;
   try {
     resp = await doFetch(reqURL, {
       method: method.toUpperCase(),
       headers: fetchHeaders,
       body: fetchBody,
-      signal: options?.signal,
+      signal: inv.signal,
     });
   } catch (e: unknown) {
-    return failedOutput(start, ERR_EXECUTION_FAILED, errorMessage(e));
+    inv.fireError(new InvocationError(ERR_EXECUTION_FAILED, errorMessage(e)));
+    return;
   }
 
   let respText: string;
   try {
     respText = await readResponseText(resp, MAX_RESPONSE_BYTES);
   } catch (e: unknown) {
-    return failedOutput(start, ERR_RESPONSE_ERROR, errorMessage(e));
+    inv.fireError(new InvocationError(ERR_RESPONSE_ERROR, errorMessage(e)));
+    return;
   }
-
-  const durationMs = Math.round(performance.now() - start);
 
   let output: unknown;
   if (respText.length > 0) {
@@ -162,86 +226,151 @@ async function doHTTPRequest(
     }
   }
 
+  // Cancelled while in flight: the handle is already terminal.
+  if (inv.signal.aborted) return;
+
+  // Leading metadata (HTTP response headers) precedes the first emit.
+  inv.setHeader(responseMetadata(resp));
+
   if (resp.status >= 400) {
-    return {
-      output,
-      status: resp.status,
-      durationMs,
-      error: {
-        code: httpErrorCode(resp.status),
-        message: `HTTP ${resp.status} ${resp.statusText}`,
-      },
-    };
+    inv.fireError(
+      new InvocationError(
+        httpErrorCode(resp.status),
+        `HTTP ${resp.status} ${resp.statusText}`,
+        { status: resp.status, body: output },
+      ),
+    );
+    return;
   }
 
-  return { output, status: resp.status, durationMs };
+  await inv.emitOutput(output);
+  inv.closeOutput();
 }
 
-interface SecurityScheme {
-  type?: string;
-  scheme?: string;
-  name?: string;
-  in?: string;
-  flows?: {
-    authorizationCode?: {
-      authorizationUrl?: string;
-      tokenUrl?: string;
-      scopes?: Record<string, string>;
-    };
-    [key: string]: unknown;
-  };
-}
-
-function resolveSecuritySchemes(
-  doc: OpenAPIDocument,
-  op: OpenAPIOperation,
-): SecurityScheme[] {
-  const opSec = op.security as Array<Record<string, unknown>> | undefined;
-  const docSec = (doc as Record<string, unknown>)["security"] as Array<Record<string, unknown>> | undefined;
-  const requirements = opSec ?? docSec;
-  if (!requirements?.length) return [];
-
-  const components = (doc as Record<string, unknown>)["components"] as Record<string, unknown> | undefined;
-  const securitySchemes = components?.["securitySchemes"] as Record<string, SecurityScheme> | undefined;
-  if (!securitySchemes) return [];
-
-  const result: SecurityScheme[] = [];
-  const seen = new Set<string>();
-
-  for (const req of requirements) {
-    for (const schemeName of Object.keys(req)) {
-      if (seen.has(schemeName)) continue;
-      seen.add(schemeName);
-      const scheme = securitySchemes[schemeName];
-      if (scheme) result.push(scheme);
+/** Converts fetch Response headers into multi-valued invocation metadata. */
+function responseMetadata(resp: Response): Metadata {
+  const md: Metadata = {};
+  resp.headers.forEach((value, key) => {
+    const existing = md[key];
+    if (existing) {
+      existing.push(value);
+    } else {
+      md[key] = [value];
     }
-  }
-
-  return result;
+  });
+  return md;
 }
+
+// ---------------------------------------------------------------------------
+// Context requirements (openbindings.binding-invoker role negotiation)
+// ---------------------------------------------------------------------------
 
 /**
- * Extracts the server origin from an OpenAPI doc and normalizes it as a
- * stable context store key via normalizeContextKey.
+ * Derives the context requirements for an operation from the OpenAPI
+ * document's securitySchemes and the operation's (or document's) security
+ * requirements, and checks them against the supplied context. Returns the
+ * CONTEXT_REQUIRED details when the context is insufficient, or null when
+ * no auth is required or the context satisfies one alternative.
+ *
+ * Each OpenAPI security-requirement object (an AND of schemes) becomes one
+ * alternative; the array of requirement objects is the OR.
  */
-export function resolveServerKey(
+export function requiredContext(
   doc: OpenAPIDocument,
-  sourceLocation?: string,
-): string {
-  if (doc.servers?.length && doc.servers[0].url) {
-    let serverURL = doc.servers[0].url as string;
-    if (!serverURL.startsWith("http://") && !serverURL.startsWith("https://")) {
-      if (sourceLocation && isHttpUrl(sourceLocation)) {
-        try {
-          const parsed = new URL(sourceLocation);
-          serverURL = parsed.origin + serverURL;
-        } catch { /* fall through */ }
-      }
-    }
-    return normalizeContextKey(serverURL.replace(/\/+$/, ""));
-  }
-  return "";
+  op: OpenAPIOperation,
+  ctx: Record<string, unknown> | undefined,
+  baseURL: string,
+): ContextRequiredDetails | null {
+  const alternatives = securityAlternatives(doc, op);
+  if (!alternatives) return null;
+  const details: ContextRequiredDetails = {
+    key: normalizeEndpoint(baseURL),
+    alternatives,
+  };
+  if (ctx && contextSatisfies(ctx, details)) return null;
+  return details;
 }
+
+function securityAlternatives(
+  doc: OpenAPIDocument,
+  op: OpenAPIOperation,
+): ContextAlternative[] | null {
+  const opSec = op.security as Array<Record<string, unknown>> | undefined;
+  const docSec = (doc as Record<string, unknown>)["security"] as
+    | Array<Record<string, unknown>>
+    | undefined;
+  // Operation-level security replaces document-level entirely (including
+  // an explicit empty array, which removes auth for the operation).
+  const requirements = opSec ?? docSec;
+  if (!requirements?.length) return null;
+
+  const components = (doc as Record<string, unknown>)["components"] as
+    | Record<string, unknown>
+    | undefined;
+  const securitySchemes = components?.["securitySchemes"] as
+    | Record<string, OpenAPISecurityScheme>
+    | undefined;
+
+  const alternatives: ContextAlternative[] = [];
+  for (const req of requirements) {
+    const names = Object.keys(req);
+    // An empty security-requirement object means unauthenticated access is
+    // allowed: the OR is trivially satisfiable, so no context is required.
+    if (names.length === 0) return null;
+
+    const reqs: ContextRequirement[] = [];
+    let expressible = true;
+    for (const name of names.sort()) {
+      const scheme = securitySchemes?.[name];
+      const type = scheme ? requirementType(scheme) : null;
+      if (!type) {
+        expressible = false;
+        break;
+      }
+      reqs.push({ type });
+    }
+    // A requirement set containing a scheme we cannot express cannot be
+    // satisfied through context negotiation; skip the whole alternative
+    // (it is an AND).
+    if (!expressible || reqs.length === 0) continue;
+    alternatives.push({ requirements: reqs });
+  }
+  return alternatives.length > 0 ? alternatives : null;
+}
+
+/** Maps an OpenAPI security scheme to a standard context-requirement family. */
+function requirementType(scheme: OpenAPISecurityScheme): string | null {
+  switch (scheme.type) {
+    case "http":
+      switch ((scheme.scheme ?? "").toLowerCase()) {
+        case "bearer":
+          return "auth.bearer";
+        case "basic":
+          return "auth.basic";
+        default:
+          return null;
+      }
+    case "apiKey":
+      return "auth.apiKey";
+    case "oauth2":
+      return "auth.oauth2";
+    case "openIdConnect":
+      return "auth.bearer";
+    default:
+      return null;
+  }
+}
+
+function requirementSummary(details: ContextRequiredDetails): string {
+  const types = [
+    ...new Set(details.alternatives.flatMap((a) => a.requirements.map((r) => r.type))),
+  ];
+  return `${types.join(" or ")} required`;
+}
+
+// ---------------------------------------------------------------------------
+// Request construction
+// ---------------------------------------------------------------------------
 
 function asInputRecord(input: unknown): Record<string, unknown> {
   if (input == null) return {};
@@ -264,7 +393,12 @@ function resolveBaseURL(doc: OpenAPIDocument, ctx?: Record<string, unknown>): st
   throw new Error("no server URL: set servers in the OpenAPI doc or provide baseURL in context metadata");
 }
 
-function resolveBaseURLWithLocation(
+/**
+ * Resolves the request base URL from context metadata or the document's
+ * servers, resolving relative server URLs against the source location.
+ * Throws when no server URL can be determined.
+ */
+export function resolveRequestBaseURL(
   doc: OpenAPIDocument,
   ctx?: Record<string, unknown>,
   sourceLocation?: string,
@@ -361,6 +495,34 @@ function applyContext(
   return queryParams;
 }
 
+function resolveSecuritySchemes(
+  doc: OpenAPIDocument,
+  op: OpenAPIOperation,
+): OpenAPISecurityScheme[] {
+  const opSec = op.security as Array<Record<string, unknown>> | undefined;
+  const docSec = (doc as Record<string, unknown>)["security"] as Array<Record<string, unknown>> | undefined;
+  const requirements = opSec ?? docSec;
+  if (!requirements?.length) return [];
+
+  const components = (doc as Record<string, unknown>)["components"] as Record<string, unknown> | undefined;
+  const securitySchemes = components?.["securitySchemes"] as Record<string, OpenAPISecurityScheme> | undefined;
+  if (!securitySchemes) return [];
+
+  const result: OpenAPISecurityScheme[] = [];
+  const seen = new Set<string>();
+
+  for (const req of requirements) {
+    for (const schemeName of Object.keys(req)) {
+      if (seen.has(schemeName)) continue;
+      seen.add(schemeName);
+      const scheme = securitySchemes[schemeName];
+      if (scheme) result.push(scheme);
+    }
+  }
+
+  return result;
+}
+
 function applyCredentialsViaSchemes(
   headers: Headers,
   doc: OpenAPIDocument,
@@ -420,6 +582,15 @@ function applyCredentialsViaSchemes(
           }
         }
         break;
+      case "oauth2":
+      case "openIdConnect": {
+        const token = contextString(ctx, "accessToken") || contextBearerToken(ctx);
+        if (token) {
+          headers.set("Authorization", `Bearer ${token}`);
+          applied = true;
+        }
+        break;
+      }
     }
   }
 
@@ -504,12 +675,4 @@ async function readResponseText(resp: Response, maxBytes: number): Promise<strin
   }
 
   return chunks.join("");
-}
-
-function failedOutput(startMs: number, code: string, message: string): InvocationOutput {
-  return {
-    status: 1,
-    durationMs: Math.round(performance.now() - startMs),
-    error: { code, message },
-  };
 }

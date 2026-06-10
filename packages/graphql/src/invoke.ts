@@ -1,14 +1,15 @@
-import type { InvocationOutput, JSONSchema } from "@openbindings/sdk";
+import type { JSONSchema, Metadata } from "@openbindings/sdk";
 import {
-  ERR_INVALID_REF,
-  ERR_EXECUTION_FAILED,
   ERR_AUTH_REQUIRED,
-  ERR_PERMISSION_DENIED,
-  ERR_STREAM_ERROR,
-  ERR_RESPONSE_ERROR,
   ERR_CONNECT_FAILED,
+  ERR_EXECUTION_FAILED,
+  ERR_PERMISSION_DENIED,
+  ERR_RESPONSE_ERROR,
+  ERR_STREAM_ERROR,
+  InvocationError,
+  httpErrorCode,
 } from "@openbindings/sdk";
-import type { IntrospectionSchema, TypeRef, TypeMap, InputValue } from "./introspection.js";
+import type { Field, IntrospectionSchema, TypeRef, TypeMap, InputValue } from "./introspection.js";
 import { buildTypeMap, rootTypeName, unwrapTypeName, INTROSPECTION_QUERY } from "./introspection.js";
 import { MAX_SELECTION_DEPTH, QUERY_FIELD_NAME } from "./constants.js";
 
@@ -41,11 +42,11 @@ export async function introspect(
   fetchFn: typeof globalThis.fetch = fetch,
   signal?: AbortSignal,
 ): Promise<IntrospectionSchema> {
-  const { data, errors } = await doGraphQLHTTP(url, INTROSPECTION_QUERY, undefined, headers, fetchFn, signal);
-  if (errors?.length) {
-    throw new Error(`introspection errors: ${errors.map((e) => e.message).join("; ")}`);
+  const { body } = await doGraphQLHTTP(url, INTROSPECTION_QUERY, undefined, headers, fetchFn, signal);
+  if (body.errors?.length) {
+    throw new Error(`introspection errors: ${body.errors.map((e) => e.message).join("; ")}`);
   }
-  const schemaData = data?.__schema;
+  const schemaData = body.data?.__schema;
   if (!schemaData) {
     throw new Error("introspection response missing __schema field");
   }
@@ -67,22 +68,23 @@ export function queryFromSchema(schema: JSONSchema | undefined): string | null {
   return typeof constVal === "string" && constVal.length > 0 ? constVal : null;
 }
 
-/**
- * Build a GraphQL query. Uses the _query const from the input schema if available,
- * otherwise builds from introspection.
- */
-export function buildQuery(
-  schema: IntrospectionSchema,
-  rootType: string,
-  fieldName: string,
-  input: unknown,
-  inputSchema?: JSONSchema,
-): { query: string; variables: Record<string, unknown> | undefined } {
-  const prebuilt = queryFromSchema(inputSchema);
-  if (prebuilt) {
-    return { query: prebuilt, variables: inputToVariablesPassthrough(input) };
-  }
-  return buildQueryFromIntrospection(schema, rootType, fieldName, input);
+/** True when the operation's input schema declares variable properties beyond the _query const. */
+export function schemaDeclaresVariables(schema: JSONSchema | undefined): boolean {
+  if (!schema) return false;
+  const props = (schema as Record<string, unknown>).properties as Record<string, unknown> | undefined;
+  if (!props) return false;
+  return Object.keys(props).some((k) => k !== QUERY_FIELD_NAME);
+}
+
+/** Resolve a root-type field from the introspected schema. Throws when the root type or field is missing. */
+export function resolveField(schema: IntrospectionSchema, rootType: string, fieldName: string): Field {
+  const typeName = rootTypeName(schema, rootType);
+  if (!typeName) throw new Error(`schema has no ${rootType} type`);
+  const t = schema.types.find((x) => x.name === typeName);
+  if (!t) throw new Error(`type "${typeName}" not found in schema`);
+  const field = t.fields?.find((f) => f.name === fieldName);
+  if (!field) throw new Error(`field "${fieldName}" not found on ${rootType} type "${typeName}"`);
+  return field;
 }
 
 /** Build a query from the introspected schema with auto-generated selection set. */
@@ -92,15 +94,8 @@ export function buildQueryFromIntrospection(
   fieldName: string,
   input: unknown,
 ): { query: string; variables: Record<string, unknown> | undefined } {
-  const typeName = rootTypeName(schema, rootType);
-  if (!typeName) throw new Error(`schema has no ${rootType} type`);
-
+  const targetField = resolveField(schema, rootType, fieldName);
   const tm = buildTypeMap(schema);
-  const rootTypeObj = tm.get(typeName);
-  if (!rootTypeObj) throw new Error(`type "${typeName}" not found in schema`);
-
-  const targetField = rootTypeObj.fields?.find((f) => f.name === fieldName);
-  if (!targetField) throw new Error(`field "${fieldName}" not found on ${rootType} type "${typeName}"`);
 
   const { varDecls, argList } = buildVariables(targetField.args);
 
@@ -186,7 +181,7 @@ export function buildSelectionSet(typeName: string, tm: TypeMap, depth: number, 
 }
 
 /** Pass through all input keys except _query as GraphQL variables. */
-function inputToVariablesPassthrough(input: unknown): Record<string, unknown> | undefined {
+export function inputToVariablesPassthrough(input: unknown): Record<string, unknown> | undefined {
   if (input == null || typeof input !== "object" || Array.isArray(input)) return undefined;
   const map = input as Record<string, unknown>;
   const vars: Record<string, unknown> = {};
@@ -224,7 +219,23 @@ interface GraphQLResponse {
   errors?: GraphQLError[];
 }
 
-/** Send a GraphQL query over HTTP POST. */
+/** Multi-valued invocation metadata from a fetch Headers object. */
+function metadataFromHeaders(h: Headers): Metadata {
+  const md: Metadata = {};
+  h.forEach((value, key) => { md[key] = [value]; });
+  return md;
+}
+
+interface GraphQLHTTPResult {
+  body: GraphQLResponse;
+  headers: Metadata;
+}
+
+/**
+ * Send a GraphQL query over HTTP POST. Non-2xx statuses throw an
+ * InvocationError coded via httpErrorCode with `{ status, body }` details;
+ * network and parse failures propagate as-is.
+ */
 async function doGraphQLHTTP(
   url: string,
   query: string,
@@ -232,7 +243,7 @@ async function doGraphQLHTTP(
   headers: Record<string, string>,
   fetchFn: typeof globalThis.fetch = fetch,
   signal?: AbortSignal,
-): Promise<GraphQLResponse> {
+): Promise<GraphQLHTTPResult> {
   const body: Record<string, unknown> = { query };
   if (variables) body.variables = variables;
 
@@ -249,27 +260,30 @@ async function doGraphQLHTTP(
     signal,
   });
 
-  if (resp.status === 401 || resp.status === 403) {
-    const text = await resp.text().catch(() => "");
-    throw new HttpError(resp.status, text);
-  }
-
   if (!resp.ok) {
     const text = await resp.text().catch(() => "");
-    throw new Error(`HTTP ${resp.status}: ${text}`);
+    throw new InvocationError(httpErrorCode(resp.status), `HTTP ${resp.status}: ${text}`, {
+      status: resp.status,
+      body: text,
+    });
   }
 
-  const result: GraphQLResponse = await resp.json();
-  return result;
+  const respBody: GraphQLResponse = await resp.json();
+  return { body: respBody, headers: metadataFromHeaders(resp.headers) };
 }
 
-class HttpError extends Error {
-  constructor(public readonly statusCode: number, body: string) {
-    super(`HTTP ${statusCode}: ${body}`);
-  }
+/** Result of a unary GraphQL invocation: the requested field's bare data plus response headers. */
+export interface GraphQLInvokeResult {
+  data: unknown;
+  headers: Metadata;
 }
 
-/** Invoke a GraphQL query/mutation and return an InvocationOutput. */
+/**
+ * Invoke a GraphQL query/mutation via HTTP POST. Returns the requested
+ * field's data and the response headers; throws an InvocationError on HTTP,
+ * network, or GraphQL-level failure (`errors` in the response body map to
+ * ERR_EXECUTION_FAILED with `{ errors }` details).
+ */
 export async function invokeGraphQL(
   url: string,
   query: string,
@@ -278,38 +292,29 @@ export async function invokeGraphQL(
   headers: Record<string, string>,
   fetchFn: typeof globalThis.fetch = fetch,
   signal?: AbortSignal,
-): Promise<InvocationOutput> {
-  const start = performance.now();
-
-  let result: GraphQLResponse;
+): Promise<GraphQLInvokeResult> {
+  let res: GraphQLHTTPResult;
   try {
-    result = await doGraphQLHTTP(url, query, variables, headers, fetchFn, signal);
+    res = await doGraphQLHTTP(url, query, variables, headers, fetchFn, signal);
   } catch (e: unknown) {
-    const durationMs = Math.round(performance.now() - start);
-    if (e instanceof HttpError) {
-      const code = e.statusCode === 401 ? ERR_AUTH_REQUIRED : e.statusCode === 403 ? ERR_PERMISSION_DENIED : ERR_EXECUTION_FAILED;
-      return { status: e.statusCode, durationMs, error: { code, message: e.message } };
-    }
-    return { status: 1, durationMs, error: { code: ERR_EXECUTION_FAILED, message: e instanceof Error ? e.message : String(e) } };
+    if (e instanceof InvocationError) throw e;
+    throw new InvocationError(ERR_EXECUTION_FAILED, e instanceof Error ? e.message : String(e));
   }
 
-  const durationMs = Math.round(performance.now() - start);
-
-  if (result.errors?.length) {
-    return {
-      status: 200,
-      durationMs,
-      error: { code: ERR_EXECUTION_FAILED, message: result.errors.map((e) => e.message).join("; ") },
-    };
+  if (res.body.errors?.length) {
+    throw new InvocationError(
+      ERR_EXECUTION_FAILED,
+      res.body.errors.map((e) => e.message).join("; "),
+      { errors: res.body.errors },
+    );
   }
 
-  const output = result.data?.[fieldName] ?? null;
-  return { output, status: 200, durationMs };
+  return { data: res.body.data?.[fieldName] ?? null, headers: res.headers };
 }
 
-/** Check if an error is an HTTP auth error. */
+/** Check if an error is an HTTP auth failure (401/403). */
 export function isAuthError(e: unknown): boolean {
-  return e instanceof HttpError && (e.statusCode === 401 || e.statusCode === 403);
+  return e instanceof InvocationError && (e.code === ERR_AUTH_REQUIRED || e.code === ERR_PERMISSION_DENIED);
 }
 
 /**
@@ -366,7 +371,12 @@ function httpToWS(url: string): string {
 
 /**
  * Subscribe to a GraphQL subscription via the graphql-transport-ws protocol.
- * Yields InvocationOutputs as they arrive until the subscription completes or is cancelled.
+ * Yields each event's bare data payload until the subscription completes
+ * (clean return) or fails (throws an InvocationError). An aborted `signal`
+ * ends the sequence cleanly — the cancellation terminal belongs to the
+ * invocation handle, not the transport. Generator teardown (early return or
+ * throw, including an emitOutput rejection in the consuming pump) closes the
+ * WebSocket.
  */
 export async function* subscribeGraphQL(
   url: string,
@@ -374,7 +384,7 @@ export async function* subscribeGraphQL(
   variables: Record<string, unknown> | undefined,
   headers: Record<string, string>,
   signal?: AbortSignal,
-): AsyncGenerator<InvocationOutput> {
+): AsyncGenerator<unknown> {
   const wsURL = httpToWS(url);
 
   // Browser WebSocket API doesn't support custom headers on the upgrade request.
@@ -388,123 +398,102 @@ export async function* subscribeGraphQL(
   try {
     ws = new WebSocket(wsURL, "graphql-transport-ws");
   } catch (e: unknown) {
-    yield { error: { code: ERR_CONNECT_FAILED, message: `WebSocket create failed: ${e instanceof Error ? e.message : String(e)}` } };
-    return;
+    throw new InvocationError(ERR_CONNECT_FAILED, `WebSocket create failed: ${e instanceof Error ? e.message : String(e)}`);
   }
 
-  // Wait for open.
-  try {
-    await new Promise<void>((resolve, reject) => {
-      ws.onopen = () => resolve();
-      ws.onerror = () => reject(new Error("WebSocket connect failed"));
-      if (signal?.aborted) reject(new Error("aborted"));
-    });
-  } catch (e: unknown) {
-    yield { error: { code: ERR_CONNECT_FAILED, message: e instanceof Error ? e.message : String(e) } };
-    return;
-  }
-
-  // connection_init
-  ws.send(JSON.stringify({
-    type: "connection_init",
-    ...(Object.keys(connectionParams).length > 0 ? { payload: connectionParams } : {}),
-  }));
-
-  // Wait for connection_ack.
-  try {
-    await new Promise<void>((resolve, reject) => {
-      ws.onmessage = (ev) => {
-        try {
-          const msg = JSON.parse(String(ev.data));
-          if (msg.type === "connection_ack") resolve();
-          else reject(new Error(`expected connection_ack, got ${msg.type}`));
-        } catch (e) {
-          reject(e);
-        }
-      };
-      ws.onerror = () => reject(new Error("WebSocket error during handshake"));
-    });
-  } catch (e: unknown) {
-    ws.close();
-    yield { error: { code: ERR_CONNECT_FAILED, message: e instanceof Error ? e.message : String(e) } };
-    return;
-  }
-
-  // Send subscribe.
-  const payload: Record<string, unknown> = { query };
-  if (variables) payload.variables = variables;
-  ws.send(JSON.stringify({ id: "1", type: "subscribe", payload }));
-
-  // Stream events via an async queue.
-  const queue: Array<InvocationOutput | null> = [];
+  // One event queue for the whole session, handshake included: protocol
+  // callbacks push, the generator loop drains in order. `null` ends the
+  // sequence cleanly; an error event throws.
+  type WireEvent = { data: unknown } | { error: InvocationError } | null;
+  const queue: WireEvent[] = [];
   let waiting: (() => void) | null = null;
-  let done = false;
+  let finished = false;
+  let acked = false;
 
-  function enqueue(event: InvocationOutput | null) {
-    queue.push(event);
+  const push = (ev: WireEvent) => {
+    queue.push(ev);
     if (waiting) { waiting(); waiting = null; }
-  }
+  };
+  const finish = (ev: { error: InvocationError } | null) => {
+    if (finished) return;
+    finished = true;
+    push(ev);
+  };
+
+  ws.onopen = () => {
+    ws.send(JSON.stringify({
+      type: "connection_init",
+      ...(Object.keys(connectionParams).length > 0 ? { payload: connectionParams } : {}),
+    }));
+  };
 
   ws.onmessage = (ev) => {
+    let msg: { type: string; payload?: unknown };
     try {
-      const msg = JSON.parse(String(ev.data)) as { type: string; payload?: unknown };
-      switch (msg.type) {
-        case "next": {
-          const p = msg.payload as { data?: unknown; errors?: Array<{ message: string }> } | undefined;
-          if (p?.errors?.length) {
-            enqueue({ error: { code: ERR_EXECUTION_FAILED, message: p.errors[0].message } });
-            done = true;
-            enqueue(null);
-          } else {
-            enqueue({ output: p?.data });
-          }
-          break;
-        }
-        case "error": {
-          const errors = Array.isArray(msg.payload) ? msg.payload as Array<{ message: string }> : undefined;
-          enqueue({ error: { code: ERR_EXECUTION_FAILED, message: errors?.[0]?.message ?? String(msg.payload) } });
-          done = true;
-          enqueue(null);
-          break;
-        }
-        case "complete":
-          done = true;
-          enqueue(null);
-          break;
+      msg = JSON.parse(String(ev.data)) as { type: string; payload?: unknown };
+    } catch (e: unknown) {
+      finish({ error: new InvocationError(ERR_RESPONSE_ERROR, `parse ws message: ${e instanceof Error ? e.message : String(e)}`) });
+      return;
+    }
+
+    if (!acked) {
+      if (msg.type === "connection_ack") {
+        acked = true;
+        const payload: Record<string, unknown> = { query };
+        if (variables) payload.variables = variables;
+        ws.send(JSON.stringify({ id: "1", type: "subscribe", payload }));
+      } else {
+        finish({ error: new InvocationError(ERR_CONNECT_FAILED, `expected connection_ack, got ${msg.type}`) });
       }
-    } catch (e) {
-      enqueue({ error: { code: ERR_RESPONSE_ERROR, message: `parse ws message: ${e instanceof Error ? e.message : String(e)}` } });
-      done = true;
-      enqueue(null);
+      return;
+    }
+
+    switch (msg.type) {
+      case "next": {
+        const p = msg.payload as { data?: unknown; errors?: Array<{ message: string }> } | undefined;
+        if (p?.errors?.length) {
+          finish({ error: new InvocationError(ERR_EXECUTION_FAILED, p.errors[0].message, { errors: p.errors }) });
+        } else {
+          push({ data: p?.data });
+        }
+        break;
+      }
+      case "error": {
+        const errors = Array.isArray(msg.payload) ? (msg.payload as Array<{ message: string }>) : undefined;
+        finish({ error: new InvocationError(ERR_EXECUTION_FAILED, errors?.[0]?.message ?? String(msg.payload), { errors }) });
+        break;
+      }
+      case "complete":
+        finish(null);
+        break;
     }
   };
 
   ws.onerror = () => {
-    if (!done) {
-      enqueue({ error: { code: ERR_STREAM_ERROR, message: "WebSocket error" } });
-      done = true;
-      enqueue(null);
-    }
+    finish({
+      error: acked
+        ? new InvocationError(ERR_STREAM_ERROR, "WebSocket error")
+        : new InvocationError(ERR_CONNECT_FAILED, "WebSocket connect failed"),
+    });
   };
 
   ws.onclose = () => {
-    if (!done) {
-      done = true;
-      enqueue(null);
-    }
+    finish(acked ? null : { error: new InvocationError(ERR_CONNECT_FAILED, "WebSocket closed during handshake") });
   };
 
-  const onAbort = () => { done = true; enqueue(null); };
+  const onAbort = () => finish(null);
   signal?.addEventListener("abort", onAbort, { once: true });
+  if (signal?.aborted) finish(null);
 
   try {
     while (true) {
       if (queue.length === 0) {
         await new Promise<void>((r) => { waiting = r; });
       }
-      const event = queue.shift()!;
-      if (event === null) return;
-      yield event;
+      const ev = queue.shift()!;
+      if (ev === null) return;
+      if ("error" in ev) throw ev.error;
+      yield ev.data;
     }
   } finally {
     signal?.removeEventListener("abort", onAbort);

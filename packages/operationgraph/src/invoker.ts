@@ -6,13 +6,19 @@
  * resolved post-construction via OperationInvoker.addBindingInvoker.
  */
 import type {
-  BindingInvocationInput,
+  BindingInvocationArgs,
   BindingInvoker,
   FormatInfo,
-  InvocationOutput,
+  Invocation,
   OperationInvoker,
 } from "@openbindings/sdk";
-import { ERR_REF_NOT_FOUND, ERR_SOURCE_LOAD_FAILED } from "@openbindings/sdk";
+import {
+  ERR_REF_NOT_FOUND,
+  ERR_RUNTIME,
+  ERR_SOURCE_LOAD_FAILED,
+  InvocationError,
+  InvocationImpl,
+} from "@openbindings/sdk";
 import type { Document, Graph } from "./types.js";
 import { parseDocument } from "./types.js";
 import { SchemaCache } from "./state.js";
@@ -33,37 +39,63 @@ export class OperationGraphInvoker implements BindingInvoker {
     return [{ token: FORMAT_TOKEN, description: "OpenBindings operation graphs" }];
   }
 
-  async *invokeBinding(
-    input: BindingInvocationInput,
-    options?: { signal?: AbortSignal },
-  ): AsyncIterable<InvocationOutput> {
+  invokeBinding<I = unknown, O = unknown>(args: BindingInvocationArgs): Invocation<I, O> {
+    const inv = new InvocationImpl<unknown, unknown>({ signal: args.signal });
+    queueMicrotask(() => {
+      this.run(args, inv).catch((err) => {
+        inv.fireError(asInvocationError(err));
+      });
+    });
+    return inv as Invocation<I, O>;
+  }
+
+  /** Drives one graph invocation behind the handle. */
+  private async run(
+    args: BindingInvocationArgs,
+    inv: InvocationImpl<unknown, unknown>,
+  ): Promise<void> {
     let doc: Document;
     try {
-      doc = this.loadDocument(input.source.location, input.source.content);
+      doc = this.loadDocument(args.source.location, args.source.content);
     } catch (err) {
-      yield { error: { code: ERR_SOURCE_LOAD_FAILED, message: (err as Error).message } };
+      inv.fireError(new InvocationError(ERR_SOURCE_LOAD_FAILED, (err as Error).message));
       return;
     }
 
-    const graph: Graph | undefined = doc.graphs?.[input.ref];
+    const graph: Graph | undefined = doc.graphs?.[args.ref];
     if (!graph) {
-      yield {
-        error: {
-          code: ERR_REF_NOT_FOUND,
-          message: `operation graph "${input.ref}" not found in document`,
-        },
-      };
+      inv.fireError(
+        new InvocationError(
+          ERR_REF_NOT_FOUND,
+          `operation graph "${args.ref}" not found in document`,
+        ),
+      );
       return;
+    }
+
+    // A graph takes at most one initial event from the caller's input
+    // channel. When the call arrived through the operation layer (binding
+    // present) for an operation that declares no input (no inputSchema),
+    // the caller never writes: close input on entry and seed the graph
+    // with undefined. Otherwise this is a unary binding: read the first
+    // input, then close input so the caller never has to.
+    let input: unknown;
+    if (args.binding !== undefined && args.inputSchema === undefined) {
+      void inv.closeInput();
+    } else {
+      input = await readFirst(inv.inputs());
+      void inv.closeInput();
     }
 
     const engine = new Engine({
       graph,
       invoker: this.invoker,
-      bindingIn: input,
+      args,
+      input,
       transform: this.invoker.transformEvaluator,
       schemas: this.schemas,
     });
-    yield* engine.run(options?.signal);
+    await engine.run(inv);
   }
 
   private loadDocument(location: string | undefined, content: unknown): Document {
@@ -90,4 +122,18 @@ export class OperationGraphInvoker implements BindingInvoker {
     if (location) this.docCache.set(location, doc);
     return doc;
   }
+}
+
+/** Reads the first input message, or undefined when input closes with none. */
+async function readFirst<T>(it: AsyncIterable<T>): Promise<T | undefined> {
+  for await (const v of it) return v;
+  return undefined;
+}
+
+function asInvocationError(err: unknown): InvocationError {
+  if (err instanceof InvocationError) return err;
+  return new InvocationError(
+    ERR_RUNTIME,
+    err instanceof Error ? err.message : String(err),
+  );
 }

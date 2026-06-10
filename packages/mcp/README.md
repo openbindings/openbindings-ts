@@ -2,7 +2,7 @@
 
 Model Context Protocol (MCP) binding invoker and interface creator for the [OpenBindings](https://openbindings.com) TypeScript SDK.
 
-This package enables OpenBindings to invoke operations against MCP servers and synthesize OBI documents from them. It connects to MCP servers via the Streamable HTTP transport, dispatches calls to tools, resources, resource templates, and prompts, and returns results as a stream of events. Built on `@modelcontextprotocol/sdk`.
+This package enables OpenBindings to invoke operations against MCP servers and synthesize OBI documents from them. It connects to MCP servers via the Streamable HTTP transport, dispatches calls to tools, resources, resource templates, and prompts, and delivers results through the SDK's cardinality-agnostic `Invocation` handle. Built on `@modelcontextprotocol/sdk`.
 
 See the [spec](https://github.com/openbindings/spec) and the [roles overview](https://openbindings.com/interfaces) for how invokers and creators fit into the OpenBindings architecture.
 
@@ -29,22 +29,41 @@ The invoker declares the date-versioned format token `mcp@2025-11-25`, matching 
 
 ### Invoke a binding
 
+`invokeBinding` returns an `Invocation` handle synchronously. Tool and prompt arguments are the operation's single input message, written to the handle; outputs are bare values.
+
 ```typescript
+import { single } from "@openbindings/sdk";
+
 const invoker = new MCPInvoker();
 
-for await (const event of invoker.invokeBinding({
+const call = invoker.invokeBinding({
   source: {
     format: "mcp@2025-11-25",
     location: "https://mcp.example.com",
   },
   ref: "tools/search",
-  input: { query: "openbindings" },
   context: { bearerToken: "tok_123" },
-})) {
-  if (event.error) console.error(event.error.message);
-  else console.log(event.output);
+});
+
+await call.write({ query: "openbindings" });
+const result = await single(call.outputs);
+```
+
+Resource reads take no input, so they need no `write` (the binding closes the input side on entry). Tools that report progress emit each progress notification as an output ahead of the final result; consume the same handle with `for await`:
+
+```typescript
+const call = invoker.invokeBinding({
+  source: { format: "mcp@2025-11-25", location: "https://mcp.example.com" },
+  ref: "tools/long_job",
+});
+
+await call.write({ target: "all" });
+for await (const output of call.outputs) {
+  console.log(output); // progress notifications, then the result
 }
 ```
+
+Failures surface as a rejected `call.closed` (and a throwing output iterator) carrying an `InvocationError` with a stable `code` — e.g. `ERR_AUTH_REQUIRED` for an HTTP 401, `ERR_EXECUTION_FAILED` for a JSON-RPC error or a tool `isError` result.
 
 Refs follow MCP entity conventions:
 
@@ -71,15 +90,17 @@ The creator connects to the server, lists every advertised tool, resource, resou
 
 ### Execution flow
 
-1. Parses the ref as `<entityType>/<name>` (`tools`, `resources`, or `prompts`)
-2. **Opens a fresh MCP session per call** via `StreamableHTTPClientTransport`. There is no session caching — every execution is a new connect/close cycle.
-3. Dispatches based on entity type:
-   - **`tools/<name>`:** calls `client.callTool`. Output prefers `structuredContent` if the tool returns one, otherwise parses the `content` array (single text item is JSON-parsed if possible; multi-text items are joined; mixed content is returned as-is).
+1. Parses the ref as `<entityType>/<name>` (`tools`, `resources`, or `prompts`) — pre-dispatch failures (bad ref, missing endpoint, non-object input) terminate the invocation before any network I/O
+2. Reads the input message from the handle (tools and prompts; resource reads close the input side on entry) and closes input so callers never have to
+3. **Opens a fresh MCP session per call** via `StreamableHTTPClientTransport`. There is no session caching — every execution is a new connect/close cycle.
+4. Dispatches based on entity type:
+   - **`tools/<name>`:** calls `client.callTool`. Progress notifications are emitted as outputs as they arrive. The final output prefers `structuredContent` if the tool returns one, otherwise parses the `content` array (single text item is JSON-parsed if possible; multi-text items are joined; mixed content is returned as-is).
    - **`resources/<uri>`:** calls `client.readResource`. Single text content is JSON-parsed if possible. Multi-content responses are returned as the raw `contents` array.
    - **`prompts/<name>`:** calls `client.getPrompt`. Output is `{ messages, description? }`.
-4. Closes the client in a `finally` block.
+5. Sets the entity call's HTTP response headers as the handle's leading metadata, then closes the output side (or fires the terminal error).
+6. Closes the client in a `finally` block.
 
-On a connect-time 401/403, the invoker maps the error to `auth_required` / `permission_denied`. If the binding declares security entries and a credential callback is configured, it calls `resolveSecurity` and retries once with the new credentials.
+HTTP 401/403 map to `ERR_AUTH_REQUIRED` / `ERR_PERMISSION_DENIED`; JSON-RPC errors and tool `isError` results map to `ERR_EXECUTION_FAILED`. MCP servers declare no security schemes, so the binding raises no upfront `CONTEXT_REQUIRED` challenge — credential resolution happens above the binding (see the `OperationInvoker`'s `contextResolver`).
 
 ### Credential application
 

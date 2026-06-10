@@ -2,7 +2,7 @@
 
 GraphQL binding invoker and interface creator for the [OpenBindings](https://openbindings.com) TypeScript SDK.
 
-This package enables OpenBindings to invoke operations against GraphQL endpoints and synthesize OBI documents from GraphQL schemas via introspection. It builds queries, mutations, and subscriptions from operation refs, applies credentials, and returns results as a stream of events. Subscriptions stream over the `graphql-transport-ws` WebSocket protocol.
+This package enables OpenBindings to invoke operations against GraphQL endpoints and synthesize OBI documents from GraphQL schemas via introspection. It builds queries, mutations, and subscriptions from operation refs, applies credentials, and delivers results through the SDK's cardinality-agnostic `Invocation` handle. Subscriptions stream over the `graphql-transport-ws` WebSocket protocol.
 
 See the [spec](https://github.com/openbindings/spec) and the [roles overview](https://openbindings.com/interfaces) for how invokers and creators fit into the OpenBindings architecture.
 
@@ -29,22 +29,40 @@ The invoker declares the versionless `graphql` format token — it handles any G
 
 ### Invoke a binding
 
+`invokeBinding` returns an `Invocation` handle synchronously. The GraphQL variables object is the operation's single input message, written to the handle; outputs are bare data values.
+
 ```typescript
+import { single } from "@openbindings/sdk";
+
 const invoker = new GraphQLInvoker();
 
-for await (const event of invoker.invokeBinding({
+const call = invoker.invokeBinding({
   source: {
     format: "graphql",
     location: "https://api.example.com/graphql",
   },
   ref: "Query/users",
-  input: { limit: 10 },
   context: { bearerToken: "tok_123" },
-})) {
-  if (event.error) console.error(event.error.message);
-  else console.log(event.output);
+});
+
+await call.write({ limit: 10 });
+const users = await single(call.outputs);
+```
+
+Fields that take no arguments need no `write` (the binding closes the input side on entry). Subscriptions consume the same handle with `for await`:
+
+```typescript
+const call = invoker.invokeBinding({
+  source: { format: "graphql", location: "https://api.example.com/graphql" },
+  ref: "Subscription/onOrder",
+});
+
+for await (const event of call.outputs) {
+  console.log(event);
 }
 ```
+
+Failures surface as a rejected `call.closed` (and a throwing output iterator) carrying an `InvocationError` with a stable `code` — e.g. `ERR_AUTH_REQUIRED` for an HTTP 401, `ERR_EXECUTION_FAILED` for GraphQL `errors`, `ERR_STREAM_ERROR` for a dropped subscription transport.
 
 Refs follow the convention `Query/<field>`, `Mutation/<field>`, or `Subscription/<field>`.
 
@@ -69,15 +87,15 @@ The creator runs a standard introspection query against the endpoint and synthes
 
 ### Execution flow
 
-1. Loads the schema (inline `Source.content`, or network introspection cached per endpoint)
-2. Parses the ref as `<RootType>/<field>` (rejects anything other than `Query`, `Mutation`, `Subscription`)
-3. Builds the GraphQL document: uses the `_query` const from the operation's input schema if present, otherwise auto-generates a query and selection set from introspection (cycle-safe, depth-limited to 3 levels)
-4. Applies credentials to HTTP headers (or to the WebSocket `connection_init` payload for subscriptions)
-5. Sends the request:
-   - **Query / Mutation:** HTTP POST, returns one stream event
-   - **Subscription:** opens a WebSocket using the `graphql-transport-ws` protocol, sends `connection_init` → `subscribe`, then forwards each `next` message as a stream event until `complete` or close
+1. Parses the ref as `<RootType>/<field>` (rejects anything other than `Query`, `Mutation`, `Subscription`) — pre-dispatch failures terminate the invocation before any network I/O
+2. Resolves the GraphQL document: a `_query` const in the operation's input schema is used directly (no schema loading); otherwise the schema is loaded (inline `Source.content`, or network introspection cached per endpoint) and a query with an auto-generated selection set is built (cycle-safe, depth-limited to 3 levels)
+3. Reads the variables object from the handle: fields with arguments read the first input message; no-argument fields close the input side on entry and dispatch with empty variables
+4. Applies credentials from the invocation context to HTTP headers (or to the WebSocket `connection_init` payload for subscriptions)
+5. Dispatches:
+   - **Query / Mutation:** HTTP POST; response headers become the handle's leading metadata, the field's data is emitted as the single output
+   - **Subscription:** opens a WebSocket using the `graphql-transport-ws` protocol, sends `connection_init` → `subscribe`, then emits each `next` payload as an output until `complete` (clean close) or a transport failure (terminal error)
 
-On a 401/403, if the binding declares security entries and a credential callback is configured, the invoker calls `resolveSecurity` and retries once.
+HTTP error statuses map to terminal error codes (`401` → `ERR_AUTH_REQUIRED`, `403` → `ERR_PERMISSION_DENIED`, otherwise `ERR_EXECUTION_FAILED`) with `{ status, body }` details. Cancellation (`call.cancel()` or an aborted `signal`) aborts the in-flight request or closes the subscription transport.
 
 ### Credential application
 
