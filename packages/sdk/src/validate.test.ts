@@ -36,10 +36,10 @@ describe("validateInterface", () => {
     expect(() => validateInterface(iface)).toThrow(ValidationError);
   });
 
-  it("requires SemVer 2.0.0 format (OBI-D-16)", () => {
+  it("requires SemVer 2.0.0 format (OBI-D-13)", () => {
     const iface = minimalInterface();
     iface.openbindings = "1.0";
-    expect(() => validateInterface(iface)).toThrow("OBI-D-16");
+    expect(() => validateInterface(iface)).toThrow("OBI-D-13");
   });
 
   it("requires operations", () => {
@@ -86,19 +86,6 @@ describe("validateInterface", () => {
     const iface = minimalInterface();
     iface.openbindings = "9.9.9";
     expect(() => validateInterface(iface)).toThrow("OBI-T-04");
-  });
-
-  it("catches binding referencing unknown security", () => {
-    const iface = minimalInterface();
-    iface.bindings!["getUser.main"].security = "nonexistent";
-    expect(() => validateInterface(iface)).toThrow('references unknown security "nonexistent"');
-  });
-
-  it("passes when binding references valid security", () => {
-    const iface = minimalInterface();
-    iface.security = { default: [{ type: "bearer" }] };
-    iface.bindings!["getUser.main"].security = "default";
-    expect(() => validateInterface(iface)).not.toThrow();
   });
 
   it("catches non-string inline transform", () => {

@@ -6,7 +6,7 @@ function iface(operations: OBInterface["operations"]): OBInterface {
   return { openbindings: "0.2.0", operations };
 }
 
-describe("resolveOperation (OBI-T-13)", () => {
+describe("resolveOperation (OBI-T-12)", () => {
   it("resolves a direct key match to its own key", () => {
     const i = iface({ createTask: { description: "native" } });
     const r = resolveOperation(i, "createTask");

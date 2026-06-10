@@ -16,7 +16,7 @@ export interface ValidateOptions {
 const KNOWN_INTERFACE_FIELDS = new Set([
   "openbindings", "name", "version", "description",
   "schemas", "operations",
-  "sources", "bindings", "transforms", "security",
+  "sources", "bindings", "transforms",
 ]);
 
 const KNOWN_OPERATION_FIELDS = new Set([
@@ -27,7 +27,7 @@ const KNOWN_OPERATION_FIELDS = new Set([
 const KNOWN_SOURCE_FIELDS = new Set(["format", "location", "content", "description", "priority"]);
 const KNOWN_BINDING_FIELDS = new Set([
   "operation", "source", "ref", "priority", "description", "deprecated",
-  "inputTransform", "outputTransform", "security",
+  "inputTransform", "outputTransform",
 ]);
 const KNOWN_EXAMPLE_FIELDS = new Set(["description", "input", "output"]);
 
@@ -69,7 +69,7 @@ const URI_REF_ALLOWED = (() => {
  * Performs shape-level validation checks on an OBInterface.
  * Throws {@link ValidationError} if problems are found.
  *
- * Unconditionally enforces OBI-D-16 (openbindings field is a valid SemVer
+ * Unconditionally enforces OBI-D-13 (openbindings field is a valid SemVer
  * 2.0.0 string) and OBI-T-04 (refuse to load when the document's major
  * version is higher than this SDK's MAX_TESTED_VERSION, or — while
  * MAX_TESTED_VERSION is pre-1.0 — when its minor is higher).
@@ -80,13 +80,13 @@ export function validateInterface(
 ): void {
   const errs: string[] = [];
 
-  // OBI-D-16: openbindings field MUST be a valid SemVer 2.0.0 string.
+  // OBI-D-13: openbindings field MUST be a valid SemVer 2.0.0 string.
   // OBI-T-04: refuse higher major (or pre-1.0 higher minor) than MaxTested.
   const ver = (iface.openbindings ?? "").trim();
   if (!ver) {
-    errs.push("openbindings: required (OBI-D-16)");
+    errs.push("openbindings: required (OBI-D-13)");
   } else if (!isValidSemver(ver)) {
-    errs.push(`openbindings: "${ver}" is not a valid SemVer 2.0.0 string (OBI-D-16)`);
+    errs.push(`openbindings: "${ver}" is not a valid SemVer 2.0.0 string (OBI-D-13)`);
   } else {
     try {
       if (isHigherMajorOrPre1MinorThanMaxTested(ver)) {
@@ -201,11 +201,6 @@ export function validateInterface(
     validateInlineTransform(errs, `transforms["${k}"]`, iface.transforms![k]);
   }
 
-  // OBI-D-04: security keys must match the identifier pattern.
-  for (const k of Object.keys(iface.security ?? {}).sort()) {
-    validateIdent(errs, "security key", k);
-  }
-
   for (const k of Object.keys(iface.bindings ?? {}).sort()) {
     // OBI-D-04: binding keys must match the identifier pattern.
     validateIdent(errs, "bindings key", k);
@@ -221,13 +216,6 @@ export function validateInterface(
       errs.push(`bindings["${k}"].source: required`);
     } else if (!iface.sources?.[b.source]) {
       errs.push(`bindings["${k}"].source: references unknown source "${b.source}" (OBI-D-10)`);
-    }
-
-    // OBI-D-11: bindings[*].security must reference an existing security entry.
-    if (b.security != null && (b.security ?? "").trim()) {
-      if (!iface.security?.[b.security]) {
-        errs.push(`bindings["${k}"].security: references unknown security "${b.security}" (OBI-D-11)`);
-      }
     }
 
     if (b.inputTransform !== undefined) {

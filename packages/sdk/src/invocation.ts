@@ -1,0 +1,725 @@
+/**
+ * The cardinality-agnostic operation invocation handle.
+ *
+ * One call shape for every cardinality (unary, server-streaming,
+ * client-streaming, bidirectional): the caller writes messages until done;
+ * the invocation yields messages until done. The OpenBindings spec assigns
+ * cardinality to the binding, not the operation, so the call signature never
+ * declares it.
+ *
+ * Two views of one session:
+ *   - {@link Invocation}    — the caller-facing handle
+ *   - {@link BindingHandle} — the binding-facing push surface
+ *
+ * The same concrete {@link InvocationImpl} implements both; the views never
+ * overlap structurally, so callers can't reach binding-only methods and
+ * bindings can't reach caller-facing ones.
+ */
+
+import {
+  CONTEXT_REQUIRED,
+  ERR_ALREADY_CONSUMED,
+  ERR_CANCELLED,
+  ERR_EXPECTED_SINGLE,
+  ERR_INPUT_CLOSED,
+  ERR_INVOCATION_CLOSED,
+} from "./errcodes.js";
+
+/**
+ * The structured error type for all terminal invocation failures. A class
+ * (not a plain shape) so it carries a stack trace and supports `instanceof`.
+ */
+export class InvocationError extends Error {
+  readonly code: string;
+  readonly details?: unknown;
+
+  constructor(code: string, message: string, details?: unknown) {
+    super(message);
+    this.name = "InvocationError";
+    this.code = code;
+    if (details !== undefined) this.details = details;
+  }
+}
+
+/**
+ * Multi-valued leading/trailing metadata (gRPC metadata, HTTP
+ * headers/trailers). Empty for formats that carry none.
+ */
+export type Metadata = Record<string, string[]>;
+
+// ---------------------------------------------------------------------------
+// Context negotiation shapes (openbindings.binding-invoker role)
+// ---------------------------------------------------------------------------
+
+/**
+ * One runtime prerequisite. `type` names a requirement family
+ * (e.g. "auth.bearer", "auth.apiKey", "auth.basic", "auth.oauth2");
+ * additional fields are family-specific.
+ */
+export interface ContextRequirement {
+  type: string;
+  /**
+   * Whether resolved context MAY be cached under the challenge's `key`.
+   * Defaults to true; `durable: false` context MUST be re-satisfied per call.
+   */
+  durable?: boolean;
+  description?: string;
+  [key: string]: unknown;
+}
+
+/** A conjunctive requirement set: ALL requirements must be satisfied. */
+export interface ContextAlternative {
+  requirements: ContextRequirement[];
+}
+
+/**
+ * The details payload of a `CONTEXT_REQUIRED` terminal error, per the
+ * `openbindings.binding-invoker` role. `alternatives` is disjunctive:
+ * satisfying any one alternative suffices.
+ */
+export interface ContextRequiredDetails {
+  /**
+   * Stable context identity (typically a normalized target origin).
+   * Store-backed resolvers use it as a cache key; others ignore it.
+   */
+  key: string;
+  alternatives: ContextAlternative[];
+}
+
+/** Constructs the canonical CONTEXT_REQUIRED terminal error. */
+export function contextRequiredError(
+  message: string,
+  details: ContextRequiredDetails,
+): InvocationError {
+  return new InvocationError(CONTEXT_REQUIRED, message, details);
+}
+
+/** Narrows a terminal error to a CONTEXT_REQUIRED challenge with usable details. */
+export function isContextRequired(
+  err: unknown,
+): err is InvocationError & { details: ContextRequiredDetails } {
+  if (!(err instanceof InvocationError) || err.code !== CONTEXT_REQUIRED) return false;
+  const d = err.details as ContextRequiredDetails | undefined;
+  return (
+    !!d &&
+    typeof d === "object" &&
+    typeof d.key === "string" &&
+    Array.isArray(d.alternatives)
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Caller-facing handle
+// ---------------------------------------------------------------------------
+
+/**
+ * Cardinality-agnostic, bidirectional invocation session. Conceptually a
+ * typed I/O pair scoped to one operation, plus lifecycle controls.
+ *
+ * Lifecycle:
+ *   write(v)    write one input message to the binding's channel
+ *   close()     signal no more input (idempotent)
+ *   cancel()    request termination (idempotent)
+ *   outputs     async-iterable of output messages
+ *   closed      resolves on normal close, rejects on terminal failure
+ *
+ * `write` does NOT dispatch the underlying transport. It puts a message on
+ * the caller→binding channel; the binding decides when to dispatch based on
+ * what it has collected. The verbs are channel verbs, not transport verbs.
+ *
+ * Cardinality is observed by the caller's own iteration; the signature does
+ * not declare it.
+ *
+ * Bidi contract: under bounded backpressure a single async context that
+ * interleaves `write` and output reads can deadlock. Drive input and output
+ * from separate async contexts (`Promise.all([pump(), drain()])`), never a
+ * fire-and-forget `void (async () => {...})()`.
+ */
+export interface Invocation<I = unknown, O = unknown> {
+  /**
+   * Writes one input message to the binding's input channel. Resolves once
+   * the message is enqueued (not processed); parks while the bounded input
+   * buffer is full (backpressure).
+   *
+   * Rejects (with `InvocationError`) if input has been closed, OBI-T-07
+   * validation failed, or the binding refused the message. A T-07 /
+   * binding-refused rejection also closes the invocation terminally; a
+   * "wrote after close" rejection does not. Convention: pick one
+   * error-observation point (usually `closed` or the iterator throw) and
+   * don't handle the same failure on both paths.
+   */
+  write(input: I): Promise<void>;
+
+  /**
+   * Graceful close: signal that no more input is coming. Idempotent.
+   * The invocation continues; outputs flow until the binding closes its
+   * output side. For abrupt termination, use `cancel()` instead.
+   *
+   * Bindings close the input side themselves when they know better
+   * (no-input and unary operations), so callers only own `close()` for
+   * client-streaming and bidirectional use.
+   */
+  close(): Promise<void>;
+
+  /** Aborts the invocation. Idempotent; a no-op once terminal. */
+  cancel(): Promise<void>;
+
+  /**
+   * Output sequence — a standard `AsyncIterable<O>`, so the platform's
+   * iterator tooling (`for await`, `Array.fromAsync`, async iterator
+   * helpers) works over it unchanged; the SDK ships no parallel operator
+   * suite. `for await (const o of call.outputs)` is the base consumption
+   * pattern; it returns on normal close and throws an `InvocationError` on
+   * terminal failure.
+   *
+   * Single-consumer, acquired once: the first acquisition (a `for await`,
+   * `single`, or an explicit `[Symbol.asyncIterator]()`) claims the
+   * sequence; a second throws `ERR_ALREADY_CONSUMED`. Abandoning the
+   * sequence early (`break`) invokes the iterator's `return()`, which
+   * cancels the invocation.
+   */
+  readonly outputs: AsyncIterable<O>;
+
+  /** Resolves on normal close. Rejects on terminal failure. */
+  readonly closed: Promise<void>;
+
+  /**
+   * Leading metadata (HTTP response headers / gRPC leading metadata).
+   * Resolves when the binding sets it, or with the first output / terminal,
+   * whichever is first. Empty for formats that carry none.
+   */
+  readonly header: Promise<Metadata>;
+
+  /**
+   * Trailing metadata (gRPC trailers / HTTP trailers). Valid only after the
+   * invocation has terminated (`outputs` exhausted or `closed` settled);
+   * throws if read before then.
+   */
+  trailer(): Metadata;
+}
+
+// ---------------------------------------------------------------------------
+// Binding-facing handle
+// ---------------------------------------------------------------------------
+
+/**
+ * Binding-facing handle. The binding receives this from the invoker layer
+ * and drives the invocation: it consumes inputs(), emits outputs, announces
+ * normal close or terminal error, and honors the cancellation signal.
+ * Callers never see this interface.
+ *
+ * Binding-author contract (the type system cannot enforce these; the
+ * reference skeletons in the format packages observe all of them):
+ *   1. Raise terminal errors (notably CONTEXT_REQUIRED) BEFORE any
+ *      observable side effect, so a no-input-consumed retry is safe.
+ *   2. Observe the `emitOutput` result: it rejects when the invocation
+ *      terminated while the emit was parked; stop emitting on rejection.
+ *   3. Do not add your own buffer; `emitOutput` parking IS backpressure.
+ *   4. Terminate exactly once: `closeOutput()` on normal completion or
+ *      `fireError()` on terminal failure; never emit after either.
+ *   5. Close input early when you can (no-input: on entry; unary: after the
+ *      first read), so the caller never has to `close()`.
+ *   6. Bidi: read inputs and emit outputs from separate async contexts; a
+ *      single interleaved loop deadlocks under bounded backpressure.
+ */
+export interface BindingHandle<I = unknown, O = unknown> {
+  /**
+   * Reads inputs as an async iterable. Returns cleanly when the input side
+   * closes; throws the terminal `InvocationError` if the invocation errors.
+   * Single-consumer: a second concurrent reader fails loudly.
+   */
+  inputs(): AsyncIterable<I>;
+
+  /**
+   * Closes the input side from the binding's perspective. Idempotent.
+   * Subsequent caller `write()` calls reject with `ERR_INPUT_CLOSED`
+   * (non-terminal). The invocation continues; outputs still flow.
+   */
+  closeInput(): Promise<void>;
+
+  /**
+   * Emits one output. Resolves when the output is accepted into the bounded
+   * buffer (parks while the buffer is full — this is how backpressure
+   * reaches the binding's read loop). Rejects with an `InvocationError` if
+   * the invocation was cancelled or its output closed while parked, so a
+   * binding that `await`s it stops emitting instead of stranding on a
+   * buffer no one will drain.
+   */
+  emitOutput(output: O): Promise<void>;
+
+  /** Closes the output side normally. Idempotent. */
+  closeOutput(): void;
+
+  /** Closes the invocation with a terminal error. Idempotent. */
+  fireError(error: InvocationError): void;
+
+  /**
+   * The cancellation signal — the only cancellation channel bindings
+   * observe. On abort, tear down underlying work and call
+   * `fireError(ERR_CANCELLED)`.
+   */
+  readonly signal: AbortSignal;
+
+  /** Sets leading metadata; must precede the first `emitOutput`/`closeOutput`. */
+  setHeader(md: Metadata): void;
+
+  /** Sets trailing metadata; must precede `closeOutput`/`fireError`. */
+  setTrailer(md: Metadata): void;
+}
+
+// ---------------------------------------------------------------------------
+// Reference implementation
+// ---------------------------------------------------------------------------
+
+/**
+ * Buffer bounds. A capacity of one is structurally mandatory (the handle is
+ * returned synchronously and a binding may emit before the caller reads; a
+ * zero-capacity rendezvous would deadlock). Above one is pipelining slack:
+ * the output side gets a little decode-ahead; the input side's slack is
+ * already supplied by the transport's send window. These are fixed internal
+ * defaults, deliberately not configurable — delivery is always lossless,
+ * in-order, exactly-once, with block-on-full backpressure in both
+ * directions.
+ */
+export const OUTPUT_BUFFER_CAPACITY = 4;
+export const INPUT_BUFFER_CAPACITY = 1;
+
+type OutputWaiter<O> = (r: IteratorResult<O, void>) => void;
+
+interface InputWaiter<I> {
+  resolve: (r: IteratorResult<I, void>) => void;
+  reject: (err: unknown) => void;
+}
+
+interface ProducerWaiter<T> {
+  value: T;
+  resolve: () => void;
+  reject: (err: unknown) => void;
+}
+
+export interface InvocationImplOptions<I> {
+  /** External cancellation; converges with `cancel()` on the internal controller. */
+  signal?: AbortSignal;
+  /**
+   * OBI-T-07 hook: validates a caller input before it is enqueued. A
+   * returned error is terminal AND rejects the offending `write` with the
+   * same `InvocationError` (the binding never sees the message). Used by
+   * the operation-layer invoker; bindings and direct binding-invoker
+   * callers normally leave it unset.
+   */
+  validateInput?: (input: I) => InvocationError | null | Promise<InvocationError | null>;
+}
+
+/**
+ * The shared invocation session: implements the caller-facing
+ * {@link Invocation} and the binding-facing {@link BindingHandle} over one
+ * pair of bounded buffers.
+ *
+ * Concurrency model: JS microtask serialization replaces locking; every
+ * state transition routes through `closeOutput`/`fireError`, which are
+ * idempotent (terminal is sticky and single). Invariants:
+ *
+ *   - A consumer waiter parks only when its buffer is empty; a producer
+ *     waiter parks only when the buffer is full. The queue and the consumer
+ *     waiters never both hold pending work, which is what guarantees queued
+ *     outputs always drain before a terminal error surfaces.
+ *   - A consumer pull that frees a slot immediately re-fills it from the
+ *     eldest parked producer, preserving order.
+ *   - Terminal transitions settle everything: output consumers see
+ *     done-then-error, parked producers reject, input consumers reject on
+ *     `fireError` but end cleanly on `closeOutput` (this distinction is
+ *     what lets a binding's `for await` loop distinguish normal close from
+ *     terminal failure without re-checking the signal).
+ */
+export class InvocationImpl<I = unknown, O = unknown>
+  implements Invocation<I, O>, BindingHandle<I, O>
+{
+  readonly closed: Promise<void>;
+  readonly header: Promise<Metadata>;
+
+  private readonly controller = new AbortController();
+  private readonly validateInputHook?: InvocationImplOptions<I>["validateInput"];
+
+  private inputBuf: I[] = [];
+  private inputWaiters: InputWaiter<I>[] = [];
+  private inputProducerWaiters: ProducerWaiter<I>[] = [];
+  private inputClosed = false;
+
+  private outputQueue: O[] = [];
+  private outputWaiters: OutputWaiter<O>[] = [];
+  private outputProducerWaiters: ProducerWaiter<O>[] = [];
+  private outputsConsumed = false;
+
+  private state: "open" | "closed" | "errored" = "open";
+  private terminalError: InvocationError | undefined;
+
+  private headerMd: Metadata | undefined;
+  private headerSettled = false;
+  private trailerMd: Metadata | undefined;
+
+  private resolveClosed!: () => void;
+  private rejectClosed!: (e: InvocationError) => void;
+  private resolveHeader!: (md: Metadata) => void;
+
+  constructor(opts: InvocationImplOptions<I> = {}) {
+    this.validateInputHook = opts.validateInput;
+
+    this.closed = new Promise<void>((res, rej) => {
+      this.resolveClosed = res;
+      this.rejectClosed = rej;
+    });
+    // Avoid unhandled-rejection if the caller never observes `closed`.
+    this.closed.catch(() => {});
+
+    this.header = new Promise<Metadata>((res) => {
+      this.resolveHeader = res;
+    });
+
+    if (opts.signal) {
+      // Forward an externally-supplied abort to the internal controller so
+      // user-cancel and handle-cancel converge on one signal.
+      if (opts.signal.aborted) {
+        this.controller.abort(opts.signal.reason);
+      } else {
+        opts.signal.addEventListener(
+          "abort",
+          () => {
+            this.controller.abort(opts.signal!.reason);
+            this.fireError(new InvocationError(ERR_CANCELLED, "invocation cancelled"));
+          },
+          { once: true },
+        );
+      }
+    }
+
+    // An already-aborted external signal transitions immediately; without
+    // this the invocation would sit "open" with an aborted controller.
+    if (this.controller.signal.aborted) {
+      this.fireError(new InvocationError(ERR_CANCELLED, "invocation cancelled"));
+    }
+  }
+
+  /** Binding-facing: the one cancellation channel bindings observe. */
+  get signal(): AbortSignal {
+    return this.controller.signal;
+  }
+
+  // ----- Caller-facing -----
+
+  async write(input: I): Promise<void> {
+    this.throwIfUnwritable();
+
+    if (this.validateInputHook) {
+      const err = await this.validateInputHook(input);
+      // State may have moved while validating.
+      if (err) {
+        // OBI-T-07 dual signal: terminal AND the offending write rejects
+        // with the same error. The binding never sees the message.
+        this.fireError(err);
+        throw err;
+      }
+      this.throwIfUnwritable();
+    }
+
+    const waiter = this.inputWaiters.shift();
+    if (waiter) {
+      waiter.resolve({ value: input, done: false });
+      return;
+    }
+    if (this.inputBuf.length < INPUT_BUFFER_CAPACITY) {
+      this.inputBuf.push(input);
+      return;
+    }
+    // Buffer full: park until a consumer pull frees a slot (backpressure).
+    await new Promise<void>((resolve, reject) => {
+      this.inputProducerWaiters.push({ value: input, resolve, reject });
+    });
+  }
+
+  private throwIfUnwritable(): void {
+    if (this.state !== "open") {
+      throw (
+        this.terminalError ??
+        new InvocationError(ERR_INVOCATION_CLOSED, "invocation is closed")
+      );
+    }
+    if (this.inputClosed) {
+      throw new InvocationError(ERR_INPUT_CLOSED, "input is closed");
+    }
+  }
+
+  async close(): Promise<void> {
+    if (this.inputClosed) return;
+    this.inputClosed = true;
+    // Normal close: parked binding reads end cleanly.
+    while (this.inputWaiters.length > 0) {
+      this.inputWaiters.shift()!.resolve({ value: undefined, done: true });
+    }
+    // A write parked behind a full buffer was never accepted; it rejects
+    // non-terminally, consistent with "wrote after close".
+    while (this.inputProducerWaiters.length > 0) {
+      this.inputProducerWaiters
+        .shift()!
+        .reject(new InvocationError(ERR_INPUT_CLOSED, "input is closed"));
+    }
+  }
+
+  async cancel(): Promise<void> {
+    // No-op once terminal: cancelling after completion or after a real
+    // terminal error must not overwrite that error with ERR_CANCELLED.
+    if (this.state !== "open") return;
+    this.controller.abort();
+    this.fireError(new InvocationError(ERR_CANCELLED, "invocation cancelled"));
+  }
+
+  get outputs(): AsyncIterable<O> {
+    return {
+      [Symbol.asyncIterator]: () => {
+        // Single-consumer, acquire-once: the first acquisition claims the
+        // sequence; a second throws rather than splitting outputs. Failing
+        // at the acquisition site (not a later read) is deliberate — a
+        // second consumer is a programming bug.
+        if (this.outputsConsumed) {
+          throw new InvocationError(ERR_ALREADY_CONSUMED, "outputs already consumed");
+        }
+        this.outputsConsumed = true;
+        return {
+          next: () => this.readNext(),
+          // Abandoning the sequence early (a `break`, or `single` bailing
+          // on a second item) cancels the invocation, so an early exit
+          // tears down cleanly without reaching back to the handle.
+          return: async (): Promise<IteratorResult<O, void>> => {
+            await this.cancel();
+            return { value: undefined, done: true };
+          },
+        };
+      },
+    };
+  }
+
+  /**
+   * Pulls one output. Order matters: drain the queue BEFORE checking state.
+   * This is what guarantees queued outputs always surface before a terminal
+   * error, even when emitOutput and fireError run in the same microtask.
+   */
+  private async readNext(): Promise<IteratorResult<O, void>> {
+    if (this.outputQueue.length > 0) {
+      const value = this.outputQueue.shift()!;
+      // Freed a slot: admit the eldest parked producer, preserving order.
+      const producer = this.outputProducerWaiters.shift();
+      if (producer) {
+        this.outputQueue.push(producer.value);
+        producer.resolve();
+      }
+      return { value, done: false };
+    }
+    if (this.state === "errored") throw this.terminalError;
+    if (this.state === "closed") return { value: undefined, done: true };
+
+    const r = await new Promise<IteratorResult<O, void>>((resolve) => {
+      this.outputWaiters.push(resolve);
+    });
+    // Resolved by emitOutput (a value), closeOutput (done), or fireError
+    // (done). If handed a value, deliver it unconditionally — re-checking
+    // `errored` here would drop a value delivered in the same microtask as
+    // a following fireError. Only a `done` resolution surfaces the error.
+    // (terminalError is set iff the state moved to "errored".)
+    if (r.done && this.terminalError) throw this.terminalError;
+    return r;
+  }
+
+  trailer(): Metadata {
+    if (this.state === "open") {
+      throw new Error(
+        "openbindings: trailer() is valid only after the invocation has terminated",
+      );
+    }
+    return this.trailerMd ?? {};
+  }
+
+  // ----- Binding-facing -----
+
+  inputs(): AsyncIterable<I> {
+    return {
+      [Symbol.asyncIterator]: () => ({
+        next: () =>
+          new Promise<IteratorResult<I, void>>((resolve, reject) => {
+            // Terminal failure surfaces to the binding as a thrown error;
+            // inputs are not drained past it (the binding must stop).
+            if (this.state === "errored") {
+              reject(this.terminalError);
+              return;
+            }
+            if (this.inputBuf.length > 0) {
+              const value = this.inputBuf.shift()!;
+              const producer = this.inputProducerWaiters.shift();
+              if (producer) {
+                this.inputBuf.push(producer.value);
+                producer.resolve();
+              }
+              resolve({ value, done: false });
+              return;
+            }
+            if (this.inputClosed) {
+              resolve({ value: undefined, done: true });
+              return;
+            }
+            if (this.inputWaiters.length > 0) {
+              // A second concurrent reader is a binding bug (e.g. a bidi
+              // binding spawning two read loops): fail loudly instead of
+              // racing the buffer.
+              reject(
+                new InvocationError(
+                  ERR_ALREADY_CONSUMED,
+                  "concurrent inputs() readers on one invocation",
+                ),
+              );
+              return;
+            }
+            this.inputWaiters.push({ resolve, reject });
+          }),
+      }),
+    };
+  }
+
+  closeInput(): Promise<void> {
+    return this.close();
+  }
+
+  async emitOutput(output: O): Promise<void> {
+    if (this.state !== "open") {
+      throw (
+        this.terminalError ??
+        new InvocationError(ERR_INVOCATION_CLOSED, "invocation is closed")
+      );
+    }
+    // Header settles with the first output if the binding never set it.
+    this.settleHeader();
+
+    const waiter = this.outputWaiters.shift();
+    if (waiter) {
+      waiter({ value: output, done: false });
+      return;
+    }
+    if (this.outputQueue.length < OUTPUT_BUFFER_CAPACITY) {
+      this.outputQueue.push(output);
+      return;
+    }
+    // Buffer full: park. This is backpressure reaching the binding's read
+    // loop. Rejected (not stranded) if the invocation terminates meanwhile.
+    await new Promise<void>((resolve, reject) => {
+      this.outputProducerWaiters.push({ value: output, resolve, reject });
+    });
+  }
+
+  closeOutput(): void {
+    if (this.state !== "open") return;
+    this.state = "closed";
+    this.inputClosed = true;
+    this.settleHeader();
+
+    while (this.outputWaiters.length > 0) {
+      this.outputWaiters.shift()!({ value: undefined, done: true });
+    }
+    // An emit parked at close is a binding bug ("terminate exactly once"),
+    // but it must not strand: reject it.
+    const closedErr = () =>
+      new InvocationError(ERR_INVOCATION_CLOSED, "invocation is closed");
+    while (this.outputProducerWaiters.length > 0) {
+      this.outputProducerWaiters.shift()!.reject(closedErr());
+    }
+    // Normal close: the binding's input loop exits cleanly.
+    while (this.inputWaiters.length > 0) {
+      this.inputWaiters.shift()!.resolve({ value: undefined, done: true });
+    }
+    while (this.inputProducerWaiters.length > 0) {
+      this.inputProducerWaiters.shift()!.reject(closedErr());
+    }
+    this.resolveClosed();
+  }
+
+  fireError(error: InvocationError): void {
+    if (this.state !== "open") return;
+    this.state = "errored";
+    this.terminalError = error;
+    this.inputClosed = true;
+    this.settleHeader();
+
+    // Drain order: parked output consumers resolve `done` and re-surface
+    // the terminal on their next-state check (queued values, when present,
+    // were already ahead of any parked consumer by the buffer invariant);
+    // THEN parked producers reject.
+    while (this.outputWaiters.length > 0) {
+      this.outputWaiters.shift()!({ value: undefined, done: true });
+    }
+    while (this.outputProducerWaiters.length > 0) {
+      this.outputProducerWaiters.shift()!.reject(error);
+    }
+    // Terminal failure: the binding's input loop THROWS (vs the clean exit
+    // on closeOutput) — this is what makes "honor signal, only signal"
+    // structurally true for bindings.
+    while (this.inputWaiters.length > 0) {
+      this.inputWaiters.shift()!.reject(error);
+    }
+    while (this.inputProducerWaiters.length > 0) {
+      this.inputProducerWaiters.shift()!.reject(error);
+    }
+    this.rejectClosed(error);
+  }
+
+  setHeader(md: Metadata): void {
+    if (this.headerSettled) {
+      throw new Error(
+        "openbindings: setHeader must precede the first emitOutput/closeOutput",
+      );
+    }
+    this.headerMd = md;
+    this.settleHeader();
+  }
+
+  setTrailer(md: Metadata): void {
+    if (this.state !== "open") {
+      throw new Error("openbindings: setTrailer must precede closeOutput/fireError");
+    }
+    this.trailerMd = md;
+  }
+
+  private settleHeader(): void {
+    if (this.headerSettled) return;
+    this.headerSettled = true;
+    this.resolveHeader(this.headerMd ?? {});
+  }
+}
+
+// ---------------------------------------------------------------------------
+// The one blessed terminal: single
+// ---------------------------------------------------------------------------
+
+/**
+ * Yields exactly one output. Errors `ERR_EXPECTED_SINGLE` on zero outputs or
+ * on a second output — short-circuiting on the second item (no whole-stream
+ * buffering) and cancelling the invocation via the iterator's `return()`.
+ *
+ * `single` is a checked assertion ("I expect one; verify it"), never a mode
+ * ("run it unary"): a short-circuit tears down a live invocation, so use it
+ * only when confident the selected binding yields one output. It consumes
+ * the sequence (single-consumer, acquire-once) and returns the payload
+ * only; metadata is read from the handle you still hold.
+ *
+ * A terminal error after the first output surfaces as that error, not as a
+ * false "got more".
+ */
+export async function single<O>(outputs: AsyncIterable<O>): Promise<O> {
+  // Claims the sequence (throws ERR_ALREADY_CONSUMED if already taken).
+  const it = outputs[Symbol.asyncIterator]();
+  const first = await it.next();
+  if (first.done) {
+    throw new InvocationError(ERR_EXPECTED_SINGLE, "expected one output, got none");
+  }
+  const second = await it.next();
+  if (!second.done) {
+    await it.return?.(); // abandon -> cancel
+    throw new InvocationError(ERR_EXPECTED_SINGLE, "expected one output, got more");
+  }
+  return first.value;
+}

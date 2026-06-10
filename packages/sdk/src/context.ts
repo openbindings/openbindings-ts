@@ -1,3 +1,6 @@
+import type { ContextRequiredDetails } from "./invocation.js";
+import type { ContextResolver } from "./invokers.js";
+
 // ---------------------------------------------------------------------------
 // Context store
 // ---------------------------------------------------------------------------
@@ -261,6 +264,55 @@ export class MemoryStore implements ContextStore {
   async delete(key: string): Promise<void> {
     this.data.delete(key);
   }
+}
+
+// ---------------------------------------------------------------------------
+// Store-backed context resolver
+// ---------------------------------------------------------------------------
+
+/**
+ * Maps standard requirement families (binding-invoker role) to the
+ * well-known context field that satisfies them (context-store role).
+ */
+const REQUIREMENT_FIELDS: Record<string, string> = {
+  "auth.bearer": "bearerToken",
+  "auth.apiKey": "apiKey",
+  "auth.basic": "basic",
+  "auth.oauth2": "accessToken",
+};
+
+/** True when the stored context can satisfy every requirement of at least one alternative. */
+export function contextSatisfies(
+  ctx: Record<string, unknown>,
+  details: ContextRequiredDetails,
+): boolean {
+  return details.alternatives.some((alt) =>
+    alt.requirements.every((req) => {
+      const field = REQUIREMENT_FIELDS[req.type] ?? req.type;
+      const v = ctx[field];
+      return v !== undefined && v !== null && v !== "";
+    }),
+  );
+}
+
+/**
+ * Builds a read-only {@link ContextResolver} backed by a {@link ContextStore}:
+ * the composition of the binding-invoker and context-store roles. Looks up
+ * the challenge's `key`, returns the stored context when it satisfies one
+ * of the challenge's alternatives, and declines (null) otherwise — at which
+ * point the challenge surfaces to the caller unchanged.
+ *
+ * Apps that resolve interactively (prompt, browser redirect, keychain)
+ * supply their own resolver and MAY persist what they obtain for
+ * `durable: true` requirements under `details.key`; non-durable context
+ * MUST NOT be persisted.
+ */
+export function storeContextResolver(store: ContextStore): ContextResolver {
+  return async (details: ContextRequiredDetails) => {
+    const ctx = await store.get(details.key);
+    if (!ctx) return null;
+    return contextSatisfies(ctx, details) ? ctx : null;
+  };
 }
 
 // ---------------------------------------------------------------------------

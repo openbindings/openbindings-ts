@@ -1,0 +1,439 @@
+/**
+ * Phase-1 acceptance: the conformance test matrix for the reference
+ * InvocationImpl and the `single` terminal (operation-invoker-design.md).
+ * Cardinality tags: U unary, SS server-streaming, CS client-streaming,
+ * BD bidi, NI no-input.
+ */
+import { describe, it, expect } from "vitest";
+import {
+  InvocationImpl,
+  InvocationError,
+  single,
+  OUTPUT_BUFFER_CAPACITY,
+} from "./invocation.js";
+import {
+  CONTEXT_REQUIRED,
+  ERR_ALREADY_CONSUMED,
+  ERR_CANCELLED,
+  ERR_EXPECTED_SINGLE,
+  ERR_INPUT_CLOSED,
+  ERR_INVOCATION_CLOSED,
+  ERR_VALIDATION_FAILED,
+} from "./errcodes.js";
+
+const tick = (): Promise<void> => new Promise((res) => setTimeout(res, 0));
+
+/** Resolves "pending" if p has not settled within two macrotasks. */
+async function settledState(p: Promise<unknown>): Promise<"resolved" | "rejected" | "pending"> {
+  const sentinel = Symbol("pending");
+  const winner = await Promise.race([
+    p.then(() => "resolved" as const, () => "rejected" as const),
+    tick().then(() => tick()).then(() => sentinel),
+  ]);
+  if (winner === sentinel) return "pending";
+  return winner as "resolved" | "rejected";
+}
+
+async function collect<O>(it: AsyncIterable<O>): Promise<O[]> {
+  const out: O[] = [];
+  for await (const v of it) out.push(v);
+  return out;
+}
+
+function errCode(err: unknown): string {
+  expect(err).toBeInstanceOf(InvocationError);
+  return (err as InvocationError).code;
+}
+
+describe("lifecycle & ordering", () => {
+  it("drains queued outputs before a terminal error (emit; emit; fireError in one tick) [SS]", async () => {
+    const inv = new InvocationImpl<never, number>();
+    void inv.emitOutput(1);
+    void inv.emitOutput(2);
+    inv.fireError(new InvocationError("ERR_STREAM_ERROR", "boom"));
+
+    const seen: number[] = [];
+    let caught: unknown;
+    try {
+      for await (const v of inv.outputs) seen.push(v);
+    } catch (err) {
+      caught = err;
+    }
+    expect(seen).toEqual([1, 2]);
+    expect(errCode(caught)).toBe("ERR_STREAM_ERROR");
+  });
+
+  it("delivers outputs emitted before the caller acquires the sequence [U, NI]", async () => {
+    const inv = new InvocationImpl<never, string>();
+    await inv.emitOutput("early");
+    inv.closeOutput();
+
+    expect(await collect(inv.outputs)).toEqual(["early"]);
+    await expect(inv.closed).resolves.toBeUndefined();
+  });
+
+  it("terminal is sticky and single: double-fire and post-close transitions are no-ops", async () => {
+    const inv = new InvocationImpl<never, never>();
+    inv.closeOutput();
+    inv.fireError(new InvocationError("ERR_RUNTIME", "late")); // no-op
+    await inv.cancel(); // no-op
+    await expect(inv.closed).resolves.toBeUndefined();
+
+    const inv2 = new InvocationImpl<never, never>();
+    inv2.fireError(new InvocationError("ERR_RUNTIME", "first"));
+    inv2.fireError(new InvocationError("ERR_RUNTIME", "second")); // no-op
+    inv2.closeOutput(); // no-op
+    await expect(inv2.closed).rejects.toThrow("first");
+  });
+
+  it("cancel() after a real terminal error does not overwrite it (load-bearing for single)", async () => {
+    const inv = new InvocationImpl<never, never>();
+    const real = new InvocationError("ERR_EXECUTION_FAILED", "real failure");
+    inv.fireError(real);
+    await inv.cancel();
+    await expect(inv.closed).rejects.toBe(real);
+  });
+});
+
+describe("single-consumer (acquire-once)", () => {
+  it("second acquisition fails eagerly with ERR_ALREADY_CONSUMED", () => {
+    const inv = new InvocationImpl<never, number>();
+    inv.outputs[Symbol.asyncIterator]();
+    expect(() => inv.outputs[Symbol.asyncIterator]()).toThrowError(
+      expect.objectContaining({ code: ERR_ALREADY_CONSUMED }),
+    );
+  });
+
+  it("single after a loop fails loudly, never splits [U, SS]", async () => {
+    const inv = new InvocationImpl<never, number>();
+    await inv.emitOutput(1);
+    inv.closeOutput();
+    await collect(inv.outputs);
+    await expect(single(inv.outputs)).rejects.toMatchObject({ code: ERR_ALREADY_CONSUMED });
+  });
+
+  it("concurrent inputs() readers fail loudly [BD]", async () => {
+    const inv = new InvocationImpl<number, never>();
+    const itA = inv.inputs()[Symbol.asyncIterator]();
+    const itB = inv.inputs()[Symbol.asyncIterator]();
+    const a = itA.next(); // parks (no input yet)
+    await expect(itB.next()).rejects.toMatchObject({ code: ERR_ALREADY_CONSUMED });
+    await inv.close();
+    await expect(a).resolves.toEqual({ value: undefined, done: true });
+  });
+});
+
+describe("single", () => {
+  it("returns the one output [U]", async () => {
+    const inv = new InvocationImpl<never, string>();
+    await inv.emitOutput("only");
+    inv.closeOutput();
+    await expect(single(inv.outputs)).resolves.toBe("only");
+  });
+
+  it("errors ERR_EXPECTED_SINGLE on zero outputs", async () => {
+    const inv = new InvocationImpl<never, string>();
+    inv.closeOutput();
+    await expect(single(inv.outputs)).rejects.toMatchObject({
+      code: ERR_EXPECTED_SINGLE,
+      message: expect.stringContaining("got none"),
+    });
+  });
+
+  it("short-circuits on the second output, cancelling cleanly [SS — the critical misuse case]", async () => {
+    const inv = new InvocationImpl<never, number>();
+    await inv.emitOutput(1);
+    await inv.emitOutput(2);
+    // The binding keeps streaming; single must NOT buffer the whole stream.
+    const p = single(inv.outputs);
+    await expect(p).rejects.toMatchObject({
+      code: ERR_EXPECTED_SINGLE,
+      message: expect.stringContaining("got more"),
+    });
+    // Abandoning the sequence cancelled the invocation: the binding's
+    // signal aborted and the handle is terminal.
+    expect(inv.signal.aborted).toBe(true);
+    await expect(inv.closed).rejects.toMatchObject({ code: ERR_CANCELLED });
+  });
+
+  it("surfaces a terminal error after the first output, not a false 'got more' [SS]", async () => {
+    const inv = new InvocationImpl<never, number>();
+    await inv.emitOutput(1);
+    inv.fireError(new InvocationError("ERR_STREAM_ERROR", "mid-stream death"));
+    await expect(single(inv.outputs)).rejects.toMatchObject({ code: "ERR_STREAM_ERROR" });
+  });
+});
+
+describe("backpressure (bounded-block)", () => {
+  it("emitOutput parks at capacity and wakes on drain, preserving order [SS]", async () => {
+    const inv = new InvocationImpl<never, number>();
+    for (let i = 0; i < OUTPUT_BUFFER_CAPACITY; i++) {
+      await inv.emitOutput(i);
+    }
+    let parkedResolved = false;
+    const parked = inv.emitOutput(99).then(() => { parkedResolved = true; });
+    expect(await settledState(parked)).toBe("pending");
+    expect(parkedResolved).toBe(false);
+
+    // Drain one: the parked producer is admitted.
+    const it = inv.outputs[Symbol.asyncIterator]();
+    await expect(it.next()).resolves.toEqual({ value: 0, done: false });
+    await parked;
+    inv.closeOutput();
+
+    const rest: number[] = [];
+    for (;;) {
+      const r = await it.next();
+      if (r.done) break;
+      rest.push(r.value);
+    }
+    // Exact order: the remaining buffered values, then the parked value.
+    expect(rest).toEqual([...Array.from({ length: OUTPUT_BUFFER_CAPACITY - 1 }, (_, i) => i + 1), 99]);
+  });
+
+  it("a producer parked on a full buffer rejects on terminal instead of stranding [SS, BD]", async () => {
+    const inv = new InvocationImpl<never, number>();
+    for (let i = 0; i < OUTPUT_BUFFER_CAPACITY; i++) await inv.emitOutput(i);
+    const parked = inv.emitOutput(99);
+    inv.fireError(new InvocationError("ERR_STREAM_ERROR", "died while parked"));
+    await expect(parked).rejects.toMatchObject({ code: "ERR_STREAM_ERROR" });
+  });
+
+  it("a producer parked at closeOutput rejects ERR_INVOCATION_CLOSED", async () => {
+    const inv = new InvocationImpl<never, number>();
+    for (let i = 0; i < OUTPUT_BUFFER_CAPACITY; i++) await inv.emitOutput(i);
+    const parked = inv.emitOutput(99);
+    inv.closeOutput();
+    await expect(parked).rejects.toMatchObject({ code: ERR_INVOCATION_CLOSED });
+  });
+
+  it("write parks at input capacity and wakes when the binding reads [CS]", async () => {
+    const inv = new InvocationImpl<number, never>();
+    await inv.write(1); // fills capacity-1 buffer
+    const parked = inv.write(2);
+    expect(await settledState(parked)).toBe("pending");
+
+    const it = inv.inputs()[Symbol.asyncIterator]();
+    await expect(it.next()).resolves.toEqual({ value: 1, done: false });
+    await parked; // admitted
+    await expect(it.next()).resolves.toEqual({ value: 2, done: false });
+  });
+
+  it("a parked write rejects on terminal [CS]", async () => {
+    const inv = new InvocationImpl<number, never>();
+    await inv.write(1);
+    const parked = inv.write(2);
+    inv.fireError(new InvocationError("ERR_RUNTIME", "terminal while write parked"));
+    await expect(parked).rejects.toMatchObject({ code: "ERR_RUNTIME" });
+  });
+
+  it("end-to-end: a slow consumer flow-controls the binding's emit loop [SS]", async () => {
+    const inv = new InvocationImpl<never, number>();
+    let emitted = 0;
+    const binding = (async () => {
+      for (let i = 0; i < OUTPUT_BUFFER_CAPACITY + 5; i++) {
+        await inv.emitOutput(i);
+        emitted++;
+      }
+      inv.closeOutput();
+    })();
+    await tick();
+    // Binding cannot run ahead of the buffer.
+    expect(emitted).toBeLessThanOrEqual(OUTPUT_BUFFER_CAPACITY);
+    const all = await collect(inv.outputs);
+    await binding;
+    expect(all).toEqual(Array.from({ length: OUTPUT_BUFFER_CAPACITY + 5 }, (_, i) => i));
+  });
+});
+
+describe("input side", () => {
+  it("caller close() ends the binding's input loop cleanly [CS]", async () => {
+    const inv = new InvocationImpl<string, never>();
+    await inv.write("a");
+    const seen: string[] = [];
+    const loop = (async () => {
+      for await (const v of inv.inputs()) seen.push(v);
+    })();
+    await inv.write("b");
+    await inv.close();
+    await loop; // exits cleanly, no throw
+    expect(seen).toEqual(["a", "b"]);
+  });
+
+  it("fireError makes the binding's parked input read THROW (vs clean exit on close)", async () => {
+    const inv = new InvocationImpl<string, never>();
+    const it = inv.inputs()[Symbol.asyncIterator]();
+    const parked = it.next();
+    inv.fireError(new InvocationError("ERR_RUNTIME", "terminal"));
+    await expect(parked).rejects.toMatchObject({ code: "ERR_RUNTIME" });
+  });
+
+  it("write after caller close() rejects ERR_INPUT_CLOSED (non-terminal)", async () => {
+    const inv = new InvocationImpl<string, string>();
+    await inv.close();
+    await expect(inv.write("late")).rejects.toMatchObject({ code: ERR_INPUT_CLOSED });
+    // Non-terminal: the invocation continues; outputs still flow.
+    await inv.emitOutput("still alive");
+    inv.closeOutput();
+    expect(await collect(inv.outputs)).toEqual(["still alive"]);
+  });
+
+  it("binding closeInput() frees the caller from closing; later writes reject [NI, U]", async () => {
+    const inv = new InvocationImpl<string, string>();
+    await inv.closeInput(); // binding-side: no-input operation
+    await expect(inv.write("x")).rejects.toMatchObject({ code: ERR_INPUT_CLOSED });
+    await inv.emitOutput("out");
+    inv.closeOutput();
+    expect(await collect(inv.outputs)).toEqual(["out"]);
+    await expect(inv.closed).resolves.toBeUndefined();
+  });
+
+  it("write after terminal rejects with the terminal error", async () => {
+    const inv = new InvocationImpl<string, never>();
+    const term = new InvocationError("ERR_RUNTIME", "done for");
+    inv.fireError(term);
+    await expect(inv.write("x")).rejects.toBe(term);
+  });
+});
+
+describe("OBI-T-07 validation hook", () => {
+  it("an invalid write rejects AND the invocation terminates with the same error (dual signal)", async () => {
+    const t07 = new InvocationError(ERR_VALIDATION_FAILED, "input validation failed");
+    const inv = new InvocationImpl<number, never>({
+      validateInput: (v) => (v < 0 ? t07 : null),
+    });
+    await inv.write(1); // valid
+    await expect(inv.write(-1)).rejects.toBe(t07);
+    await expect(inv.closed).rejects.toBe(t07);
+    // The binding's read loop throws the same terminal.
+    const it = inv.inputs()[Symbol.asyncIterator]();
+    await expect(it.next()).rejects.toBe(t07);
+  });
+});
+
+describe("cancellation & close", () => {
+  it("cancel() before any drive tears down an inert handle", async () => {
+    const inv = new InvocationImpl<never, never>();
+    await inv.cancel();
+    expect(inv.signal.aborted).toBe(true);
+    await expect(inv.closed).rejects.toMatchObject({ code: ERR_CANCELLED });
+  });
+
+  it("an external signal converges with handle-cancel on one ERR_CANCELLED [SS, BD]", async () => {
+    const ctrl = new AbortController();
+    const inv = new InvocationImpl<never, number>({ signal: ctrl.signal });
+    ctrl.abort();
+    await tick();
+    expect(inv.signal.aborted).toBe(true);
+    await expect(inv.closed).rejects.toMatchObject({ code: ERR_CANCELLED });
+  });
+
+  it("a pre-aborted external signal yields an immediately-terminal handle", async () => {
+    const ctrl = new AbortController();
+    ctrl.abort();
+    const inv = new InvocationImpl<never, never>({ signal: ctrl.signal });
+    await expect(inv.closed).rejects.toMatchObject({ code: ERR_CANCELLED });
+  });
+
+  it("breaking out of `for await` cancels the invocation (return() wiring)", async () => {
+    const inv = new InvocationImpl<never, number>();
+    await inv.emitOutput(1);
+    await inv.emitOutput(2);
+    for await (const v of inv.outputs) {
+      expect(v).toBe(1);
+      break;
+    }
+    expect(inv.signal.aborted).toBe(true);
+    await expect(inv.closed).rejects.toMatchObject({ code: ERR_CANCELLED });
+  });
+});
+
+describe("metadata", () => {
+  it("header resolves with binding-set metadata before the first output [SS, U]", async () => {
+    const inv = new InvocationImpl<never, string>();
+    inv.setHeader({ "content-type": ["application/json"] });
+    await inv.emitOutput("x");
+    await expect(inv.header).resolves.toEqual({ "content-type": ["application/json"] });
+  });
+
+  it("header resolves empty with the first output when the binding sets none", async () => {
+    const inv = new InvocationImpl<never, string>();
+    await inv.emitOutput("x");
+    await expect(inv.header).resolves.toEqual({});
+  });
+
+  it("header resolves (empty) on terminal with no outputs", async () => {
+    const inv = new InvocationImpl<never, never>();
+    inv.fireError(new InvocationError("ERR_RUNTIME", "early death"));
+    await expect(inv.header).resolves.toEqual({});
+  });
+
+  it("trailer is valid only after termination", async () => {
+    const inv = new InvocationImpl<never, string>();
+    inv.setTrailer({ "grpc-status": ["0"] });
+    expect(() => inv.trailer()).toThrow(/after the invocation has terminated/);
+    inv.closeOutput();
+    expect(inv.trailer()).toEqual({ "grpc-status": ["0"] });
+  });
+
+  it("setHeader after the first output is a loud binding bug", async () => {
+    const inv = new InvocationImpl<never, string>();
+    await inv.emitOutput("x");
+    expect(() => inv.setHeader({ late: ["true"] })).toThrow(/must precede/);
+  });
+
+  it("setTrailer after terminal is a loud binding bug", () => {
+    const inv = new InvocationImpl<never, never>();
+    inv.closeOutput();
+    expect(() => inv.setTrailer({ late: ["true"] })).toThrow(/must precede/);
+  });
+
+  it("after a single short-circuit, header (if set) is valid and trailer reflects the cancelled call", async () => {
+    const inv = new InvocationImpl<never, number>();
+    inv.setHeader({ "x-stream": ["yes"] });
+    await inv.emitOutput(1);
+    await inv.emitOutput(2);
+    await expect(single(inv.outputs)).rejects.toMatchObject({ code: ERR_EXPECTED_SINGLE });
+    await expect(inv.header).resolves.toEqual({ "x-stream": ["yes"] });
+    expect(inv.trailer()).toEqual({}); // binding never terminated normally
+  });
+});
+
+describe("bidi & drive", () => {
+  it("separate-context drive succeeds with buffers smaller than the message count [BD]", async () => {
+    const inv = new InvocationImpl<number, number>();
+    const N = 25; // far beyond both buffer bounds
+
+    // The "binding": echo loop on its own context.
+    const binding = (async () => {
+      for await (const v of inv.inputs()) {
+        await inv.emitOutput(v * 2);
+      }
+      inv.closeOutput();
+    })();
+
+    // The caller: pump and drain on separate contexts (the blessed pattern).
+    const pump = (async () => {
+      for (let i = 0; i < N; i++) await inv.write(i);
+      await inv.close();
+    })();
+    const seen: number[] = [];
+    const drain = (async () => {
+      for await (const v of inv.outputs) seen.push(v);
+    })();
+
+    await Promise.all([pump, drain, binding]);
+    expect(seen).toEqual(Array.from({ length: N }, (_, i) => i * 2));
+  });
+
+  it("CONTEXT_REQUIRED is just a terminal code on the handle", async () => {
+    const inv = new InvocationImpl<never, never>();
+    inv.fireError(
+      new InvocationError(CONTEXT_REQUIRED, "bearer token required", {
+        key: "api.example.com",
+        alternatives: [{ requirements: [{ type: "auth.bearer" }] }],
+      }),
+    );
+    await expect(inv.closed).rejects.toMatchObject({ code: CONTEXT_REQUIRED });
+  });
+});

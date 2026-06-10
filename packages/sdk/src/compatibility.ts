@@ -13,7 +13,7 @@ export type CompatibilityIssue = {
  * Checks whether a provided interface satisfies the requirements of a
  * required interface. For each operation the required interface declares by
  * key, the provided interface is searched by that name against its flat
- * key+aliases namespace (OBI-T-13): a provided operation matches if its key
+ * key+aliases namespace (OBI-T-12): a provided operation matches if its key
  * equals the required key or one of its aliases does. Carrying the required
  * contract's operation name as an alias is exactly how an implementation
  * claims to fulfill that contract.

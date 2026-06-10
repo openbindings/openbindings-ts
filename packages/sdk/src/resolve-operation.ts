@@ -8,7 +8,7 @@ export interface ResolvedOperation {
 }
 
 /**
- * Resolves an operation by name against an interface, per OBI-T-13.
+ * Resolves an operation by name against an interface, per OBI-T-12.
  *
  * An operation's identifiers are its key plus its `aliases`; together they form
  * one flat namespace in which key and alias matches are equally authoritative.

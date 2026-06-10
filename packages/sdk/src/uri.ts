@@ -1,11 +1,11 @@
 /**
  * URI canonicalization (spec §10) and reference resolution (spec §12).
  *
- * The OpenBindings spec relies on URI equality for cross-document role
- * matching, deduplication, and identifying when two references point at
- * the same OBI. canonicalizeLocation produces the byte-stable canonical
- * form. resolveRef converts a relative URI reference (in roles[*],
- * sources[*].location, or schema $ref) into a fully-qualified URI.
+ * The OpenBindings spec relies on URI equality for deduplication and for
+ * identifying when two references point at the same OBI.
+ * canonicalizeLocation produces the byte-stable canonical form. resolveRef
+ * converts a relative URI reference (in sources[*].location or a schema
+ * $ref) into a fully-qualified URI.
  *
  * The canonicalization algorithm uses the WHATWG URL Standard for the
  * heavy lifting (lowercase scheme/host, IDN punycode via UTS #46,
@@ -64,9 +64,9 @@ export function canonicalizeLocation(uri: string): string {
 
 /**
  * Resolves a relative URI reference against a base URI per RFC 3986 §5.
- * This is the spec §12 operation: it converts a roles[*] value, a
- * sources[*].location, or a schema $ref into a fully-qualified URI suitable
- * for fetching or comparison.
+ * This is the spec §12 operation: it converts a sources[*].location or a
+ * schema $ref into a fully-qualified URI suitable for fetching or
+ * comparison.
  *
  * Resolution is directory-relative: the merge step strips everything after
  * the last `/` in the base URI's path before appending the reference

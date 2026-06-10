@@ -1,17 +1,24 @@
-import type { OBInterface, BindingEntry, Transform, TransformOrRef, JSONSchema } from "./types.js";
+import type { OBInterface, BindingEntry, Operation, Source, Transform, TransformOrRef, JSONSchema } from "./types.js";
 import { resolveTransform } from "./types.js";
 import type {
-  BindingInvocationInput,
-  OperationInvocationInput,
-  InvocationOutput,
+  BindingInvocationArgs,
+  OperationInvocationArgs,
   FormatInfo,
 } from "./invoker-types.js";
 import type {
   BindingInvoker,
   BindingSelector,
+  ContextResolver,
   TransformEvaluator,
 } from "./invokers.js";
-import type { ContextStore, PlatformCallbacks } from "./context.js";
+import {
+  type ContextRequiredDetails,
+  type Invocation,
+  InvocationError,
+  InvocationImpl,
+  contextRequiredError,
+  isContextRequired,
+} from "./invocation.js";
 import {
   BindingNotFoundError,
   EmptyTransformExpressionError,
@@ -23,24 +30,66 @@ import {
 } from "./errors.js";
 import { combineInvokers, type CombinedInvoker } from "./combiners.js";
 import { resolveOperation, allOperationIdentifiers } from "./resolve-operation.js";
-import { ERR_BINDING_NOT_FOUND, ERR_TRANSFORM_ERROR, ERR_VALIDATION_FAILED } from "./errcodes.js";
+import {
+  ERR_BINDING_NOT_FOUND,
+  ERR_INPUT_CLOSED,
+  ERR_RUNTIME,
+  ERR_TRANSFORM_ERROR,
+  ERR_VALIDATION_FAILED,
+} from "./errcodes.js";
 import { matchesRange, parseRange } from "./format-token.js";
 import { buildSchemaDefs, compileExampleSchema, safeValidate } from "./schema-validation.js";
 import type { Validator } from "@cfworker/json-schema";
 
+/**
+ * Maximum CONTEXT_REQUIRED resolve-and-retry rounds per invocation. A
+ * binding that keeps challenging after resolution is either mis-declaring
+ * its requirements or being fed an insufficient resolver; surfacing beats
+ * looping.
+ */
+const MAX_CONTEXT_ROUNDS = 3;
+
 export interface OperationInvokerOptions {
   bindingSelector?: BindingSelector;
   transformEvaluator?: TransformEvaluator;
-  contextStore?: ContextStore;
-  platformCallbacks?: PlatformCallbacks;
+  /**
+   * Resolves CONTEXT_REQUIRED challenges raised by bindings. When unset, or
+   * when it declines (returns null), the challenge surfaces to the caller
+   * as an ordinary terminal InvocationError.
+   */
+  contextResolver?: ContextResolver;
   fetch?: typeof globalThis.fetch;
 }
 
+/**
+ * The operation-layer invoker: resolves an OBI operation to a binding
+ * (OBI-T-12 name resolution, OBI-T-09 selection) and returns a
+ * cardinality-agnostic {@link Invocation} handle.
+ *
+ * Between the caller and the binding it enforces the operation contract:
+ *   - OBI-T-07: every caller input validates against the operation's input
+ *     schema BEFORE the input transform; a failure is terminal and rejects
+ *     the offending `write` with the same error.
+ *   - inputTransform / outputTransform evaluate per message (JSONata 2.0).
+ *   - OBI-T-08: each (transformed) output validates against the output
+ *     schema before it is emitted; a failure is terminal and the value is
+ *     not emitted. Callers that need to inspect unvalidated payloads call
+ *     `invokeBinding` directly.
+ *   - CONTEXT_REQUIRED negotiation: challenges raised by the binding before
+ *     any input was consumed are resolved via the configured resolver and
+ *     the binding is re-driven against the same input buffer (the
+ *     already-forwarded prefix is replayed). Once the binding shows
+ *     observable progress (a first output), challenges surface to the
+ *     caller instead.
+ *
+ * `invoke` throws synchronously on wiring/document errors (unknown
+ * operation, binding, or source) — failures knowable before any work
+ * starts. Runtime outcomes travel on the handle.
+ */
 export class OperationInvoker {
   readonly bindingSelector?: BindingSelector;
   readonly transformEvaluator?: TransformEvaluator;
-  readonly contextStore?: ContextStore;
-  readonly platformCallbacks?: PlatformCallbacks;
+  readonly contextResolver?: ContextResolver;
   readonly fetch?: typeof globalThis.fetch;
 
   private readonly invoker: CombinedInvoker;
@@ -48,8 +97,7 @@ export class OperationInvoker {
   constructor(invokers: BindingInvoker[], opts?: OperationInvokerOptions) {
     this.bindingSelector = opts?.bindingSelector;
     this.transformEvaluator = opts?.transformEvaluator;
-    this.contextStore = opts?.contextStore;
-    this.platformCallbacks = opts?.platformCallbacks;
+    this.contextResolver = opts?.contextResolver;
     this.fetch = opts?.fetch;
     this.invoker = combineInvokers(...invokers);
   }
@@ -65,21 +113,16 @@ export class OperationInvoker {
   }
 
   /**
-   * Returns a new OperationInvoker sharing the combined invoker but with
-   * independent store/callbacks. Undefined arguments inherit the original's
-   * values. Useful when one OperationInvoker needs different runtime for
-   * different call sites without mutating the shared instance.
+   * Returns a new OperationInvoker sharing the combined invoker registry
+   * but with an independent context resolver / fetch. Undefined arguments
+   * inherit the original's values. Useful when one OperationInvoker serves
+   * call sites with different runtimes.
    */
-  withRuntime(
-    store?: ContextStore,
-    callbacks?: PlatformCallbacks,
-    fetchFn?: typeof globalThis.fetch,
-  ): OperationInvoker {
+  withRuntime(resolver?: ContextResolver, fetchFn?: typeof globalThis.fetch): OperationInvoker {
     const cp = new OperationInvoker([], {
       bindingSelector: this.bindingSelector,
       transformEvaluator: this.transformEvaluator,
-      contextStore: store ?? this.contextStore,
-      platformCallbacks: callbacks ?? this.platformCallbacks,
+      contextResolver: resolver ?? this.contextResolver,
       fetch: fetchFn ?? this.fetch,
     });
     // Share the underlying combined-invoker registry rather than re-combining
@@ -96,268 +139,427 @@ export class OperationInvoker {
     return new Set(this.invoker.formats().map(f => f.token));
   }
 
-  async *invokeBinding(
-    input: BindingInvocationInput,
-    options?: { signal?: AbortSignal },
-  ): AsyncIterable<InvocationOutput> {
-    yield* this.invoker.invokeBinding(this.withRuntimeInput(input), options);
+  /**
+   * Binding-layer passthrough: invoke a resolved binding directly, without
+   * operation-layer validation, transforms, or context negotiation.
+   */
+  invokeBinding<I = unknown, O = unknown>(args: BindingInvocationArgs): Invocation<I, O> {
+    return this.invoker.invokeBinding<I, O>(this.withFetch(args));
+  }
+
+  /** Side-effect-free preflight for a resolved binding (binding-invoker role `prepareBinding`). */
+  prepareBinding(args: BindingInvocationArgs): Promise<ContextRequiredDetails | null> {
+    return this.invoker.prepareBinding(this.withFetch(args));
   }
 
   /**
-   * Resolves an OBI operation to a binding and yields a stream of events.
-   * Every operation is a stream — unary calls produce a single event.
-   *
-   * The invoker's invokeBinding returns AsyncIterable<InvocationOutput>.
-   * Input transforms apply once before invocation. Output transforms apply
-   * per event.
+   * Resolves an OBI operation to a binding and returns the invocation
+   * handle. Returns synchronously; creation is inert (no I/O until the
+   * invocation is driven).
    */
-  async *invoke(
-    input: OperationInvocationInput,
-    options?: { signal?: AbortSignal },
-  ): AsyncGenerator<InvocationOutput> {
-    const iface = input.interface;
+  invoke<I = unknown, O = unknown>(args: OperationInvocationArgs): Invocation<I, O> {
+    const iface = args.interface;
     if (!iface) throw new MissingInterfaceError();
-    // OBI-T-13: resolve against the flat key+aliases namespace. Bindings are
-    // selected by the resolved canonical key, not the name the caller used.
-    const resolved = resolveOperation(iface, input.operation);
+
+    // OBI-T-12: resolve against the flat key+aliases namespace. Bindings
+    // are selected by the resolved canonical key, not the name used.
+    const resolved = resolveOperation(iface, args.operation);
     if (!resolved) {
-      throw new OperationNotFoundError(
-        input.operation,
-        allOperationIdentifiers(iface),
-      );
+      throw new OperationNotFoundError(args.operation, allOperationIdentifiers(iface));
     }
     const { key: opKey, operation: op } = resolved;
 
     let bindingKey: string;
     let binding: BindingEntry;
-
-    if (input.bindingKey) {
-      const b = iface.bindings?.[input.bindingKey];
-      if (!b) {
-        yield {
-          error: {
-            code: ERR_BINDING_NOT_FOUND,
-            message: `Binding "${input.bindingKey}" is not defined on this interface.`,
-          },
-        };
-        return;
-      }
-      bindingKey = input.bindingKey;
+    if (args.bindingKey) {
+      const b = iface.bindings?.[args.bindingKey];
+      if (!b) throw new BindingNotFoundError(args.bindingKey);
+      bindingKey = args.bindingKey;
       binding = b;
     } else {
-      const selector = this.bindingSelector ?? ((iface: OBInterface, op: string) =>
-        defaultBindingSelector(iface, op, this.availableFormats()));
+      const selector = this.bindingSelector ?? ((i: OBInterface, o: string) =>
+        defaultBindingSelector(i, o, this.availableFormats()));
       ({ key: bindingKey, binding } = selector(iface, opKey));
     }
 
     const source = iface.sources?.[binding.source];
     if (!source) throw new UnknownSourceError(bindingKey, binding.source);
 
-    // OBI-T-07: Validate input against the operation's input schema before transform.
-    if (op.input != null) {
-      let inputValidator: Validator;
-      try {
-        inputValidator = compileExampleSchema(op.input, buildSchemaDefs(iface.schemas));
-      } catch (err) {
-        yield {
-          error: {
-            code: ERR_VALIDATION_FAILED,
-            message: `openbindings: input schema compilation failed for "${input.operation}": ${(err as Error).message}`,
-          },
-        };
-        return;
-      }
-      const r = safeValidate(inputValidator, input.input);
-      if (!r.valid) {
-        yield {
-          error: {
-            code: ERR_VALIDATION_FAILED,
-            message: `openbindings: input validation failed for "${input.operation}": ${r.errors.join("; ")}`,
-            details: { failures: r.failures },
-          },
-        };
-        return;
-      }
-    }
+    const callerInv = new InvocationImpl<I, O>({
+      signal: args.signal,
+      validateInput: makeInputValidator(op, iface, args.operation),
+    });
 
-    let invokeInput = input.input;
+    queueMicrotask(() => {
+      this.run(callerInv, iface, op, binding, bindingKey, source, args.context).catch((err) => {
+        callerInv.fireError(asInvocationError(err));
+      });
+    });
 
-    if (binding.inputTransform) {
-      if (!this.transformEvaluator) {
-        yield {
-          error: {
-            code: ERR_TRANSFORM_ERROR,
-            message: `${new NoTransformEvaluatorError(bindingKey).message}`,
-          },
-        };
-        return;
-      }
-      try {
-        invokeInput = await applyTransformRef(
-          this.transformEvaluator,
-          iface.transforms,
-          binding.inputTransform,
-          invokeInput,
-        );
-      } catch (e: unknown) {
-        yield {
-          error: {
-            code: ERR_TRANSFORM_ERROR,
-            message: `openbindings: input transform failed for "${bindingKey}": ${e instanceof Error ? e.message : String(e)}`,
-          },
-        };
-        return;
-      }
-    }
-
-    const securityMethods =
-      binding.security && iface.security?.[binding.security]
-        ? iface.security[binding.security]
-        : undefined;
-
-    const bindingIn: BindingInvocationInput = {
-      source: {
-        format: source.format,
-        location: source.location,
-        ...(source.content != null ? { content: source.content } : {}),
-      },
-      ref: binding.ref ?? "",
-      input: invokeInput,
-      inputSchema: op.input ?? undefined,
-      interface: iface,
-      context: input.context,
-      security: securityMethods,
-    };
-
-    yield* this.transformStream(
-      this.invokeBinding(bindingIn, options),
-      binding,
-      iface.transforms,
-      bindingKey,
-      op.output ?? undefined,
-      iface.schemas,
-    );
+    return callerInv;
   }
 
   /**
-   * Wraps a stream of events, applying outputTransform to each event's data
-   * and validating against outputSchema (OBI-T-08). Passes through events
-   * without data or with errors unchanged.
+   * Drives the binding-layer invocation(s) behind one caller-facing handle:
+   * an input pump forwarding (transformed) caller inputs, an output loop
+   * forwarding (transformed, T-08-validated) binding outputs, and the
+   * CONTEXT_REQUIRED resolve-replay-retry machinery between attempts.
    */
-  private async *transformStream(
-    source: AsyncIterable<InvocationOutput>,
+  private async run<I, O>(
+    callerInv: InvocationImpl<I, O>,
+    iface: OBInterface,
+    op: Operation,
     binding: BindingEntry,
-    transforms: Record<string, Transform> | undefined,
     bindingKey: string,
-    outputSchema?: JSONSchema,
-    schemas?: Record<string, JSONSchema>,
-  ): AsyncGenerator<InvocationOutput> {
-    if (!binding.outputTransform && !outputSchema) {
-      yield* source;
-      return;
-    }
-    if (binding.outputTransform && !this.transformEvaluator) {
-      yield {
-        error: {
-          code: ERR_TRANSFORM_ERROR,
-          message: `${new NoTransformEvaluatorError(bindingKey).message}`,
-        },
-      };
+    source: Source,
+    initialContext: Record<string, unknown> | undefined,
+  ): Promise<void> {
+    const evaluator = this.transformEvaluator;
+    if ((binding.inputTransform || binding.outputTransform) && !evaluator) {
+      callerInv.fireError(
+        new InvocationError(ERR_TRANSFORM_ERROR, new NoTransformEvaluatorError(bindingKey).message),
+      );
       return;
     }
 
-    // Compile output schema once outside the loop.
+    // OBI-T-08: compile the output schema once per invocation.
     let outputValidator: Validator | undefined;
-    if (outputSchema) {
+    if (op.output != null) {
       try {
-        outputValidator = compileExampleSchema(outputSchema, buildSchemaDefs(schemas));
+        outputValidator = compileExampleSchema(op.output, buildSchemaDefs(iface.schemas));
       } catch (err) {
-        yield {
-          error: {
-            code: ERR_VALIDATION_FAILED,
-            message: `openbindings: output schema compilation failed for "${bindingKey}": ${(err as Error).message}`,
-          },
-        };
-        for await (const _ of source) {
-          // Drain producer.
-        }
+        callerInv.fireError(
+          new InvocationError(
+            ERR_VALIDATION_FAILED,
+            `openbindings: output schema compilation failed for "${bindingKey}": ${(err as Error).message}`,
+          ),
+        );
         return;
       }
     }
 
-    for await (const ev of source) {
-      if (ev.error) {
-        yield ev;
+    let context = initialContext;
+    const bindingArgs = (): BindingInvocationArgs =>
+      this.withFetch({
+        source: {
+          format: source.format,
+          location: source.location,
+          ...(source.content != null ? { content: source.content } : {}),
+        },
+        ref: binding.ref ?? "",
+        binding,
+        inputSchema: op.input ?? undefined,
+        interface: iface,
+        context,
+        signal: callerInv.signal,
+      });
+
+    const mergeResolved = (resolved: Record<string, unknown>): void => {
+      context = { ...(context ?? {}), ...resolved };
+    };
+
+    // Preflight (binding-invoker role `prepareBinding`): collapse
+    // knowable-upfront context challenges into the clean
+    // no-input-consumed case before anything is forwarded.
+    try {
+      const details = await this.invoker.prepareBinding(bindingArgs());
+      if (details) {
+        const resolvedCtx = this.contextResolver ? await this.contextResolver(details) : null;
+        if (!resolvedCtx) {
+          callerInv.fireError(
+            contextRequiredError("openbindings: binding requires context", details),
+          );
+          return;
+        }
+        mergeResolved(resolvedCtx);
+      }
+    } catch (err) {
+      callerInv.fireError(wireError(err));
+      return;
+    }
+
+    // ----- shared input machinery (survives attempt swaps) -----
+
+    // The single reader of the caller's input buffer. At most one next() is
+    // in flight; its result lands in `stash` and survives a retry swap, so
+    // no caller input is ever lost between attempts.
+    const callerInputs = callerInv.inputs()[Symbol.asyncIterator]();
+    let stash: { r?: IteratorResult<I, void>; err?: unknown } | null = null;
+    let pulling = false;
+    let wakeWaiters: (() => void)[] = [];
+    const wake = (): void => {
+      const ws = wakeWaiters;
+      wakeWaiters = [];
+      for (const w of ws) w();
+    };
+    const waitSignal = (): Promise<void> => new Promise((res) => wakeWaiters.push(res));
+    const ensurePull = (): void => {
+      if (pulling || stash) return;
+      pulling = true;
+      callerInputs.next().then(
+        (r) => { pulling = false; stash = { r }; wake(); },
+        (err) => { pulling = false; stash = { err }; wake(); },
+      );
+    };
+
+    // Inputs already forwarded to the binding, post-transform, recorded for
+    // replay while the retry window is open. The window closes at the
+    // binding's first output (observable progress: by the binding contract,
+    // CONTEXT_REQUIRED precedes any side effect, so a challenge after
+    // output cannot be retried safely).
+    let replayLog: unknown[] = [];
+    let retryEligible = true;
+    let attemptGen = 0;
+
+    const pumpInputs = async (inner: Invocation<unknown, unknown>): Promise<void> => {
+      const myGen = attemptGen;
+      // Replay the prefix the previous attempt(s) already consumed.
+      for (let i = 0; i < replayLog.length; i++) {
+        try {
+          await inner.write(replayLog[i]);
+        } catch {
+          return; // inner terminal or input-closed; the output loop owns reporting
+        }
+      }
+      while (attemptGen === myGen) {
+        if (stash) {
+          const s = stash;
+          stash = null;
+          if (s.err) return; // caller side terminal (T-07 / cancel)
+          const r = s.r!;
+          if (r.done) {
+            try { await inner.close(); } catch { /* inner already terminal */ }
+            return;
+          }
+          let v: unknown = r.value;
+          if (binding.inputTransform) {
+            try {
+              v = await applyTransformRef(evaluator!, iface.transforms, binding.inputTransform, v);
+            } catch (e) {
+              await inner.cancel();
+              callerInv.fireError(
+                new InvocationError(
+                  ERR_TRANSFORM_ERROR,
+                  `openbindings: input transform failed for "${bindingKey}": ${e instanceof Error ? e.message : String(e)}`,
+                ),
+              );
+              return;
+            }
+          }
+          if (retryEligible) replayLog.push(v);
+          try {
+            await inner.write(v);
+          } catch (err) {
+            if (err instanceof InvocationError && err.code === ERR_INPUT_CLOSED) {
+              // The binding closed its input side deliberately (no-input /
+              // unary / read-enough): propagate so further caller writes
+              // reject, and stop forwarding. Outputs continue to flow.
+              void callerInv.closeInput();
+              return;
+            }
+            // Inner terminal: if a retry follows, v is in the replay log.
+            return;
+          }
+          continue;
+        }
+        ensurePull();
+        await waitSignal();
+      }
+    };
+
+    // ----- attempt loop -----
+
+    let headerForwarded = false;
+    const forwardHeader = async (inner: Invocation<unknown, unknown>): Promise<void> => {
+      if (headerForwarded) return;
+      headerForwarded = true;
+      callerInv.setHeader(await inner.header);
+    };
+
+    let rounds = 0;
+    for (;;) {
+      let inner: Invocation<unknown, unknown>;
+      try {
+        inner = this.invoker.invokeBinding(bindingArgs());
+      } catch (err) {
+        callerInv.fireError(wireError(err));
+        return;
+      }
+
+      attemptGen++;
+      const pump = pumpInputs(inner);
+
+      let surface: InvocationError | undefined;
+      let retry = false;
+      try {
+        for await (const out of inner.outputs) {
+          if (retryEligible) {
+            retryEligible = false;
+            replayLog = [];
+          }
+          let data: unknown = out;
+          if (binding.outputTransform) {
+            try {
+              data = await applyTransformRef(evaluator!, iface.transforms, binding.outputTransform, data);
+            } catch (e) {
+              await inner.cancel();
+              surface = new InvocationError(
+                ERR_TRANSFORM_ERROR,
+                `openbindings: output transform failed for "${bindingKey}": ${e instanceof Error ? e.message : String(e)}`,
+              );
+              break;
+            }
+          }
+          // OBI-T-08: an invalid output is not emitted; the invocation
+          // terminates. Per-item for streaming bindings.
+          if (outputValidator) {
+            const r = safeValidate(outputValidator, data);
+            if (!r.valid) {
+              await inner.cancel();
+              surface = new InvocationError(
+                ERR_VALIDATION_FAILED,
+                `openbindings: output validation failed for "${bindingKey}": ${r.errors.join("; ")}`,
+                { failures: r.failures },
+              );
+              break;
+            }
+          }
+          await forwardHeader(inner);
+          try {
+            await callerInv.emitOutput(data as O);
+          } catch {
+            // Caller-side terminal (cancel / abandoned iteration): tear
+            // down the binding and stop. Nothing to report — the caller
+            // handle is already terminal.
+            await inner.cancel();
+            break;
+          }
+        }
+      } catch (err) {
+        const invErr = asInvocationError(err);
+        if (
+          isContextRequired(invErr) &&
+          retryEligible &&
+          this.contextResolver &&
+          rounds < MAX_CONTEXT_ROUNDS
+        ) {
+          const resolvedCtx = await this.contextResolver(invErr.details);
+          if (resolvedCtx) {
+            mergeResolved(resolvedCtx);
+            retry = true;
+          } else {
+            surface = invErr;
+          }
+        } else {
+          surface = invErr;
+        }
+      }
+
+      // Unpark and retire this attempt's pump before deciding next steps —
+      // the shared stash must have exactly one consumer at a time.
+      attemptGen++;
+      wake();
+      await pump;
+
+      if (retry) {
+        rounds++;
         continue;
       }
-      let data: unknown = ev.output;
-      if (binding.outputTransform) {
-        try {
-          data = await applyTransformRef(
-            this.transformEvaluator!,
-            transforms,
-            binding.outputTransform,
-            data,
-          );
-        } catch (e: unknown) {
-          yield {
-            error: {
-              code: ERR_TRANSFORM_ERROR,
-              message: `openbindings: output transform failed for "${bindingKey}": ${e instanceof Error ? e.message : String(e)}`,
-            },
-          };
-          continue;
-        }
+
+      if (surface) {
+        await forwardHeader(inner);
+        const t = terminalTrailer(inner);
+        if (t) callerInv.setTrailer(t);
+        callerInv.fireError(surface);
+      } else {
+        // Clean end (or caller-side teardown, where these are no-ops).
+        await forwardHeader(inner);
+        const t = terminalTrailer(inner);
+        if (t) callerInv.setTrailer(t);
+        callerInv.closeOutput();
       }
-      // OBI-T-08: Validate output after transform. On failure, yield the
-      // data alongside the error so callers can inspect or render the
-      // underlying response while still being informed of the schema
-      // mismatch. The spec describes a T-08 failure as an "invocation
-      // error for that operation"; it does not prescribe how the SDK
-      // surfaces that error, and it does not require hiding the data.
-      if (outputValidator) {
-        const r = safeValidate(outputValidator, data);
-        if (!r.valid) {
-          yield {
-            output: data,
-            error: {
-              code: ERR_VALIDATION_FAILED,
-              message: `openbindings: output validation failed for "${bindingKey}": ${r.errors.join("; ")}`,
-              details: { failures: r.failures },
-            },
-          };
-          continue;
-        }
-      }
-      yield { output: data };
+      return;
     }
   }
 
   /**
-   * Returns a copy of input with store and callbacks filled from the
-   * invoker when the input doesn't already have them. Never mutates
-   * the caller's input. Short-circuits when nothing needs filling.
+   * Returns a copy of args with fetch filled from the invoker when the args
+   * don't already carry one. Never mutates the caller's args.
    */
-  private withRuntimeInput(input: BindingInvocationInput): BindingInvocationInput {
-    const needStore = !input.store && this.contextStore;
-    const needCallbacks = !input.callbacks && this.platformCallbacks;
-    const needFetch = !input.fetch && this.fetch;
-    if (!needStore && !needCallbacks && !needFetch) return input;
-    return {
-      ...input,
-      store: input.store ?? this.contextStore,
-      callbacks: input.callbacks ?? this.platformCallbacks,
-      fetch: input.fetch ?? this.fetch,
-    };
+  private withFetch(args: BindingInvocationArgs): BindingInvocationArgs {
+    if (args.fetch || !this.fetch) return args;
+    return { ...args, fetch: this.fetch };
   }
+}
 
+/** Builds the OBI-T-07 write-validation hook for an operation, compiling lazily on first write. */
+function makeInputValidator(
+  op: Operation,
+  iface: OBInterface,
+  operationName: string,
+): ((input: unknown) => InvocationError | null) | undefined {
+  if (op.input == null) return undefined;
+  let validator: Validator | undefined;
+  let compileError: InvocationError | undefined;
+  let compiled = false;
+  return (input: unknown): InvocationError | null => {
+    if (!compiled) {
+      compiled = true;
+      try {
+        validator = compileExampleSchema(op.input!, buildSchemaDefs(iface.schemas));
+      } catch (err) {
+        compileError = new InvocationError(
+          ERR_VALIDATION_FAILED,
+          `openbindings: input schema compilation failed for "${operationName}": ${(err as Error).message}`,
+        );
+      }
+    }
+    if (compileError) return compileError;
+    const r = safeValidate(validator!, input);
+    if (!r.valid) {
+      return new InvocationError(
+        ERR_VALIDATION_FAILED,
+        `openbindings: input validation failed for "${operationName}": ${r.errors.join("; ")}`,
+        { failures: r.failures },
+      );
+    }
+    return null;
+  };
+}
+
+/** Reads the inner invocation's trailer, tolerating a non-terminal handle. */
+function terminalTrailer(inner: Invocation<unknown, unknown>): Record<string, string[]> | null {
+  try {
+    const t = inner.trailer();
+    return Object.keys(t).length > 0 ? t : null;
+  } catch {
+    return null;
+  }
+}
+
+function asInvocationError(err: unknown): InvocationError {
+  if (err instanceof InvocationError) return err;
+  return new InvocationError(
+    ERR_RUNTIME,
+    err instanceof Error ? err.message : String(err),
+  );
+}
+
+/** Converts wiring errors (no invoker for format) raised mid-run into terminal invocation errors. */
+function wireError(err: unknown): InvocationError {
+  if (err instanceof InvocationError) return err;
+  if (err instanceof Error && err.name === "NoInvokerError") {
+    return new InvocationError(ERR_BINDING_NOT_FOUND, err.message);
+  }
+  return asInvocationError(err);
 }
 
 /**
- * Picks the best binding for an operation. Non-deprecated bindings are
- * preferred. Lower priority values win (binding priority overrides source
- * priority). Ties broken alphabetically. When availableFormats is provided,
- * bindings whose source format is not in the set are skipped.
+ * Picks the best binding for an operation (OBI-T-09). Non-deprecated
+ * bindings are preferred. Lower priority values win (binding priority
+ * overrides source priority). Ties broken alphabetically. When
+ * availableFormats is provided, bindings whose source format is not in the
+ * set are skipped.
  */
 export function defaultBindingSelector(
   iface: OBInterface,

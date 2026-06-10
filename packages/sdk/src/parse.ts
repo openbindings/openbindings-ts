@@ -9,7 +9,7 @@ import { validateInterface, type ValidateOptions } from "./validate.js";
  *
  *   - OBI-D-01: rejects duplicate JSON object keys.
  *   - OBI-D-02: validates against the meta-schema. The meta-schema's
- *     SemVer pattern on `openbindings` also covers OBI-D-16.
+ *     SemVer pattern on `openbindings` also covers OBI-D-13.
  *
  * Returns a typed {@link OBInterface}. Full OBI-D rule enforcement
  * (cross-references, identifier patterns, example schema checks,

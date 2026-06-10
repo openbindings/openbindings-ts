@@ -31,7 +31,7 @@ describe("parseDocument", () => {
     expect(() => parseDocument(`{"openbindings":"0.2.0"}`)).toThrow(ValidationError);
   });
 
-  it("rejects a document with an invalid `openbindings` SemVer (OBI-D-16 via meta-schema)", () => {
+  it("rejects a document with an invalid `openbindings` SemVer (OBI-D-13 via meta-schema)", () => {
     expect(() => parseDocument(`{"openbindings":"not-a-version","operations":{}}`))
       .toThrow(ValidationError);
   });

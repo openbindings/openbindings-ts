@@ -21,7 +21,7 @@ export interface Operation {
   /**
    * Additional names for this operation, equal in standing to its key. The key
    * plus aliases form one flat, document-unique namespace; every name resolves
-   * to this operation (see resolveOperation / OBI-T-13).
+   * to this operation (see resolveOperation / OBI-T-12).
    */
   aliases?: string[];
 
@@ -65,19 +65,6 @@ export interface TransformRef {
   $ref: string;
 }
 
-/**
- * A security method declaration, discriminated on the `type` field.
- * Per spec §6.6, only `type` (required) and `description` (optional) are
- * spec-defined; all other fields are open-ended and scheme-specific.
- * Well-known types: "bearer", "oauth2", "basic", "apiKey".
- * Unknown types SHOULD be skipped by clients.
- */
-export interface SecurityMethod {
-  type: string;
-  description?: string;
-  [key: string]: unknown;
-}
-
 /** Maps an operation to a concrete source with optional input/output transforms. */
 export interface BindingEntry {
   operation: string;
@@ -86,8 +73,6 @@ export interface BindingEntry {
   priority?: number;
   description?: string;
   deprecated?: boolean;
-  /** Key referencing an entry in the document's security map. */
-  security?: string;
   inputTransform?: TransformOrRef;
   outputTransform?: TransformOrRef;
   [key: string]: unknown;
@@ -103,8 +88,6 @@ export interface OBInterface {
   operations: Record<string, Operation>;
   sources?: Record<string, Source>;
   bindings?: Record<string, BindingEntry>;
-  /** Named security entries referenced by bindings. Each entry is an array of methods in preference order. */
-  security?: Record<string, SecurityMethod[]>;
   transforms?: Record<string, Transform>;
   [key: string]: unknown;
 }

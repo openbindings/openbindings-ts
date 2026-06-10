@@ -7,19 +7,35 @@ export type {
   TransformOrRef,
   TransformRef,
   BindingEntry,
-  SecurityMethod,
   OBInterface,
 } from "./types.js";
 export { isTransformRef, resolveTransform } from "./types.js";
 
 export type {
+  Invocation,
+  BindingHandle,
+  Metadata,
+  ContextRequirement,
+  ContextAlternative,
+  ContextRequiredDetails,
+  InvocationImplOptions,
+} from "./invocation.js";
+export {
+  InvocationError,
+  InvocationImpl,
+  single,
+  contextRequiredError,
+  isContextRequired,
+  OUTPUT_BUFFER_CAPACITY,
+  INPUT_BUFFER_CAPACITY,
+} from "./invocation.js";
+
+export type {
   InvocationSource,
-  BindingInvocationInput,
-  OperationInvocationInput,
-  InvocationOutput,
+  BindingInvocationArgs,
+  OperationInvocationArgs,
   CreateSource,
   CreateInput,
-  InvocationError,
   FormatInfo,
   BindableTarget,
   SourceInspection,
@@ -45,6 +61,8 @@ export {
   normalizeContextKey,
   normalizeEndpoint,
   buildAuthHeaders,
+  contextSatisfies,
+  storeContextResolver,
   MemoryStore,
   ContextInsufficientError,
   ResolutionUnavailableError,
@@ -57,6 +75,7 @@ export type {
   TransformEvaluator,
   TransformEvaluatorWithBindings,
   BindingSelector,
+  ContextResolver,
 } from "./invokers.js";
 export { isInterfaceCreator, isTransformEvaluatorWithBindings } from "./invokers.js";
 
@@ -125,29 +144,36 @@ export type { ResolvedOperation } from "./resolve-operation.js";
 export { formatName, maybeJSON, detectFormatVersion, isHttpUrl } from "./helpers.js";
 
 export {
+  CONTEXT_REQUIRED,
+  ERR_ALREADY_CONSUMED,
   ERR_AUTH_REQUIRED,
-  ERR_PERMISSION_DENIED,
-  ERR_INVALID_REF,
-  ERR_REF_NOT_FOUND,
-  ERR_INVALID_INPUT,
-  ERR_SOURCE_LOAD_FAILED,
-  ERR_SOURCE_CONFIG_ERROR,
+  ERR_BINDING_NOT_FOUND,
+  ERR_CANCELLED,
   ERR_CONNECT_FAILED,
+  ERR_EVENT_LIMIT_EXCEEDED,
   ERR_EXECUTION_FAILED,
+  ERR_EXPECTED_SINGLE,
+  ERR_INPUT_CLOSED,
+  ERR_INVALID_REF,
+  ERR_INVOCATION_CLOSED,
+  ERR_MAP_NOT_ARRAY,
+  ERR_MISSING_INPUT,
+  ERR_OPERATION_GRAPH_EXIT,
+  ERR_PERMISSION_DENIED,
+  ERR_PROTOCOL,
+  ERR_REF_NOT_FOUND,
   ERR_RESPONSE_ERROR,
+  ERR_RUNTIME,
+  ERR_SOURCE_CONFIG_ERROR,
+  ERR_SOURCE_LOAD_FAILED,
   ERR_STREAM_ERROR,
   ERR_TIMEOUT,
-  ERR_CANCELLED,
-  ERR_BINDING_NOT_FOUND,
+  ERR_TOO_MANY_INPUTS,
   ERR_TRANSFORM_ERROR,
+  ERR_TRANSPORT_CLOSED,
   ERR_VALIDATION_FAILED,
-  ERR_EVENT_LIMIT_EXCEEDED,
-  ERR_OPERATION_GRAPH_EXIT,
-  ERR_MAP_NOT_ARRAY,
   httpErrorCode,
 } from "./errcodes.js";
-
-export { resolveSecurity, AuthCancelledError } from "./security.js";
 
 export { dereference } from "./deref.js";
 

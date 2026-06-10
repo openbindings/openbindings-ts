@@ -1,23 +1,33 @@
 import type { OBInterface, BindingEntry, Source } from "./types.js";
 import type {
-  BindingInvocationInput,
+  BindingInvocationArgs,
   CreateInput,
-  InvocationOutput,
   FormatInfo,
   SourceInspection,
 } from "./invoker-types.js";
+import type { ContextRequiredDetails, Invocation } from "./invocation.js";
 
 /**
  * Invokes bindings against format-specific sources.
  * Implementations handle a specific binding format (e.g., OpenAPI, gRPC, MCP).
- * Callers must consume the returned async iterable to avoid resource leaks.
+ *
+ * `invokeBinding` returns the {@link Invocation} handle synchronously and
+ * creation is inert: no I/O happens during construction. The binding's work
+ * is scheduled asynchronously and MUST raise `CONTEXT_REQUIRED` (and any
+ * other pre-dispatch failure) before any observable side effect.
  */
 export interface BindingInvoker {
   formats(): FormatInfo[];
-  invokeBinding(
-    input: BindingInvocationInput,
-    options?: { signal?: AbortSignal },
-  ): AsyncIterable<InvocationOutput>;
+  invokeBinding<I = unknown, O = unknown>(args: BindingInvocationArgs): Invocation<I, O>;
+  /**
+   * Optional side-effect-free preflight: reports the context the binding
+   * would require for this invocation (the `prepareBinding` operation of
+   * the openbindings.binding-invoker role), or null when the binding can
+   * proceed. Lets the operation layer resolve context BEFORE the caller
+   * streams input, collapsing knowable-upfront challenges into the clean
+   * no-input-consumed case.
+   */
+  prepareBinding?(args: BindingInvocationArgs): Promise<ContextRequiredDetails | null>;
 }
 
 /**
@@ -71,6 +81,17 @@ export type BindingSelector = (
   iface: OBInterface,
   opKey: string,
 ) => { key: string; binding: BindingEntry };
+
+/**
+ * Resolves a `CONTEXT_REQUIRED` challenge into context data, or null to
+ * decline. Composition-time wiring on the operation invoker: whether it
+ * consults a context store, reads an env var, prompts a keychain, or
+ * returns a hardcoded value is the resolver's business — invisible to the
+ * invoker and to bindings.
+ */
+export type ContextResolver = (
+  details: ContextRequiredDetails,
+) => Promise<Record<string, unknown> | null> | Record<string, unknown> | null;
 
 /** Type guard that checks whether a {@link BindingInvoker} also implements {@link InterfaceCreator}. */
 export function isInterfaceCreator(

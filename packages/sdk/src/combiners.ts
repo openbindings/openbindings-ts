@@ -1,11 +1,11 @@
 import type { BindingInvoker, InterfaceCreator, SourceInspector } from "./invokers.js";
 import type {
-  BindingInvocationInput,
-  InvocationOutput,
+  BindingInvocationArgs,
   FormatInfo,
   CreateInput,
   SourceInspection,
 } from "./invoker-types.js";
+import type { ContextRequiredDetails, Invocation } from "./invocation.js";
 import type { OBInterface, Source } from "./types.js";
 import { type VersionRange, parseRange, matchesRange } from "./format-token.js";
 import { formatName } from "./helpers.js";
@@ -36,6 +36,8 @@ interface InspectorEntry {
 export interface CombinedInvoker extends BindingInvoker {
   /** Register an additional invoker after construction. First match wins. */
   add(invoker: BindingInvoker): void;
+  /** Always present on the combiner: routes to the inner invoker's preflight, or reports no requirement. */
+  prepareBinding(args: BindingInvocationArgs): Promise<ContextRequiredDetails | null>;
 }
 
 export function combineInvokers(...invokers: BindingInvoker[]): CombinedInvoker {
@@ -88,13 +90,18 @@ export function combineInvokers(...invokers: BindingInvoker[]): CombinedInvoker 
     formats(): FormatInfo[] {
       return [...allFormats];
     },
-    async *invokeBinding(
-      input: BindingInvocationInput,
-      options?: { signal?: AbortSignal },
-    ): AsyncIterable<InvocationOutput> {
-      const invoker = findInvoker(input.source.format);
-      if (!invoker) throw new NoInvokerError(input.source.format);
-      yield* invoker.invokeBinding(input, options);
+    invokeBinding<I, O>(args: BindingInvocationArgs): Invocation<I, O> {
+      const invoker = findInvoker(args.source.format);
+      // A missing invoker is a wiring error, knowable synchronously: throw
+      // rather than returning a pre-errored handle.
+      if (!invoker) throw new NoInvokerError(args.source.format);
+      return invoker.invokeBinding<I, O>(args);
+    },
+    async prepareBinding(args: BindingInvocationArgs): Promise<ContextRequiredDetails | null> {
+      const invoker = findInvoker(args.source.format);
+      if (!invoker) throw new NoInvokerError(args.source.format);
+      // An invoker without preflight support simply reports no requirement.
+      return invoker.prepareBinding ? invoker.prepareBinding(args) : null;
     },
   };
 }

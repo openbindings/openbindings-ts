@@ -1,5 +1,4 @@
-import type { OBInterface, SecurityMethod, JSONSchema, Operation } from "./types.js";
-import type { ContextStore, PlatformCallbacks } from "./context.js";
+import type { OBInterface, BindingEntry, JSONSchema, Operation } from "./types.js";
 
 /** Identifies the binding source for invocation. */
 export interface InvocationSource {
@@ -9,37 +8,47 @@ export interface InvocationSource {
 }
 
 /**
- * Input for invoking a binding against a format-specific source.
- * The invoker populates `context` from the {@link ContextStore} when available;
- * `store` and `callbacks` let the invoker persist updated context and invoke
- * platform interactions during invocation.
+ * Arguments for invoking a resolved binding against a format-specific
+ * source. Input messages are NOT part of the args — they flow through the
+ * returned {@link Invocation} handle's `write` channel.
+ *
+ * Runtime prerequisites (credentials, configuration) travel in `context`
+ * as opaque well-known fields; a binding that needs context it wasn't
+ * given terminates with `CONTEXT_REQUIRED` before any side effect, and
+ * resolution happens above the binding (see OperationInvoker's
+ * contextResolver). Bindings depend on context data, never on a context
+ * store or platform callbacks.
  */
-export interface BindingInvocationInput {
+export interface BindingInvocationArgs {
   source: InvocationSource;
+  /** Format-specific pointer into the source artifact. Empty when the format doesn't use refs. */
   ref: string;
-  input?: unknown;
+  /** The selected binding entry. Populated by the operation invoker; optional for direct calls. */
+  binding?: BindingEntry;
   context?: Record<string, unknown>;
-  store?: ContextStore;
-  callbacks?: PlatformCallbacks;
-  /** Security methods for this binding, populated by the operation invoker from the OBI's security section. */
-  security?: SecurityMethod[];
-  /** Operation input schema, populated by the operation invoker. Enables format-specific invokers to read schema metadata (e.g., const values). */
-  inputSchema?: JSONSchema;
   /** The containing OBI. Most invokers do not need this; it is used by invokers that invoke sub-operations (e.g., operation graphs). */
   interface?: OBInterface;
+  /** Operation input schema, populated by the operation invoker. Enables format-specific invokers to read schema metadata (e.g., const values). */
+  inputSchema?: JSONSchema;
+  /** External cancellation; converges with the handle's `cancel()`. */
+  signal?: AbortSignal;
   fetch?: typeof globalThis.fetch;
 }
 
-/** Input for invoking an OBI operation. The invoker resolves the binding internally. */
-export interface OperationInvocationInput {
+/**
+ * Arguments for invoking an OBI operation. The invoker resolves the
+ * operation name (OBI-T-12), selects a binding (OBI-T-09), and returns an
+ * {@link Invocation} handle; input messages flow through the handle.
+ */
+export interface OperationInvocationArgs {
   interface: OBInterface;
   operation: string;
-  input?: unknown;
   context?: Record<string, unknown>;
   /** When set, bypass the binding selector and use this binding key directly. */
   bindingKey?: string;
+  /** External cancellation; converges with the handle's `cancel()`. */
+  signal?: AbortSignal;
 }
-
 
 /** Describes a binding source for interface creation. */
 export interface CreateSource {
@@ -59,37 +68,6 @@ export interface CreateInput {
   name?: string;
   version?: string;
   description?: string;
-}
-
-/**
- * A single output produced by an operation invocation.
- * Unary invocations produce one InvocationOutput; streaming invocations
- * produce many over time.
- *
- * Each one may carry:
- *   - `output` only — success.
- *   - `error` only — failure prior to producing output (e.g. transport error,
- *     input validation, transform failure).
- *   - `output` AND `error` — OBI-T-08 output validation failed against the
- *     declared output schema. The data is still surfaced so callers may
- *     inspect or render it, while the error reports the schema mismatch.
- *
- * Callers that previously short-circuited on `error` will continue to see
- * the failure; callers that want to render the underlying response (e.g.
- * a UI debugger) should consult `output` even when `error` is set.
- */
-export interface InvocationOutput {
-  output?: unknown;
-  error?: InvocationError;
-  status?: number;
-  durationMs?: number;
-}
-
-/** A structured invocation error with a machine-readable code and human-readable message. */
-export interface InvocationError {
-  code: string;
-  message: string;
-  details?: unknown;
 }
 
 /** Describes a binding format supported by an invoker. */

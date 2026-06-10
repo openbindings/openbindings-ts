@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://openbindings.com/schema/openbindings-0.2.0.json",
-  "title": "OpenBindings Interface Document (v0.2.0-draft)",
+  "title": "OpenBindings Interface Document (v0.2.0)",
   "description": "Canonical JSON Schema for the OpenBindings interface document.",
   "type": "object",
   "required": [
@@ -66,19 +66,6 @@
         "$ref": "#/$defs/BindingEntry"
       }
     },
-    "security": {
-      "type": "object",
-      "description": "Named security entries. Each entry is an array of security methods in preference order (first = preferred). Bindings reference these by key.",
-      "propertyNames": {
-        "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$"
-      },
-      "additionalProperties": {
-        "type": "array",
-        "items": {
-          "$ref": "#/$defs/SecurityMethod"
-        }
-      }
-    },
     "transforms": {
       "type": "object",
       "description": "Named transforms. Each value is a JSONata expression string.",
@@ -124,6 +111,7 @@
         "aliases": {
           "type": "array",
           "description": "Additional names for this operation, equal in standing to its key. The key plus aliases form one flat, document-unique namespace; every name resolves to this operation.",
+          "uniqueItems": true,
           "items": {
             "type": "string",
             "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$"
@@ -223,10 +211,12 @@
       "properties": {
         "operation": {
           "type": "string",
+          "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$",
           "description": "Operation key referenced by this binding."
         },
         "source": {
           "type": "string",
+          "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$",
           "description": "Binding source key from sources."
         },
         "ref": {
@@ -245,10 +235,6 @@
           "type": "boolean",
           "description": "If true, this binding is deprecated and an alternative should be preferred."
         },
-        "security": {
-          "type": "string",
-          "description": "Key referencing an entry in the document's security map. Indicates the security requirements for this binding."
-        },
         "inputTransform": {
           "$ref": "#/$defs/TransformOrRef",
           "description": "Transform from operation input schema to binding input structure."
@@ -259,22 +245,6 @@
         }
       },
       "additionalProperties": true
-    },
-    "SecurityMethod": {
-      "type": "object",
-      "required": ["type"],
-      "properties": {
-        "type": {
-          "type": "string",
-          "description": "Security method type identifier."
-        },
-        "description": {
-          "type": "string",
-          "description": "Human-readable description."
-        }
-      },
-      "additionalProperties": true,
-      "description": "A security method declaration. Discriminated on the `type` field; semantics of each type are defined by the relevant authentication-scheme specification."
     },
     "TransformOrRef": {
       "oneOf": [
@@ -288,10 +258,11 @@
           "properties": {
             "$ref": {
               "type": "string",
+              "pattern": "^#/transforms/[A-Za-z_][A-Za-z0-9_.-]*$",
               "description": "JSON Pointer reference to a named transform (e.g., '#/transforms/myTransform')."
             }
           },
-          "additionalProperties": false
+          "additionalProperties": true
         }
       ],
       "description": "Either an inline JSONata expression or a reference to a named transform."

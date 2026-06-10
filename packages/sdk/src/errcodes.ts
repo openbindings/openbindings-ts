@@ -1,73 +1,118 @@
 /**
- * Standard error codes for binding invoker results. These enable
- * protocol-agnostic error handling by the operation invoker and
- * application code. Binding invokers SHOULD use these codes in
- * InvocationError.code.
+ * Canonical invocation error codes. Wire values are SCREAMING_SNAKE with an
+ * `ERR_` prefix, plus the un-prefixed negotiation signal `CONTEXT_REQUIRED`,
+ * matching the `openbindings.binding-invoker` role. The Go SDK emits the
+ * same values; consumers switching on `code` are portable across both.
  *
- * These are SDK conventions, not spec requirements. Third-party
- * invokers MAY use different codes.
+ * The lifecycle codes (`ERR_CANCELLED`, `ERR_ALREADY_CONSUMED`, ...) are
+ * produced by the SDK's invocation machinery; the operational codes are
+ * SDK conventions for format invokers. Third-party invokers MAY use
+ * additional codes.
  */
 
-/** Authentication needed (e.g., HTTP 401, gRPC Unauthenticated). Retryable with credentials. */
-export const ERR_AUTH_REQUIRED = "auth_required";
+// ---------------------------------------------------------------------------
+// Lifecycle and protocol codes (produced by the invocation machinery)
+// ---------------------------------------------------------------------------
+
+/** Invocation was cancelled (caller `cancel()`, abandoned iteration, or an aborted signal). */
+export const ERR_CANCELLED = "ERR_CANCELLED";
+
+/** The output sequence was acquired a second time (single-consumer, acquire-once). */
+export const ERR_ALREADY_CONSUMED = "ERR_ALREADY_CONSUMED";
+
+/** `single()` observed zero outputs, or short-circuited on a second output. */
+export const ERR_EXPECTED_SINGLE = "ERR_EXPECTED_SINGLE";
+
+/** Write after the input side closed (caller `close()` or binding `closeInput()`). Non-terminal. */
+export const ERR_INPUT_CLOSED = "ERR_INPUT_CLOSED";
+
+/** The invocation already terminated (closed, errored, or cancelled). */
+export const ERR_INVOCATION_CLOSED = "ERR_INVOCATION_CLOSED";
+
+/** A binding that accepts a bounded number of inputs received more. Terminal. */
+export const ERR_TOO_MANY_INPUTS = "ERR_TOO_MANY_INPUTS";
+
+/** A required input message never arrived before the input side closed. */
+export const ERR_MISSING_INPUT = "ERR_MISSING_INPUT";
+
+/** Frame-protocol violation (binding-invoker role wire protocol). */
+export const ERR_PROTOCOL = "ERR_PROTOCOL";
+
+/** Transport closed without a terminal frame (binding-invoker role wire protocol). */
+export const ERR_TRANSPORT_CLOSED = "ERR_TRANSPORT_CLOSED";
+
+/**
+ * Missing runtime context (credentials, configuration). Raised by a binding
+ * BEFORE any observable side effect; details carry a ContextRequiredDetails.
+ * Un-prefixed: it is a negotiation signal, not a failure of the operation.
+ */
+export const CONTEXT_REQUIRED = "CONTEXT_REQUIRED";
+
+// ---------------------------------------------------------------------------
+// Operational codes (format-invoker conventions)
+// ---------------------------------------------------------------------------
+
+/** The service rejected the provided credentials (e.g., HTTP 401, gRPC Unauthenticated). */
+export const ERR_AUTH_REQUIRED = "ERR_AUTH_REQUIRED";
 
 /** Authenticated but not authorized (e.g., HTTP 403). */
-export const ERR_PERMISSION_DENIED = "permission_denied";
+export const ERR_PERMISSION_DENIED = "ERR_PERMISSION_DENIED";
 
 /** Ref is malformed or can't be parsed. */
-export const ERR_INVALID_REF = "invalid_ref";
+export const ERR_INVALID_REF = "ERR_INVALID_REF";
 
 /** Ref is syntactically valid but doesn't resolve to anything in the source. */
-export const ERR_REF_NOT_FOUND = "ref_not_found";
-
-/** Input doesn't match the expected schema. */
-export const ERR_INVALID_INPUT = "invalid_input";
+export const ERR_REF_NOT_FOUND = "ERR_REF_NOT_FOUND";
 
 /** Binding source couldn't be loaded or parsed. */
-export const ERR_SOURCE_LOAD_FAILED = "source_load_failed";
+export const ERR_SOURCE_LOAD_FAILED = "ERR_SOURCE_LOAD_FAILED";
 
 /** Source loaded but missing required configuration (e.g., no server URL). */
-export const ERR_SOURCE_CONFIG_ERROR = "source_config_error";
+export const ERR_SOURCE_CONFIG_ERROR = "ERR_SOURCE_CONFIG_ERROR";
 
 /** Connection to the service couldn't be established. */
-export const ERR_CONNECT_FAILED = "connect_failed";
+export const ERR_CONNECT_FAILED = "ERR_CONNECT_FAILED";
 
 /** Call was made but the service returned an error. */
-export const ERR_EXECUTION_FAILED = "execution_failed";
+export const ERR_EXECUTION_FAILED = "ERR_EXECUTION_FAILED";
 
 /** Response received but couldn't be processed (e.g., too large, parse error). */
-export const ERR_RESPONSE_ERROR = "response_error";
+export const ERR_RESPONSE_ERROR = "ERR_RESPONSE_ERROR";
 
 /** Error during streaming after initial connection. */
-export const ERR_STREAM_ERROR = "stream_error";
+export const ERR_STREAM_ERROR = "ERR_STREAM_ERROR";
 
 /** Operation timed out. */
-export const ERR_TIMEOUT = "timeout";
-
-/** Operation was cancelled by the caller. */
-export const ERR_CANCELLED = "cancelled";
+export const ERR_TIMEOUT = "ERR_TIMEOUT";
 
 /** No binding found for the requested operation. */
-export const ERR_BINDING_NOT_FOUND = "binding_not_found";
+export const ERR_BINDING_NOT_FOUND = "ERR_BINDING_NOT_FOUND";
 
 /** Transform evaluation failed. */
-export const ERR_TRANSFORM_ERROR = "transform_error";
+export const ERR_TRANSFORM_ERROR = "ERR_TRANSFORM_ERROR";
 
-/** Input or output schema validation failed. */
-export const ERR_VALIDATION_FAILED = "validation_failed";
+/** Input (OBI-T-07) or output (OBI-T-08) schema validation failed. */
+export const ERR_VALIDATION_FAILED = "ERR_VALIDATION_FAILED";
+
+/** A generic runtime failure inside a binding implementation. */
+export const ERR_RUNTIME = "ERR_RUNTIME";
+
+// ---------------------------------------------------------------------------
+// Operation-graph codes
+// ---------------------------------------------------------------------------
 
 /**
  * The operation graph exceeded the maximum number of events permitted per
  * execution. Protects against unbounded event amplification from map nodes
  * in cycles.
  */
-export const ERR_EVENT_LIMIT_EXCEEDED = "event_limit_exceeded";
+export const ERR_EVENT_LIMIT_EXCEEDED = "ERR_EVENT_LIMIT_EXCEEDED";
 
 /** An exit node terminated the operation graph execution with an error. */
-export const ERR_OPERATION_GRAPH_EXIT = "operation_graph_exit";
+export const ERR_OPERATION_GRAPH_EXIT = "ERR_OPERATION_GRAPH_EXIT";
 
 /** A map node's transform did not produce an array value as required. */
-export const ERR_MAP_NOT_ARRAY = "map_not_array";
+export const ERR_MAP_NOT_ARRAY = "ERR_MAP_NOT_ARRAY";
 
 /**
  * Maps an HTTP status code to a standard error code.
