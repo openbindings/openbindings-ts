@@ -10,6 +10,7 @@ import {
   ERR_REF_NOT_FOUND,
   ERR_RUNTIME,
   ERR_SOURCE_LOAD_FAILED,
+  ERR_VALIDATION_FAILED,
   type BindingInvocationArgs,
   type BindingInvoker,
   type Invocation,
@@ -159,6 +160,25 @@ describe("OperationGraphInvoker", () => {
     const res = await invokeGraph("{not json", "g", { x: 1 });
     expect(res.outputs.length).toBe(0);
     expect(res.error?.code).toBe(ERR_SOURCE_LOAD_FAILED);
+  });
+
+  it("validates the graph before reading input: an invalid graph fails without a write", async () => {
+    const op = freshInvoker();
+    const call = op.invokeBinding({
+      source: {
+        format: FORMAT_TOKEN,
+        content: JSON.stringify({
+          "openbindings.operation-graph": "0.2.0",
+          // Invalid: no output node.
+          graphs: { bad: { nodes: { in: { type: "input" } }, edges: [] } },
+        }),
+      },
+      ref: "bad",
+    });
+
+    // The caller never writes nor closes; validation must terminate the
+    // call anyway instead of parking on the input read.
+    await expect(call.closed).rejects.toMatchObject({ code: ERR_VALIDATION_FAILED });
   });
 });
 

@@ -1,8 +1,12 @@
 /**
  * Canonical invocation error codes. Wire values are SCREAMING_SNAKE with an
  * `ERR_` prefix, plus the un-prefixed negotiation signal `CONTEXT_REQUIRED`,
- * matching the `openbindings.binding-invoker` role. The Go SDK emits the
- * same values; consumers switching on `code` are portable across both.
+ * matching the `openbindings.binding-invoker` role. The Go SDK uses the same
+ * values for the same failure classes, so consumers switching on `code` are
+ * portable for every code an invocation handle can carry. (One idiom split:
+ * wiring errors — unknown operation/binding/source — THROW synchronously in
+ * TypeScript but surface as pre-errored handles in Go; the local wiring
+ * codes below exist so the Go-emitted values are documented here too.)
  *
  * The lifecycle codes (`ERR_CANCELLED`, `ERR_ALREADY_CONSUMED`, ...) are
  * produced by the SDK's invocation machinery; the operational codes are
@@ -47,6 +51,19 @@ export const ERR_TRANSPORT_CLOSED = "ERR_TRANSPORT_CLOSED";
  * Un-prefixed: it is a negotiation signal, not a failure of the operation.
  */
 export const CONTEXT_REQUIRED = "CONTEXT_REQUIRED";
+
+// ---------------------------------------------------------------------------
+// Local wiring codes (operation-layer resolution failures; never cross the
+// wire from a binding). The TS SDK throws typed errors for these instead —
+// the constants exist for cross-SDK documentation and for consumers handling
+// Go-originated values.
+// ---------------------------------------------------------------------------
+
+/** The requested operation matches no key or alias on the interface. */
+export const ERR_OPERATION_NOT_FOUND = "ERR_OPERATION_NOT_FOUND";
+
+/** A binding references a source not present in the interface. */
+export const ERR_UNKNOWN_SOURCE = "ERR_UNKNOWN_SOURCE";
 
 // ---------------------------------------------------------------------------
 // Operational codes (format-invoker conventions)

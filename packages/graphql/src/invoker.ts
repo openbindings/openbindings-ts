@@ -7,7 +7,6 @@ import {
   InvocationImpl,
   NoSourcesError,
   buildAuthHeaders,
-  normalizeEndpoint,
   type BindingInvocationArgs,
   type BindingInvoker,
   type CreateInput,
@@ -170,7 +169,15 @@ export class GraphQLInvoker implements BindingInvoker {
     fetchFn: typeof globalThis.fetch,
     signal?: AbortSignal,
   ): Promise<IntrospectionSchema> {
-    const key = normalizeEndpoint(url) || url;
+    // Key by the full endpoint URL (origin + path + query): two GraphQL
+    // endpoints on one host must not share introspected schemas.
+    let key: string;
+    try {
+      const u = new URL(url);
+      key = u.origin + u.pathname + u.search;
+    } catch {
+      key = url;
+    }
     const cached = this.schemaCache.get(key);
     if (cached) return cached;
     const schema = await introspect(url, headers, fetchFn, signal);

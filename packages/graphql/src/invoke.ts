@@ -370,6 +370,14 @@ function httpToWS(url: string): string {
 }
 
 /**
+ * Maximum number of undelivered subscription events buffered between the
+ * socket and the consuming pump. The handle's bounded output buffer IS the
+ * backpressure contract; an unbounded second buffer here would defeat it,
+ * so overflow fails the stream instead.
+ */
+const MAX_QUEUED_EVENTS = 1024;
+
+/**
  * Subscribe to a GraphQL subscription via the graphql-transport-ws protocol.
  * Yields each event's bare data payload until the subscription completes
  * (clean return) or fails (throws an InvocationError). An aborted `signal`
@@ -453,6 +461,19 @@ export async function* subscribeGraphQL(
         const p = msg.payload as { data?: unknown; errors?: Array<{ message: string }> } | undefined;
         if (p?.errors?.length) {
           finish({ error: new InvocationError(ERR_EXECUTION_FAILED, p.errors[0].message, { errors: p.errors }) });
+        } else if (queue.length >= MAX_QUEUED_EVENTS) {
+          // The consumer is not draining; fail the stream rather than
+          // buffer without bound, and stop the inflow at the socket.
+          queue.length = 0;
+          finish({
+            error: new InvocationError(
+              ERR_STREAM_ERROR,
+              `backpressure overflow: more than ${MAX_QUEUED_EVENTS} undelivered subscription events`,
+            ),
+          });
+          if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
+            ws.close();
+          }
         } else {
           push({ data: p?.data });
         }
@@ -478,7 +499,15 @@ export async function* subscribeGraphQL(
   };
 
   ws.onclose = () => {
-    finish(acked ? null : { error: new InvocationError(ERR_CONNECT_FAILED, "WebSocket closed during handshake") });
+    // graphql-transport-ws semantics: a clean end is signalled by a
+    // `complete` frame (which already finished the sequence and makes this
+    // a no-op). A post-ack close without one is an abnormal termination —
+    // surfacing it as clean completion would mask server crashes.
+    finish({
+      error: acked
+        ? new InvocationError(ERR_STREAM_ERROR, "WebSocket closed before subscription complete")
+        : new InvocationError(ERR_CONNECT_FAILED, "WebSocket closed during handshake"),
+    });
   };
 
   const onAbort = () => finish(null);

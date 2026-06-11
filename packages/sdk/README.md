@@ -6,7 +6,7 @@ OpenBindings is an open standard: one interface, limitless bindings. An OBI (Ope
 
 **Spec version:** implements OpenBindings 0.2. Exact range is exported as `MIN_SUPPORTED_VERSION` / `MAX_TESTED_VERSION`; check programmatically via `isSupportedVersion(version)`.
 
-**Conformance:** `parseDocument(data)` rejects malformed JSON and duplicate object keys (OBI-D-01), then `validateInterface(iface)` enforces OBI-D-02 through OBI-D-17 and OBI-T-04. OBI-D-02 (document validates against `openbindings.schema.json`) and OBI-D-15 (examples validate against their operation's input/output schemas) are enforced via [Ajv 2020-12](https://ajv.js.org/json-schema.html#draft-2020-12). The schema is embedded at build time (synced via `scripts/sync-schema.sh`). In this monorepo, run `pnpm conformance` with the spec repo checked out at `./spec` or `../spec` to exercise the core conformance corpus.
+**Conformance:** `parseDocument(data)` rejects malformed JSON and duplicate object keys (OBI-D-01), then `validateInterface(iface)` enforces OBI-D-02 through OBI-D-13 and OBI-T-04. OBI-D-02 (document validates against `openbindings.schema.json`) and OBI-D-12 (examples validate against their operation's input/output schemas) are enforced via [@cfworker/json-schema](https://github.com/cfworker/cfworker/tree/main/packages/json-schema) (JSON Schema 2020-12). The schema is embedded at build time (synced via `scripts/sync-schema.sh`). In this monorepo, run `pnpm conformance` with the spec repo checked out at `./spec` or `../spec` to exercise the core conformance corpus.
 
 ## Install
 
@@ -57,9 +57,9 @@ For typed methods per operation, run `ob codegen <obi> --lang typescript` to pro
 
 See the [monorepo README](https://github.com/openbindings/openbindings-ts#readme) for full documentation.
 
-## Transforms (Invoking-class only)
+## Transforms (invoking tools only)
 
-OpenBindings 0.2.0 mandates JSONata 2.0 as the transform language for tools that evaluate `inputTransform`/`outputTransform` (OBI-T-11). This SDK does not bundle a JSONata runtime; Inspection-class and Codegen-class tools do not need one, and shipping it as a hard dependency would tax those callers. To wire up Invoking-class behavior, install `jsonata` separately and pass an adapter implementing the `TransformEvaluator` interface:
+OpenBindings 0.2.0 mandates JSONata 2.0 as the transform language for tools that evaluate `inputTransform`/`outputTransform` (OBI-T-10). This SDK does not bundle a JSONata runtime; tools that only parse, validate, inspect, or generate code do not need one, and shipping it as a hard dependency would tax those callers. To evaluate transforms when invoking, install `jsonata` separately and pass an adapter implementing the `TransformEvaluator` interface:
 
 ```typescript
 import jsonata from "jsonata";

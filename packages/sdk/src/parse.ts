@@ -21,7 +21,19 @@ import { validateInterface, type ValidateOptions } from "./validate.js";
  * {@link SyntaxError} on malformed JSON.
  */
 export function parseDocument(input: string | Uint8Array): OBInterface {
-  const text = typeof input === "string" ? input : new TextDecoder().decode(input);
+  let text: string;
+  if (typeof input === "string") {
+    text = input;
+  } else {
+    // OBI-D-01: an OBI document is UTF-8 encoded JSON. The default
+    // TextDecoder silently replaces invalid sequences with U+FFFD; decode
+    // fatally so encoding errors surface as parse errors.
+    try {
+      text = new TextDecoder("utf-8", { fatal: true }).decode(input);
+    } catch {
+      throw new SyntaxError("parse document: input is not valid UTF-8 (OBI-D-01)");
+    }
+  }
   rejectDuplicateObjectKeys(text);
   const parsed = JSON.parse(text);
 

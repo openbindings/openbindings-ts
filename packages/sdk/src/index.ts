@@ -26,8 +26,6 @@ export {
   single,
   contextRequiredError,
   isContextRequired,
-  OUTPUT_BUFFER_CAPACITY,
-  INPUT_BUFFER_CAPACITY,
 } from "./invocation.js";
 
 export type {
@@ -64,8 +62,6 @@ export {
   contextSatisfies,
   storeContextResolver,
   MemoryStore,
-  ContextInsufficientError,
-  ResolutionUnavailableError,
 } from "./context.js";
 
 export type {
@@ -159,6 +155,7 @@ export {
   ERR_MAP_NOT_ARRAY,
   ERR_MISSING_INPUT,
   ERR_OPERATION_GRAPH_EXIT,
+  ERR_OPERATION_NOT_FOUND,
   ERR_PERMISSION_DENIED,
   ERR_PROTOCOL,
   ERR_REF_NOT_FOUND,
@@ -171,6 +168,7 @@ export {
   ERR_TOO_MANY_INPUTS,
   ERR_TRANSFORM_ERROR,
   ERR_TRANSPORT_CLOSED,
+  ERR_UNKNOWN_SOURCE,
   ERR_VALIDATION_FAILED,
   httpErrorCode,
 } from "./errcodes.js";

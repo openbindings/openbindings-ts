@@ -47,9 +47,11 @@ export async function parseAsyncAPIDocument(
     throw new Error("source must have location or content");
   }
 
-  // Resolve all $ref pointers.
+  // Resolve all $ref pointers. External $refs fetch through the injected
+  // fetch (callers that must stay side-effect-free inject a rejecting one).
   const resolved = (await dereference(raw as Record<string, unknown>, {
     baseUrl: location,
+    fetch: fetchFn,
     parse: (text) => yaml.load(text) as Record<string, unknown>,
     signal: options?.signal,
   })) as unknown as AsyncAPIDocument;

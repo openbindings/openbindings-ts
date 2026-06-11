@@ -16,11 +16,13 @@ import {
   ERR_REF_NOT_FOUND,
   ERR_RUNTIME,
   ERR_SOURCE_LOAD_FAILED,
+  ERR_VALIDATION_FAILED,
   InvocationError,
   InvocationImpl,
 } from "@openbindings/sdk";
 import type { Document, Graph } from "./types.js";
 import { parseDocument } from "./types.js";
+import { validate } from "./validate.js";
 import { SchemaCache } from "./state.js";
 import { Engine } from "./engine.js";
 import { FORMAT_TOKEN } from "./constants.js";
@@ -70,6 +72,21 @@ export class OperationGraphInvoker implements BindingInvoker {
           `operation graph "${args.ref}" not found in document`,
         ),
       );
+      return;
+    }
+
+    // Validate the graph BEFORE touching the caller's input channel so an
+    // invalid graph fails without consuming a write (and without parking on
+    // a read the caller may never satisfy). The engine re-validates, which
+    // is a no-op for graphs that pass here.
+    let opKeys: Set<string> | undefined;
+    if (args.interface) {
+      opKeys = new Set(Object.keys(args.interface.operations));
+    }
+    try {
+      validate(graph, opKeys);
+    } catch (err) {
+      inv.fireError(new InvocationError(ERR_VALIDATION_FAILED, (err as Error).message));
       return;
     }
 

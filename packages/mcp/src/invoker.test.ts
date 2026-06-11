@@ -299,6 +299,25 @@ describe("MCPInvoker resources", () => {
 // ---------------------------------------------------------------------------
 
 describe("MCPInvoker prompts", () => {
+  it("closes input on entry under the operation-layer no-input convention (zero-argument prompt)", async () => {
+    const messages = [{ role: "user", content: { type: "text", text: "Hi" } }];
+    const { fn, calls } = mcpServer(() => ({ result: { messages } }));
+    // binding present + inputSchema absent: the operation declares NO input
+    // (the creator emits no input schema for zero-argument prompts), so the
+    // caller never writes nor closes — the call must not park on a read.
+    const call = new MCPInvoker().invokeBinding({
+      source,
+      ref: "prompts/greeting",
+      binding: { operation: "greeting", source: "mcp", ref: "prompts/greeting" },
+      fetch: fn,
+    });
+
+    await expect(single(call.outputs)).resolves.toEqual({ messages });
+    await expect(call.closed).resolves.toBeUndefined();
+    expect(calls[0].method).toBe("prompts/get");
+    expect(calls[0].params.name).toBe("greeting");
+  });
+
   it("renders a prompt with stringified arguments", async () => {
     const messages = [{ role: "user", content: { type: "text", text: "Summarize this" } }];
     const { fn, calls } = mcpServer(() => ({

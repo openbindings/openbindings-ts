@@ -254,9 +254,12 @@ export interface BindingHandle<I = unknown, O = unknown> {
   fireError(error: InvocationError): void;
 
   /**
-   * The cancellation signal — the only cancellation channel bindings
-   * observe. On abort, tear down underlying work and call
-   * `fireError(ERR_CANCELLED)`.
+   * The teardown signal — the only lifecycle channel bindings observe.
+   * It aborts on EVERY terminal transition (caller `cancel()`, an external
+   * signal, `closeOutput`, or `fireError` — including terminals raised on
+   * the caller side, such as an OBI-T-07 validation failure), mirroring the
+   * Go SDK's `Done()`. On abort, tear down underlying work; if your binding
+   * initiated no terminal itself, call `fireError(ERR_CANCELLED)`.
    */
   readonly signal: AbortSignal;
 
@@ -636,6 +639,10 @@ export class InvocationImpl<I = unknown, O = unknown>
       this.inputProducerWaiters.shift()!.reject(closedErr());
     }
     this.resolveClosed();
+    // The signal fires on every terminal transition (the TS analog of the
+    // Go SDK's Done() channel): anything still doing work on behalf of this
+    // invocation tears down. Aborted last so listeners observe settled state.
+    this.controller.abort();
   }
 
   fireError(error: InvocationError): void {
@@ -665,6 +672,11 @@ export class InvocationImpl<I = unknown, O = unknown>
       this.inputProducerWaiters.shift()!.reject(error);
     }
     this.rejectClosed(error);
+    // The signal fires on every terminal transition, not just cancel():
+    // a terminal raised on the caller side (e.g. an OBI-T-07 validation
+    // failure) must tear down the binding's underlying work too. Without
+    // this, a binding parked on inputs()/transport strands forever.
+    this.controller.abort();
   }
 
   setHeader(md: Metadata): void {

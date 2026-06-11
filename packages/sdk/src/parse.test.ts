@@ -35,6 +35,23 @@ describe("parseDocument", () => {
     expect(() => parseDocument(`{"openbindings":"not-a-version","operations":{}}`))
       .toThrow(ValidationError);
   });
+
+  it("rejects invalid UTF-8 byte input (OBI-D-01)", () => {
+    // 0xFF can never appear in valid UTF-8; the default non-fatal
+    // TextDecoder would silently replace it with U+FFFD.
+    const prefix = new TextEncoder().encode(`{"openbindings":"0.2.0","name":"X`);
+    const suffix = new TextEncoder().encode(`","operations":{}}`);
+    const bytes = new Uint8Array(prefix.length + 2 + suffix.length);
+    bytes.set(prefix, 0);
+    bytes.set([0xff, 0xfe], prefix.length);
+    bytes.set(suffix, prefix.length + 2);
+    expect(() => parseDocument(bytes)).toThrow(/UTF-8/);
+  });
+
+  it("accepts valid UTF-8 byte input", () => {
+    const bytes = new TextEncoder().encode(`{"openbindings":"0.2.0","name":"héllo","operations":{}}`);
+    expect(parseDocument(bytes).name).toBe("héllo");
+  });
 });
 
 describe("validateDocument", () => {

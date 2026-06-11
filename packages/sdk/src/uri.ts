@@ -1,11 +1,13 @@
 /**
- * URI canonicalization (spec §10) and reference resolution (spec §12).
+ * URI normalization and reference resolution (spec §10, Reference
+ * resolution).
  *
- * The OpenBindings spec relies on URI equality for deduplication and for
- * identifying when two references point at the same OBI.
- * canonicalizeLocation produces the byte-stable canonical form. resolveRef
- * converts a relative URI reference (in sources[*].location or a schema
- * $ref) into a fully-qualified URI.
+ * resolveRef converts a relative URI reference (in sources[*].location or a
+ * schema $ref) into a fully-qualified URI, per spec §10.
+ * canonicalizeLocation produces a normalized form useful for caching and
+ * deduplicating fetched documents; comparing URIs for identity is a tool
+ * concern (the spec defines no canonical URI equality), and this SDK's
+ * normalization is its own convention.
  *
  * The canonicalization algorithm uses the WHATWG URL Standard for the
  * heavy lifting (lowercase scheme/host, IDN punycode via UTS #46,
@@ -18,8 +20,12 @@
 const UNRESERVED = /^[A-Za-z0-9\-._~]$/;
 
 /**
- * Produces the canonical form of a URI per spec §10 (Location Equality).
- * Two URIs refer to the same OBI iff their canonical forms are byte-equal.
+ * Produces a normalized form of a URI suitable for caching and
+ * deduplicating fetched documents. The spec (v0.2.0 §10) defines no
+ * canonical URI equality — identity comparison is a tool concern — so this
+ * is an SDK convention applying RFC 3986 §6.2 syntax-based normalization:
+ * trivially equivalent spellings of the same location compare equal, while
+ * distinct normalized forms may still address the same resource.
  *
  * Steps applied in order:
  *
@@ -64,9 +70,9 @@ export function canonicalizeLocation(uri: string): string {
 
 /**
  * Resolves a relative URI reference against a base URI per RFC 3986 §5.
- * This is the spec §12 operation: it converts a sources[*].location or a
- * schema $ref into a fully-qualified URI suitable for fetching or
- * comparison.
+ * This is the spec §10 (Reference resolution) operation: it converts a
+ * sources[*].location or a schema $ref into a fully-qualified URI suitable
+ * for fetching or comparison.
  *
  * Resolution is directory-relative: the merge step strips everything after
  * the last `/` in the base URI's path before appending the reference
@@ -83,8 +89,8 @@ export function resolveRef(base: string, ref: string): string {
     throw new Error("openbindings: cannot resolve empty reference");
   }
 
-  // If `ref` parses as a standalone URL, it's absolute. Per spec §12,
-  // absolute references are returned unchanged (no canonicalization).
+  // If `ref` parses as a standalone URL, it's absolute. Per spec §10,
+  // absolute references are returned unchanged (base not consulted).
   try {
     new URL(ref);
     return ref;

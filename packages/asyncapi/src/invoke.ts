@@ -48,6 +48,7 @@ import type {
   AsyncAPIDocument,
   AsyncAPIOperation,
   AsyncAPISecurityScheme,
+  AsyncAPIServer,
 } from "./asyncapi-types.js";
 import { isSecurityScheme } from "./asyncapi-types.js";
 import { parseRef, errorMessage } from "./util.js";
@@ -89,15 +90,17 @@ export async function runBinding(
 
   let serverURL: string;
   let protocol: string;
+  let server: AsyncAPIServer | undefined;
   try {
-    ({ url: serverURL, protocol } = resolveServer(doc, args.context));
+    ({ url: serverURL, protocol, server } = resolveServer(doc, args.context));
   } catch (e: unknown) {
     h.fireError(new InvocationError(ERR_SOURCE_CONFIG_ERROR, errorMessage(e)));
     return;
   }
 
   // Context negotiation: challenge BEFORE any connection is opened.
-  const required = requiredContext(doc, asyncOp, serverURL, args.context);
+  // Requirements derive from the SAME server the connection targets.
+  const required = requiredContext(asyncOp, server, serverURL, args.context);
   if (required) {
     h.fireError(
       contextRequiredError(
@@ -113,9 +116,9 @@ export async function runBinding(
   switch (asyncOp.action) {
     case "receive":
       if (protocol === "ws" || protocol === "wss") {
-        await runWSReceive(wsPool, serverURL, address, doc, asyncOp, args, h);
+        await runWSReceive(wsPool, serverURL, address, asyncOp, server, args, h);
       } else if (protocol === "http" || protocol === "https") {
-        await runSSEReceive(serverURL, address, doc, asyncOp, args, h);
+        await runSSEReceive(serverURL, address, asyncOp, server, args, h);
       } else {
         h.fireError(
           new InvocationError(
@@ -127,9 +130,9 @@ export async function runBinding(
       return;
     case "send":
       if (protocol === "ws" || protocol === "wss") {
-        await runWSSend(wsPool, serverURL, address, doc, asyncOp, args, h);
+        await runWSSend(wsPool, serverURL, address, asyncOp, server, args, h);
       } else if (protocol === "http" || protocol === "https") {
-        await runHTTPSend(serverURL, address, doc, asyncOp, args, h);
+        await runHTTPSend(serverURL, address, asyncOp, server, args, h);
       } else {
         h.fireError(
           new InvocationError(
@@ -155,7 +158,9 @@ export async function runBinding(
 
 const SUPPORTED_PROTOCOLS = new Set(["http", "https", "ws", "wss"]);
 
-function pickDocServer(doc: AsyncAPIDocument): { url: string; protocol: string } | null {
+function pickDocServer(
+  doc: AsyncAPIDocument,
+): { url: string; protocol: string; server: AsyncAPIServer } | null {
   const servers = doc.servers ?? {};
   // Sort by id for deterministic selection
   const sorted = Object.entries(servers).sort(([a], [b]) => a.localeCompare(b));
@@ -165,16 +170,23 @@ function pickDocServer(doc: AsyncAPIDocument): { url: string; protocol: string }
       let url = `${proto}://${server.host}`;
       const pathname = server.pathname;
       if (pathname) url += pathname;
-      return { url, protocol: proto };
+      return { url, protocol: proto, server };
     }
   }
   return null;
 }
 
+/**
+ * Resolves the server the connection targets. `server` is the selected
+ * document server — the single source of server-level security for this
+ * invocation. With a `baseURL` context override the connection goes to the
+ * override, but the document's selected server still supplies the security
+ * model (undefined when the document declares no supported server).
+ */
 export function resolveServer(
   doc: AsyncAPIDocument,
   ctx?: Record<string, unknown>,
-): { url: string; protocol: string } {
+): { url: string; protocol: string; server: AsyncAPIServer | undefined } {
   const meta = contextMetadata(ctx);
   if (meta["baseURL"]) {
     const base = String(meta["baseURL"]);
@@ -182,12 +194,16 @@ export function resolveServer(
     if (base.startsWith("https://")) proto = "https";
     else if (base.startsWith("wss://")) proto = "wss";
     else if (base.startsWith("ws://")) proto = "ws";
-    return { url: base.replace(/\/+$/, ""), protocol: proto };
+    return {
+      url: base.replace(/\/+$/, ""),
+      protocol: proto,
+      server: pickDocServer(doc)?.server,
+    };
   }
 
-  const server = pickDocServer(doc);
-  if (!server) throw new Error("no supported server found (need http, https, ws, or wss protocol)");
-  return { url: server.url.replace(/\/+$/, ""), protocol: server.protocol };
+  const picked = pickDocServer(doc);
+  if (!picked) throw new Error("no supported server found (need http, https, ws, or wss protocol)");
+  return { url: picked.url.replace(/\/+$/, ""), protocol: picked.protocol, server: picked.server };
 }
 
 // ---------------------------------------------------------------------------
@@ -195,8 +211,8 @@ export function resolveServer(
 // ---------------------------------------------------------------------------
 
 function resolveSecuritySchemes(
-  doc: AsyncAPIDocument,
   asyncOp: AsyncAPIOperation,
+  server: AsyncAPIServer | undefined,
 ): AsyncAPISecurityScheme[] {
   // Operation-level security overrides server-level.
   // After dereference, security items are resolved scheme objects.
@@ -205,17 +221,9 @@ function resolveSecuritySchemes(
     return opSecurity.filter(isSecurityScheme);
   }
 
-  // Fall back to server-level security
-  const servers = doc.servers ?? {};
-  const sorted = Object.entries(servers).sort(([a], [b]) => a.localeCompare(b));
-  for (const [, server] of sorted) {
-    const serverSec = server.security;
-    if (serverSec && serverSec.length > 0) {
-      return serverSec.filter(isSecurityScheme);
-    }
-  }
-
-  return [];
+  // Fall back to the security of the server the connection targets —
+  // never to some other server's declaration.
+  return (server?.security ?? []).filter(isSecurityScheme);
 }
 
 /** Maps an AsyncAPI security scheme to a standard requirement family, or null when unknown. */
@@ -244,15 +252,17 @@ function requirementType(scheme: AsyncAPISecurityScheme): string | null {
 /**
  * Computes the context the binding requires for this operation, or null when
  * the provided context already satisfies it (or the doc declares nothing
- * checkable). Side-effect-free; shared by runBinding and prepareBinding.
+ * checkable). `server` is the server the connection logic picked — its
+ * security (not some other server's) backs the operation-level fallback.
+ * Side-effect-free; shared by runBinding and prepareBinding.
  */
 export function requiredContext(
-  doc: AsyncAPIDocument,
   asyncOp: AsyncAPIOperation,
+  server: AsyncAPIServer | undefined,
   serverURL: string,
   ctx?: Record<string, unknown>,
 ): ContextRequiredDetails | null {
-  const schemes = resolveSecuritySchemes(doc, asyncOp);
+  const schemes = resolveSecuritySchemes(asyncOp, server);
   const alternatives: ContextAlternative[] = [];
   for (const scheme of schemes) {
     const type = requirementType(scheme);
@@ -277,11 +287,11 @@ export function requiredContext(
 
 function applyCredentialsViaSchemes(
   headers: Headers,
-  doc: AsyncAPIDocument,
   asyncOp: AsyncAPIOperation,
+  server: AsyncAPIServer | undefined,
   ctx: Record<string, unknown>,
 ): { applied: boolean; queryParams?: Record<string, string> } {
-  const schemes = resolveSecuritySchemes(doc, asyncOp);
+  const schemes = resolveSecuritySchemes(asyncOp, server);
   if (!schemes.length) return { applied: false };
 
   let applied = false;
@@ -389,14 +399,14 @@ function applyCredentialsFallback(headers: Headers, ctx: Record<string, unknown>
 
 function applyContext(
   headers: Headers,
-  doc: AsyncAPIDocument,
   asyncOp: AsyncAPIOperation,
+  server: AsyncAPIServer | undefined,
   ctx?: Record<string, unknown>,
 ): Record<string, string> | undefined {
   let queryParams: Record<string, string> | undefined;
 
   if (ctx) {
-    const result = applyCredentialsViaSchemes(headers, doc, asyncOp, ctx);
+    const result = applyCredentialsViaSchemes(headers, asyncOp, server, ctx);
     if (!result.applied) {
       applyCredentialsFallback(headers, ctx);
     }
@@ -424,8 +434,8 @@ function applyContext(
 async function runSSEReceive(
   serverURL: string,
   address: string,
-  doc: AsyncAPIDocument,
   asyncOp: AsyncAPIOperation,
+  server: AsyncAPIServer | undefined,
   args: BindingInvocationArgs,
   h: Handle,
 ): Promise<void> {
@@ -434,7 +444,7 @@ async function runSSEReceive(
 
   let url = `${serverURL}/${address.replace(/^\/+/, "")}`;
   const headers = new Headers({ Accept: "text/event-stream" });
-  const authQueryParams = applyContext(headers, doc, asyncOp, args.context);
+  const authQueryParams = applyContext(headers, asyncOp, server, args.context);
   if (authQueryParams) {
     const sep = url.includes("?") ? "&" : "?";
     url += sep + new URLSearchParams(authQueryParams).toString();
@@ -532,29 +542,37 @@ async function runSSEReceive(
 async function runHTTPSend(
   serverURL: string,
   address: string,
-  doc: AsyncAPIDocument,
   asyncOp: AsyncAPIOperation,
+  server: AsyncAPIServer | undefined,
   args: BindingInvocationArgs,
   h: Handle,
 ): Promise<void> {
   // Unary: the first input is the message payload.
-  const first = await readFirstInput(h);
-  if (!first.ok) {
-    h.fireError(
-      new InvocationError(ERR_MISSING_INPUT, "send operation requires an input message"),
-    );
-    return;
+  let body: string;
+  if (noInputDeclared(args)) {
+    // Operation-layer no-input convention: the caller never writes nor
+    // closes. Close input on entry and send one empty-object message.
+    void h.closeInput();
+    body = "{}";
+  } else {
+    const first = await readFirstInput(h);
+    if (!first.ok) {
+      h.fireError(
+        new InvocationError(ERR_MISSING_INPUT, "send operation requires an input message"),
+      );
+      return;
+    }
+    void h.closeInput();
+    body = first.value != null ? JSON.stringify(first.value) : "{}";
   }
-  void h.closeInput();
 
   let url = `${serverURL}/${address.replace(/^\/+/, "")}`;
-  const body = first.value != null ? JSON.stringify(first.value) : "{}";
 
   const headers = new Headers({
     "Content-Type": "application/json",
     Accept: "application/json",
   });
-  const authQueryParams = applyContext(headers, doc, asyncOp, args.context);
+  const authQueryParams = applyContext(headers, asyncOp, server, args.context);
   if (authQueryParams) {
     const sep = url.includes("?") ? "&" : "?";
     url += sep + new URLSearchParams(authQueryParams).toString();
@@ -653,8 +671,8 @@ function parseWSFrame(raw: string): WSFrame {
 function buildWSURL(
   serverURL: string,
   address: string,
-  doc: AsyncAPIDocument,
   asyncOp: AsyncAPIOperation,
+  server: AsyncAPIServer | undefined,
   ctx?: Record<string, unknown>,
 ): string {
   const url = new URL(`/${address.replace(/^\/+/, "")}`, serverURL);
@@ -662,7 +680,7 @@ function buildWSURL(
   // Browser WebSocket cannot set handshake headers, so header-based auth is
   // handled via the first-frame bearer convention instead.
   const tempHeaders = new Headers();
-  const authQueryParams = applyContext(tempHeaders, doc, asyncOp, ctx);
+  const authQueryParams = applyContext(tempHeaders, asyncOp, server, ctx);
   if (authQueryParams) {
     for (const [k, v] of Object.entries(authQueryParams)) {
       url.searchParams.set(k, v);
@@ -671,23 +689,71 @@ function buildWSURL(
   return url.toString();
 }
 
+/**
+ * True when the resolved security declares a bearer-family scheme (HTTP
+ * bearer, httpBearer, or an OAuth2 access token presented as a bearer).
+ * Gates the first-frame bearer convention: the `{bearerToken}` frame is
+ * only sent to servers that declare they expect one.
+ */
+function declaresBearerScheme(
+  asyncOp: AsyncAPIOperation,
+  server: AsyncAPIServer | undefined,
+): boolean {
+  return resolveSecuritySchemes(asyncOp, server).some((s) => {
+    if (s.type === "httpBearer" || s.type === "oauth2") return true;
+    return s.type === "http" && (s.scheme ?? "").toLowerCase() === "bearer";
+  });
+}
+
+/**
+ * First-frame bearer convention: browsers cannot set headers on WebSocket
+ * upgrades, so the token travels in the first message body — once per
+ * CONNECTION (a reused pooled socket must not re-authenticate per
+ * invocation), and only when the resolved security declares a
+ * bearer-family scheme.
+ */
+function sendFirstFrameBearer(
+  pooled: PooledWS,
+  asyncOp: AsyncAPIOperation,
+  server: AsyncAPIServer | undefined,
+  ctx?: Record<string, unknown>,
+): void {
+  const bearer = contextBearerToken(ctx);
+  if (!bearer || !declaresBearerScheme(asyncOp, server)) return;
+  if (!pooled.once("first-frame-bearer")) return;
+  pooled.send(JSON.stringify({ bearerToken: bearer }));
+}
+
+/** Operation-layer no-input convention: binding populated, no input schema. */
+function noInputDeclared(args: BindingInvocationArgs): boolean {
+  return args.binding !== undefined && args.inputSchema === undefined;
+}
+
 // ---------------------------------------------------------------------------
 // Receive over WebSocket: subscribe (bidi-capable) on a pooled socket
 // ---------------------------------------------------------------------------
+
+/**
+ * Maximum number of undelivered frames buffered between the socket and the
+ * output pump. The handle's bounded output buffer IS the backpressure
+ * contract; an unbounded second buffer here would defeat it, so overflow
+ * fails the stream and closes the socket instead.
+ */
+const MAX_BUFFERED_FRAMES = 1024;
 
 async function runWSReceive(
   pool: WSPool,
   serverURL: string,
   address: string,
-  doc: AsyncAPIDocument,
   asyncOp: AsyncAPIOperation,
+  server: AsyncAPIServer | undefined,
   args: BindingInvocationArgs,
   h: Handle,
 ): Promise<void> {
   let pooled: PooledWS;
   try {
     pooled = await pool.acquire(serverURL, address, {
-      buildURL: (base, addr) => buildWSURL(base, addr, doc, asyncOp, args.context),
+      buildURL: (base, addr) => buildWSURL(base, addr, asyncOp, server, args.context),
       signal: h.signal,
     });
   } catch (e: unknown) {
@@ -696,18 +762,25 @@ async function runWSReceive(
     return;
   }
 
-  // First-frame bearer convention: browsers cannot set headers on WebSocket
-  // upgrades, so the token travels in the first message body.
-  const bearer = contextBearerToken(args.context);
-  if (bearer) pooled.send(JSON.stringify({ bearerToken: bearer }));
-
   const frames: WSFrame[] = [];
+  let overflowed = false;
   let socketClosed = false;
   let socketError: Error | undefined;
   let wake: (() => void) | undefined;
   const notify = () => wake?.();
 
   const removeMsg = pooled.onMessage((data) => {
+    if (overflowed) return;
+    if (frames.length >= MAX_BUFFERED_FRAMES) {
+      // The consumer is not draining; stop the inflow at the socket and
+      // let the output pump fail the stream.
+      overflowed = true;
+      try {
+        pooled.ws.close();
+      } catch { /* already closing */ }
+      notify();
+      return;
+    }
     frames.push(parseWSFrame(data));
     notify();
   });
@@ -722,7 +795,7 @@ async function runWSReceive(
   // Socket -> outputs. Owns the terminal transition.
   const outputPump = async (): Promise<void> => {
     while (true) {
-      while (frames.length > 0) {
+      while (frames.length > 0 && !overflowed) {
         const frame = frames.shift()!;
         if (frame.kind === "error") {
           h.fireError(new InvocationError(ERR_STREAM_ERROR, frame.message, { error: frame.error }));
@@ -730,6 +803,15 @@ async function runWSReceive(
         }
         // Throws if the invocation terminated while parked: stop emitting.
         await h.emitOutput(frame.value);
+      }
+      if (overflowed) {
+        h.fireError(
+          new InvocationError(
+            ERR_STREAM_ERROR,
+            `backpressure overflow: more than ${MAX_BUFFERED_FRAMES} undelivered frames`,
+          ),
+        );
+        return;
       }
       if (h.signal.aborted) return;
       if (socketClosed) {
@@ -760,6 +842,7 @@ async function runWSReceive(
   };
 
   try {
+    sendFirstFrameBearer(pooled, asyncOp, server, args.context);
     await Promise.all([
       outputPump().catch((e: unknown) => {
         h.fireError(
@@ -786,15 +869,15 @@ async function runWSSend(
   pool: WSPool,
   serverURL: string,
   address: string,
-  doc: AsyncAPIDocument,
   asyncOp: AsyncAPIOperation,
+  server: AsyncAPIServer | undefined,
   args: BindingInvocationArgs,
   h: Handle,
 ): Promise<void> {
   let pooled: PooledWS;
   try {
     pooled = await pool.acquire(serverURL, address, {
-      buildURL: (base, addr) => buildWSURL(base, addr, doc, asyncOp, args.context),
+      buildURL: (base, addr) => buildWSURL(base, addr, asyncOp, server, args.context),
       signal: h.signal,
     });
   } catch (e: unknown) {
@@ -803,11 +886,33 @@ async function runWSSend(
     return;
   }
 
+  // A socket that dies mid-stream must fail the publish, not silently
+  // swallow frames and then close as success. The terminal also rejects
+  // any caller write parked on the input channel.
+  const removeClose = pooled.onClose((err) => {
+    h.fireError(
+      new InvocationError(
+        ERR_STREAM_ERROR,
+        err ? `socket failed mid-publish: ${err.message}` : "socket closed mid-publish",
+      ),
+    );
+  });
+
   try {
-    // Every input is one frame; the loop ends cleanly when the caller closes
-    // input, and throws if the invocation terminates.
-    for await (const msg of h.inputs()) {
-      pooled.send(JSON.stringify(msg));
+    sendFirstFrameBearer(pooled, asyncOp, server, args.context);
+
+    if (noInputDeclared(args)) {
+      // Operation-layer no-input convention: the caller never writes nor
+      // closes. Close input on entry and publish one empty-object message.
+      void h.closeInput();
+      pooled.send(JSON.stringify({}));
+    } else {
+      // Every input is one frame; the loop ends cleanly when the caller
+      // closes input, and throws if the invocation terminates. `send`
+      // throws on a dead socket, so no frame is ever silently dropped.
+      for await (const msg of h.inputs()) {
+        pooled.send(JSON.stringify(msg));
+      }
     }
     h.closeOutput();
   } catch (e: unknown) {
@@ -817,6 +922,7 @@ async function runWSSend(
         : new InvocationError(ERR_STREAM_ERROR, errorMessage(e)),
     );
   } finally {
+    removeClose();
     pooled.release();
   }
 }

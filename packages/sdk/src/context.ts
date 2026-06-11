@@ -281,17 +281,25 @@ const REQUIREMENT_FIELDS: Record<string, string> = {
   "auth.oauth2": "accessToken",
 };
 
-/** True when the stored context can satisfy every requirement of at least one alternative. */
+/**
+ * True when the stored context can satisfy every requirement of at least one
+ * alternative. An alternative with no requirements never satisfies (the
+ * binding-invoker role requires at least one requirement per alternative;
+ * treating a malformed empty alternative as vacuously satisfied would hand
+ * stored context to any challenge).
+ */
 export function contextSatisfies(
   ctx: Record<string, unknown>,
   details: ContextRequiredDetails,
 ): boolean {
-  return details.alternatives.some((alt) =>
-    alt.requirements.every((req) => {
-      const field = REQUIREMENT_FIELDS[req.type] ?? req.type;
-      const v = ctx[field];
-      return v !== undefined && v !== null && v !== "";
-    }),
+  return details.alternatives.some(
+    (alt) =>
+      alt.requirements.length > 0 &&
+      alt.requirements.every((req) => {
+        const field = REQUIREMENT_FIELDS[req.type] ?? req.type;
+        const v = ctx[field];
+        return v !== undefined && v !== null && v !== "";
+      }),
   );
 }
 
@@ -315,22 +323,3 @@ export function storeContextResolver(store: ContextStore): ContextResolver {
   };
 }
 
-// ---------------------------------------------------------------------------
-// Error classes
-// ---------------------------------------------------------------------------
-
-/** Thrown when an invoker cannot proceed because required context (credentials, configuration) is missing. */
-export class ContextInsufficientError extends Error {
-  constructor(message = "openbindings: context insufficient for this binding") {
-    super(message);
-    this.name = "ContextInsufficientError";
-  }
-}
-
-/** Thrown when context is insufficient and no platform callbacks are available to resolve it interactively. */
-export class ResolutionUnavailableError extends Error {
-  constructor(message = "openbindings: interactive context resolution not available") {
-    super(message);
-    this.name = "ResolutionUnavailableError";
-  }
-}

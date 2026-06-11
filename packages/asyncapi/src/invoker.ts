@@ -50,6 +50,14 @@ async function loadDoc(
 // Invoker
 // ---------------------------------------------------------------------------
 
+/**
+ * A fetch that always rejects: `prepareBinding` is side-effect-free by
+ * contract, so external $refs must never be resolved over the network in
+ * the preflight path.
+ */
+const rejectNetworkFetch: typeof globalThis.fetch = () =>
+  Promise.reject(new Error("openbindings: prepareBinding performs no network I/O"));
+
 /** Invokes AsyncAPI 3.x bindings over HTTP, SSE, and WebSocket protocols. */
 export class AsyncAPIInvoker implements BindingInvoker {
   private readonly docCache = new Map<string, AsyncAPIDocument>();
@@ -84,13 +92,20 @@ export class AsyncAPIInvoker implements BindingInvoker {
    * Side-effect-free preflight: reports the context this binding would
    * require, or null when the binding can proceed (or the answer is not
    * knowable without network I/O). Only inline source content and the warm
-   * doc cache are consulted; nothing is fetched.
+   * doc cache are consulted; nothing is fetched — including external $refs
+   * inside inline content, which parse against a rejecting fetch and
+   * collapse to "not knowable" (null).
    */
   async prepareBinding(args: BindingInvocationArgs): Promise<ContextRequiredDetails | null> {
     let doc: AsyncAPIDocument | undefined;
     if (args.source.content != null) {
       try {
-        doc = await parseAsyncAPIDocument(args.source.location, args.source.content);
+        doc = await parseAsyncAPIDocument(
+          args.source.location,
+          args.source.content,
+          undefined,
+          rejectNetworkFetch,
+        );
       } catch {
         return null;
       }
@@ -103,8 +118,8 @@ export class AsyncAPIInvoker implements BindingInvoker {
       const opID = parseRef(args.ref);
       const asyncOp = (doc.operations ?? {})[opID];
       if (!asyncOp) return null;
-      const { url: serverURL } = resolveServer(doc, args.context);
-      return requiredContext(doc, asyncOp, serverURL, args.context);
+      const { url: serverURL, server } = resolveServer(doc, args.context);
+      return requiredContext(asyncOp, server, serverURL, args.context);
     } catch {
       return null;
     }

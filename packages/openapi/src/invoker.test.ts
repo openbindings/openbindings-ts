@@ -4,11 +4,13 @@ import {
   CONTEXT_REQUIRED,
   ERR_AUTH_REQUIRED,
   ERR_CANCELLED,
+  ERR_CONNECT_FAILED,
   ERR_EXECUTION_FAILED,
   ERR_INVALID_REF,
   ERR_MISSING_INPUT,
   ERR_PERMISSION_DENIED,
   ERR_REF_NOT_FOUND,
+  ERR_RESPONSE_ERROR,
   ERR_SOURCE_CONFIG_ERROR,
   ERR_SOURCE_LOAD_FAILED,
 } from "@openbindings/sdk";
@@ -202,6 +204,34 @@ describe("invokeBinding — request construction", () => {
     expect(out).toEqual([]);
     expect(requests[0].url).toBe("https://api.example.com/v1/search");
   });
+
+  it("percent-encodes path parameter values so reserved characters cannot corrupt the URL", async () => {
+    const { fetch, requests } = mockFetch(() => jsonResponse({ id: "x" }));
+    const call = new OpenAPIInvoker().invokeBinding({ source: SOURCE, ref: REF_GET_USER, fetch });
+
+    await call.write({ id: "a/b?c#d" });
+    await single(call.outputs);
+
+    expect(requests[0].url).toBe("https://api.example.com/v1/users/a%2Fb%3Fc%23d");
+  });
+
+  it("dispatches immediately with empty input under the operation-layer no-input convention", async () => {
+    // binding present + inputSchema absent: the operation declares NO input,
+    // so the caller never writes nor closes — even though the OpenAPI doc
+    // declares a required requestBody for this path.
+    const { fetch, requests } = mockFetch(() => jsonResponse({ id: "u1" }, 201));
+    const call = new OpenAPIInvoker().invokeBinding({
+      source: SOURCE,
+      ref: REF_CREATE_USER,
+      binding: { operation: "createUser", source: "api", ref: REF_CREATE_USER },
+      fetch,
+    });
+
+    await expect(single(call.outputs)).resolves.toEqual({ id: "u1" });
+    await expect(call.closed).resolves.toBeUndefined();
+    expect(requests).toHaveLength(1);
+    expect(JSON.parse(requests[0].body as string)).toEqual({});
+  });
 });
 
 describe("invokeBinding — pre-dispatch failures", () => {
@@ -247,6 +277,17 @@ describe("invokeBinding — pre-dispatch failures", () => {
     });
 
     await expect(call.closed).rejects.toMatchObject({ code: ERR_SOURCE_LOAD_FAILED });
+  });
+
+  it("maps a network-level fetch rejection to ERR_CONNECT_FAILED", async () => {
+    const fetch = (() =>
+      Promise.reject(new TypeError("fetch failed"))) as typeof globalThis.fetch;
+    const call = new OpenAPIInvoker().invokeBinding({ source: SOURCE, ref: REF_PING, fetch });
+
+    await expect(call.closed).rejects.toMatchObject({
+      code: ERR_CONNECT_FAILED,
+      message: "fetch failed",
+    });
   });
 });
 
@@ -301,6 +342,27 @@ describe("invokeBinding — responses", () => {
     const outs: unknown[] = [];
     for await (const o of call.outputs) outs.push(o);
     expect(outs).toEqual([undefined]);
+  });
+
+  it("cancels the body stream when the response exceeds the size limit", async () => {
+    let bodyCancelled = false;
+    const huge = new Uint8Array(1024 * 1024); // 1 MiB per chunk
+    const stream = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        controller.enqueue(huge);
+      },
+      cancel() {
+        bodyCancelled = true;
+      },
+    });
+    const { fetch } = mockFetch(() => new Response(stream, { status: 200 }));
+    const call = new OpenAPIInvoker().invokeBinding({ source: SOURCE, ref: REF_PING, fetch });
+
+    await expect(call.closed).rejects.toMatchObject({
+      code: ERR_RESPONSE_ERROR,
+      message: expect.stringContaining("byte limit"),
+    });
+    expect(bodyCancelled).toBe(true);
   });
 
   it("aborts the in-flight request and terminates ERR_CANCELLED on cancel", async () => {
@@ -477,6 +539,38 @@ describe("invokeBinding — context negotiation", () => {
     });
     await single(call.outputs);
     expect(r2[0].headers.get("Authorization")).toBe("Bearer at_1");
+  });
+
+  it("maps openIdConnect to auth.oauth2 and applies an accessToken as a bearer", async () => {
+    const spec = authSpec({
+      securitySchemes: {
+        oidc: {
+          type: "openIdConnect",
+          openIdConnectUrl: "https://auth.example.com/.well-known/openid-configuration",
+        },
+      },
+      security: [{ oidc: [] }],
+    });
+    const inv = new OpenAPIInvoker();
+
+    const { fetch: f1, requests: r1 } = mockFetch(() => jsonResponse({}));
+    await expect(
+      inv.invokeBinding({ source: authSource(spec), ref: REF_DATA, fetch: f1 }).closed,
+    ).rejects.toMatchObject({
+      code: CONTEXT_REQUIRED,
+      details: { alternatives: [{ requirements: [{ type: "auth.oauth2" }] }] },
+    });
+    expect(r1).toHaveLength(0);
+
+    const { fetch: f2, requests: r2 } = mockFetch(() => jsonResponse({}));
+    const call = inv.invokeBinding({
+      source: authSource(spec),
+      ref: REF_DATA,
+      context: { accessToken: "at_2" },
+      fetch: f2,
+    });
+    await single(call.outputs);
+    expect(r2[0].headers.get("Authorization")).toBe("Bearer at_2");
   });
 
   it("treats multiple security-requirement objects as alternatives (OR)", async () => {

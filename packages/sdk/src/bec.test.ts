@@ -13,8 +13,6 @@ import {
   contextString,
   contextSatisfies,
   storeContextResolver,
-  ContextInsufficientError,
-  ResolutionUnavailableError,
   OperationInvoker,
   InvocationImpl,
   single,
@@ -260,30 +258,5 @@ describe("context flow", () => {
     const a = op.formats();
     a.push({ token: "junk@0.0" });
     expect(op.formats()).toHaveLength(1);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// BEC error classes
-// ---------------------------------------------------------------------------
-
-describe("BEC error classes", () => {
-  it("ContextInsufficientError is instanceof-checkable", () => {
-    const err = new ContextInsufficientError();
-    expect(err).toBeInstanceOf(ContextInsufficientError);
-    expect(err).toBeInstanceOf(Error);
-    expect(err.name).toBe("ContextInsufficientError");
-  });
-
-  it("ResolutionUnavailableError is instanceof-checkable", () => {
-    const err = new ResolutionUnavailableError();
-    expect(err).toBeInstanceOf(ResolutionUnavailableError);
-    expect(err).toBeInstanceOf(Error);
-    expect(err.name).toBe("ResolutionUnavailableError");
-  });
-
-  it("custom messages are preserved", () => {
-    expect(new ContextInsufficientError("custom a").message).toBe("custom a");
-    expect(new ResolutionUnavailableError("custom b").message).toBe("custom b");
   });
 });

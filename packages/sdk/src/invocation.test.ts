@@ -312,6 +312,19 @@ describe("OBI-T-07 validation hook", () => {
 });
 
 describe("cancellation & close", () => {
+  it("the signal aborts on EVERY terminal transition (Done() parity with Go)", () => {
+    // fireError — including caller-side terminals like T-07 — must tear
+    // down binding work; the signal is the binding's only lifecycle channel.
+    const errored = new InvocationImpl<never, never>();
+    expect(errored.signal.aborted).toBe(false);
+    errored.fireError(new InvocationError("ERR_RUNTIME", "terminal"));
+    expect(errored.signal.aborted).toBe(true);
+
+    const closed = new InvocationImpl<never, never>();
+    closed.closeOutput();
+    expect(closed.signal.aborted).toBe(true);
+  });
+
   it("cancel() before any drive tears down an inert handle", async () => {
     const inv = new InvocationImpl<never, never>();
     await inv.cancel();

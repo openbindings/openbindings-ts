@@ -95,7 +95,43 @@ describe("validateInterface", () => {
       ...iface.bindings!["getUser.main"],
       inputTransform: { expression: "foo" } as any,
     };
-    expect(() => validateInterface(iface)).toThrow("must be a non-empty JSONata expression");
+    expect(() => validateInterface(iface)).toThrow(
+      "must be a JSONata expression string or a $ref object",
+    );
+  });
+
+  it("accepts empty transform expressions (no document rule forbids them)", () => {
+    // The schema allows any string; empty expressions fail at invoke time
+    // (ERR_TRANSFORM_ERROR / EmptyTransformExpressionError), not at
+    // document validation.
+    const iface = minimalInterface();
+    iface.transforms = { t: "" };
+    iface.bindings!["getUser.main"] = {
+      ...iface.bindings!["getUser.main"],
+      inputTransform: "",
+      outputTransform: { $ref: "#/transforms/t" },
+    };
+    expect(() => validateInterface(iface)).not.toThrow();
+  });
+
+  it("cites OBI-D-11 for unresolvable transform $refs", () => {
+    const iface = minimalInterface();
+    iface.bindings!["getUser.main"] = {
+      ...iface.bindings!["getUser.main"],
+      inputTransform: { $ref: "#/transforms/nonexistent" },
+    };
+    expect(() => validateInterface(iface)).toThrow(/OBI-D-11/);
+  });
+
+  it("accepts any non-empty sources[*].format string at document level (OBI-T-01)", () => {
+    // Spec §6.4 deliberately does not constrain the format value beyond
+    // being a string; rejecting unrecognized spellings would make the
+    // document fail solely due to an unsupported binding format.
+    const iface = minimalInterface();
+    iface.sources!.main.format = "workers_rpc@1.0";
+    expect(() => validateInterface(iface)).not.toThrow();
+    iface.sources!.main.format = "vnd custom";
+    expect(() => validateInterface(iface)).not.toThrow();
   });
 
   it("validates alias uniqueness", () => {
@@ -107,7 +143,7 @@ describe("validateInterface", () => {
   });
 });
 
-describe("validateInterface example validation (OBI-D-15)", () => {
+describe("validateInterface example validation (OBI-D-12)", () => {
   function ifaceWithExample(overrides?: {
     input?: unknown;
     output?: unknown;
@@ -157,7 +193,7 @@ describe("validateInterface example validation (OBI-D-15)", () => {
   it("fails when example input does not match the input schema", () => {
     const iface = ifaceWithExample({ input: { name: 123 } });
     expect(() => validateInterface(iface,)).toThrow(
-      /OBI-D-15/,
+      /OBI-D-12/,
     );
     try {
       validateInterface(iface,);
@@ -171,7 +207,7 @@ describe("validateInterface example validation (OBI-D-15)", () => {
   it("fails when example output does not match the output schema", () => {
     const iface = ifaceWithExample({ output: { id: "not-a-number" } });
     expect(() => validateInterface(iface,)).toThrow(
-      /OBI-D-15/,
+      /OBI-D-12/,
     );
     try {
       validateInterface(iface,);
@@ -184,9 +220,9 @@ describe("validateInterface example validation (OBI-D-15)", () => {
 
   it("checks examples by default", () => {
     const iface = ifaceWithExample({ input: { name: 123 } });
-    expect(() => validateInterface(iface)).toThrow(/OBI-D-15/);
-    expect(() => validateInterface(iface, {})).toThrow(/OBI-D-15/);
-    expect(() => validateInterface(iface,)).toThrow(/OBI-D-15/);
+    expect(() => validateInterface(iface)).toThrow(/OBI-D-12/);
+    expect(() => validateInterface(iface, {})).toThrow(/OBI-D-12/);
+    expect(() => validateInterface(iface,)).toThrow(/OBI-D-12/);
   });
 
   it("skips operations without examples gracefully", () => {
@@ -211,5 +247,71 @@ describe("validateInterface example validation (OBI-D-15)", () => {
   it("skips examples when the operation has no schemas", () => {
     const iface = ifaceWithExample({ inputSchema: null, outputSchema: null });
     expect(() => validateInterface(iface,)).not.toThrow();
+  });
+});
+
+describe("validateInterface example validation edge cases (OBI-D-12)", () => {
+  function baseIface(input: Record<string, unknown>, example: Record<string, unknown>): OBInterface {
+    return {
+      openbindings: "0.2.0",
+      operations: {
+        greet: {
+          input,
+          examples: { ex: example },
+        },
+      },
+    };
+  }
+
+  it("validates an explicit null example value (distinct from absent)", () => {
+    const iface = baseIface({ type: "object" }, { input: null });
+    expect(() => validateInterface(iface)).toThrow(/OBI-D-12/);
+  });
+
+  it("does not validate an absent example value", () => {
+    const iface = baseIface({ type: "object" }, { output: { ok: true } });
+    expect(() => validateInterface(iface)).not.toThrow();
+  });
+
+  it("abstains from example validation when the operation schema has an external $ref", () => {
+    // Capability-relative verification: an unresolvable external reference
+    // means the validator abstains rather than failing the document.
+    const iface = baseIface(
+      { $ref: "https://schemas.example.com/user.json" },
+      { input: { anything: true } },
+    );
+    expect(() => validateInterface(iface)).not.toThrow();
+  });
+
+  it("abstains when an external $ref is reachable via the schemas map", () => {
+    const iface: OBInterface = {
+      openbindings: "0.2.0",
+      schemas: {
+        User: { $ref: "https://schemas.example.com/user.json" },
+      },
+      operations: {
+        greet: {
+          input: { $ref: "#/schemas/User" },
+          examples: { ex: { input: { anything: true } } },
+        },
+      },
+    };
+    expect(() => validateInterface(iface)).not.toThrow();
+  });
+
+  it("still validates examples against internal #/schemas/ refs", () => {
+    const iface: OBInterface = {
+      openbindings: "0.2.0",
+      schemas: {
+        User: { type: "object", required: ["name"] },
+      },
+      operations: {
+        greet: {
+          input: { $ref: "#/schemas/User" },
+          examples: { bad: { input: { wrong: 42 } } },
+        },
+      },
+    };
+    expect(() => validateInterface(iface)).toThrow(/OBI-D-12/);
   });
 });

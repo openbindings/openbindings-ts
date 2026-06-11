@@ -156,6 +156,12 @@ export class OperationInvoker {
    * Resolves an OBI operation to a binding and returns the invocation
    * handle. Returns synchronously; creation is inert (no I/O until the
    * invocation is driven).
+   *
+   * Contract narrowing vs the bare handle: `header` on an operation-layer
+   * invocation settles with the binding's metadata at the FIRST DELIVERED
+   * output (or at terminal), not the instant the binding sets it — forwarding
+   * any earlier would pin metadata from an attempt that CONTEXT_REQUIRED
+   * negotiation may yet discard and re-drive.
    */
   invoke<I = unknown, O = unknown>(args: OperationInvocationArgs): Invocation<I, O> {
     const iface = args.interface;
@@ -313,11 +319,22 @@ export class OperationInvoker {
 
     const pumpInputs = async (inner: Invocation<unknown, unknown>): Promise<void> => {
       const myGen = attemptGen;
-      // Replay the prefix the previous attempt(s) already consumed.
-      for (let i = 0; i < replayLog.length; i++) {
+      // Replay the prefix the previous attempt(s) already consumed. Snapshot
+      // the ARRAY REFERENCE first: this attempt's own first output closes the
+      // retry window and rebinds `replayLog` to a fresh empty array — the
+      // snapshot keeps the in-flight replay iterating the full prefix instead
+      // of being truncated mid-loop (which would silently drop inputs).
+      const replay = replayLog;
+      for (let i = 0; i < replay.length; i++) {
         try {
-          await inner.write(replayLog[i]);
-        } catch {
+          await inner.write(replay[i]);
+        } catch (err) {
+          if (err instanceof InvocationError && err.code === ERR_INPUT_CLOSED) {
+            // Same propagation as the live loop below: the binding stopped
+            // reading; further caller writes must reject rather than be
+            // silently accepted into a buffer nobody drains.
+            void callerInv.closeInput();
+          }
           return; // inner terminal or input-closed; the output loop owns reporting
         }
       }
@@ -466,16 +483,20 @@ export class OperationInvoker {
         continue;
       }
 
-      if (surface) {
+      // Metadata forwarding races a concurrent caller-side terminal (cancel):
+      // setHeader/setTrailer throw on a settled handle. Guard explicitly —
+      // when the caller handle already terminated there is nothing to forward
+      // and nothing left to report.
+      try {
         await forwardHeader(inner);
         const t = terminalTrailer(inner);
         if (t) callerInv.setTrailer(t);
+      } catch {
+        // Caller handle already terminal; metadata can no longer land.
+      }
+      if (surface) {
         callerInv.fireError(surface);
       } else {
-        // Clean end (or caller-side teardown, where these are no-ops).
-        await forwardHeader(inner);
-        const t = terminalTrailer(inner);
-        if (t) callerInv.setTrailer(t);
         callerInv.closeOutput();
       }
       return;

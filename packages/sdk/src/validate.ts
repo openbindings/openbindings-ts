@@ -5,7 +5,6 @@ import {
   isHigherMajorOrPre1MinorThanMaxTested,
   MAX_TESTED_VERSION,
 } from "./version.js";
-import { isFormatToken, isValidFormatName } from "./format-token.js";
 import { ValidationError } from "./errors.js";
 import { validateAgainstOBISchema, validateExamplesAgainstOpSchemas } from "./schema-validation.js";
 
@@ -177,11 +176,12 @@ export function validateInterface(
     // OBI-D-04: source keys must match the identifier pattern.
     validateIdent(errs, "sources key", k);
     const src = iface.sources![k];
+    // The spec (§6.4) requires format to be a non-empty string but
+    // deliberately does not constrain its syntax; rejecting unrecognized
+    // format spellings at document level would violate OBI-T-01.
     const fmtVal = (src.format ?? "").trim();
     if (!fmtVal) {
       errs.push(`sources["${k}"].format: required`);
-    } else if (!isFormatToken(fmtVal) && !isValidFormatName(fmtVal)) {
-      errs.push(`sources["${k}"].format: invalid format "${src.format}"`);
     }
     const hasLoc = !!(src.location ?? "").trim();
     const hasCnt = src.content != null;
@@ -245,7 +245,7 @@ export function validateInterface(
   // OBI-D-02: validate the document against openbindings.schema.json.
   validateAgainstOBISchema(errs, iface);
 
-  // OBI-D-15: validate every example.input/output against its
+  // OBI-D-12: validate every example.input/output against its
   // operation's input/output schema, when the respective schema is specified.
   validateExamplesAgainstOpSchemas(errs, iface);
 
@@ -275,16 +275,16 @@ function validateTransformRef(
 ): void {
   const pfx = "#/transforms/";
   if (!ref.startsWith(pfx)) {
-    errs.push(`${prefix}: must start with "${pfx}" (OBI-D-12)`);
+    errs.push(`${prefix}: must start with "${pfx}" (OBI-D-11)`);
     return;
   }
   const name = ref.slice(pfx.length);
   if (!name) {
-    errs.push(`${prefix}: transform name is empty (OBI-D-12)`);
+    errs.push(`${prefix}: transform name is empty (OBI-D-11)`);
     return;
   }
-  if (!transforms?.[name]) {
-    errs.push(`${prefix}: references unknown transform "${name}" (OBI-D-12)`);
+  if (transforms?.[name] === undefined) {
+    errs.push(`${prefix}: references unknown transform "${name}" (OBI-D-11)`);
   }
 }
 
@@ -293,9 +293,13 @@ function validateInlineTransform(
   prefix: string,
   expr: TransformOrRef,
 ): void {
-  // Per v0.2 spec §6.5, transforms are JSONata 2.0 expression strings.
-  if (typeof expr !== "string" || !expr.trim()) {
-    errs.push(`${prefix}: must be a non-empty JSONata expression`);
+  // Per v0.2 spec §6.5, inline transforms are JSONata 2.0 expression
+  // strings. No document rule constrains the expression's content (an empty
+  // string is schema-valid); evaluation failures, including empty
+  // expressions, surface at invoke time per OBI-T-10
+  // (EmptyTransformExpressionError / ERR_TRANSFORM_ERROR).
+  if (typeof expr !== "string") {
+    errs.push(`${prefix}: must be a JSONata expression string or a $ref object`);
   }
 }
 

@@ -207,6 +207,25 @@ describe("GraphQLInvoker unary", () => {
     expect(calls).toHaveLength(3);
   });
 
+  it("keys the introspection cache by the full endpoint URL, not the host", async () => {
+    const { fn, calls } = mockFetch((body) =>
+      body.query.includes("__schema")
+        ? jsonResponse({ data: { __schema: testSchema } })
+        : jsonResponse({ data: { ping: "pong" } }),
+    );
+    const invoker = new GraphQLInvoker();
+    const srcA = { format: "graphql", location: "https://api.example.com/graphql" };
+    const srcB = { format: "graphql", location: "https://api.example.com/tenant-b/graphql" };
+
+    await expect(single(invoker.invokeBinding({ source: srcA, ref: "Query/ping", fetch: fn }).outputs)).resolves.toBe("pong");
+    await expect(single(invoker.invokeBinding({ source: srcB, ref: "Query/ping", fetch: fn }).outputs)).resolves.toBe("pong");
+
+    // Two endpoints on one host: each must be introspected separately.
+    const introspections = calls.filter((c) => c.body.query.includes("__schema"));
+    expect(introspections).toHaveLength(2);
+    expect(new Set(introspections.map((c) => c.url)).size).toBe(2);
+  });
+
   it("maps GraphQL response errors to ERR_EXECUTION_FAILED with errors details", async () => {
     const { fn } = mockFetch(() => jsonResponse({ errors: [{ message: "boom" }] }));
     const call = new GraphQLInvoker().invokeBinding({ source, ref: "Query/ping", fetch: fn });
@@ -395,6 +414,33 @@ describe("GraphQLInvoker subscriptions", () => {
     ws.receive({ type: "next", payload: { data: { onOrder: { id: "o1", status: "created" } } } });
     ws.fail();
     await expect(call.closed).rejects.toMatchObject({ code: ERR_STREAM_ERROR });
+  });
+
+  it("maps an abnormal post-ack close without a complete frame to ERR_STREAM_ERROR", async () => {
+    const { call, ws } = await start("Subscription/onOrder");
+
+    ws.receive({ type: "next", payload: { data: { onOrder: { id: "o1", status: "created" } } } });
+    ws.close(); // server drops the connection without sending `complete`
+
+    await expect(call.closed).rejects.toMatchObject({
+      code: ERR_STREAM_ERROR,
+      message: expect.stringContaining("before subscription complete"),
+    });
+  });
+
+  it("bounds the event queue and fails ERR_STREAM_ERROR on backpressure overflow", async () => {
+    const { call, ws } = await start("Subscription/onOrder");
+
+    // Nobody drains the outputs; flood past the queue bound.
+    for (let i = 0; i < 1100; i++) {
+      ws.receive({ type: "next", payload: { data: { onOrder: { id: String(i), status: "s" } } } });
+    }
+
+    await expect(call.closed).rejects.toMatchObject({
+      code: ERR_STREAM_ERROR,
+      message: expect.stringContaining("backpressure overflow"),
+    });
+    await vi.waitFor(() => { expect(ws.readyState).toBe(FakeWebSocket.CLOSED); });
   });
 
   it("cancel tears down the WebSocket", async () => {

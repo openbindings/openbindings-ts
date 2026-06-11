@@ -1,9 +1,10 @@
 /**
  * Reference conformance runner for the OpenBindings TypeScript SDK.
  *
- * Walks fixture files under <corpus>/{document,tool}/, parses each embedded
- * `document` with @openbindings/sdk, calls validateInterface(), and compares
- * the SDK's verdict against the fixture's `valid` field.
+ * Walks fixture files under <corpus>/{document,tool}/, parses AND validates
+ * each embedded `document` with @openbindings/sdk (validateDocument =
+ * parseDocument + validateInterface, so the full OBI-D rule walk runs), and
+ * compares the SDK's verdict against the fixture's `valid` field.
  *
  * Each SDK runs the corpus independently — there is no single cross-SDK CI
  * job. The corpus lives in the spec repo (../../../spec/conformance by
@@ -19,7 +20,7 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, basename, dirname, isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  parseDocument,
+  validateDocument,
   isHigherMajorOrPre1MinorThanMaxTested,
   MAX_TESTED_VERSION,
 } from "../src/index.js";
@@ -112,7 +113,7 @@ function runOne(rule: string, t: FixtureTest): Result {
   let actual = false;
   let reason: string | undefined;
   try {
-    parseDocument(JSON.stringify(t.document));
+    validateDocument(JSON.stringify(t.document));
     actual = true;
   } catch (e) {
     reason = `parse/validate: ${(e as Error).message}`;

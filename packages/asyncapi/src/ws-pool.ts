@@ -36,8 +36,18 @@ export interface PooledWS {
    * undefined for a clean close. Returns a removal function.
    */
   onClose(handler: (err?: Error) => void): () => void;
-  /** Send a frame on the shared socket. */
+  /**
+   * Send a frame on the shared socket. Throws when the socket is not open:
+   * silently dropping frames would let a publish complete "successfully"
+   * after the connection died.
+   */
   send(data: string): void;
+  /**
+   * Returns true the first time the marker `key` is claimed on this
+   * CONNECTION, false afterwards. Lets per-connection conventions (e.g. the
+   * first-frame bearer) run once per socket rather than once per invocation.
+   */
+  once(key: string): boolean;
   /** Release this reference. Starts idle timer if last ref. */
   release(): void;
 }
@@ -55,6 +65,8 @@ interface PoolEntry {
   idleTimer: ReturnType<typeof setTimeout> | null;
   messageHandlers: Set<(data: string) => void>;
   closeHandlers: Set<(err?: Error) => void>;
+  /** Markers claimed via PooledWS.once for this connection's lifetime. */
+  onceKeys: Set<string>;
   ready: Promise<void>;
   key: string;
 }
@@ -183,6 +195,7 @@ export class WSPool {
       idleTimer: null,
       messageHandlers,
       closeHandlers,
+      onceKeys: new Set(),
       ready,
       key,
     };
@@ -224,9 +237,16 @@ export class WSPool {
       },
 
       send(data: string): void {
-        if (entry.ws.readyState === WebSocket.OPEN) {
-          entry.ws.send(data);
+        if (entry.ws.readyState !== WebSocket.OPEN) {
+          throw new Error("WebSocket is not open");
         }
+        entry.ws.send(data);
+      },
+
+      once(key: string): boolean {
+        if (entry.onceKeys.has(key)) return false;
+        entry.onceKeys.add(key);
+        return true;
       },
 
       release: () => {
@@ -234,6 +254,11 @@ export class WSPool {
         this.startIdleTimer(entry);
       },
     };
+  }
+
+  /** @internal Test/diagnostic hook: the current ref count for a pooled key. */
+  refCount(serverURL: string, address: string): number {
+    return this.conns.get(`${serverURL}|${address}`)?.refCount ?? 0;
   }
 
   /** Close all pooled connections. */

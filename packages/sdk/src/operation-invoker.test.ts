@@ -190,6 +190,25 @@ class MockBindingInvoker implements BindingInvoker {
         h.closeOutput();
         return;
       }
+      case "collectThenChallenge": {
+        // Client-streaming with a context gate: reads the WHOLE input stream
+        // first, then challenges if unauthenticated (read ≠ consumed — the
+        // streamed-prefix replay case). With context, acks per input AS READ,
+        // so the retry's first output lands while the replay is in flight.
+        if (!args.context?.["bearerToken"]) {
+          for await (const chunk of h.inputs()) {
+            reads.push(chunk);
+          }
+          h.fireError(contextRequiredError("bearer required", BEARER_DETAILS));
+          return;
+        }
+        for await (const chunk of h.inputs()) {
+          reads.push(chunk);
+          await h.emitOutput({ ack: (chunk as Record<string, unknown>)["n"] });
+        }
+        h.closeOutput();
+        return;
+      }
       default:
         h.fireError(new InvocationError(ERR_RUNTIME, `unknown ref: ${args.ref}`));
     }
@@ -263,6 +282,7 @@ function testInterface(): OBInterface {
       },
       chat: {},
       uploadChunks: {},
+      uploadAuth: {},
     },
     sources: {
       mock: { format: "mock@1.0", location: "mem://mock" },
@@ -281,6 +301,7 @@ function testInterface(): OBInterface {
       "watchTyped.main": { operation: "watchTyped", source: "mock", ref: "streamBadSecond" },
       "chat.main": { operation: "chat", source: "mock", ref: "chat" },
       "uploadChunks.main": { operation: "uploadChunks", source: "mock", ref: "uploadChunks" },
+      "uploadAuth.main": { operation: "uploadAuth", source: "mock", ref: "collectThenChallenge" },
     },
   };
 }
@@ -567,6 +588,42 @@ describe("CONTEXT_REQUIRED", () => {
     // Both attempts read the same lone input: the prefix was replayed.
     expect(mock.reads).toEqual([[{ id: "u1" }], [{ id: "u1" }]]);
     expect(mock.contexts[1]).toMatchObject({ bearerToken: "tok-123" });
+  });
+
+  it("resolve-and-retry replays a streamed multi-input prefix in full [CS]", async () => {
+    // Regression: the retry attempt's own first output closes the retry
+    // window mid-replay; the in-flight replay must still deliver the FULL
+    // prefix (a live-rebound log truncated it to 3 items and closed clean).
+    const mock = new MockBindingInvoker();
+    const resolver = vi.fn(async () => ({ bearerToken: "tok" }));
+    const op = makeInvoker(mock, { contextResolver: resolver });
+    const call = op.invoke({ interface: testInterface(), operation: "uploadAuth" });
+    const N = 6;
+    for (let n = 1; n <= N; n++) await call.write({ n });
+    await call.close();
+
+    const acks = await collect(call.outputs);
+    expect(acks).toEqual(Array.from({ length: N }, (_, i) => ({ ack: i + 1 })));
+    expect(mock.attempts).toBe(2);
+    // Attempt 1 read all N (then challenged); attempt 2 must replay all N.
+    expect(mock.reads[0]).toHaveLength(N);
+    expect(mock.reads[1]).toHaveLength(N);
+    expect(mock.reads[1]).toEqual(Array.from({ length: N }, (_, i) => ({ n: i + 1 })));
+  });
+
+  it("a T-07 terminal tears down the in-flight binding attempt", async () => {
+    // Regression: a caller-side terminal (T-07) previously left the inner
+    // binding invocation stranded (its signal never aborted) — a permanent
+    // connection leak per validation failure.
+    const mock = new MockBindingInvoker();
+    const op = makeInvoker(mock);
+    const call = op.invoke({ interface: testInterface(), operation: "getUser" });
+    await expect(call.write({ id: 42 })).rejects.toMatchObject({ code: ERR_VALIDATION_FAILED });
+    await expect(call.closed).rejects.toMatchObject({ code: ERR_VALIDATION_FAILED });
+    // Give teardown propagation a few macrotasks.
+    await new Promise((r) => setTimeout(r, 20));
+    expect(mock.signals).toHaveLength(1);
+    expect(mock.signals[0]!.aborted).toBe(true);
   });
 
   it("surfaces when the resolver declines", async () => {

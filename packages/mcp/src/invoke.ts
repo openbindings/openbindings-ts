@@ -97,7 +97,13 @@ export async function runMCPBinding(
   // Tools and prompts take one named-arguments object; resource reads take
   // no input. Close input as early as possible so callers never have to.
   let input: Record<string, unknown> = {};
-  if (entityType === "resources") {
+  if (args.binding !== undefined && args.inputSchema === undefined) {
+    // Operation-layer no-input convention: the binding is populated but no
+    // input schema is, so the operation declares NO input (e.g. a
+    // zero-argument prompt or tool) — the caller never writes nor closes.
+    // Close input on entry and dispatch with empty arguments.
+    void inv.closeInput();
+  } else if (entityType === "resources") {
     void inv.closeInput();
   } else {
     const first = await readFirst(inv.inputs());
@@ -191,7 +197,10 @@ async function runTool(
 ): Promise<void> {
   // Progress callbacks are synchronous; chain the emits so they stay
   // ordered and observe emitOutput's backpressure without a side buffer.
+  // Once an emit fails the invocation is terminal: the terminated flag
+  // makes every queued and subsequent link a no-op.
   let progressChain: Promise<void> = Promise.resolve();
+  let progressTerminated = false;
 
   const result = await client.callTool(
     { name: toolName, arguments: toolArgs },
@@ -201,10 +210,13 @@ async function runTool(
       onprogress: (progress) => {
         progressChain = progressChain
           .then(() => {
+            if (progressTerminated) return;
             setHeaderOnce();
             return inv.emitOutput(progress);
           })
-          .catch(() => { /* invocation terminated; stop emitting */ });
+          .catch(() => {
+            progressTerminated = true; // invocation terminated; stop emitting
+          });
       },
     },
   );

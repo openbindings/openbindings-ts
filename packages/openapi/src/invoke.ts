@@ -16,7 +16,7 @@ import {
   ERR_INVALID_REF,
   ERR_SOURCE_CONFIG_ERROR,
   ERR_REF_NOT_FOUND,
-  ERR_EXECUTION_FAILED,
+  ERR_CONNECT_FAILED,
   ERR_RESPONSE_ERROR,
   ERR_MISSING_INPUT,
   type BindingHandle,
@@ -99,7 +99,14 @@ export async function runBinding(
   const takesInput = allParams.length > 0 || op.requestBody != null;
 
   let inputMap: Record<string, unknown>;
-  if (!takesInput) {
+  if (args.binding !== undefined && args.inputSchema === undefined) {
+    // Operation-layer no-input convention: the binding is populated but no
+    // input schema is, so the operation declares NO input — the caller never
+    // writes nor closes. Close input on entry and dispatch with an empty
+    // input, overriding whatever the OpenAPI document declares.
+    void inv.closeInput();
+    inputMap = {};
+  } else if (!takesInput) {
     // No-input operation: close input on entry so the caller never has to,
     // and dispatch immediately.
     void inv.closeInput();
@@ -201,7 +208,11 @@ async function doHTTPRequest(
       signal: inv.signal,
     });
   } catch (e: unknown) {
-    inv.fireError(new InvocationError(ERR_EXECUTION_FAILED, errorMessage(e)));
+    // Aborted while in flight: the handle is already terminal (caller
+    // cancel or another terminal transition); stay silent.
+    if (inv.signal.aborted) return;
+    // The request never produced a response: a transport-level failure.
+    inv.fireError(new InvocationError(ERR_CONNECT_FAILED, errorMessage(e)));
     return;
   }
 
@@ -355,7 +366,8 @@ function requirementType(scheme: OpenAPISecurityScheme): string | null {
     case "oauth2":
       return "auth.oauth2";
     case "openIdConnect":
-      return "auth.bearer";
+      // OpenID Connect resolves to an OAuth2 access token (Go SDK parity).
+      return "auth.oauth2";
     default:
       return null;
   }
@@ -444,7 +456,9 @@ function classifyInput(
     }
     switch (classification) {
       case "path":
-        resolvedPath = resolvedPath.replaceAll(`{${name}}`, String(value));
+        // Encode so a value containing `/`, `?`, or `#` cannot corrupt the
+        // request URL's path/query structure.
+        resolvedPath = resolvedPath.replaceAll(`{${name}}`, encodeURIComponent(String(value)));
         break;
       case "query":
         query[name] = value;
@@ -665,6 +679,9 @@ async function readResponseText(resp: Response, maxBytes: number): Promise<strin
       if (done) break;
       total += value.byteLength;
       if (total > maxBytes) {
+        // Cancel the body stream before bailing; releasing the lock alone
+        // leaves the response socket pinned on the remaining bytes.
+        await reader.cancel().catch(() => {});
         throw new Error(`response exceeds ${maxBytes} byte limit`);
       }
       chunks.push(decoder.decode(value, { stream: true }));
