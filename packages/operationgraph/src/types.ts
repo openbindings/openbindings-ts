@@ -1,71 +1,70 @@
 /**
- * Operation graph source document types (openbindings.operation-graph@0.2.0).
+ * Operation graph definition types (openbindings.operation-graph@0.2.0, the
+ * transparency rewrite). A graph is the addressable unit of the format: a
+ * binding's ref resolves to it via JSON Pointer; the JSON document hosting
+ * it is unconstrained and carries no type here.
  */
 
-/** Top-level operation graph source document. */
-export interface Document {
-  "openbindings.operation-graph": string;
-  graphs: Record<string, Graph>;
-}
-
-/** A single named operation graph. */
+/** One operation graph definition. */
 export interface Graph {
+  /**
+   * The graph's own format version declaration (the
+   * `openbindings.operation-graph` field). Each graph in a document declares
+   * its own version independently (OG-V-01, OG-T-02).
+   */
+  "openbindings.operation-graph": string;
   description?: string;
   nodes: Record<string, Node>;
   edges: Edge[];
 }
 
 /**
- * A typed node in the graph. The `type` field determines which other
- * fields are meaningful.
+ * A typed node. The `type` field is the discriminator determining which
+ * other fields are valid (enforced by validate's per-type field whitelists,
+ * mirroring the format schema).
  */
 export interface Node {
   type: string;
 
-  // All nodes
+  // All processing nodes (not input/output; OG-V-17).
   onError?: string;
 
-  // operation
+  // operation (the conduit) and each.
   operation?: string;
-  maxIterations?: number;
   timeout?: number;
 
-  // buffer
+  // each only.
+  maxIterations?: number;
+
+  // buffer.
   limit?: number;
   until?: unknown;
   through?: unknown;
 
-  // filter (schema-based)
+  // filter (schema-based).
   schema?: unknown;
 
-  // filter (expression-based), transform, map
+  // filter (expression-based), transform, map.
   transform?: string;
 
-  // exit
+  // exit.
   error?: boolean;
 }
 
-/** An edge connecting two nodes. */
+/** An edge connecting two nodes. Edges carry event streams and no logic. */
 export interface Edge {
   from: string;
   to: string;
 }
 
 /**
- * Parses an operation graph source document from JSON text or an already-parsed
- * object.
+ * Converts a JSON value (the target of a resolved ref) into a Graph. The
+ * value must be a JSON object; structural validity beyond that is
+ * validate's concern.
  */
-export function parseDocument(data: unknown): Document {
-  let parsed: unknown;
-  if (typeof data === "string") {
-    parsed = JSON.parse(data);
-  } else if (data instanceof Uint8Array) {
-    parsed = JSON.parse(new TextDecoder().decode(data));
-  } else {
-    parsed = data;
+export function graphFromValue(v: unknown): Graph {
+  if (typeof v !== "object" || v === null || Array.isArray(v)) {
+    throw new Error("resolved ref value is not a JSON object");
   }
-  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-    throw new Error("operation graph document must be a JSON object");
-  }
-  return parsed as Document;
+  return v as Graph;
 }

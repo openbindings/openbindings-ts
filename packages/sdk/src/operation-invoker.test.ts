@@ -345,6 +345,14 @@ describe("OperationInvoker wiring", () => {
       .toThrow(BindingNotFoundError);
   });
 
+  it("throws BindingNotFoundError when bindingKey names a binding for a different operation", () => {
+    // getUser.main binds the getUser operation; pinning it under "ping" must be
+    // refused, otherwise the wrong operation's schema/transforms would apply.
+    const op = makeInvoker();
+    expect(() => op.invoke({ interface: testInterface(), operation: "ping", bindingKey: "getUser.main" }))
+      .toThrow(BindingNotFoundError);
+  });
+
   it("throws UnknownSourceError synchronously when the binding's source is missing", () => {
     const iface = testInterface();
     delete iface.sources!["mock"];

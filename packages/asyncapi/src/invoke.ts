@@ -842,6 +842,10 @@ async function runWSReceive(
   };
 
   try {
+    // sendFirstFrameBearer may throw on a dead socket (pooled.send throws
+    // when the socket is not open), before either pump owns the terminal.
+    // Catch it here — mirroring runWSSend — so the terminal is a meaningful
+    // ERR_STREAM_ERROR, not the invoker's generic ERR_RUNTIME fallback.
     sendFirstFrameBearer(pooled, asyncOp, server, args.context);
     await Promise.all([
       outputPump().catch((e: unknown) => {
@@ -853,6 +857,12 @@ async function runWSReceive(
       }),
       inputPump(),
     ]);
+  } catch (e: unknown) {
+    h.fireError(
+      e instanceof InvocationError
+        ? e
+        : new InvocationError(ERR_STREAM_ERROR, errorMessage(e)),
+    );
   } finally {
     h.signal.removeEventListener("abort", onAbort);
     removeMsg();

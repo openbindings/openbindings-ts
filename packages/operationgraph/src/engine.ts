@@ -1,70 +1,78 @@
 /**
- * Operation graph execution engine.
+ * Operation graph execution engine (the transparency rewrite).
  *
  * Each node is an async task with its own {@link AsyncQueue} mailbox; the
- * engine routes data and completion events through those queues. Cancellation
- * is via `AbortSignal`; per-node timeouts race an AbortController against
- * `setTimeout`.
+ * engine routes data and completion events through those queues.
  *
- * Correctness invariants:
- *
- *   - **Exit short-circuit**: when an exit node fires, every in-flight node
- *     execution returns without emitting downstream events.
- *   - **maxIterations is per-event lineage**: each event carries its own
- *     lineage map; operation nodes increment their key before invoking and
- *     drop the event when the count reaches the limit.
- *   - **onError routing**: a node failure routes a wrapped error event to
- *     `onError`. Without `onError`, the error is silently dropped. Error
- *     propagation depth is bounded by {@link maxErrorDepth}.
- *   - **Completion propagation**: when a node has heard "complete" from each
- *     of its incoming edges, it (a) flushes buffer/combine state if any,
- *     then (b) propagates "complete" downstream. Completion travels through
- *     the same mailbox as data events to preserve FIFO ordering.
- *   - **Event amplification limit**: a global counter rejects executions
- *     that exceed {@link maxEvents}; map nodes inside cycles are the primary
- *     amplification vector.
+ * Semantics implemented:
+ *   - `operation` is the conduit: one held invocation per graph invocation.
+ *     Arriving events are written into it in order; when the inner binding
+ *     closes its input from below the node becomes non-accepting and later
+ *     events are WRITE_REJECTED error events. An unhandled terminal error on
+ *     the held invocation terminates the graph invocation with that error
+ *     (the identity law's terminal-status clause); onError opts it into
+ *     in-graph handling.
+ *   - `each` opens one single-write invocation per arriving event;
+ *     `maxIterations` bounds it per event lineage; failures are per-event.
+ *   - Caller writes stream through the input node, each rooting a lineage;
+ *     back-closure closes the caller-facing input side once every direct
+ *     consumer of the input node is a non-accepting conduit.
+ *   - `$input` is the lineage root; merge nodes (buffer, combine, the
+ *     conduit) take the element-wise max of lineage counts and keep a root
+ *     only when all contributors share one.
+ *   - Completion propagates per edge exactly once; at quiescence (no events
+ *     or inner invocations in flight, input closed) the engine injects any
+ *     undelivered edge completions — the spec's implementation-defined drain
+ *     detection for cycles (and error-route-fed merges).
  */
 import type {
   BindingHandle,
   BindingInvocationArgs,
+  Invocation,
   OperationInvoker,
   TransformEvaluator,
 } from "@openbindings/sdk";
 import {
+  ERR_CANCELLED,
   ERR_EVENT_LIMIT_EXCEEDED,
-  ERR_MAP_NOT_ARRAY,
+  ERR_INPUT_CLOSED,
   ERR_OPERATION_GRAPH_EXIT,
-  ERR_VALIDATION_FAILED,
   InvocationError,
   isTransformEvaluatorWithBindings,
 } from "@openbindings/sdk";
+import { MAP_NOT_ARRAY, TIMEOUT_EXCEEDED, TRANSFORM_UNDEFINED, WRITE_REJECTED } from "./constants.js";
 import type { Graph, Node } from "./types.js";
-import { validate } from "./validate.js";
 import {
   BufferState,
   CombineState,
+  NO_ROOT,
+  RootTracker,
+  SchemaCache,
   cloneEvent,
   copyLineage,
+  mergeMaxInto,
   newEvent,
   type GraphEvent,
-  type SchemaCache,
 } from "./state.js";
 
 /**
- * Maximum number of data events processed per graph invocation. Primarily
- * protects against map-in-cycle amplification.
+ * Maximum number of data events processed per graph invocation (the spec's
+ * SHOULD-level amplification backstop; map-in-cycle is the primary vector).
  */
 export const MAX_EVENTS = 100_000;
 
-/** Maximum depth of onError routing chains. */
+/**
+ * Maximum depth of onError routing chains, as defense in depth. The
+ * normative bound is lineage: error events inherit it and onError routes
+ * count as cycle edges (OG-V-09/OG-V-10).
+ */
 export const MAX_ERROR_DEPTH = 32;
 
 /**
  * A FIFO async queue used for per-node mailboxes. `push` is non-blocking;
- * `next` resolves when an item arrives. `close` signals end-of-stream;
- * subsequent `next` calls return `{ done: true }` once the buffer drains.
+ * `next` resolves when an item arrives. `close` signals end-of-stream.
  */
-export class AsyncQueue<T> implements AsyncIterable<T> {
+export class AsyncQueue<T> {
   private readonly buffer: T[] = [];
   private readonly waiters: Array<(v: IteratorResult<T>) => void> = [];
   private closed = false;
@@ -95,21 +103,42 @@ export class AsyncQueue<T> implements AsyncIterable<T> {
     }
     return new Promise((resolve) => this.waiters.push(resolve));
   }
+}
 
-  [Symbol.asyncIterator](): AsyncIterator<T> {
-    return {
-      next: () => this.next(),
-    };
+/**
+ * The in-graph `error` value for a failure originating in an inner
+ * invocation: the inner terminal error surfaced verbatim. An
+ * InvocationError's code is its routable identity.
+ */
+function errValue(err: unknown): unknown {
+  if (err instanceof InvocationError) return err.code;
+  return err instanceof Error ? err.message : String(err);
+}
+
+/** An operation node's held invocation: one per graph invocation. */
+class ConduitState {
+  started = false;
+  accepting = true;
+  call?: Invocation<unknown, unknown>;
+  timedOut = false;
+  timer?: ReturnType<typeof setTimeout>;
+  readonly lineage = new Map<string, number>();
+  readonly roots = new RootTracker();
+
+  mergeEvent(ev: GraphEvent): void {
+    mergeMaxInto(this.lineage, ev.lineage);
+    this.roots.add(ev.root);
+  }
+
+  merged(): { lineage: Map<string, number>; root: number } {
+    return { lineage: copyLineage(this.lineage), root: this.roots.merged() };
   }
 }
 
 interface EngineDeps {
   graph: Graph;
   invoker: OperationInvoker;
-  /** The binding invocation that started this graph (carries interface/context). */
   args: BindingInvocationArgs;
-  /** The graph's initial input event data (already read off the handle). */
-  input: unknown;
   transform?: TransformEvaluator;
   schemas: SchemaCache;
 }
@@ -117,7 +146,8 @@ interface EngineDeps {
 /**
  * Runs a single operation graph invocation against a {@link BindingHandle}.
  * Spawn-once: call {@link run} once; it resolves when the graph has
- * terminated (normal completion, exit node, error, or cancellation).
+ * terminated (normal completion, exit node, error, or cancellation). The
+ * graph is validated by the invoker before the engine is constructed.
  */
 export class Engine {
   private readonly graph: Graph;
@@ -125,7 +155,6 @@ export class Engine {
   private readonly args: BindingInvocationArgs;
   private readonly transform?: TransformEvaluator;
   private readonly schemas: SchemaCache;
-  private readonly origInput: unknown;
 
   private readonly outEdges = new Map<string, string[]>();
   private readonly inEdges = new Map<string, string[]>();
@@ -135,17 +164,22 @@ export class Engine {
   private exitFlag = false;
   private inflight = 0;
   private eventCount = 0;
-  private finished = false;
   private readonly abortController = new AbortController();
 
-  /** Mailboxes — one FIFO per node. */
+  private readonly rootValues: unknown[] = [];
+  private readonly conduits = new Map<string, ConduitState>();
+  private readonly conduitPumps: Promise<void>[] = [];
+
   private readonly mailboxes = new Map<string, AsyncQueue<GraphEvent>>();
-  /** Buffer state — one per buffer node. */
   private readonly bufferStates = new Map<string, BufferState>();
-  /** Combine state — one per combine node. */
   private readonly combineStates = new Map<string, CombineState>();
-  /** Per-node count of "complete" markers received from upstream. */
   private readonly completedSources = new Map<string, number>();
+
+  /** Per-edge completion dedup: quiescence injection vs natural propagation. */
+  private readonly completionSent = new Map<string, Set<string>>();
+
+  /** Resolvers woken at each inflight zero-crossing (true quiescence). */
+  private idleWaiters: Array<() => void> = [];
 
   constructor(deps: EngineDeps) {
     this.graph = deps.graph;
@@ -153,51 +187,24 @@ export class Engine {
     this.args = deps.args;
     this.transform = deps.transform;
     this.schemas = deps.schemas;
-    this.origInput = deps.input;
 
     for (const e of this.graph.edges ?? []) {
-      const o = this.outEdges.get(e.from);
-      if (o) o.push(e.to);
-      else this.outEdges.set(e.from, [e.to]);
-      const i = this.inEdges.get(e.to);
-      if (i) i.push(e.from);
-      else this.inEdges.set(e.to, [e.from]);
+      pushTo(this.outEdges, e.from, e.to);
+      pushTo(this.inEdges, e.to, e.from);
     }
     for (const [k, n] of Object.entries(this.graph.nodes)) {
       if (n.type === "input") this.inputKey = k;
+      if (n.type === "operation") this.conduits.set(k, new ConduitState());
     }
   }
 
-  /**
-   * Runs the graph, emitting outputs on `handle` and terminating it
-   * (`closeOutput` on completion, `fireError` on terminal failure).
-   * Cancellation arrives via `handle.signal` and aborts execution.
-   */
   async run(handle: BindingHandle<unknown, unknown>): Promise<void> {
     this.handle = handle;
 
-    // Validate before executing. When `interface` is absent on the args
-    // (direct binding invocation via host), skip the operation-key check —
-    // bad references will fail at runtime.
-    let opKeys: Set<string> | undefined;
-    if (this.args.interface) {
-      opKeys = new Set(Object.keys(this.args.interface.operations));
-    }
-    try {
-      validate(this.graph, opKeys);
-    } catch (err) {
-      handle.fireError(new InvocationError(ERR_VALIDATION_FAILED, (err as Error).message));
-      return;
-    }
-
-    // Tie the invocation's cancellation signal to ours.
     if (handle.signal.aborted) this.abortController.abort();
     else handle.signal.addEventListener("abort", () => this.abortController.abort(), { once: true });
-    // When abort fires (from exit node, event-limit, or cancellation),
-    // close all mailboxes so workers waiting on next() can exit.
     this.abortController.signal.addEventListener("abort", () => this.shutdown(), { once: true });
 
-    // Allocate mailboxes and per-node state.
     for (const key of Object.keys(this.graph.nodes)) {
       this.mailboxes.set(key, new AsyncQueue<GraphEvent>());
       const node = this.graph.nodes[key];
@@ -206,51 +213,60 @@ export class Engine {
       if ((this.inEdges.get(key) ?? []).length > 0) this.completedSources.set(key, 0);
     }
 
-    // Spawn one worker task per node.
-    const workers = Object.entries(this.graph.nodes).map(([key, node]) =>
-      this.runNode(key, node),
-    );
+    const workers = Object.entries(this.graph.nodes).map(([key, node]) => this.runNode(key, node));
 
-    // Inject the initial event into the input node.
+    // Input pump: every caller write becomes one event at the input node, in
+    // write order, each rooting a lineage. The pump's inflight token keeps
+    // the graph alive while the caller's input side is open; back-closure
+    // (or the caller's close) ends it. End-of-input travels through the
+    // input node's mailbox like any event, so FIFO ordering guarantees it
+    // never overtakes a write.
     this.incInflight();
-    this.mailboxes.get(this.inputKey)!.push(
-      newEvent({ data: this.origInput, lineage: new Map() }),
-    );
+    const pump = (async () => {
+      try {
+        for await (const v of handle.inputs()) {
+          this.rootValues.push(v);
+          this.sendToNode(
+            this.inputKey,
+            newEvent({ data: v, root: this.rootValues.length - 1 }),
+          );
+        }
+      } catch {
+        /* terminal failure; the engine tears down via the signal */
+      }
+      this.sendToNode(this.inputKey, newEvent({ complete: true }));
+      this.decInflight();
+    })();
 
-    await Promise.all(workers);
-    this.finishOnce();
-    // Normal completion. A no-op when a terminal error already fired
-    // (exit error, event limit, cancellation).
+    // Quiescence loop: a zero crossing means no event can ever flow again
+    // (the pump and every live inner invocation hold tokens). Any edge whose
+    // completion has not been delivered by then is starved by a cycle or
+    // feeds from an error route; injecting those completions is the spec's
+    // implementation-defined drain detection. Injected markers may flush
+    // buffers and complete combines, producing new work; loop until a zero
+    // crossing injects nothing.
+    for (;;) {
+      await this.waitIdle();
+      if (this.abortController.signal.aborted || this.exitFlag) break;
+      if (this.inflight !== 0) continue;
+      let injected = false;
+      for (const e of this.graph.edges ?? []) {
+        if (this.deliverCompletion(e.from, e.to)) injected = true;
+      }
+      if (!injected) break;
+    }
+
+    this.shutdown();
+    await Promise.all([pump, ...workers, ...this.conduitPumps]);
+    for (const c of this.conduits.values()) {
+      if (c.timer) clearTimeout(c.timer);
+    }
+    // Normal completion. A no-op when a terminal error already fired (exit
+    // error, unhandled conduit terminal, event limit, cancellation).
     handle.closeOutput();
   }
 
-  private async runNode(key: string, node: Node): Promise<void> {
-    const mailbox = this.mailboxes.get(key)!;
-    for (;;) {
-      if (this.abortController.signal.aborted) return;
-      const next = await mailbox.next();
-      if (next.done) return;
-      const ev = next.value;
-      if (this.exitFlag) {
-        this.decInflight();
-        // Drain remaining events without processing them.
-        continue;
-      }
-      await this.processNode(key, node, ev);
-      this.decInflight();
-    }
-  }
-
-  private finishOnce(): void {
-    if (this.finished) return;
-    this.finished = true;
-    this.shutdown();
-  }
-
-  /** Closes all mailboxes. Idempotent. */
-  private shutdown(): void {
-    for (const mb of this.mailboxes.values()) mb.close();
-  }
+  // ----- plumbing -----
 
   private incInflight(): void {
     this.inflight++;
@@ -258,28 +274,32 @@ export class Engine {
 
   private decInflight(): void {
     this.inflight--;
-    if (this.inflight === 0) this.finishOnce();
+    if (this.inflight === 0) {
+      const ws = this.idleWaiters;
+      this.idleWaiters = [];
+      for (const w of ws) w();
+    }
   }
 
-  /**
-   * Emits one output on the handle, honoring backpressure. A rejected emit
-   * means the invocation terminated (cancelled or abandoned); stop the
-   * engine — there is no one left to deliver to.
-   */
-  private async emitToCaller(data: unknown): Promise<void> {
-    try {
-      await this.handle.emitOutput(data);
-    } catch {
-      this.exitFlag = true;
-      this.abortController.abort();
-    }
+  private waitIdle(): Promise<void> {
+    if (this.inflight === 0 || this.abortController.signal.aborted) return Promise.resolve();
+    return new Promise((resolve) => {
+      this.idleWaiters.push(resolve);
+      this.abortController.signal.addEventListener("abort", () => resolve(), { once: true });
+    });
+  }
+
+  private shutdown(): void {
+    for (const mb of this.mailboxes.values()) mb.close();
+    const ws = this.idleWaiters;
+    this.idleWaiters = [];
+    for (const w of ws) w();
   }
 
   private sendToNode(toKey: string, ev: GraphEvent): void {
     this.incInflight();
     const mb = this.mailboxes.get(toKey);
     if (!mb) {
-      // Should never happen for validated graphs; guard anyway.
       this.decInflight();
       return;
     }
@@ -295,85 +315,96 @@ export class Engine {
     }
   }
 
-  /**
-   * Routes completion markers through the same mailbox as data events so
-   * FIFO ordering preserves the "all data first, then complete" invariant.
-   */
+  /** Delivers one edge's completion marker at most once. */
+  private deliverCompletion(fromKey: string, toKey: string): boolean {
+    let sent = this.completionSent.get(fromKey);
+    if (!sent) {
+      sent = new Set();
+      this.completionSent.set(fromKey, sent);
+    }
+    if (sent.has(toKey)) return false;
+    sent.add(toKey);
+    this.sendToNode(toKey, newEvent({ source: fromKey, complete: true }));
+    return true;
+  }
+
   private sendCompletion(fromKey: string): void {
     for (const toKey of this.outEdges.get(fromKey) ?? []) {
       if (this.exitFlag) return;
-      this.sendToNode(toKey, newEvent({ source: fromKey, complete: true }));
+      this.deliverCompletion(fromKey, toKey);
     }
   }
 
-  private sendError(
+  /**
+   * Routes a per-event failure ({error, event}) to the node's onError
+   * target, or drops it. The error event inherits the failing event's
+   * lineage and root.
+   */
+  private sendPerEventError(
     nodeKey: string,
-    errMsg: string,
-    input: unknown,
+    errVal: unknown,
+    ev: GraphEvent,
     lineage: Map<string, number>,
-    errorDepth: number,
   ): void {
     const node = this.graph.nodes[nodeKey];
     if (!node.onError) return;
-    if (errorDepth >= MAX_ERROR_DEPTH) return;
+    if (ev.errorDepth >= MAX_ERROR_DEPTH) return;
     this.sendToNode(
       node.onError,
       newEvent({
-        data: { error: errMsg, input },
+        data: { error: errVal, event: ev.data },
         source: nodeKey,
+        root: ev.root,
         lineage: copyLineage(lineage),
-        errorDepth: errorDepth + 1,
+        errorDepth: ev.errorDepth + 1,
       }),
     );
   }
 
   /**
-   * Processes a completion marker arriving at a node. When all upstream
-   * sources have completed, flushes any per-node state and propagates
-   * completion downstream.
+   * Back-closure: close the caller-facing input side once every node the
+   * input node feeds is a non-accepting operation conduit. Built-in
+   * consumers keep closure caller-owned (non-acceptance is defined for
+   * operation nodes only).
    */
-  private handleCompletion(key: string, node: Node): void {
-    const prev = this.completedSources.get(key);
-    if (prev === undefined) return;
-    const newCount = prev + 1;
-    this.completedSources.set(key, newCount);
-    const required = (this.inEdges.get(key) ?? []).length;
-    if (newCount < required) return;
-
-    if (node.type === "buffer") {
-      const batch = this.bufferStates.get(key)!.flush();
-      if (batch !== null) {
-        this.sendDownstream(
-          key,
-          newEvent({ data: batch, source: key, lineage: new Map() }),
-        );
-      }
-    } else if (node.type === "combine") {
-      const result = this.combineStates.get(key)!.complete();
-      if (result !== null) {
-        this.sendDownstream(
-          key,
-          newEvent({ data: result, source: key, lineage: new Map() }),
-        );
-      }
+  private backClosure(): void {
+    const consumers = this.outEdges.get(this.inputKey) ?? [];
+    if (consumers.length === 0) return;
+    for (const k of consumers) {
+      if (this.graph.nodes[k].type !== "operation") return;
+      if (this.conduits.get(k)!.accepting) return;
     }
-    this.sendCompletion(key);
+    void this.handle.closeInput();
+  }
+
+  // ----- node workers -----
+
+  private async runNode(key: string, node: Node): Promise<void> {
+    const mailbox = this.mailboxes.get(key)!;
+    for (;;) {
+      if (this.abortController.signal.aborted) return;
+      const next = await mailbox.next();
+      if (next.done) return;
+      const ev = next.value;
+      if (this.exitFlag) {
+        this.decInflight();
+        continue;
+      }
+      await this.processNode(key, node, ev);
+      this.decInflight();
+    }
   }
 
   private async processNode(key: string, node: Node, ev: GraphEvent): Promise<void> {
     if (ev.complete) {
-      this.handleCompletion(key, node);
+      this.handleCompletion(key, node, ev);
       return;
     }
 
-    // Event amplification bound.
     if (++this.eventCount > MAX_EVENTS) {
       this.exitFlag = true;
       this.handle.fireError(
-        new InvocationError(
-          ERR_EVENT_LIMIT_EXCEEDED,
-          `exceeded maximum event count (${MAX_EVENTS})`,
-        ),
+        new InvocationError(ERR_EVENT_LIMIT_EXCEEDED, `exceeded maximum event count (${MAX_EVENTS})`),
       );
       this.abortController.abort();
       return;
@@ -382,28 +413,40 @@ export class Engine {
     switch (node.type) {
       case "input":
         this.sendDownstream(key, ev);
-        this.sendCompletion(key);
         return;
 
       case "output":
-        await this.emitToCaller(ev.data);
+        try {
+          await this.handle.emitOutput(ev.data);
+        } catch {
+          this.exitFlag = true;
+          this.abortController.abort();
+        }
         return;
 
       case "exit": {
         this.exitFlag = true;
         if (node.error === true) {
           this.handle.fireError(
-            new InvocationError(ERR_OPERATION_GRAPH_EXIT, stringify(ev.data)),
+            new InvocationError(ERR_OPERATION_GRAPH_EXIT, "operation graph exit", ev.data),
           );
         } else {
-          await this.emitToCaller(ev.data);
+          try {
+            await this.handle.emitOutput(ev.data);
+          } catch {
+            /* the abort below tears the engine down either way */
+          }
         }
         this.abortController.abort();
         return;
       }
 
       case "operation":
-        await this.processOperation(key, node, ev);
+        await this.processConduitEvent(key, node, ev);
+        return;
+
+      case "each":
+        await this.processEach(key, node, ev);
         return;
 
       case "filter":
@@ -419,197 +462,315 @@ export class Engine {
         return;
 
       case "buffer": {
-        const bs = this.bufferStates.get(key)!;
-        for (const batch of bs.add(ev)) {
-          this.sendDownstream(
-            key,
-            newEvent({ data: batch, source: key, lineage: new Map() }),
-          );
-        }
+        const b = this.bufferStates.get(key)!.add(ev);
+        if (b) this.sendDownstream(key, newEvent({ data: b.data, source: key, root: b.root, lineage: b.lineage }));
         return;
       }
 
       case "combine": {
-        const cs = this.combineStates.get(key)!;
-        const result = cs.add(ev);
-        this.sendDownstream(
-          key,
-          newEvent({ data: result, source: key, lineage: new Map() }),
-        );
+        const snap = this.combineStates.get(key)!.add(ev);
+        if (snap) {
+          this.sendDownstream(key, newEvent({ data: snap.data, source: key, root: snap.root, lineage: snap.lineage }));
+        }
         return;
       }
     }
   }
 
-  private async processOperation(key: string, node: Node, ev: GraphEvent): Promise<void> {
-    // Check maxIterations on a copy of the lineage; mutate the copy.
-    const lineage = copyLineage(ev.lineage);
-    if (node.maxIterations !== undefined) {
-      const count = lineage.get(key) ?? 0;
-      if (count >= node.maxIterations) return; // safety bound, not an error
-      lineage.set(key, count + 1);
+  private handleCompletion(key: string, node: Node, ev: GraphEvent): void {
+    // The input node's completion marker comes from the pump through its own
+    // mailbox (so it can never overtake buffered writes); forward it.
+    if (node.type === "input") {
+      this.sendCompletion(key);
+      return;
+    }
+    // combine consumes per-source completion before the all-complete
+    // transition (completion can be what makes it ready).
+    if (node.type === "combine") {
+      const snap = this.combineStates.get(key)!.sourceComplete(ev.source);
+      if (snap) {
+        this.sendDownstream(key, newEvent({ data: snap.data, source: key, root: snap.root, lineage: snap.lineage }));
+      }
+    }
+    const prev = this.completedSources.get(key);
+    if (prev === undefined) return;
+    const count = prev + 1;
+    this.completedSources.set(key, count);
+    if (count < (this.inEdges.get(key) ?? []).length) return;
+
+    // All incoming edges complete.
+    if (node.type === "operation") {
+      // Close the held invocation's input side; the output pump sends this
+      // node's completion when the invocation's outputs finish.
+      this.startConduit(key, node);
+      void this.conduits.get(key)!.call!.close();
+      return;
+    }
+    if (node.type === "buffer") {
+      const b = this.bufferStates.get(key)!.flush();
+      if (b) this.sendDownstream(key, newEvent({ data: b.data, source: key, root: b.root, lineage: b.lineage }));
+    }
+    this.sendCompletion(key);
+  }
+
+  // ----- operation (the conduit) -----
+
+  /**
+   * Lazily drives an operation node's held invocation and spawns its
+   * acceptance watcher and output pump. The output pump owns the node's
+   * downstream completion and its terminal error handling: routed per
+   * onError when set, fatal to the graph when not (the identity law's
+   * terminal-status clause).
+   */
+  private startConduit(key: string, node: Node): void {
+    const c = this.conduits.get(key)!;
+    if (c.started) return;
+    c.started = true;
+
+    const call = this.invoker.invoke<unknown, unknown>({
+      interface: this.args.interface!,
+      operation: node.operation!,
+      context: this.args.context,
+      signal: this.abortController.signal,
+    });
+    c.call = call;
+    if (node.timeout !== undefined) {
+      c.timer = setTimeout(() => {
+        c.timedOut = true;
+        void call.cancel();
+      }, node.timeout);
     }
 
-    // Per-call AbortController so a timeout cancels just this operation.
-    // Tied to the engine's controller so cancelling the graph cancels
-    // in-flight sub-operations.
-    const opCtrl = new AbortController();
-    const onAbort = (): void => opCtrl.abort();
-    this.abortController.signal.addEventListener("abort", onAbort, { once: true });
-    if (this.abortController.signal.aborted) opCtrl.abort();
+    // Acceptance watcher: the inner binding closing its input from below (or
+    // any terminal transition) makes the node non-accepting and may
+    // back-close the graph's own input side.
+    void call.inputClosed.then(() => {
+      c.accepting = false;
+      this.backClosure();
+    });
+
+    // Output pump. Holds an inflight token: the graph is not complete while
+    // an inner invocation is in flight.
+    this.incInflight();
+    this.conduitPumps.push(
+      (async () => {
+        try {
+          for await (const out of call.outputs) {
+            if (this.exitFlag) return; // iterator return() cancels the call
+            const { lineage, root } = c.merged();
+            this.sendDownstream(key, newEvent({ data: out, source: key, root, lineage }));
+          }
+          this.sendCompletion(key);
+        } catch (err) {
+          c.accepting = false;
+          this.backClosure();
+          let ie =
+            err instanceof InvocationError
+              ? err
+              : new InvocationError(ERR_CANCELLED, err instanceof Error ? err.message : String(err));
+          if (c.timedOut) {
+            ie = new InvocationError(
+              TIMEOUT_EXCEEDED,
+              `operation "${node.operation}" exceeded its ${node.timeout}ms budget`,
+            );
+          } else if (ie.code === ERR_CANCELLED && this.abortController.signal.aborted) {
+            return; // the graph itself is tearing down
+          }
+          if (node.onError) {
+            // Opt-in handling: an error event without an `event` member (the
+            // failure belongs to the invocation as a whole), carrying the
+            // merged lineage of everything written into it. The node
+            // completes; the graph continues.
+            const { lineage, root } = c.merged();
+            this.sendToNode(node.onError, newEvent({ data: { error: errValue(ie) }, source: key, root, lineage }));
+            this.sendCompletion(key);
+            return;
+          }
+          // Fatal default: the graph invocation terminates with the inner
+          // terminal error, verbatim.
+          this.exitFlag = true;
+          this.handle.fireError(ie);
+          this.abortController.abort();
+        } finally {
+          if (c.timer) clearTimeout(c.timer);
+          this.decInflight();
+        }
+      })(),
+    );
+  }
+
+  /**
+   * Writes one arriving event into the conduit's held invocation, or rejects
+   * it (WRITE_REJECTED) when the node is non-accepting.
+   */
+  private async processConduitEvent(key: string, node: Node, ev: GraphEvent): Promise<void> {
+    const c = this.conduits.get(key)!;
+    if (!c.accepting) {
+      this.sendPerEventError(key, WRITE_REJECTED, ev, ev.lineage);
+      return;
+    }
+    this.startConduit(key, node);
+    c.mergeEvent(ev);
+    try {
+      await c.call!.write(ev.data);
+    } catch (err) {
+      if (err instanceof InvocationError && err.code === ERR_INPUT_CLOSED) {
+        // The write raced the inner binding closing its input from below.
+        c.accepting = false;
+        this.backClosure();
+        this.sendPerEventError(key, WRITE_REJECTED, ev, ev.lineage);
+      }
+      // Terminal failures surface through the output pump, which owns
+      // reporting; nothing further to do here.
+    }
+  }
+
+  // ----- each -----
+
+  /**
+   * Opens one invocation per arriving event, writing the event as its only
+   * input. maxIterations bounds invocations per event lineage.
+   */
+  private async processEach(key: string, node: Node, ev: GraphEvent): Promise<void> {
+    const lineage = copyLineage(ev.lineage);
+    if (node.maxIterations !== undefined && (lineage.get(key) ?? 0) >= node.maxIterations) {
+      return; // safety bound: the event is dropped, not errored
+    }
+    lineage.set(key, (lineage.get(key) ?? 0) + 1);
+
+    const call = this.invoker.invoke<unknown, unknown>({
+      interface: this.args.interface!,
+      operation: node.operation!,
+      context: this.args.context,
+      signal: this.abortController.signal,
+    });
+    let timedOut = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     if (node.timeout !== undefined) {
-      timer = setTimeout(() => opCtrl.abort(), node.timeout);
+      timer = setTimeout(() => {
+        timedOut = true;
+        void call.cancel();
+      }, node.timeout);
     }
 
     try {
-      // invoke throws synchronously on wiring/document errors (unknown
-      // operation, binding, or source); those route to onError like any
-      // other node failure.
-      const call = this.invoker.invoke({
-        interface: this.args.interface!,
-        operation: node.operation!,
-        context: this.args.context,
-        signal: opCtrl.signal,
-      });
-      // One initial event in; close is idempotent and safe even when the
-      // binding already closed input (no-input / unary). Rejections here
-      // are expected noise — terminal failures surface on the outputs
-      // iteration below.
+      // One write, then close: each fixes the graph's contribution at one
+      // write per session. Write/close failures surface via the outputs.
       try {
-        if (ev.data !== undefined) await call.write(ev.data);
+        await call.write(ev.data);
         await call.close();
       } catch {
         /* surfaces via outputs */
       }
       for await (const out of call.outputs) {
-        // Abandoning the iteration (exit fired) cancels the sub-call via
-        // the iterator's return().
         if (this.exitFlag) return;
-        this.sendDownstream(
-          key,
-          newEvent({
-            data: out,
-            source: key,
-            lineage: copyLineage(lineage),
-          }),
-        );
+        this.sendDownstream(key, newEvent({ data: out, source: key, root: ev.root, lineage: copyLineage(lineage) }));
       }
     } catch (err) {
-      this.sendError(key, (err as Error).message, ev.data, ev.lineage, ev.errorDepth);
+      let val = errValue(err);
+      if (timedOut) {
+        val = TIMEOUT_EXCEEDED;
+      } else if (
+        err instanceof InvocationError &&
+        err.code === ERR_CANCELLED &&
+        this.abortController.signal.aborted
+      ) {
+        return; // graph teardown, not a node failure
+      }
+      this.sendPerEventError(key, val, ev, lineage);
     } finally {
       if (timer) clearTimeout(timer);
-      this.abortController.signal.removeEventListener("abort", onAbort);
     }
   }
+
+  // ----- expression nodes -----
 
   private async processFilter(key: string, node: Node, ev: GraphEvent): Promise<void> {
     if (node.schema !== undefined) {
       try {
-        const passes = this.schemas.match(node.schema, ev.data);
-        if (passes) this.sendDownstream(key, ev);
+        if (this.schemas.match(node.schema, ev.data)) this.sendDownstream(key, ev);
       } catch (err) {
-        this.sendError(key, (err as Error).message, ev.data, ev.lineage, ev.errorDepth);
+        this.sendPerEventError(key, errValue(err), ev, ev.lineage);
       }
       return;
     }
-    if (node.transform !== undefined) {
-      if (!this.transform) {
-        this.sendError(key, "no transform evaluator available", ev.data, ev.lineage, ev.errorDepth);
-        return;
-      }
-      try {
-        const result = await this.evaluateTransform(node.transform, ev.data);
-        if (isTruthy(result)) this.sendDownstream(key, ev);
-      } catch (err) {
-        this.sendError(key, (err as Error).message, ev.data, ev.lineage, ev.errorDepth);
-      }
-    }
+    const r = await this.evalOrFail(key, node.transform!, ev);
+    if (r.failed) return;
+    if (isTruthy(r.result)) this.sendDownstream(key, ev);
   }
 
   private async processTransform(key: string, node: Node, ev: GraphEvent): Promise<void> {
-    if (!this.transform) {
-      this.sendError(key, "no transform evaluator available", ev.data, ev.lineage, ev.errorDepth);
-      return;
-    }
-    try {
-      const result = await this.evaluateTransform(node.transform!, ev.data);
-      this.sendDownstream(
-        key,
-        newEvent({ data: result, source: key, lineage: copyLineage(ev.lineage) }),
-      );
-    } catch (err) {
-      this.sendError(key, (err as Error).message, ev.data, ev.lineage, ev.errorDepth);
-    }
+    const r = await this.evalOrFail(key, node.transform!, ev);
+    if (r.failed) return;
+    this.sendDownstream(key, newEvent({ data: r.result, source: key, root: ev.root, lineage: copyLineage(ev.lineage) }));
   }
 
   private async processMap(key: string, node: Node, ev: GraphEvent): Promise<void> {
-    if (!this.transform) {
-      this.sendError(key, "no transform evaluator available", ev.data, ev.lineage, ev.errorDepth);
+    const r = await this.evalOrFail(key, node.transform!, ev);
+    if (r.failed) return;
+    if (!Array.isArray(r.result)) {
+      this.sendPerEventError(key, MAP_NOT_ARRAY, ev, ev.lineage);
       return;
+    }
+    for (const item of r.result) {
+      if (this.exitFlag) return;
+      this.sendDownstream(key, newEvent({ data: item, source: key, root: ev.root, lineage: copyLineage(ev.lineage) }));
+    }
+  }
+
+  /**
+   * Evaluates a node expression with the event as $ and the lineage's root
+   * input as $input. An undefined result fails the node with
+   * TRANSFORM_UNDEFINED; other evaluation failures fail it with their
+   * message. failed=true means a per-event error was already routed (or
+   * dropped).
+   */
+  private async evalOrFail(
+    key: string,
+    expression: string,
+    ev: GraphEvent,
+  ): Promise<{ result?: unknown; failed: boolean }> {
+    if (!this.transform) {
+      this.sendPerEventError(key, "no transform evaluator available", ev, ev.lineage);
+      return { failed: true };
     }
     let result: unknown;
     try {
-      result = await this.evaluateTransform(node.transform!, ev.data);
+      if (isTransformEvaluatorWithBindings(this.transform)) {
+        const bindings: Record<string, unknown> = {};
+        if (ev.root !== NO_ROOT) bindings.input = this.rootValues[ev.root];
+        result = await this.transform.evaluateWithBindings(expression, ev.data, bindings);
+      } else {
+        result = await this.transform.evaluate(expression, ev.data);
+      }
     } catch (err) {
-      this.sendError(key, (err as Error).message, ev.data, ev.lineage, ev.errorDepth);
-      return;
+      this.sendPerEventError(key, errValue(err), ev, ev.lineage);
+      return { failed: true };
     }
-    const arr = toArray(result);
-    if (!arr) {
-      // Error message is the literal error code so callers can match on text.
-      this.sendError(key, ERR_MAP_NOT_ARRAY, ev.data, ev.lineage, ev.errorDepth);
-      return;
+    if (result === undefined) {
+      this.sendPerEventError(key, TRANSFORM_UNDEFINED, ev, ev.lineage);
+      return { failed: true };
     }
-    for (const item of arr) {
-      if (this.exitFlag) return;
-      this.sendDownstream(
-        key,
-        newEvent({ data: item, source: key, lineage: copyLineage(ev.lineage) }),
-      );
-    }
-  }
-
-  private async evaluateTransform(expression: string, data: unknown): Promise<unknown> {
-    if (this.transform && isTransformEvaluatorWithBindings(this.transform)) {
-      return this.transform.evaluateWithBindings(expression, data, {
-        input: this.origInput,
-      });
-    }
-    return this.transform!.evaluate(expression, data);
+    return { result, failed: false };
   }
 }
 
-/** Truthiness rule for filter-expression results: false on null/undefined,
- *  false on the value-typed empty cases (false, 0, ""); everything else is
- *  truthy. Object/array values are always truthy regardless of contents. */
+function pushTo(m: Map<string, string[]>, k: string, v: string): void {
+  const list = m.get(k);
+  if (list) list.push(v);
+  else m.set(k, [v]);
+}
+
+/**
+ * Truthiness rule for filter-expression results: false on null, false on the
+ * value-typed empty cases (false, 0, ""); everything else is truthy.
+ * Object/array values are always truthy regardless of contents. (undefined
+ * never reaches here: it fails the node per the Transforms rule.)
+ */
 function isTruthy(v: unknown): boolean {
   if (v === null || v === undefined) return false;
   if (typeof v === "boolean") return v;
   if (typeof v === "number") return v !== 0;
   if (typeof v === "string") return v !== "";
   return true;
-}
-
-/**
- * Returns `v` as an array if it is one, or `null` otherwise. The Go version
- * round-trips through JSON to handle arbitrary typed slices; in JS the only
- * useful case is the plain `Array` check.
- */
-function toArray(v: unknown): unknown[] | null {
-  return Array.isArray(v) ? v : null;
-}
-
-/** Best-effort fmt.Sprintf("%v", ev.data) for exit-error messages. */
-function stringify(v: unknown): string {
-  if (v === null || v === undefined) return String(v);
-  if (typeof v === "string") return v;
-  if (typeof v === "object") {
-    try {
-      return JSON.stringify(v);
-    } catch {
-      return String(v);
-    }
-  }
-  return String(v);
 }

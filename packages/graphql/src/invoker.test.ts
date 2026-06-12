@@ -294,6 +294,26 @@ describe("GraphQLInvoker unary", () => {
     await call.cancel();
     await expect(call.closed).rejects.toMatchObject({ code: ERR_CANCELLED });
   });
+
+  it("cancel during introspection surfaces ERR_CANCELLED, not ERR_SOURCE_LOAD_FAILED", async () => {
+    // No inline content: the binding introspects over the network first.
+    // Aborting the introspection fetch must surface as the cancellation
+    // terminal, never get re-wrapped as a source-load failure.
+    const fn: typeof fetch = (_input, init) =>
+      new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")), { once: true });
+      });
+    const call = new GraphQLInvoker().invokeBinding({
+      source: { format: "graphql", location: ENDPOINT }, // forces introspection
+      ref: "Query/ping",
+      fetch: fn,
+    });
+
+    // Let the introspection fetch start, then cancel.
+    await new Promise((r) => setTimeout(r, 0));
+    await call.cancel();
+    await expect(call.closed).rejects.toMatchObject({ code: ERR_CANCELLED });
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -449,5 +469,14 @@ describe("GraphQLInvoker subscriptions", () => {
     await call.cancel();
     await expect(call.closed).rejects.toMatchObject({ code: ERR_CANCELLED });
     await vi.waitFor(() => { expect(ws.readyState).toBe(FakeWebSocket.CLOSED); });
+  });
+
+  it("settles the header to empty at subscription start, before any event", async () => {
+    // A subscription has no HTTP response headers (the WS handshake hides
+    // them), so `header` must resolve to {} up front rather than block until
+    // the first event arrives.
+    const { call } = await start("Subscription/onOrder");
+
+    await expect(call.header).resolves.toEqual({});
   });
 });

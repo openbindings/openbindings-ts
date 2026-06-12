@@ -184,6 +184,15 @@ export interface Invocation<I = unknown, O = unknown> {
   readonly closed: Promise<void>;
 
   /**
+   * Resolves once the invocation's input side has closed — by the caller's
+   * `close()`, by the binding from below (a unary binding after its first
+   * read), or by a terminal transition. Consumers that pipe a stream into
+   * the invocation (e.g. operation-graph conduits) await it to learn
+   * acceptance has ended without probing with a failing `write`.
+   */
+  readonly inputClosed: Promise<void>;
+
+  /**
    * Leading metadata (HTTP response headers / gRPC leading metadata).
    * Resolves when the binding sets it, or with the first output / terminal,
    * whichever is first. Empty for formats that carry none.
@@ -339,6 +348,7 @@ export class InvocationImpl<I = unknown, O = unknown>
 {
   readonly closed: Promise<void>;
   readonly header: Promise<Metadata>;
+  readonly inputClosed: Promise<void>;
 
   private readonly controller = new AbortController();
   private readonly validateInputHook?: InvocationImplOptions<I>["validateInput"];
@@ -346,7 +356,7 @@ export class InvocationImpl<I = unknown, O = unknown>
   private inputBuf: I[] = [];
   private inputWaiters: InputWaiter<I>[] = [];
   private inputProducerWaiters: ProducerWaiter<I>[] = [];
-  private inputClosed = false;
+  private inputSideClosed = false;
 
   private outputQueue: O[] = [];
   private outputWaiters: OutputWaiter<O>[] = [];
@@ -363,6 +373,7 @@ export class InvocationImpl<I = unknown, O = unknown>
   private resolveClosed!: () => void;
   private rejectClosed!: (e: InvocationError) => void;
   private resolveHeader!: (md: Metadata) => void;
+  private resolveInputClosed!: () => void;
 
   constructor(opts: InvocationImplOptions<I> = {}) {
     this.validateInputHook = opts.validateInput;
@@ -373,6 +384,10 @@ export class InvocationImpl<I = unknown, O = unknown>
     });
     // Avoid unhandled-rejection if the caller never observes `closed`.
     this.closed.catch(() => {});
+
+    this.inputClosed = new Promise<void>((res) => {
+      this.resolveInputClosed = res;
+    });
 
     this.header = new Promise<Metadata>((res) => {
       this.resolveHeader = res;
@@ -387,8 +402,14 @@ export class InvocationImpl<I = unknown, O = unknown>
         opts.signal.addEventListener(
           "abort",
           () => {
-            this.controller.abort(opts.signal!.reason);
+            // Transition to terminal FIRST: fireError settles state and drains
+            // before it aborts the controller, so every signal listener observes
+            // settled state (the documented terminal-state invariant). Aborting
+            // here, ahead of fireError, would fire the signal mid-transition.
             this.fireError(new InvocationError(ERR_CANCELLED, "invocation cancelled"));
+            // Propagate the external reason onto the (already-aborted) internal
+            // controller; abort is idempotent so this does not re-fire the signal.
+            this.controller.abort(opts.signal!.reason);
           },
           { once: true },
         );
@@ -446,14 +467,15 @@ export class InvocationImpl<I = unknown, O = unknown>
         new InvocationError(ERR_INVOCATION_CLOSED, "invocation is closed")
       );
     }
-    if (this.inputClosed) {
+    if (this.inputSideClosed) {
       throw new InvocationError(ERR_INPUT_CLOSED, "input is closed");
     }
   }
 
   async close(): Promise<void> {
-    if (this.inputClosed) return;
-    this.inputClosed = true;
+    if (this.inputSideClosed) return;
+    this.inputSideClosed = true;
+    this.resolveInputClosed();
     // Normal close: parked binding reads end cleanly.
     while (this.inputWaiters.length > 0) {
       this.inputWaiters.shift()!.resolve({ value: undefined, done: true });
@@ -471,7 +493,10 @@ export class InvocationImpl<I = unknown, O = unknown>
     // No-op once terminal: cancelling after completion or after a real
     // terminal error must not overwrite that error with ERR_CANCELLED.
     if (this.state !== "open") return;
-    this.controller.abort();
+    // fireError performs the state transition and drains, THEN aborts the
+    // controller last so signal listeners observe settled state (the terminal
+    // -state invariant shared by closeOutput/fireError). A pre-abort here would
+    // fire the signal mid-transition; matches the Go SDK's Cancel == FireError.
     this.fireError(new InvocationError(ERR_CANCELLED, "invocation cancelled"));
   }
 
@@ -563,7 +588,7 @@ export class InvocationImpl<I = unknown, O = unknown>
               resolve({ value, done: false });
               return;
             }
-            if (this.inputClosed) {
+            if (this.inputSideClosed) {
               resolve({ value: undefined, done: true });
               return;
             }
@@ -618,7 +643,8 @@ export class InvocationImpl<I = unknown, O = unknown>
   closeOutput(): void {
     if (this.state !== "open") return;
     this.state = "closed";
-    this.inputClosed = true;
+    this.inputSideClosed = true;
+    this.resolveInputClosed();
     this.settleHeader();
 
     while (this.outputWaiters.length > 0) {
@@ -649,7 +675,8 @@ export class InvocationImpl<I = unknown, O = unknown>
     if (this.state !== "open") return;
     this.state = "errored";
     this.terminalError = error;
-    this.inputClosed = true;
+    this.inputSideClosed = true;
+    this.resolveInputClosed();
     this.settleHeader();
 
     // Drain order: parked output consumers resolve `done` and re-surface
@@ -691,7 +718,13 @@ export class InvocationImpl<I = unknown, O = unknown>
 
   setTrailer(md: Metadata): void {
     if (this.state !== "open") {
-      throw new Error("openbindings: setTrailer must precede closeOutput/fireError");
+      // Terminal state is reachable at any time via caller/upstream
+      // cancellation, so a binding may legally set trailers on an async task
+      // after the invocation has already settled. Per the documented contract
+      // ("late sets are dropped"), this is a no-op rather than a throw —
+      // throwing here would surface a benign cancellation race as a crash,
+      // and diverge from the Go SDK's SetTrailer.
+      return;
     }
     this.trailerMd = md;
   }

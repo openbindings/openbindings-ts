@@ -36,6 +36,19 @@ describe("parseDocument", () => {
       .toThrow(ValidationError);
   });
 
+  it("refuses a document declaring a higher major version on the parse path (OBI-T-04)", () => {
+    // The refusal lives in parseDocument so every parse entry point (including
+    // fetchInterface, which never calls validateInterface) refuses unsupported
+    // versions with the identical error.
+    expect(() => parseDocument(`{"openbindings":"99.0.0","operations":{}}`))
+      .toThrow(/OBI-T-04/);
+  });
+
+  it("refuses a pre-1.0 higher-minor version on the parse path (OBI-T-04)", () => {
+    expect(() => parseDocument(`{"openbindings":"0.99.0","operations":{}}`))
+      .toThrow(/OBI-T-04/);
+  });
+
   it("rejects invalid UTF-8 byte input (OBI-D-01)", () => {
     // 0xFF can never appear in valid UTF-8; the default non-fatal
     // TextDecoder would silently replace it with U+FFFD.
@@ -65,8 +78,15 @@ describe("validateDocument", () => {
   });
 
   it("throws on rule-walk failure (delegates to validateInterface)", () => {
-    // Future-major version: parseDocument accepts it (meta-schema only checks
-    // SemVer shape), validateInterface rejects it via OBI-T-04.
+    // Passes parse (valid version + meta-schema shape) but fails a cross-
+    // reference rule-walk check only validateInterface performs (OBI-D-09).
+    const doc = `{"openbindings":"0.2.0","operations":{"ping":{}},"sources":{"s":{"format":"x","content":{}}},"bindings":{"b":{"operation":"missing","source":"s"}}}`;
+    expect(() => validateDocument(doc)).toThrow(/OBI-D-09/);
+  });
+
+  it("refuses a higher major version via the parse path (OBI-T-04)", () => {
+    // parseDocument now refuses too, so the version is rejected before the
+    // rule-walk; the error is identical at every entry point.
     expect(() => validateDocument(`{"openbindings":"99.0.0","operations":{}}`))
       .toThrow(/OBI-T-04/);
   });

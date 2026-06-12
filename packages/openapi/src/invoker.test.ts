@@ -510,11 +510,20 @@ describe("invokeBinding — context negotiation", () => {
   });
 
   it("challenges auth.oauth2 and applies an accessToken as a bearer", async () => {
+    // clientCredentials is a token-only flow: it defines tokenUrl/scopes but
+    // never authorizationUrl. The flow fallback keys on tokenUrl, so the
+    // challenge must carry tokenUrl (and scopes) — keying on authorizationUrl
+    // would skip this flow and yield a bare auth.oauth2 requirement.
     const spec = authSpec({
       securitySchemes: {
         oauth: {
           type: "oauth2",
-          flows: { clientCredentials: { tokenUrl: "https://auth.example.com/token", scopes: {} } },
+          flows: {
+            clientCredentials: {
+              tokenUrl: "https://auth.example.com/token",
+              scopes: { read: "Read", write: "Write" },
+            },
+          },
         },
       },
       security: [{ oauth: [] }],
@@ -526,7 +535,19 @@ describe("invokeBinding — context negotiation", () => {
       inv.invokeBinding({ source: authSource(spec), ref: REF_DATA, fetch: f1 }).closed,
     ).rejects.toMatchObject({
       code: CONTEXT_REQUIRED,
-      details: { alternatives: [{ requirements: [{ type: "auth.oauth2" }] }] },
+      details: {
+        alternatives: [
+          {
+            requirements: [
+              {
+                type: "auth.oauth2",
+                tokenUrl: "https://auth.example.com/token",
+                scopes: ["read", "write"],
+              },
+            ],
+          },
+        ],
+      },
     });
     expect(r1).toHaveLength(0);
 
@@ -539,6 +560,74 @@ describe("invokeBinding — context negotiation", () => {
     });
     await single(call.outputs);
     expect(r2[0].headers.get("Authorization")).toBe("Bearer at_1");
+  });
+
+  it("carries the oauth2 authorization-code flow endpoints into the challenge", async () => {
+    const spec = authSpec({
+      securitySchemes: {
+        oauth: {
+          type: "oauth2",
+          flows: {
+            authorizationCode: {
+              authorizationUrl: "/oauth/authorize", // relative -> absolutized
+              tokenUrl: "https://auth.example.com/oauth/token",
+              scopes: { read: "Read", write: "Write" },
+            },
+          },
+        },
+      },
+      security: [{ oauth: [] }],
+    });
+    const { fetch, requests } = mockFetch(() => jsonResponse({}));
+    await expect(
+      new OpenAPIInvoker().invokeBinding({ source: authSource(spec), ref: REF_DATA, fetch }).closed,
+    ).rejects.toMatchObject({
+      code: CONTEXT_REQUIRED,
+      details: {
+        alternatives: [
+          {
+            requirements: [
+              {
+                type: "auth.oauth2",
+                authorizeUrl: "https://api.example.com/oauth/authorize",
+                tokenUrl: "https://auth.example.com/oauth/token",
+                scopes: ["read", "write"],
+              },
+            ],
+          },
+        ],
+      },
+    });
+    expect(requests).toHaveLength(0);
+  });
+
+  it("carries the openIdConnect discovery URL into the challenge", async () => {
+    const spec = authSpec({
+      securitySchemes: {
+        oidc: {
+          type: "openIdConnect",
+          openIdConnectUrl: "https://auth.example.com/.well-known/openid-configuration",
+        },
+      },
+      security: [{ oidc: [] }],
+    });
+    const { fetch } = mockFetch(() => jsonResponse({}));
+    await expect(
+      new OpenAPIInvoker().invokeBinding({ source: authSource(spec), ref: REF_DATA, fetch }).closed,
+    ).rejects.toMatchObject({
+      details: {
+        alternatives: [
+          {
+            requirements: [
+              {
+                type: "auth.oauth2",
+                openIdConnectUrl: "https://auth.example.com/.well-known/openid-configuration",
+              },
+            ],
+          },
+        ],
+      },
+    });
   });
 
   it("maps openIdConnect to auth.oauth2 and applies an accessToken as a bearer", async () => {

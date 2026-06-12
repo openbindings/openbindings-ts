@@ -395,10 +395,14 @@ describe("metadata", () => {
     expect(() => inv.setHeader({ late: ["true"] })).toThrow(/must precede/);
   });
 
-  it("setTrailer after terminal is a loud binding bug", () => {
+  it("setTrailer after terminal is dropped silently (late sets are dropped)", () => {
+    // Terminal state is reachable at any time via a cancellation race, so a
+    // late setTrailer is a no-op rather than a throw — matching the documented
+    // "late sets are dropped" contract and the Go SDK's SetTrailer.
     const inv = new InvocationImpl<never, never>();
     inv.closeOutput();
-    expect(() => inv.setTrailer({ late: ["true"] })).toThrow(/must precede/);
+    expect(() => inv.setTrailer({ late: ["true"] })).not.toThrow();
+    expect(inv.trailer()).toEqual({}); // the late set did not land
   });
 
   it("after a single short-circuit, header (if set) is valid and trailer reflects the cancelled call", async () => {

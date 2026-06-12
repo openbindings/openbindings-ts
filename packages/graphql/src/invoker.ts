@@ -117,6 +117,11 @@ export class GraphQLInvoker implements BindingInvoker {
         try {
           schema = await this.cachedIntrospect(url, headers, fetchFn, inv.signal);
         } catch (e: unknown) {
+          // A cancelled introspection fetch rejects with an AbortError, not
+          // an InvocationError: cancellation is already terminal (the handle
+          // fired ERR_CANCELLED), so return rather than masquerade the abort
+          // as a source-load failure. Mirrors the asyncapi/HTTP runners.
+          if (inv.signal.aborted) return;
           if (isAuthError(e)) throw e;
           throw new InvocationError(ERR_SOURCE_LOAD_FAILED, errMsg(e));
         }
@@ -145,6 +150,12 @@ export class GraphQLInvoker implements BindingInvoker {
 
     // Subscriptions stream over WebSocket.
     if (rootType === "Subscription") {
+      // The graphql-transport-ws upgrade exposes no HTTP response headers
+      // (the browser WebSocket API hides them), so there is no leading
+      // metadata to surface. Settle the header to empty up front — before
+      // the first emit — so a caller awaiting `header` resolves at
+      // subscription start rather than blocking until the first event.
+      inv.setHeader({});
       for await (const ev of subscribeGraphQL(url, query, variables, headers, inv.signal)) {
         // Always await: a rejection means the invocation terminated, and the
         // for-await teardown closes the WebSocket via the generator's finally.

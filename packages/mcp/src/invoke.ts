@@ -107,17 +107,22 @@ export async function runMCPBinding(
     void inv.closeInput();
   } else {
     const first = await readFirst(inv.inputs());
+    // Validate BEFORE closing input: a terminal validation error must
+    // precede the observable input-close side effect (which resolves the
+    // `inputClosed` promise conduit consumers await). On the validation
+    // path, fireError itself closes the input side, keeping the terminal
+    // and the input-close atomic.
+    if (first != null && (typeof first !== "object" || Array.isArray(first))) {
+      inv.fireError(
+        new InvocationError(
+          ERR_VALIDATION_FAILED,
+          `MCP ${entityType === "tools" ? "tool" : "prompt"} input must be an object, got ${typeof first}`,
+        ),
+      );
+      return;
+    }
     void inv.closeInput();
     if (first != null) {
-      if (typeof first !== "object" || Array.isArray(first)) {
-        inv.fireError(
-          new InvocationError(
-            ERR_VALIDATION_FAILED,
-            `MCP ${entityType === "tools" ? "tool" : "prompt"} input must be an object, got ${typeof first}`,
-          ),
-        );
-        return;
-      }
       input = first as Record<string, unknown>;
     }
   }

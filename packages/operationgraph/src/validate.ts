@@ -1,169 +1,404 @@
 /**
- * Validates an operation graph against the well-formedness rules in the
- * openbindings.operation-graph@0.2.0 spec. Rule numbers in comments match
- * the spec section.
+ * Enforces the format spec's validation rules OG-V-01 through OG-V-17 on one
+ * graph definition, plus the per-type field whitelists the format's JSON
+ * Schema expresses structurally (which is how OG-V-17 and the each/operation
+ * field split are caught without a separate schema pass).
+ *
+ * `validateGraph` returns structured issues (rule id + offending node keys)
+ * so callers like graph editors can attribute failures to nodes; `validate`
+ * is the throwing form used by the invoker (OG-T-01).
  */
+import { SUPPORTED_MAJOR, SUPPORTED_MINOR } from "./constants.js";
 import type { Graph, Node } from "./types.js";
 
-const KNOWN_NODE_TYPES = new Set([
-  "input",
-  "output",
-  "operation",
-  "buffer",
-  "filter",
-  "transform",
-  "map",
-  "combine",
-  "exit",
-]);
+/** The SemVer 2.0.0 pattern (the same pattern the format schema carries). */
+export const SEMVER_RE =
+  /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$/;
 
 /**
- * Validates a graph. `operationKeys` is the set of valid operation keys from
- * the containing OBI; when undefined, the operation-existence check is
- * skipped (references will fail at runtime if invalid).
+ * OG-T-02: refuses a graph declaring a format version this implementation
+ * does not support. Returns an error message, or null when supported.
  */
-export function validate(g: Graph | null | undefined, operationKeys?: Set<string>): void {
-  if (!g) throw new Error("graph is nil");
+export function checkVersion(version: string): string | null {
+  const m = SEMVER_RE.exec(version);
+  if (!m) return `version "${version}" is not a SemVer 2.0.0 string`;
+  const major = Number(m[1]);
+  const minor = Number(m[2]);
+  if (major > SUPPORTED_MAJOR || (SUPPORTED_MAJOR === 0 && major === 0 && minor > SUPPORTED_MINOR)) {
+    return `OG-T-02: graph declares openbindings.operation-graph ${version}; this implementation supports up to ${SUPPORTED_MAJOR}.${SUPPORTED_MINOR}.x`;
+  }
+  return null;
+}
+
+/**
+ * One validation failure. `rule` is the stable identifier from the format
+ * spec's Validation rules section (OG-V-##) when the failure maps to a
+ * numbered rule; per-type field-whitelist failures (the schema's structural
+ * enforcement) carry no rule id unless they realize OG-V-17. `nodeKeys`
+ * names the offending node(s) when the failure is attributable — a graph
+ * editor can highlight them directly.
+ */
+export interface GraphValidationIssue {
+  rule?: string;
+  message: string;
+  nodeKeys?: string[];
+}
+
+/** Renders an issue the way the throwing `validate` reports it. */
+export function formatIssue(issue: GraphValidationIssue): string {
+  return issue.rule ? `${issue.rule}: ${issue.message}` : issue.message;
+}
+
+interface FieldRules {
+  allowed: Set<string>;
+  required: string[];
+}
+
+function rules(required: string[], ...allowed: string[]): FieldRules {
+  return { allowed: new Set([...required, ...allowed]), required };
+}
+
+const NODE_FIELD_RULES: Record<string, FieldRules> = {
+  input: rules([]),
+  output: rules([]),
+  operation: rules(["operation"], "timeout", "onError"),
+  each: rules(["operation"], "maxIterations", "timeout", "onError"),
+  transform: rules(["transform"], "onError"),
+  filter: rules([], "schema", "transform", "onError"),
+  map: rules(["transform"], "onError"),
+  buffer: rules([], "limit", "until", "through", "onError"),
+  combine: rules([], "onError"),
+  exit: rules([], "error", "onError"),
+};
+
+const SPEC_FIELDS = [
+  "onError",
+  "operation",
+  "maxIterations",
+  "timeout",
+  "limit",
+  "until",
+  "through",
+  "schema",
+  "transform",
+  "error",
+] as const;
+
+// Per-field value types (the schema's structural enforcement, matching the
+// strict decode typed implementations perform). In particular `transform` is
+// a plain JSONata expression string — not an object wrapper.
+const FIELD_TYPES: Record<string, { ok: (v: unknown) => boolean; expected: string }> = {
+  onError: { ok: (v) => typeof v === "string", expected: "string" },
+  operation: { ok: (v) => typeof v === "string", expected: "string" },
+  transform: { ok: (v) => typeof v === "string", expected: "string (a JSONata expression)" },
+  maxIterations: { ok: (v) => typeof v === "number", expected: "number" },
+  timeout: { ok: (v) => typeof v === "number", expected: "number" },
+  limit: { ok: (v) => typeof v === "number", expected: "number" },
+  schema: { ok: isPlainObject, expected: "object (a JSON Schema)" },
+  until: { ok: isPlainObject, expected: "object (a JSON Schema)" },
+  through: { ok: isPlainObject, expected: "object (a JSON Schema)" },
+  error: { ok: (v) => typeof v === "boolean", expected: "boolean" },
+};
+
+function isPlainObject(v: unknown): boolean {
+  return typeof v === "object" && v !== null && !Array.isArray(v);
+}
+
+function presentFields(n: Node): string[] {
+  return SPEC_FIELDS.filter((f) => (n as unknown as Record<string, unknown>)[f] !== undefined);
+}
+
+/**
+ * All spec-defined node fields across every node type — the universe the
+ * per-type whitelists draw from. Fields outside this list (x-* extensions,
+ * future spec additions) are not the validator's concern.
+ */
+export const SPEC_NODE_FIELDS: readonly string[] = SPEC_FIELDS;
+
+/**
+ * The spec's field whitelist for a node type (required fields included), or
+ * undefined for an unknown type. Lets editors derive which fields survive a
+ * node retype instead of duplicating spec knowledge.
+ */
+export function allowedNodeFields(type: string): ReadonlySet<string> | undefined {
+  return NODE_FIELD_RULES[type]?.allowed;
+}
+
+/** The spec's required fields for a node type, or undefined for an unknown type. */
+export function requiredNodeFields(type: string): readonly string[] | undefined {
+  return NODE_FIELD_RULES[type]?.required;
+}
+
+/**
+ * Validates a graph, returning structured issues (empty = valid).
+ * `operationKeys` is the set of operation keys the containing OBI declares;
+ * when undefined, the OG-V-11 reference check is skipped (references then
+ * fail at invocation time).
+ */
+export function validateGraph(
+  g: Graph | null | undefined,
+  operationKeys?: Set<string>,
+): GraphValidationIssue[] {
+  if (!g) return [{ message: "graph is nil" }];
   if (!g.nodes || Object.keys(g.nodes).length === 0) {
-    throw new Error("graph has no nodes");
+    return [{ message: "graph has no nodes" }];
   }
 
-  const errs: string[] = [];
+  const issues: GraphValidationIssue[] = [];
 
-  // Rules 1 & 2: exactly one input and one output node.
-  let inputKey = "";
-  let outputKey = "";
-  let inputCount = 0;
-  let outputCount = 0;
+  // OG-V-01: version field present and SemVer 2.0.0.
+  const version = g["openbindings.operation-graph"];
+  if (version === undefined || version === "") {
+    issues.push({
+      rule: "OG-V-01",
+      message: "graph must declare an openbindings.operation-graph version field",
+    });
+  } else if (typeof version !== "string" || !SEMVER_RE.test(version)) {
+    issues.push({
+      rule: "OG-V-01",
+      message: `version "${version}" is not a SemVer 2.0.0 string`,
+    });
+  }
+
+  // OG-V-02 / OG-V-03: exactly one input and one output node.
+  const inputKeys: string[] = [];
+  const outputKeys: string[] = [];
   for (const [key, node] of Object.entries(g.nodes)) {
-    if (node.type === "input") {
-      inputCount++;
-      inputKey = key;
-    } else if (node.type === "output") {
-      outputCount++;
-      outputKey = key;
-    }
+    if (node.type === "input") inputKeys.push(key);
+    else if (node.type === "output") outputKeys.push(key);
   }
-  if (inputCount !== 1) errs.push(`expected exactly 1 input node, found ${inputCount}`);
-  if (outputCount !== 1) errs.push(`expected exactly 1 output node, found ${outputCount}`);
+  const inputKey = inputKeys.length === 1 ? inputKeys[0] : "";
+  const outputKey = outputKeys.length === 1 ? outputKeys[0] : "";
+  if (inputKeys.length !== 1) {
+    issues.push({
+      rule: "OG-V-02",
+      message: `expected exactly 1 input node, found ${inputKeys.length}`,
+      nodeKeys: inputKeys.length > 0 ? inputKeys : undefined,
+    });
+  }
+  if (outputKeys.length !== 1) {
+    issues.push({
+      rule: "OG-V-03",
+      message: `expected exactly 1 output node, found ${outputKeys.length}`,
+      nodeKeys: outputKeys.length > 0 ? outputKeys : undefined,
+    });
+  }
 
-  // Build adjacency.
+  // Adjacency; OG-V-07 (valid endpoints) and OG-V-08 (no duplicates).
   const outEdges = new Map<string, string[]>();
   const inEdges = new Map<string, string[]>();
   const edgeSeen = new Set<string>();
-  const edges = g.edges ?? [];
-  for (const e of edges) {
-    // Rule 6: edges reference valid node keys.
-    if (!(e.from in g.nodes)) errs.push(`edge references unknown node "${e.from}" in from`);
-    if (!(e.to in g.nodes)) errs.push(`edge references unknown node "${e.to}" in to`);
-    // Rule 7: no duplicate edges.
+  for (const e of g.edges ?? []) {
+    if (!(e.from in g.nodes)) {
+      issues.push({
+        rule: "OG-V-07",
+        message: `edge references unknown node "${e.from}" in from`,
+        nodeKeys: e.to in g.nodes ? [e.to] : undefined,
+      });
+    }
+    if (!(e.to in g.nodes)) {
+      issues.push({
+        rule: "OG-V-07",
+        message: `edge references unknown node "${e.to}" in to`,
+        nodeKeys: e.from in g.nodes ? [e.from] : undefined,
+      });
+    }
     const edgeKey = `${e.from} -> ${e.to}`;
-    if (edgeSeen.has(edgeKey)) errs.push(`duplicate edge: ${edgeKey}`);
+    if (edgeSeen.has(edgeKey)) {
+      issues.push({
+        rule: "OG-V-08",
+        message: `duplicate edge: ${edgeKey}`,
+        nodeKeys: [e.from, e.to].filter((k) => k in g.nodes),
+      });
+    }
     edgeSeen.add(edgeKey);
-
     pushTo(outEdges, e.from, e.to);
     pushTo(inEdges, e.to, e.from);
   }
 
-  // Rule 3: input has no incoming edges.
+  // OG-V-04 / OG-V-05: boundary edge constraints.
   if (inputKey && (inEdges.get(inputKey)?.length ?? 0) > 0) {
-    errs.push("input node must not have incoming edges");
+    issues.push({
+      rule: "OG-V-04",
+      message: "input node must not have incoming edges",
+      nodeKeys: [inputKey],
+    });
   }
-
-  // Rule 4: output has no outgoing edges.
   if (outputKey && (outEdges.get(outputKey)?.length ?? 0) > 0) {
-    errs.push("output node must not have outgoing edges");
+    issues.push({
+      rule: "OG-V-05",
+      message: "output node must not have outgoing edges",
+      nodeKeys: [outputKey],
+    });
   }
 
-  // Rule 14: exit nodes have no outgoing edges.
+  // OG-V-16: exit nodes have no outgoing edges.
   for (const [key, node] of Object.entries(g.nodes)) {
     if (node.type === "exit" && (outEdges.get(key)?.length ?? 0) > 0) {
-      errs.push(`exit node "${key}" must not have outgoing edges`);
+      issues.push({
+        rule: "OG-V-16",
+        message: `exit node "${key}" must not have outgoing edges`,
+        nodeKeys: [key],
+      });
     }
   }
 
-  // Rule 5: every node reachable from input via edges or onError references.
+  // succ is the control adjacency: data edges plus onError references.
+  // Both OG-V-06 (reachability) and OG-V-09/OG-V-10 (cycles) follow it.
+  const succ = new Map<string, string[]>();
+  for (const [key, node] of Object.entries(g.nodes)) {
+    const next = [...(outEdges.get(key) ?? [])];
+    if (node.onError) next.push(node.onError);
+    succ.set(key, next);
+  }
+
+  // OG-V-06: every node reachable from input.
   if (inputKey) {
     const reachable = new Set<string>();
     const walk = (key: string): void => {
       if (reachable.has(key)) return;
       reachable.add(key);
-      for (const to of outEdges.get(key) ?? []) walk(to);
-      const node = g.nodes[key];
-      if (node?.onError) walk(node.onError);
+      for (const next of succ.get(key) ?? []) {
+        if (next in g.nodes) walk(next);
+      }
     };
     walk(inputKey);
     for (const key of Object.keys(g.nodes)) {
-      if (!reachable.has(key)) errs.push(`node "${key}" is not reachable from input`);
+      if (!reachable.has(key)) {
+        issues.push({
+          rule: "OG-V-06",
+          message: `node "${key}" is not reachable from input`,
+          nodeKeys: [key],
+        });
+      }
     }
   }
 
-  // Rule 8: every cycle must contain at least one operation node with maxIterations.
-  const cycles = findCycles(g);
-  for (const cycle of cycles) {
+  // OG-V-09 / OG-V-10: cycle rules over the control adjacency.
+  for (const cycle of findCycles(g.nodes, succ)) {
     cycle.sort();
-    let hasGuard = false;
+    let hasBoundedEach = false;
     for (const key of cycle) {
       const node = g.nodes[key];
-      if (node.type === "operation" && node.maxIterations !== undefined) {
-        hasGuard = true;
-        break;
+      if (node.type === "each" && node.maxIterations !== undefined) hasBoundedEach = true;
+      if (node.type === "operation") {
+        issues.push({
+          rule: "OG-V-10",
+          message: `operation node "${key}" must not participate in a cycle [${cycle.join(" -> ")}]`,
+          nodeKeys: [key],
+        });
       }
     }
-    if (!hasGuard) {
-      errs.push(
-        `cycle [${cycle.join(" -> ")}] must contain at least one operation node with maxIterations`,
-      );
+    if (!hasBoundedEach) {
+      issues.push({
+        rule: "OG-V-09",
+        message: `cycle [${cycle.join(" -> ")}] must contain at least one each node with maxIterations`,
+        nodeKeys: [...cycle],
+      });
     }
   }
 
-  // Per-node validation.
+  // Per-node rules: OG-V-11 .. OG-V-15, OG-V-17, plus per-type field
+  // whitelists (the schema's structural enforcement).
   for (const [key, node] of Object.entries(g.nodes)) {
-    // Rule 12: valid type.
-    if (!KNOWN_NODE_TYPES.has(node.type)) {
-      errs.push(`node "${key}" has unsupported type "${node.type}"`);
+    const fields = NODE_FIELD_RULES[node.type];
+    if (!fields) {
+      issues.push({
+        rule: "OG-V-14",
+        message: `node "${key}" has unsupported type "${node.type}"`,
+        nodeKeys: [key],
+      });
+      continue;
     }
 
-    // Rule 9: operation nodes reference valid operations.
-    if (node.type === "operation") {
-      if (!node.operation) {
-        errs.push(`operation node "${key}" missing operation field`);
-      } else if (operationKeys && !operationKeys.has(node.operation)) {
-        errs.push(`operation node "${key}" references unknown operation "${node.operation}"`);
+    for (const f of presentFields(node)) {
+      if (!fields.allowed.has(f)) {
+        const isBoundaryOnError =
+          f === "onError" && (node.type === "input" || node.type === "output");
+        issues.push({
+          rule: isBoundaryOnError ? "OG-V-17" : undefined,
+          message: `node "${key}" (${node.type}) does not permit field "${f}"`,
+          nodeKeys: [key],
+        });
+        continue;
+      }
+      const ft = FIELD_TYPES[f];
+      const value = (node as unknown as Record<string, unknown>)[f];
+      if (ft && !ft.ok(value)) {
+        issues.push({
+          message: `node "${key}" field "${f}" must be a ${ft.expected}`,
+          nodeKeys: [key],
+        });
+      }
+    }
+    for (const f of fields.required) {
+      if ((node as unknown as Record<string, unknown>)[f] === undefined) {
+        issues.push({
+          message: `${node.type} node "${key}" missing ${f} field`,
+          nodeKeys: [key],
+        });
       }
     }
 
-    // Rule 10: filter mutual exclusivity.
+    // OG-V-11: operation and each references resolve in the containing OBI.
+    if ((node.type === "operation" || node.type === "each") && node.operation) {
+      if (operationKeys && !operationKeys.has(node.operation)) {
+        issues.push({
+          rule: "OG-V-11",
+          message: `${node.type} node "${key}" references unknown operation "${node.operation}"`,
+          nodeKeys: [key],
+        });
+      }
+    }
+
+    // OG-V-12: filter mutual exclusivity (exactly one of schema/transform).
     if (node.type === "filter") {
       const hasSchema = node.schema !== undefined;
       const hasTransform = node.transform !== undefined;
-      if (!hasSchema && !hasTransform) {
-        errs.push(`filter node "${key}" must have schema or transform`);
-      }
-      if (hasSchema && hasTransform) {
-        errs.push(`filter node "${key}" must have exactly one of schema or transform`);
+      if (hasSchema === hasTransform) {
+        issues.push({
+          rule: "OG-V-12",
+          message: `filter node "${key}" must have exactly one of schema or transform`,
+          nodeKeys: [key],
+        });
       }
     }
 
-    // Rule 11: buffer mutual exclusivity.
+    // OG-V-13: buffer until/through mutual exclusivity.
     if (node.type === "buffer" && node.until !== undefined && node.through !== undefined) {
-      errs.push(`buffer node "${key}" must not have both until and through`);
+      issues.push({
+        rule: "OG-V-13",
+        message: `buffer node "${key}" must not have both until and through`,
+        nodeKeys: [key],
+      });
     }
 
-    // Rule 13: onError references valid node.
+    // OG-V-15: onError references an existing node.
     if (node.onError && !(node.onError in g.nodes)) {
-      errs.push(`node "${key}" onError references unknown node "${node.onError}"`);
-    }
-
-    // transform and map nodes require a transform field.
-    if ((node.type === "transform" || node.type === "map") && node.transform === undefined) {
-      errs.push(`${node.type} node "${key}" missing transform field`);
+      issues.push({
+        rule: "OG-V-15",
+        message: `node "${key}" onError references unknown node "${node.onError}"`,
+        nodeKeys: [key],
+      });
     }
   }
 
-  if (errs.length > 0) {
-    throw new Error(`validation errors:\n  ${errs.join("\n  ")}`);
+  return issues;
+}
+
+/**
+ * Throwing form of {@link validateGraph}: the OG-T-01 gate used by the
+ * invoker. Throws an Error joining every issue, one per line.
+ */
+export function validate(g: Graph | null | undefined, operationKeys?: Set<string>): void {
+  const issues = validateGraph(g, operationKeys);
+  if (issues.length === 0) return;
+  if (issues.length === 1 && issues[0].nodeKeys === undefined && issues[0].rule === undefined) {
+    // Shape preconditions ("graph is nil", "graph has no nodes") throw bare,
+    // matching the historical behavior.
+    throw new Error(issues[0].message);
   }
+  throw new Error(`validation errors:\n  ${issues.map(formatIssue).join("\n  ")}`);
 }
 
 function pushTo(m: Map<string, string[]>, k: string, v: string): void {
@@ -173,16 +408,12 @@ function pushTo(m: Map<string, string[]>, k: string, v: string): void {
 }
 
 /**
- * Returns all strongly connected components with more than one node,
- * plus single-node SCCs that have a self-loop. Implements Tarjan's algorithm.
- *
- * Iterative implementation: deep graphs would otherwise blow the call stack
- * for the recursive form used in the Go reference.
+ * Returns all strongly connected components with more than one node, plus
+ * single-node SCCs with a self-loop, over the given adjacency (data edges
+ * plus onError references). Iterative Tarjan (deep graphs would blow the
+ * call stack in recursive form).
  */
-function findCycles(g: Graph): string[][] {
-  const outEdges = new Map<string, string[]>();
-  for (const e of g.edges ?? []) pushTo(outEdges, e.from, e.to);
-
+function findCycles(nodes: Record<string, Node>, succ: Map<string, string[]>): string[][] {
   let index = 0;
   const stack: string[] = [];
   const onStack = new Set<string>();
@@ -202,7 +433,8 @@ function findCycles(g: Graph): string[][] {
       visited.add(v);
       stack.push(v);
       onStack.add(v);
-      frames.push({ v, iter: (outEdges.get(v) ?? [])[Symbol.iterator]() });
+      const next = (succ.get(v) ?? []).filter((w) => w in nodes);
+      frames.push({ v, iter: next[Symbol.iterator]() });
     };
     init(start);
 
@@ -222,7 +454,6 @@ function findCycles(g: Graph): string[][] {
         continue;
       }
 
-      // Frame finished — pop and propagate lowlink to parent.
       frames.pop();
       if (lowlinks.get(frame.v) === indices.get(frame.v)) {
         const scc: string[] = [];
@@ -235,7 +466,7 @@ function findCycles(g: Graph): string[][] {
         if (scc.length > 1) {
           result.push(scc);
         } else if (scc.length === 1) {
-          for (const to of outEdges.get(scc[0]) ?? []) {
+          for (const to of succ.get(scc[0]) ?? []) {
             if (to === scc[0]) {
               result.push(scc);
               break;
@@ -251,7 +482,7 @@ function findCycles(g: Graph): string[][] {
     }
   };
 
-  for (const key of Object.keys(g.nodes)) {
+  for (const key of Object.keys(nodes)) {
     if (!visited.has(key)) strongConnect(key);
   }
   return result;

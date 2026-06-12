@@ -2,7 +2,7 @@
 
 Operation-graph binding invoker for OpenBindings. Composes existing operations on the same OBI into a graph: a new operation whose binding is a graph of nodes that fan-in, fan-out, filter, transform, and combine results from other operations.
 
-Implements the `openbindings.operation-graph` companion format, currently at `@0.2.0`. See [`spec/formats/operation-graph/`](https://github.com/openbindings/spec/tree/main/formats/operation-graph) for the full format specification.
+Implements the `openbindings.operation-graph` companion format at `@0.2.0` (the transparency rewrite), governed by the identity law: `input → operation(y) → output` is observationally indistinguishable from invoking `y` directly. See [`spec/formats/operation-graph/`](https://github.com/openbindings/spec/tree/main/formats/operation-graph) for the full format specification.
 
 ## Install
 
@@ -15,17 +15,19 @@ npm install @openbindings/operationgraph
 An operation-graph binding lets you define a new operation in terms of existing ones, declaratively:
 
 ```
-input ── transform ── operation A
-                 └─── operation B ── filter ── exit
+input ── operation A ── map ── each B ── buffer ── output
 ```
 
-Each node has a type (`input`, `output`, `operation`, `transform`, `filter`, `buffer`, `map`, `combine`, `exit`), an optional schema or JSONata expression, and edges to downstream nodes. The engine drives the graph mailbox-style: each node runs in its own async loop, processing events from upstream and emitting events downstream, until the `output` node yields the final stream or an `exit` node terminates the graph.
+Each node has a type (`input`, `output`, `operation`, `each`, `transform`, `filter`, `buffer`, `map`, `combine`, `exit`), an optional schema or JSONata expression, and edges to downstream nodes. Two node types invoke operations, reflecting the two liftings of an operation over a stream:
 
-This is what powers "I want one OBI operation that calls three underlying operations and stitches their results together" without writing imperative orchestration code in your service.
+- **`operation`** is the conduit: one held invocation per graph invocation, fed every arriving event in order — the node that makes the trivial wrapper transparent at every cardinality (no-input, unary, streaming, bidirectional).
+- **`each`** opens one invocation per arriving event — the per-item node; `maxIterations` lives here and bounds cycles per event lineage.
+
+The engine drives the graph mailbox-style: each node runs in its own async loop, processing events from upstream and emitting events downstream, until the graph completes or an `exit` node terminates it.
 
 ## Usage
 
-The invoker needs a reference to the `OperationInvoker` so its `operation` nodes can recurse into other operations on the same OBI. Because the dependency is mutual, register it after construction:
+The invoker needs a reference to the `OperationInvoker` so its `operation` and `each` nodes can recurse into other operations on the same OBI. Because the dependency is mutual, register it after construction:
 
 ```typescript
 import { OperationInvoker } from "@openbindings/sdk";
@@ -37,28 +39,28 @@ const operationGraph = new OperationGraphInvoker(operationInvoker);
 operationInvoker.addBindingInvoker(operationGraph);
 ```
 
-After that, the operation-graph invoker behaves like any other format invoker. Operations whose bindings reference an `openbindings.operation-graph@0.2.0` source route to it; that source's `graphs` map is keyed by ref.
+After that, the operation-graph invoker behaves like any other format invoker. Caller writes stream into the graph (each write becomes one event at the `input` node, rooting a lineage); the graph back-closes the caller's input side when its contents stop accepting input (e.g. the trivial unary wrapper closes after the first write, exactly like direct invocation):
 
 ```typescript
 const call = operationInvoker.invoke({
   interface: iface,
   operation: "summarizeOrder",
 });
-await call.write({ orderId: "abc123" }); // the binding closes input after the first read
+await call.write({ orderId: "abc123" }); // a unary wrapper back-closes input here
 
 for await (const event of call.outputs) {
   console.log(event);
 }
-// Terminal failures (including exit-node errors) throw from the iteration
-// as InvocationError, e.g. with code ERR_OPERATION_GRAPH_EXIT.
+// Terminal failures throw from the iteration as InvocationError: an exit
+// node with error:true (code ERR_OPERATION_GRAPH_EXIT, details = the event),
+// or an unhandled terminal error on an operation conduit, surfaced verbatim.
 ```
 
 ## Conventions
 
 - **Format token**: `openbindings.operation-graph@0.2.0`
-- **Source `location`**: usually empty; graphs are typically inline in `content`
-- **Source `content`**: a JSON document with a top-level `graphs` map keyed by graph name
-- **Binding `ref`**: the key of the graph within `source.content.graphs`
+- **Binding `ref`**: a REQUIRED JSON Pointer fragment addressing the graph definition within the source document (`"#/graphs/summarizeOrder"`, or `"#"` for a document whose root is a graph). Bare graph keys are rejected.
+- **Source document**: any JSON document; the conventional shape is a top-level `graphs` map. Each graph declares its own `openbindings.operation-graph` version, refused per OG-T-02 when unsupported.
 
 ## Source shape
 
@@ -66,13 +68,10 @@ for await (const event of call.outputs) {
 {
   "graphs": {
     "summarizeOrder": {
+      "openbindings.operation-graph": "0.2.0",
       "nodes": {
         "in": { "type": "input" },
-        "fetch": {
-          "type": "operation",
-          "operation": "getOrder",
-          "input": "{ \"id\": orderId }"
-        },
+        "fetch": { "type": "operation", "operation": "getOrder" },
         "summarize": {
           "type": "transform",
           "transform": "{ \"id\": id, \"total\": items.price ~> $sum() }"
@@ -89,23 +88,25 @@ for await (const event of call.outputs) {
 }
 ```
 
-`transform` fields are bare JSONata expression strings, matching the core OpenBindings spec v0.2.
+`transform` fields are bare JSONata expression strings; `$` is the current event and `$input` the lineage's root input.
+
+## Error model
+
+Per the spec, error policy follows the two liftings:
+
+- **Per-event failures** (`each` invocation errors, `WRITE_REJECTED` at a non-accepting conduit, `MAP_NOT_ARRAY`, `TRANSFORM_UNDEFINED`) route an `{error, event}` event via `onError`, or drop silently.
+- **Conduit terminal errors** are fatal by default: an unhandled terminal error on an `operation` node terminates the graph invocation with the inner error verbatim (the identity law's terminal-status clause); `onError` on the node opts it into in-graph handling instead (the error event then carries no `event` member).
 
 ## Engine invariants
 
-- **`MAX_EVENTS = 100_000`** events per invocation. Prevents runaway graphs (recursive operation nodes, unbounded buffers) from consuming unbounded memory.
-- **`MAX_ERROR_DEPTH = 32`** for `onError` chains. Errors in error-handling paths are bounded so a misconfigured graph cannot loop forever.
-- **Per-node mailboxes**: each node consumes from its own AsyncQueue; caller-facing backpressure comes from the engine awaiting `emitOutput` on the invocation handle.
+- **`MAX_EVENTS = 100_000`** events per invocation (the spec's amplification backstop).
+- **`MAX_ERROR_DEPTH = 32`** for `onError` chains, as defense in depth; the normative bound is lineage (`onError` routes count as cycle edges).
+- **Per-node mailboxes**: each node consumes from its own AsyncQueue; backpressure comes from the engine awaiting `emitOutput` on the invocation handle.
+- **Quiescence completion**: cyclic (and error-route-fed) completion resolves once nothing is in flight, per the spec's implementation-defined drain detection.
 
-These match the Go reference invoker's invariants and are validated by the same conformance corpus.
+## Conformance
 
-## How it works
-
-1. The invoker receives `BindingInvocationArgs` with a source whose format is `openbindings.operation-graph@0.2.0` and returns an `Invocation` handle synchronously; the graph's work is scheduled on a microtask.
-2. It parses the source's `content` as a `Document`, validates against the format schema, and looks up the graph by `ref`.
-3. The graph's initial event is the first message written to the handle (the invoker closes the input side after reading it; for operations that declare no input it closes input on entry and seeds `undefined`).
-4. An `Engine` instance is constructed with the graph plus the parent `OperationInvoker` (for recursing into `operation` nodes) and the OBI's transform evaluator. The engine seeds the `input` node, then spins up an async loop per node. Each loop reads from its mailbox, applies its node-type logic, and pushes events to downstream mailboxes.
-5. Events flowing into the `output` node are emitted on the handle (`emitOutput`, with backpressure). An event flowing into an `exit` node terminates the graph: normally on success, or with a terminal `InvocationError` of code `ERR_OPERATION_GRAPH_EXIT` when the node sets `error: true`. Cancelling the handle aborts the engine and any in-flight sub-operations.
+The test suite runs the spec repository's conformance corpus unmodified — 19 execution fixtures (including the identity-law suite across no-input, unary, client-streaming, and terminal-error scenarios) plus the OG-V validation fixtures — through the real `OperationInvoker` against a mock binding invoker. Point `OB_SPEC_CORPUS` at `spec/conformance/operation-graph` (or keep the local-dev sibling layout) and run `pnpm test`.
 
 ## License
 

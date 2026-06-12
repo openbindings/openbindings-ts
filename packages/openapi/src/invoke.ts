@@ -31,6 +31,7 @@ import type {
   OpenAPIOperation,
   OpenAPIParameter,
   OpenAPISecurityScheme,
+  OpenAPIOAuthFlow,
 } from "./types.js";
 import { errorMessage, mergeParameters, parseRef } from "./util.js";
 
@@ -292,7 +293,7 @@ export function requiredContext(
   ctx: Record<string, unknown> | undefined,
   baseURL: string,
 ): ContextRequiredDetails | null {
-  const alternatives = securityAlternatives(doc, op);
+  const alternatives = securityAlternatives(doc, op, baseURL);
   if (!alternatives) return null;
   const details: ContextRequiredDetails = {
     key: normalizeEndpoint(baseURL),
@@ -305,6 +306,7 @@ export function requiredContext(
 function securityAlternatives(
   doc: OpenAPIDocument,
   op: OpenAPIOperation,
+  baseURL: string,
 ): ContextAlternative[] | null {
   const opSec = op.security as Array<Record<string, unknown>> | undefined;
   const docSec = (doc as Record<string, unknown>)["security"] as
@@ -333,12 +335,12 @@ function securityAlternatives(
     let expressible = true;
     for (const name of names.sort()) {
       const scheme = securitySchemes?.[name];
-      const type = scheme ? requirementType(scheme) : null;
-      if (!type) {
+      const requirement = scheme ? schemeRequirement(scheme, baseURL) : null;
+      if (!requirement) {
         expressible = false;
         break;
       }
-      reqs.push({ type });
+      reqs.push(requirement);
     }
     // A requirement set containing a scheme we cannot express cannot be
     // satisfied through context negotiation; skip the whole alternative
@@ -349,27 +351,86 @@ function securityAlternatives(
   return alternatives.length > 0 ? alternatives : null;
 }
 
-/** Maps an OpenAPI security scheme to a standard context-requirement family. */
-function requirementType(scheme: OpenAPISecurityScheme): string | null {
+/**
+ * Maps an OpenAPI security scheme to a standard context requirement, carrying
+ * the family-specific fields a resolver needs to act without out-of-band
+ * knowledge (notably oauth2 flow endpoints). Returns null for schemes that
+ * cannot be expressed as a known requirement family.
+ */
+function schemeRequirement(
+  scheme: OpenAPISecurityScheme,
+  baseURL: string,
+): ContextRequirement | null {
   switch (scheme.type) {
     case "http":
       switch ((scheme.scheme ?? "").toLowerCase()) {
         case "bearer":
-          return "auth.bearer";
+          return { type: "auth.bearer" };
         case "basic":
-          return "auth.basic";
+          return { type: "auth.basic" };
         default:
           return null;
       }
     case "apiKey":
-      return "auth.apiKey";
+      return { type: "auth.apiKey" };
     case "oauth2":
-      return "auth.oauth2";
-    case "openIdConnect":
-      // OpenID Connect resolves to an OAuth2 access token (Go SDK parity).
-      return "auth.oauth2";
+      return oauth2Requirement(scheme, baseURL);
+    case "openIdConnect": {
+      // OpenID Connect resolves to an OAuth2 access token. The discovery URL
+      // lets a resolver fetch the authorize/token endpoints.
+      const req: ContextRequirement = { type: "auth.oauth2" };
+      if (scheme.openIdConnectUrl) {
+        req.openIdConnectUrl = absolutize(scheme.openIdConnectUrl, baseURL);
+      }
+      return req;
+    }
     default:
       return null;
+  }
+}
+
+/**
+ * Builds an `auth.oauth2` requirement carrying the flow's authorize/token URLs
+ * and scopes under the role's convention field names (`authorizeUrl`,
+ * `tokenUrl`, `scopes`). Prefers the authorization-code flow — the only
+ * interactive, PKCE-capable flow — then implicit, then any flow that declares
+ * a usable endpoint. The fallback keys on `tokenUrl` (not `authorizationUrl`)
+ * so token-only flows — password and clientCredentials, which define only
+ * `tokenUrl` — are selected; keying on `authorizationUrl` skipped them, yielding
+ * a bare `auth.oauth2` requirement with no `tokenUrl`/`scopes`. Relative URLs
+ * are resolved against the server base.
+ */
+function oauth2Requirement(
+  scheme: OpenAPISecurityScheme,
+  baseURL: string,
+): ContextRequirement {
+  const req: ContextRequirement = { type: "auth.oauth2" };
+  const flows = scheme.flows;
+  const flow =
+    flows?.authorizationCode ??
+    flows?.implicit ??
+    (flows
+      ? (Object.values(flows).find(
+          (f): f is OpenAPIOAuthFlow =>
+            !!f &&
+            typeof f === "object" &&
+            typeof (f as OpenAPIOAuthFlow).tokenUrl === "string",
+        ) as OpenAPIOAuthFlow | undefined)
+      : undefined);
+  if (flow?.authorizationUrl) req.authorizeUrl = absolutize(flow.authorizationUrl, baseURL);
+  if (flow?.tokenUrl) req.tokenUrl = absolutize(flow.tokenUrl, baseURL);
+  if (flow?.scopes && Object.keys(flow.scopes).length > 0) {
+    req.scopes = Object.keys(flow.scopes);
+  }
+  return req;
+}
+
+/** Resolves a possibly-relative URL against the server base; passes absolute URLs through. */
+function absolutize(url: string, baseURL: string): string {
+  try {
+    return new URL(url, baseURL).toString();
+  } catch {
+    return url;
   }
 }
 

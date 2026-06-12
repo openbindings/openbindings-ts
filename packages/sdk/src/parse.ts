@@ -2,6 +2,11 @@ import type { OBInterface } from "./types.js";
 import { ValidationError } from "./errors.js";
 import { validateAgainstOBISchema } from "./schema-validation.js";
 import { validateInterface, type ValidateOptions } from "./validate.js";
+import {
+  isValidSemver,
+  isHigherMajorOrPre1MinorThanMaxTested,
+  MAX_TESTED_VERSION,
+} from "./version.js";
 
 /**
  * Parses an OBI document from JSON and validates it against
@@ -10,10 +15,14 @@ import { validateInterface, type ValidateOptions } from "./validate.js";
  *   - OBI-D-01: rejects duplicate JSON object keys.
  *   - OBI-D-02: validates against the meta-schema. The meta-schema's
  *     SemVer pattern on `openbindings` also covers OBI-D-13.
+ *   - OBI-T-04: refuses a document whose `openbindings` version declares a
+ *     higher major than this SDK's MAX_TESTED_VERSION (or, while pre-1.0, a
+ *     higher minor). Enforced here so every parse entry point — including
+ *     {@link fetchInterface}, which never calls {@link validateInterface} —
+ *     refuses unsupported versions with the same error.
  *
- * Returns a typed {@link OBInterface}. Full OBI-D rule enforcement
- * (cross-references, identifier patterns, example schema checks,
- * version refusal via OBI-T-04, etc.) is the job of
+ * The remaining OBI-D rule enforcement (cross-references, identifier
+ * patterns, example schema checks, etc.) is the job of
  * {@link validateInterface}. Use {@link validateDocument} for the
  * combined parse-and-validate convenience.
  *
@@ -41,6 +50,27 @@ export function parseDocument(input: string | Uint8Array): OBInterface {
   validateAgainstOBISchema(errs, parsed);
   if (errs.length > 0) {
     throw new ValidationError(errs);
+  }
+
+  // OBI-T-04 (§11.1): refuse to PARSE a document declaring a higher major
+  // version than this SDK's MAX_TESTED_VERSION (or, while pre-1.0, a higher
+  // minor). The refusal lives here, after the meta-schema check, so every
+  // parse entry point (parseDocument, validateDocument, fetchInterface) is
+  // covered with the identical error validateInterface raises. The
+  // meta-schema's SemVer pattern already guarantees a valid string by this
+  // point; guard defensively in case a future schema relaxes that.
+  const ver = ((parsed as Record<string, unknown>)?.openbindings as string ?? "").trim();
+  if (ver && isValidSemver(ver)) {
+    try {
+      if (isHigherMajorOrPre1MinorThanMaxTested(ver)) {
+        throw new ValidationError([
+          `openbindings: "${ver}" exceeds this SDK's MaxTestedVersion "${MAX_TESTED_VERSION}" (OBI-T-04)`,
+        ]);
+      }
+    } catch (err) {
+      if (err instanceof ValidationError) throw err;
+      throw new ValidationError([`openbindings: ${(err as Error).message} (OBI-T-04)`]);
+    }
   }
 
   return parsed as OBInterface;

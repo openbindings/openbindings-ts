@@ -128,8 +128,15 @@ export const ERR_EVENT_LIMIT_EXCEEDED = "ERR_EVENT_LIMIT_EXCEEDED";
 /** An exit node terminated the operation graph execution with an error. */
 export const ERR_OPERATION_GRAPH_EXIT = "ERR_OPERATION_GRAPH_EXIT";
 
-/** A map node's transform did not produce an array value as required. */
-export const ERR_MAP_NOT_ARRAY = "ERR_MAP_NOT_ARRAY";
+/**
+ * A binding source declares a format version the invoker refuses (e.g. the
+ * operation-graph OG-T-02 rule mirroring OBI-T-04: higher major, or higher
+ * minor while pre-1.0). Per-node failure identifiers inside an operation
+ * graph (TIMEOUT_EXCEEDED, WRITE_REJECTED, MAP_NOT_ARRAY,
+ * TRANSFORM_UNDEFINED) are format error identifiers defined by the
+ * operation-graph spec and live in @openbindings/operationgraph, not here.
+ */
+export const ERR_UNSUPPORTED_FORMAT_VERSION = "ERR_UNSUPPORTED_FORMAT_VERSION";
 
 /**
  * Maps an HTTP status code to a standard error code.

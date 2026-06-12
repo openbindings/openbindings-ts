@@ -180,6 +180,13 @@ export class OperationInvoker {
     if (args.bindingKey) {
       const b = iface.bindings?.[args.bindingKey];
       if (!b) throw new BindingNotFoundError(args.bindingKey);
+      // An explicit bindingKey must name a binding FOR the resolved operation.
+      // Without this check a caller could invoke any binding under the guise of
+      // any operation, applying the wrong operation's input/output schema and
+      // transforms. Same refusal (ERR_BINDING_NOT_FOUND) as the Go fix.
+      if (b.operation !== opKey) {
+        throw new BindingNotFoundError(opKey);
+      }
       bindingKey = args.bindingKey;
       binding = b;
     } else {

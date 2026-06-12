@@ -133,6 +133,32 @@
 
 ### Added
 
+- **`Invocation.inputClosed`** in `@openbindings/sdk` — a promise resolved
+  once the invocation's input side has closed: by the caller's `close()`, by
+  the binding from below (a unary binding after its first read), or by a
+  terminal transition. Lets consumers that pipe a stream into an invocation
+  (the operation-graph conduit) observe non-acceptance without probing with
+  a failing `write`.
+
+- **`@openbindings/operationgraph` rewritten for the transparency rewrite**
+  of `openbindings.operation-graph@0.2.0`: `operation` is the held-invocation
+  conduit and `each` the per-event node (`maxIterations` moved there; cycles
+  forbid conduits); caller input is a write stream with back-closure;
+  `$input` is the lineage root; combine readiness, lineage-max merges, and
+  buffer flush precedence corrected; spec error identifiers
+  (`TIMEOUT_EXCEEDED`, `WRITE_REJECTED`, `MAP_NOT_ARRAY`,
+  `TRANSFORM_UNDEFINED`); unhandled conduit terminal errors are fatal to the
+  graph invocation (the identity law's terminal-status clause); refs are
+  JSON Pointer fragments against unconstrained host documents; per-graph
+  version refusal (OG-T-02, `ERR_UNSUPPORTED_FORMAT_VERSION`, which replaces
+  `ERR_MAP_NOT_ARRAY` in the SDK's error codes); validation implements
+  OG-V-01..17. `validateGraph` returns structured
+  `GraphValidationIssue[]` (`{rule?, message, nodeKeys?}`) so editors can
+  attribute failures to nodes; `validate` remains the throwing OG-T-01 form.
+  The test suite runs the spec repository's conformance corpus unmodified
+  (19 execution fixtures including the identity-law suite, plus the OG-V
+  validation fixtures).
+
 - **URI helpers** in `@openbindings/sdk`: `canonicalizeLocation(uri)` and
   `resolveRef(base, ref)` per spec §10 (Location Equality) and §12
   (Reference Resolution). `canonicalizeLocation` lifts bare absolute paths
