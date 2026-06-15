@@ -11,7 +11,6 @@ import {
   contextHeaders,
   contextCookies,
   contextMetadata,
-  normalizeEndpoint,
   httpErrorCode,
   ERR_INVALID_REF,
   ERR_SOURCE_CONFIG_ERROR,
@@ -296,7 +295,7 @@ export function requiredContext(
   const alternatives = securityAlternatives(doc, op, baseURL);
   if (!alternatives) return null;
   const details: ContextRequiredDetails = {
-    key: normalizeEndpoint(baseURL),
+    target: baseURL,
     alternatives,
   };
   if (ctx && contextSatisfies(ctx, details)) return null;

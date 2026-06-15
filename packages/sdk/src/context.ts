@@ -236,37 +236,6 @@ export function normalizeEndpoint(url: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// MemoryStore
-// ---------------------------------------------------------------------------
-
-/**
- * In-memory ContextStore for session-scoped usage.
- * Uses structuredClone for isolation (prevents aliasing between
- * callers and the store).
- */
-export class MemoryStore implements ContextStore {
-  private data = new Map<string, Record<string, unknown>>();
-
-  async get(key: string): Promise<Record<string, unknown> | null> {
-    const v = this.data.get(key);
-    if (!v) return null;
-    return structuredClone(v);
-  }
-
-  async set(key: string, value: Record<string, unknown> | null): Promise<void> {
-    if (value == null) {
-      this.data.delete(key);
-      return;
-    }
-    this.data.set(key, structuredClone(value));
-  }
-
-  async delete(key: string): Promise<void> {
-    this.data.delete(key);
-  }
-}
-
-// ---------------------------------------------------------------------------
 // Store-backed context resolver
 // ---------------------------------------------------------------------------
 
@@ -305,19 +274,20 @@ export function contextSatisfies(
 
 /**
  * Builds a read-only {@link ContextResolver} backed by a {@link ContextStore}:
- * the composition of the binding-invoker and context-store roles. Looks up
- * the challenge's `key`, returns the stored context when it satisfies one
- * of the challenge's alternatives, and declines (null) otherwise — at which
- * point the challenge surfaces to the caller unchanged.
+ * the composition of the binding-invoker and context-store roles. It derives
+ * the store key from the challenge's `target` by normalizing it
+ * ({@link normalizeEndpoint}), returns the stored context when it satisfies
+ * one of the challenge's alternatives, and declines (null) otherwise — at
+ * which point the challenge surfaces to the caller unchanged.
  *
  * Apps that resolve interactively (prompt, browser redirect, keychain)
  * supply their own resolver and MAY persist what they obtain for
- * `durable: true` requirements under `details.key`; non-durable context
- * MUST NOT be persisted.
+ * `durable: true` requirements under the target-derived key; non-durable
+ * context MUST NOT be persisted.
  */
 export function storeContextResolver(store: ContextStore): ContextResolver {
   return async (details: ContextRequiredDetails) => {
-    const ctx = await store.get(details.key);
+    const ctx = await store.get(normalizeEndpoint(details.target));
     if (!ctx) return null;
     return contextSatisfies(ctx, details) ? ctx : null;
   };

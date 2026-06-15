@@ -176,7 +176,7 @@ describe("AsyncAPI binding invoker (real HTTP)", () => {
     await expect(call.closed).rejects.toMatchObject({
       code: CONTEXT_REQUIRED,
       details: {
-        key: `127.0.0.1:${port}`,
+        target: `http://127.0.0.1:${port}`,
         alternatives: [{ requirements: [{ type: "auth.bearer" }] }],
       },
     });
@@ -277,7 +277,7 @@ describe("AsyncAPI binding invoker (real HTTP)", () => {
       });
 
       expect(details).toMatchObject({
-        key: `127.0.0.1:${port}`,
+        target: `http://127.0.0.1:${port}`,
         alternatives: [{ requirements: [{ type: "auth.bearer" }] }],
       });
     });
@@ -329,7 +329,7 @@ describe("AsyncAPI binding invoker (real HTTP)", () => {
         ref: "#/operations/publish",
       });
       expect(details).toMatchObject({
-        key: "api.example.com",
+        target: "https://api.example.com",
         alternatives: [
           { requirements: [{ type: "auth.apiKey" }] },
           { requirements: [{ type: "auth.basic" }] },

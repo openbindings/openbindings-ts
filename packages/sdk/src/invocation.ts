@@ -59,7 +59,7 @@ export type Metadata = Record<string, string[]>;
 export interface ContextRequirement {
   type: string;
   /**
-   * Whether resolved context MAY be cached under the challenge's `key`.
+   * Whether resolved context MAY be cached under the target-derived key.
    * Defaults to true; `durable: false` context MUST be re-satisfied per call.
    */
   durable?: boolean;
@@ -79,10 +79,11 @@ export interface ContextAlternative {
  */
 export interface ContextRequiredDetails {
   /**
-   * Stable context identity (typically a normalized target origin).
-   * Store-backed resolvers use it as a cache key; others ignore it.
+   * The target the binding addresses (its endpoint URL or host). The
+   * runtime/resolver derives a storage key from it; the invoker does not
+   * key or store.
    */
-  key: string;
+  target: string;
   alternatives: ContextAlternative[];
 }
 
@@ -103,7 +104,7 @@ export function isContextRequired(
   return (
     !!d &&
     typeof d === "object" &&
-    typeof d.key === "string" &&
+    typeof d.target === "string" &&
     Array.isArray(d.alternatives)
   );
 }

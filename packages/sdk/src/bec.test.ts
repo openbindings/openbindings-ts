@@ -5,7 +5,6 @@
  */
 import { describe, it, expect, vi } from "vitest";
 import {
-  MemoryStore,
   normalizeContextKey,
   contextBearerToken,
   contextApiKey,
@@ -18,6 +17,7 @@ import {
   single,
 } from "./index.js";
 import type {
+  ContextStore,
   BindingInvoker,
   BindingInvocationArgs,
   ContextRequiredDetails,
@@ -25,51 +25,28 @@ import type {
   OBInterface,
 } from "./index.js";
 
-// ---------------------------------------------------------------------------
-// MemoryStore
-// ---------------------------------------------------------------------------
+// Minimal in-memory ContextStore for exercising the store-backed resolver.
+// Storage backing is the consuming tool's job, so the SDK ships only the
+// ContextStore interface; tests supply their own.
+class MemoryStore implements ContextStore {
+  private data = new Map<string, Record<string, unknown>>();
 
-describe("MemoryStore", () => {
-  it("get/set/delete basics", async () => {
-    const store = new MemoryStore();
+  async get(key: string): Promise<Record<string, unknown> | null> {
+    return this.data.get(key) ?? null;
+  }
 
-    expect(await store.get("missing")).toBeNull();
+  async set(key: string, value: Record<string, unknown> | null): Promise<void> {
+    if (value == null) {
+      this.data.delete(key);
+      return;
+    }
+    this.data.set(key, value);
+  }
 
-    await store.set("k1", { bearerToken: "abc" });
-    expect(await store.get("k1")).toEqual({ bearerToken: "abc" });
-
-    await store.delete("k1");
-    expect(await store.get("k1")).toBeNull();
-  });
-
-  it("set null deletes", async () => {
-    const store = new MemoryStore();
-    await store.set("k1", { bearerToken: "abc" });
-    await store.set("k1", null);
-    expect(await store.get("k1")).toBeNull();
-  });
-
-  it("deep copy isolation — mutating returned value doesn't affect store", async () => {
-    const store = new MemoryStore();
-    await store.set("k1", { nested: { value: "original" } });
-
-    const got = (await store.get("k1"))!;
-    (got["nested"] as Record<string, unknown>)["value"] = "mutated";
-
-    const fresh = (await store.get("k1"))!;
-    expect((fresh["nested"] as Record<string, unknown>)["value"]).toBe("original");
-  });
-
-  it("deep copy isolation — mutating input after set doesn't affect store", async () => {
-    const store = new MemoryStore();
-    const input: Record<string, unknown> = { nested: { value: "original" } };
-    await store.set("k1", input);
-    (input["nested"] as Record<string, unknown>)["value"] = "mutated";
-
-    const got = (await store.get("k1"))!;
-    expect((got["nested"] as Record<string, unknown>)["value"]).toBe("original");
-  });
-});
+  async delete(key: string): Promise<void> {
+    this.data.delete(key);
+  }
+}
 
 // ---------------------------------------------------------------------------
 // normalizeContextKey
@@ -136,8 +113,10 @@ describe("well-known context helpers", () => {
 // contextSatisfies
 // ---------------------------------------------------------------------------
 
+// Carries a raw target URL; the resolver normalizes it to the
+// "api.example.com" store key.
 const BEARER_OR_APIKEY: ContextRequiredDetails = {
-  key: "api.example.com",
+  target: "https://api.example.com/v1/users",
   alternatives: [
     { requirements: [{ type: "auth.bearer" }] },
     { requirements: [{ type: "auth.apiKey" }] },
@@ -152,7 +131,7 @@ describe("contextSatisfies", () => {
 
   it("requires every requirement within an alternative (conjunctive)", () => {
     const details: ContextRequiredDetails = {
-      key: "k",
+      target: "k",
       alternatives: [
         { requirements: [{ type: "auth.basic" }, { type: "config.value" }] },
       ],
@@ -174,7 +153,7 @@ describe("contextSatisfies", () => {
   it("maps the standard auth families to their well-known fields", () => {
     expect(
       contextSatisfies({ accessToken: "a" }, {
-        key: "k",
+        target: "k",
         alternatives: [{ requirements: [{ type: "auth.oauth2" }] }],
       }),
     ).toBe(true);
@@ -186,8 +165,9 @@ describe("contextSatisfies", () => {
 // ---------------------------------------------------------------------------
 
 describe("storeContextResolver", () => {
-  it("returns stored context that satisfies the challenge", async () => {
+  it("normalizes the challenge target to the store key and returns satisfying context", async () => {
     const store = new MemoryStore();
+    // Stored under the normalized host; the raw target carries scheme + path.
     await store.set("api.example.com", { bearerToken: "stored-tok" });
     const resolve = storeContextResolver(store);
     await expect(resolve(BEARER_OR_APIKEY)).resolves.toEqual({ bearerToken: "stored-tok" });

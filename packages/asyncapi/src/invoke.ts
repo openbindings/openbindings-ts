@@ -21,7 +21,6 @@ import {
   InvocationError,
   contextRequiredError,
   contextSatisfies,
-  normalizeEndpoint,
   maybeJSON,
   contextBearerToken,
   contextApiKey,
@@ -274,7 +273,7 @@ export function requiredContext(
   if (alternatives.length === 0) return null;
 
   const details: ContextRequiredDetails = {
-    key: normalizeEndpoint(serverURL),
+    target: serverURL,
     alternatives,
   };
   if (ctx && contextSatisfies(ctx, details)) return null;

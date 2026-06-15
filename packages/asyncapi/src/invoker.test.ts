@@ -75,7 +75,7 @@ describe("AsyncAPIInvoker.prepareBinding", () => {
     });
 
     expect(details).toMatchObject({
-      key: "api.example.com",
+      target: "https://api.example.com",
       alternatives: [{ requirements: [{ type: "auth.bearer" }] }],
     });
     expect(fetchCount).toBe(0);

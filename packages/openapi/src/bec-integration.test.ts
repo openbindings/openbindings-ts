@@ -2,19 +2,38 @@ import { createServer, type Server, type IncomingMessage, type ServerResponse } 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import {
   OperationInvoker,
-  MemoryStore,
   fetchInterface,
   normalizeEndpoint,
   single,
   storeContextResolver,
   CONTEXT_REQUIRED,
   ERR_AUTH_REQUIRED,
+  type ContextStore,
   type ContextRequiredDetails,
   type OBInterface,
 } from "@openbindings/sdk";
 import { OpenAPIInvoker, OpenAPICreator } from "./invoker.js";
 
 const SECRET = "test-token-123";
+
+// Minimal in-memory ContextStore: the SDK ships only the interface, so tests
+// supply their own backing.
+class MemoryStore implements ContextStore {
+  private data = new Map<string, Record<string, unknown>>();
+  async get(key: string): Promise<Record<string, unknown> | null> {
+    return this.data.get(key) ?? null;
+  }
+  async set(key: string, value: Record<string, unknown> | null): Promise<void> {
+    if (value == null) {
+      this.data.delete(key);
+      return;
+    }
+    this.data.set(key, value);
+  }
+  async delete(key: string): Promise<void> {
+    this.data.delete(key);
+  }
+}
 
 function makeOpenAPISpec(port: number) {
   return {
@@ -162,8 +181,14 @@ describe("BEC Integration (real HTTP)", () => {
     return iface;
   }
 
+  // The raw target the binding addresses (challenge carries it verbatim).
+  function targetURL(): string {
+    return `http://127.0.0.1:${port}`;
+  }
+
+  // The store key the resolver derives from that target.
   function contextKey(): string {
-    return normalizeEndpoint(`http://127.0.0.1:${port}`);
+    return normalizeEndpoint(targetURL());
   }
 
   it("surfaces CONTEXT_REQUIRED without hitting the API when no credentials are available", async () => {
@@ -176,7 +201,7 @@ describe("BEC Integration (real HTTP)", () => {
     await expect(call.closed).rejects.toMatchObject({
       code: CONTEXT_REQUIRED,
       details: {
-        key: contextKey(),
+        target: targetURL(),
         alternatives: [{ requirements: [{ type: "auth.bearer" }] }],
       },
     });
@@ -276,7 +301,7 @@ describe("BEC Integration (real HTTP)", () => {
     await opInvoker.invoke({ interface: iface, operation: "listItems" }).closed.catch(() => {});
 
     await expect(invoker.prepareBinding(args)).resolves.toMatchObject({
-      key: contextKey(),
+      target: targetURL(),
       alternatives: [{ requirements: [{ type: "auth.bearer" }] }],
     });
 

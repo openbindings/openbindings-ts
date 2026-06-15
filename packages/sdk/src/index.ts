@@ -61,7 +61,6 @@ export {
   buildAuthHeaders,
   contextSatisfies,
   storeContextResolver,
-  MemoryStore,
 } from "./context.js";
 
 export type {

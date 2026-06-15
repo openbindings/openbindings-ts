@@ -403,7 +403,7 @@ describe("invokeBinding — context negotiation", () => {
     await expect(call.closed).rejects.toMatchObject({
       code: CONTEXT_REQUIRED,
       details: {
-        key: "api.example.com",
+        target: "https://api.example.com",
         alternatives: [{ requirements: [{ type: "auth.bearer" }] }],
       },
     });
@@ -813,7 +813,7 @@ describe("prepareBinding", () => {
     });
 
     expect(details).toEqual({
-      key: "api.example.com",
+      target: "https://api.example.com",
       alternatives: [{ requirements: [{ type: "auth.bearer" }] }],
     });
   });
@@ -865,6 +865,6 @@ describe("prepareBinding", () => {
       source: { format: "openapi@3.1", location: SPEC_URL },
       ref: REF_DATA,
     });
-    expect(details).toMatchObject({ key: "api.example.com" });
+    expect(details).toMatchObject({ target: "https://api.example.com" });
   });
 });

@@ -38,7 +38,7 @@ import {
 // ---------------------------------------------------------------------------
 
 const BEARER_DETAILS: ContextRequiredDetails = {
-  key: "api.example.com",
+  target: "https://api.example.com",
   alternatives: [{ requirements: [{ type: "auth.bearer" }] }],
 };
 

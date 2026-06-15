@@ -447,7 +447,7 @@ describe("bidi & drive", () => {
     const inv = new InvocationImpl<never, never>();
     inv.fireError(
       new InvocationError(CONTEXT_REQUIRED, "bearer token required", {
-        key: "api.example.com",
+        target: "https://api.example.com",
         alternatives: [{ requirements: [{ type: "auth.bearer" }] }],
       }),
     );

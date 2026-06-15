@@ -762,15 +762,18 @@ function pushTo(m: Map<string, string[]>, k: string, v: string): void {
 }
 
 /**
- * Truthiness rule for filter-expression results: false on null, false on the
- * value-typed empty cases (false, 0, ""); everything else is truthy.
- * Object/array values are always truthy regardless of contents. (undefined
- * never reaches here: it fails the node per the Transforms rule.)
+ * JSONata 2.0's boolean cast ($boolean) for filter-expression results:
+ * false/null/0/"" are false, empty composites are false, and an array is
+ * true only if some member casts to true. (undefined never reaches here:
+ * it fails the node with TRANSFORM_UNDEFINED per the Transforms rule.)
  */
 function isTruthy(v: unknown): boolean {
   if (v === null || v === undefined) return false;
   if (typeof v === "boolean") return v;
   if (typeof v === "number") return v !== 0;
   if (typeof v === "string") return v !== "";
+  if (Array.isArray(v)) return v.some(isTruthy);
+  if (typeof v === "function") return false;
+  if (typeof v === "object") return Object.keys(v).length > 0;
   return true;
 }
