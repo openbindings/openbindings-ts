@@ -1,7 +1,7 @@
 /**
  * Translates a JSON schema from OpenAPI 3.0's Draft-4 subset dialect into
  * JSON Schema 2020-12. OBI documents are required to use the 2020-12
- * dialect (spec §6.2, OBI-D-07), so 3.0 sources must be normalized at
+ * dialect (spec §6.2, OBI-D-06), so 3.0 sources must be normalized at
  * synthesis time.
  *
  * Translations performed when `openapiVersion` is in the 3.0 family:

@@ -1,6 +1,6 @@
 /**
  * OBI-D-02 (validate document against openbindings.schema.json) and
- * OBI-D-12 (validate every example.input/output against its operation's
+ * OBI-D-11 (validate every example.input/output against its operation's
  * input/output schema). Also exposes helpers used by OperationInvoker
  * for OBI-T-07/T-08 runtime validation.
  *
@@ -56,12 +56,12 @@ export function validateAgainstOBISchema(
 }
 
 /**
- * Reports OBI-D-12 violations: every example.input/output that has its
+ * Reports OBI-D-11 violations: every example.input/output that has its
  * operation's input/output schema specified must validate against that
  * schema. An explicit `null` is a provided example value, distinct from an
  * absent field, and is validated.
  *
- * Verification is capability-relative (cf. the spec's §8 / OBI-D-14
+ * Verification is capability-relative (cf. the spec's §8 / OBI-D-13
  * discussion): when a schema's $refs point outside the document, this
  * validator cannot resolve them and abstains from example validation for
  * that operation rather than failing the document.
@@ -88,7 +88,7 @@ export function validateExamplesAgainstOpSchemas(
         inputValidator = compileExampleSchema(op.input, defs);
       } catch (err) {
         errs.push(
-          `operations["${opKey}"].input: cannot compile schema: ${(err as Error).message} (OBI-D-12)`,
+          `operations["${opKey}"].input: cannot compile schema: ${(err as Error).message} (OBI-D-11)`,
         );
       }
     }
@@ -97,7 +97,7 @@ export function validateExamplesAgainstOpSchemas(
         outputValidator = compileExampleSchema(op.output, defs);
       } catch (err) {
         errs.push(
-          `operations["${opKey}"].output: cannot compile schema: ${(err as Error).message} (OBI-D-12)`,
+          `operations["${opKey}"].output: cannot compile schema: ${(err as Error).message} (OBI-D-11)`,
         );
       }
     }
@@ -108,7 +108,7 @@ export function validateExamplesAgainstOpSchemas(
         if (!r.valid) {
           for (const e of r.errors) {
             errs.push(
-              `operations["${opKey}"].examples["${exKey}"].input: ${e} (OBI-D-12)`,
+              `operations["${opKey}"].examples["${exKey}"].input: ${e} (OBI-D-11)`,
             );
           }
         }
@@ -118,7 +118,7 @@ export function validateExamplesAgainstOpSchemas(
         if (!r.valid) {
           for (const e of r.errors) {
             errs.push(
-              `operations["${opKey}"].examples["${exKey}"].output: ${e} (OBI-D-12)`,
+              `operations["${opKey}"].examples["${exKey}"].output: ${e} (OBI-D-11)`,
             );
           }
         }
@@ -148,7 +148,7 @@ function schemaHasExternalRef(value: unknown): boolean {
 /**
  * Compiles a single operation schema with the document's schemas
  * exposed under $defs (so `$ref: "#/schemas/X"` references resolve).
- * Used by validateExamplesAgainstOpSchemas (OBI-D-12) and by
+ * Used by validateExamplesAgainstOpSchemas (OBI-D-11) and by
  * OperationInvoker (OBI-T-07 / OBI-T-08).
  */
 export function compileExampleSchema(

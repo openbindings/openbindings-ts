@@ -30,16 +30,41 @@ describe("validateInterface", () => {
     expect(() => validateInterface(minimalInterface())).not.toThrow();
   });
 
+  it("rejects a relative source location (OBI-D-05)", () => {
+    const iface = minimalInterface();
+    iface.sources!.main.location = "./api.json";
+    expect(() => validateInterface(iface)).toThrow("OBI-D-05");
+  });
+
+  it("rejects a relative schema $ref (OBI-D-05)", () => {
+    const iface = minimalInterface();
+    iface.operations.getUser.output = { $ref: "./schemas.json#/User" };
+    expect(() => validateInterface(iface)).toThrow("OBI-D-05");
+  });
+
+  it("accepts a same-document fragment $ref", () => {
+    const iface = minimalInterface();
+    iface.schemas = { User: { type: "object" } };
+    iface.operations.getUser.output = { $ref: "#/schemas/User" };
+    expect(() => validateInterface(iface)).not.toThrow();
+  });
+
+  it("rejects an unsupported pre-release openbindings version (OBI-T-04)", () => {
+    const iface = minimalInterface();
+    iface.openbindings = "0.2.0-rc.1";
+    expect(() => validateInterface(iface)).toThrow("pre-release");
+  });
+
   it("requires openbindings field", () => {
     const iface = minimalInterface();
     iface.openbindings = "";
     expect(() => validateInterface(iface)).toThrow(ValidationError);
   });
 
-  it("requires SemVer 2.0.0 format (OBI-D-13)", () => {
+  it("requires SemVer 2.0.0 format (OBI-D-12)", () => {
     const iface = minimalInterface();
     iface.openbindings = "1.0";
-    expect(() => validateInterface(iface)).toThrow("OBI-D-13");
+    expect(() => validateInterface(iface)).toThrow("OBI-D-12");
   });
 
   it("requires operations", () => {
@@ -114,13 +139,13 @@ describe("validateInterface", () => {
     expect(() => validateInterface(iface)).not.toThrow();
   });
 
-  it("cites OBI-D-11 for unresolvable transform $refs", () => {
+  it("cites OBI-D-10 for unresolvable transform $refs", () => {
     const iface = minimalInterface();
     iface.bindings!["getUser.main"] = {
       ...iface.bindings!["getUser.main"],
       inputTransform: { $ref: "#/transforms/nonexistent" },
     };
-    expect(() => validateInterface(iface)).toThrow(/OBI-D-11/);
+    expect(() => validateInterface(iface)).toThrow(/OBI-D-10/);
   });
 
   it("accepts any non-empty sources[*].format string at document level (OBI-T-01)", () => {
@@ -143,7 +168,7 @@ describe("validateInterface", () => {
   });
 });
 
-describe("validateInterface example validation (OBI-D-12)", () => {
+describe("validateInterface example validation (OBI-D-11)", () => {
   function ifaceWithExample(overrides?: {
     input?: unknown;
     output?: unknown;
@@ -193,7 +218,7 @@ describe("validateInterface example validation (OBI-D-12)", () => {
   it("fails when example input does not match the input schema", () => {
     const iface = ifaceWithExample({ input: { name: 123 } });
     expect(() => validateInterface(iface,)).toThrow(
-      /OBI-D-12/,
+      /OBI-D-11/,
     );
     try {
       validateInterface(iface,);
@@ -207,7 +232,7 @@ describe("validateInterface example validation (OBI-D-12)", () => {
   it("fails when example output does not match the output schema", () => {
     const iface = ifaceWithExample({ output: { id: "not-a-number" } });
     expect(() => validateInterface(iface,)).toThrow(
-      /OBI-D-12/,
+      /OBI-D-11/,
     );
     try {
       validateInterface(iface,);
@@ -220,9 +245,9 @@ describe("validateInterface example validation (OBI-D-12)", () => {
 
   it("checks examples by default", () => {
     const iface = ifaceWithExample({ input: { name: 123 } });
-    expect(() => validateInterface(iface)).toThrow(/OBI-D-12/);
-    expect(() => validateInterface(iface, {})).toThrow(/OBI-D-12/);
-    expect(() => validateInterface(iface,)).toThrow(/OBI-D-12/);
+    expect(() => validateInterface(iface)).toThrow(/OBI-D-11/);
+    expect(() => validateInterface(iface, {})).toThrow(/OBI-D-11/);
+    expect(() => validateInterface(iface,)).toThrow(/OBI-D-11/);
   });
 
   it("skips operations without examples gracefully", () => {
@@ -250,7 +275,7 @@ describe("validateInterface example validation (OBI-D-12)", () => {
   });
 });
 
-describe("validateInterface example validation edge cases (OBI-D-12)", () => {
+describe("validateInterface example validation edge cases (OBI-D-11)", () => {
   function baseIface(input: Record<string, unknown>, example: Record<string, unknown>): OBInterface {
     return {
       openbindings: "0.2.0",
@@ -265,7 +290,7 @@ describe("validateInterface example validation edge cases (OBI-D-12)", () => {
 
   it("validates an explicit null example value (distinct from absent)", () => {
     const iface = baseIface({ type: "object" }, { input: null });
-    expect(() => validateInterface(iface)).toThrow(/OBI-D-12/);
+    expect(() => validateInterface(iface)).toThrow(/OBI-D-11/);
   });
 
   it("does not validate an absent example value", () => {
@@ -312,6 +337,6 @@ describe("validateInterface example validation edge cases (OBI-D-12)", () => {
         },
       },
     };
-    expect(() => validateInterface(iface)).toThrow(/OBI-D-12/);
+    expect(() => validateInterface(iface)).toThrow(/OBI-D-11/);
   });
 });

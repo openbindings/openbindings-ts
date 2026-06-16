@@ -4,6 +4,7 @@ import {
   supportedRange,
   isValidSemver,
   isHigherMajorOrPre1MinorThanMaxTested,
+  isUnsupportedPrerelease,
   MIN_SUPPORTED_VERSION,
   MAX_TESTED_VERSION,
 } from "./version.js";
@@ -67,6 +68,20 @@ describe("isValidSemver", () => {
     ["1.2.3-", false],
   ])("isValidSemver(%j) === %s", (input, want) => {
     expect(isValidSemver(input)).toBe(want);
+  });
+});
+
+describe("isUnsupportedPrerelease", () => {
+  // MIN_SUPPORTED_VERSION === MAX_TESTED_VERSION === "0.2.0": no prerelease is in range.
+  it.each([
+    ["0.2.0", false],
+    ["0.2.1", false],
+    ["0.2.0+build.1", false],
+    ["0.2.0-rc.1", true],
+    ["0.3.0-rc.1", true],
+    ["not-a-version", false],
+  ])("isUnsupportedPrerelease(%j) === %s", (input, want) => {
+    expect(isUnsupportedPrerelease(input)).toBe(want);
   });
 });
 

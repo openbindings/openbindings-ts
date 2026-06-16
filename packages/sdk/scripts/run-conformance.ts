@@ -12,7 +12,7 @@
  *
  * Usage:
  *   pnpm conformance                     # all fixtures
- *   pnpm conformance -- --rule=OBI-D-04  # single rule
+ *   pnpm conformance -- --rule=OBI-D-03  # single rule
  *   pnpm conformance -- --verbose        # per-test output
  *   pnpm conformance -- --json           # machine-readable
  */

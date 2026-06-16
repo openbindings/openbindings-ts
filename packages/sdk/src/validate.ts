@@ -3,6 +3,7 @@ import { isTransformRef } from "./types.js";
 import {
   isValidSemver,
   isHigherMajorOrPre1MinorThanMaxTested,
+  isUnsupportedPrerelease,
   MAX_TESTED_VERSION,
 } from "./version.js";
 import { ValidationError } from "./errors.js";
@@ -30,7 +31,7 @@ const KNOWN_BINDING_FIELDS = new Set([
 ]);
 const KNOWN_EXAMPLE_FIELDS = new Set(["description", "input", "output"]);
 
-// OBI-D-04 identifier pattern: every map key and operation alias must match.
+// OBI-D-03 identifier pattern: every map key and operation alias must match.
 const IDENT_PATTERN = /^[A-Za-z_][A-Za-z0-9_.-]*$/;
 
 const DRAFT_2020_12_URI = "https://json-schema.org/draft/2020-12/schema";
@@ -68,7 +69,7 @@ const URI_REF_ALLOWED = (() => {
  * Performs shape-level validation checks on an OBInterface.
  * Throws {@link ValidationError} if problems are found.
  *
- * Unconditionally enforces OBI-D-13 (openbindings field is a valid SemVer
+ * Unconditionally enforces OBI-D-12 (openbindings field is a valid SemVer
  * 2.0.0 string) and OBI-T-04 (refuse to load when the document's major
  * version is higher than this SDK's MAX_TESTED_VERSION, or — while
  * MAX_TESTED_VERSION is pre-1.0 — when its minor is higher).
@@ -79,25 +80,27 @@ export function validateInterface(
 ): void {
   const errs: string[] = [];
 
-  // OBI-D-13: openbindings field MUST be a valid SemVer 2.0.0 string.
+  // OBI-D-12: openbindings field MUST be a valid SemVer 2.0.0 string.
   // OBI-T-04: refuse higher major (or pre-1.0 higher minor) than MaxTested.
   const ver = (iface.openbindings ?? "").trim();
   if (!ver) {
-    errs.push("openbindings: required (OBI-D-13)");
+    errs.push("openbindings: required (OBI-D-12)");
   } else if (!isValidSemver(ver)) {
-    errs.push(`openbindings: "${ver}" is not a valid SemVer 2.0.0 string (OBI-D-13)`);
+    errs.push(`openbindings: "${ver}" is not a valid SemVer 2.0.0 string (OBI-D-12)`);
   } else {
     try {
       if (isHigherMajorOrPre1MinorThanMaxTested(ver)) {
         errs.push(`openbindings: "${ver}" exceeds this SDK's MaxTestedVersion "${MAX_TESTED_VERSION}" (OBI-T-04)`);
+      } else if (isUnsupportedPrerelease(ver)) {
+        errs.push(`openbindings: "${ver}" is a pre-release this SDK does not declare support for (OBI-T-04)`);
       }
     } catch (err) {
       errs.push(`openbindings: ${(err as Error).message} (OBI-T-04)`);
     }
   }
 
-  // Validate schemas: keys match identifier pattern (OBI-D-04); each schema
-  // walked for OBI-D-06 ($ref URI), OBI-D-07 ($schema dialect), OBI-D-08 (no
+  // Validate schemas: keys match identifier pattern (OBI-D-03); each schema
+  // walked for OBI-D-05 ($ref URI), OBI-D-06 ($schema dialect), OBI-D-07 (no
   // $vocabulary).
   if (iface.schemas) {
     for (const k of Object.keys(iface.schemas).sort()) {
@@ -117,10 +120,10 @@ export function validateInterface(
   for (const k of opKeys) {
     const op = iface.operations[k];
 
-    // OBI-D-04: operation keys must match the identifier pattern.
+    // OBI-D-03: operation keys must match the identifier pattern.
     validateIdent(errs, "operations key", k);
 
-    // Alias checks (OBI-D-04 pattern; OBI-D-05 collisions including dup
+    // Alias checks (OBI-D-03 pattern; OBI-D-04 collisions including dup
     // within own array and alias equal to own key).
     const seenAlias = new Set<string>();
     for (const a of op.aliases ?? []) {
@@ -130,28 +133,28 @@ export function validateInterface(
       }
       validateIdent(errs, `operations["${k}"].aliases`, a);
       if (a === k) {
-        errs.push(`operations["${k}"].aliases: "${a}" duplicates the operation's own key (OBI-D-05)`);
+        errs.push(`operations["${k}"].aliases: "${a}" duplicates the operation's own key (OBI-D-04)`);
         continue;
       }
       if (seenAlias.has(a)) {
-        errs.push(`operations["${k}"].aliases: "${a}" is listed more than once (OBI-D-05)`);
+        errs.push(`operations["${k}"].aliases: "${a}" is listed more than once (OBI-D-04)`);
         continue;
       }
       seenAlias.add(a);
       if (opKeySet.has(a)) {
-        errs.push(`operations["${k}"].aliases: "${a}" conflicts with operation key "${a}" (OBI-D-05)`);
+        errs.push(`operations["${k}"].aliases: "${a}" conflicts with operation key "${a}" (OBI-D-04)`);
         continue;
       }
       const owner = aliasOwner.get(a);
       if (owner && owner !== k) {
-        errs.push(`operations["${k}"].aliases: "${a}" is also an alias of "${owner}" (OBI-D-05)`);
+        errs.push(`operations["${k}"].aliases: "${a}" is also an alias of "${owner}" (OBI-D-04)`);
         continue;
       }
       aliasOwner.set(a, k);
     }
 
 
-    // Walk operation input/output schemas for OBI-D-06/D-07/D-08.
+    // Walk operation input/output schemas for OBI-D-05/D-07/D-08.
     if (op.input != null) {
       walkSchema(errs, `operations["${k}"].input`, op.input);
     }
@@ -159,7 +162,7 @@ export function validateInterface(
       walkSchema(errs, `operations["${k}"].output`, op.output);
     }
 
-    // OBI-D-04: example keys must match the identifier pattern.
+    // OBI-D-03: example keys must match the identifier pattern.
     for (const ek of Object.keys(op.examples ?? {}).sort()) {
       validateIdent(errs, `operations["${k}"].examples key`, ek);
     }
@@ -173,7 +176,7 @@ export function validateInterface(
   }
 
   for (const k of Object.keys(iface.sources ?? {}).sort()) {
-    // OBI-D-04: source keys must match the identifier pattern.
+    // OBI-D-03: source keys must match the identifier pattern.
     validateIdent(errs, "sources key", k);
     const src = iface.sources![k];
     // The spec (§6.4) requires format to be a non-empty string but
@@ -186,9 +189,13 @@ export function validateInterface(
     const hasLoc = !!(src.location ?? "").trim();
     const hasCnt = src.content != null;
     if (!hasLoc && !hasCnt) errs.push(`sources["${k}"]: must have location or content`);
-    // OBI-D-06: sources[*].location must be a well-formed URI reference.
+    // OBI-D-05: sources[*].location must be a well-formed, absolute reference
+    // (absolute URI or a format-defined absolute address; never relative).
     if (hasLoc) {
       validateURIRef(errs, `sources["${k}"].location`, src.location!);
+      if (!referenceIsAbsolute(src.location!)) {
+        errs.push(`sources["${k}"].location: "${src.location}" must be an absolute URI or a format-defined absolute address, not a relative reference (OBI-D-05)`);
+      }
     }
     if (opts.rejectUnknownTypedFields) {
       appendUnknown(errs, `sources["${k}"]`, src, KNOWN_SOURCE_FIELDS);
@@ -196,26 +203,26 @@ export function validateInterface(
   }
 
   for (const k of Object.keys(iface.transforms ?? {}).sort()) {
-    // OBI-D-04: transform keys must match the identifier pattern.
+    // OBI-D-03: transform keys must match the identifier pattern.
     validateIdent(errs, "transforms key", k);
     validateInlineTransform(errs, `transforms["${k}"]`, iface.transforms![k]);
   }
 
   for (const k of Object.keys(iface.bindings ?? {}).sort()) {
-    // OBI-D-04: binding keys must match the identifier pattern.
+    // OBI-D-03: binding keys must match the identifier pattern.
     validateIdent(errs, "bindings key", k);
     const b = iface.bindings![k];
-    // OBI-D-09: bindings[*].operation must reference an existing operation.
+    // OBI-D-08: bindings[*].operation must reference an existing operation.
     if (!(b.operation ?? "").trim()) {
       errs.push(`bindings["${k}"].operation: required`);
     } else if (!iface.operations?.[b.operation]) {
-      errs.push(`bindings["${k}"].operation: references unknown operation "${b.operation}" (OBI-D-09)`);
+      errs.push(`bindings["${k}"].operation: references unknown operation "${b.operation}" (OBI-D-08)`);
     }
-    // OBI-D-10: bindings[*].source must reference an existing source.
+    // OBI-D-09: bindings[*].source must reference an existing source.
     if (!(b.source ?? "").trim()) {
       errs.push(`bindings["${k}"].source: required`);
     } else if (!iface.sources?.[b.source]) {
-      errs.push(`bindings["${k}"].source: references unknown source "${b.source}" (OBI-D-10)`);
+      errs.push(`bindings["${k}"].source: references unknown source "${b.source}" (OBI-D-09)`);
     }
 
     if (b.inputTransform !== undefined) {
@@ -245,7 +252,7 @@ export function validateInterface(
   // OBI-D-02: validate the document against openbindings.schema.json.
   validateAgainstOBISchema(errs, iface);
 
-  // OBI-D-12: validate every example.input/output against its
+  // OBI-D-11: validate every example.input/output against its
   // operation's input/output schema, when the respective schema is specified.
   validateExamplesAgainstOpSchemas(errs, iface);
 
@@ -275,16 +282,16 @@ function validateTransformRef(
 ): void {
   const pfx = "#/transforms/";
   if (!ref.startsWith(pfx)) {
-    errs.push(`${prefix}: must start with "${pfx}" (OBI-D-11)`);
+    errs.push(`${prefix}: must start with "${pfx}" (OBI-D-10)`);
     return;
   }
   const name = ref.slice(pfx.length);
   if (!name) {
-    errs.push(`${prefix}: transform name is empty (OBI-D-11)`);
+    errs.push(`${prefix}: transform name is empty (OBI-D-10)`);
     return;
   }
   if (transforms?.[name] === undefined) {
-    errs.push(`${prefix}: references unknown transform "${name}" (OBI-D-11)`);
+    errs.push(`${prefix}: references unknown transform "${name}" (OBI-D-10)`);
   }
 }
 
@@ -305,7 +312,7 @@ function validateInlineTransform(
 
 function validateIdent(errs: string[], prefix: string, id: string): void {
   if (!IDENT_PATTERN.test(id)) {
-    errs.push(`${prefix}: "${id}" does not match identifier pattern ^[A-Za-z_][A-Za-z0-9_.-]*$ (OBI-D-04)`);
+    errs.push(`${prefix}: "${id}" does not match identifier pattern ^[A-Za-z_][A-Za-z0-9_.-]*$ (OBI-D-03)`);
   }
 }
 
@@ -319,14 +326,14 @@ function validateURIRef(errs: string[], prefix: string, raw: string): void {
     const c = raw.charCodeAt(i);
     if (c === 0x25 /* % */) {
       if (i + 2 >= raw.length || !isHex(raw.charCodeAt(i + 1)) || !isHex(raw.charCodeAt(i + 2))) {
-        errs.push(`${prefix}: "${raw}" contains malformed percent-encoding (OBI-D-06)`);
+        errs.push(`${prefix}: "${raw}" contains malformed percent-encoding (OBI-D-05)`);
         return;
       }
       i += 2;
       continue;
     }
     if (!URI_REF_ALLOWED.has(c)) {
-      errs.push(`${prefix}: "${raw}" contains character "${raw[i]}" not allowed in a URI reference (OBI-D-06)`);
+      errs.push(`${prefix}: "${raw}" contains character "${raw[i]}" not allowed in a URI reference (OBI-D-05)`);
       return;
     }
   }
@@ -335,15 +342,28 @@ function validateURIRef(errs: string[], prefix: string, raw: string): void {
   try {
     new URL(raw, "http://example.com/");
   } catch {
-    errs.push(`${prefix}: "${raw}" is not a well-formed URI reference (OBI-D-06)`);
+    errs.push(`${prefix}: "${raw}" is not a well-formed URI reference (OBI-D-05)`);
+  }
+}
+
+// referenceIsAbsolute reports whether raw is an absolute reference for OBI-D-05
+// purposes: an absolute URI (has a scheme) or a format-defined absolute address
+// (e.g. a gRPC host:port, which parses with a scheme). Same-document fragments
+// and relative-path references are not absolute.
+function referenceIsAbsolute(raw: string): boolean {
+  try {
+    new URL(raw);
+    return true;
+  } catch {
+    return false;
   }
 }
 
 /**
  * Walks a JSON Schema 2020-12 value and applies:
- *   - OBI-D-07: $schema, where present, MUST equal the 2020-12 dialect URI.
- *   - OBI-D-08: $vocabulary keyword forbidden anywhere in any schema.
- *   - OBI-D-06: $ref values MUST be well-formed URI references.
+ *   - OBI-D-06: $schema, where present, MUST equal the 2020-12 dialect URI.
+ *   - OBI-D-07: $vocabulary keyword forbidden anywhere in any schema.
+ *   - OBI-D-05: $ref and $id values MUST be absolute or same-document and well-formed.
  *
  * Recursion follows JSON Schema keyword shapes so that property names under
  * `properties`/`patternProperties`/`$defs`/etc. are not themselves treated
@@ -356,13 +376,19 @@ function walkSchema(errs: string[], prefix: string, schema: unknown): void {
   const s = schema as Record<string, unknown>;
 
   if (typeof s.$schema === "string" && s.$schema !== DRAFT_2020_12_URI) {
-    errs.push(`${prefix}.$schema: "${s.$schema}" must equal "${DRAFT_2020_12_URI}" (OBI-D-07)`);
+    errs.push(`${prefix}.$schema: "${s.$schema}" must equal "${DRAFT_2020_12_URI}" (OBI-D-06)`);
   }
   if ("$vocabulary" in s) {
-    errs.push(`${prefix}: $vocabulary keyword is forbidden in OBI documents (OBI-D-08)`);
+    errs.push(`${prefix}: $vocabulary keyword is forbidden in OBI documents (OBI-D-07)`);
   }
   if (typeof s.$ref === "string") {
     validateURIRef(errs, `${prefix}.$ref`, s.$ref);
+    if (!s.$ref.startsWith("#") && !referenceIsAbsolute(s.$ref)) {
+      errs.push(`${prefix}.$ref: "${s.$ref}" must be a same-document fragment or an absolute URI, not a relative reference (OBI-D-05)`);
+    }
+  }
+  if (typeof s.$id === "string" && !referenceIsAbsolute(s.$id)) {
+    errs.push(`${prefix}.$id: "${s.$id}" must be an absolute URI (OBI-D-05)`);
   }
 
   for (const k of Object.keys(s).sort()) {

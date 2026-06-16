@@ -12,10 +12,10 @@ export interface ResolvedOperation {
  *
  * An operation's identifiers are its key plus its `aliases`; together they form
  * one flat namespace in which key and alias matches are equally authoritative.
- * OBI-D-05 makes that namespace document-unique, so a name resolves to at most
+ * OBI-D-04 makes that namespace document-unique, so a name resolves to at most
  * one operation. Key matches are NOT privileged over alias matches: a name that
  * is some operation's native key always belongs to that operation (a different
- * operation cannot also carry it as an alias without violating OBI-D-05).
+ * operation cannot also carry it as an alias without violating OBI-D-04).
  *
  * Returns the resolved operation and its canonical key, or `undefined` if the
  * name matches no identifier. Binding selection MUST use the returned `key`, not
@@ -27,7 +27,7 @@ export function resolveOperation(
 ): ResolvedOperation | undefined {
   const ops = iface.operations;
 
-  // Direct key match. By OBI-D-05 a key is never also another operation's alias,
+  // Direct key match. By OBI-D-04 a key is never also another operation's alias,
   // so this is authoritative when it hits — order relative to alias search is
   // irrelevant to the result.
   const direct = ops[name];

@@ -38,6 +38,24 @@ export function isHigherMajorOrPre1MinorThanMaxTested(v: string): boolean {
 }
 
 /**
+ * Reports whether v carries a pre-release identifier this SDK does not declare
+ * support for. Per OBI-T-04 and §11.1, a tool MUST NOT accept a prerelease
+ * unless it declares support for that specific prerelease; "declares support"
+ * means the prerelease falls within this SDK's supported range
+ * [MIN_SUPPORTED_VERSION, MAX_TESTED_VERSION]. A prerelease sorts below its
+ * release, so against a non-prerelease MAX_TESTED_VERSION no prerelease is in
+ * range. Non-prerelease versions and build metadata are never flagged.
+ */
+export function isUnsupportedPrerelease(v: string): boolean {
+  const parsed = parseSemverStrict(v);
+  if (!parsed || parsed.preRelease.length === 0) return false;
+  const inRange =
+    compareSemver(parsed, parseSemverStrict(MIN_SUPPORTED_VERSION)!) >= 0 &&
+    compareSemver(parsed, parseSemverStrict(MAX_TESTED_VERSION)!) <= 0;
+  return !inRange;
+}
+
+/**
  * Parsed SemVer 2.0.0 value. Build metadata is ignored for precedence
  * comparison per SemVer 2.0.0 §10.
  */

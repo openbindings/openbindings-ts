@@ -14,7 +14,7 @@ import {
  *
  *   - OBI-D-01: rejects duplicate JSON object keys.
  *   - OBI-D-02: validates against the meta-schema. The meta-schema's
- *     SemVer pattern on `openbindings` also covers OBI-D-13.
+ *     SemVer pattern on `openbindings` also covers OBI-D-12.
  *   - OBI-T-04: refuses a document whose `openbindings` version declares a
  *     higher major than this SDK's MAX_TESTED_VERSION (or, while pre-1.0, a
  *     higher minor). Enforced here so every parse entry point — including

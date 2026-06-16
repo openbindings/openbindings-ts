@@ -31,7 +31,7 @@ describe("parseDocument", () => {
     expect(() => parseDocument(`{"openbindings":"0.2.0"}`)).toThrow(ValidationError);
   });
 
-  it("rejects a document with an invalid `openbindings` SemVer (OBI-D-13 via meta-schema)", () => {
+  it("rejects a document with an invalid `openbindings` SemVer (OBI-D-12 via meta-schema)", () => {
     expect(() => parseDocument(`{"openbindings":"not-a-version","operations":{}}`))
       .toThrow(ValidationError);
   });
@@ -79,9 +79,9 @@ describe("validateDocument", () => {
 
   it("throws on rule-walk failure (delegates to validateInterface)", () => {
     // Passes parse (valid version + meta-schema shape) but fails a cross-
-    // reference rule-walk check only validateInterface performs (OBI-D-09).
+    // reference rule-walk check only validateInterface performs (OBI-D-08).
     const doc = `{"openbindings":"0.2.0","operations":{"ping":{}},"sources":{"s":{"format":"x","content":{}}},"bindings":{"b":{"operation":"missing","source":"s"}}}`;
-    expect(() => validateDocument(doc)).toThrow(/OBI-D-09/);
+    expect(() => validateDocument(doc)).toThrow(/OBI-D-08/);
   });
 
   it("refuses a higher major version via the parse path (OBI-T-04)", () => {
