@@ -195,9 +195,9 @@
           "type": "string",
           "description": "Human-readable description of this binding source."
         },
-        "priority": {
+        "preference": {
           "type": "number",
-          "description": "Default priority for all bindings referencing this source. Lower values are more preferred. Binding-level priority overrides this value."
+          "description": "Default preference for all bindings referencing this source. Higher values are more preferred; absent is treated as 0. Binding-level preference overrides this value."
         }
       },
       "additionalProperties": true
@@ -223,9 +223,9 @@
           "type": "string",
           "description": "Pointer into the binding artifact."
         },
-        "priority": {
+        "preference": {
           "type": "number",
-          "description": "Relative binding preference (lower is more preferred)."
+          "description": "Relative binding preference (higher is more preferred; absent is treated as 0)."
         },
         "description": {
           "type": "string",

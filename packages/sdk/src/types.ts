@@ -39,8 +39,8 @@ export interface Source {
   location?: string;
   content?: unknown;
   description?: string;
-  /** Default priority for bindings referencing this source. Binding-level priority overrides. Lower wins. */
-  priority?: number;
+  /** Default preference for bindings referencing this source. Binding-level preference overrides. Higher wins; absent is treated as 0. */
+  preference?: number;
   [key: string]: unknown;
 }
 
@@ -70,7 +70,7 @@ export interface BindingEntry {
   operation: string;
   source: string;
   ref?: string;
-  priority?: number;
+  preference?: number;
   description?: string;
   deprecated?: boolean;
   inputTransform?: TransformOrRef;

@@ -24,9 +24,9 @@ const KNOWN_OPERATION_FIELDS = new Set([
   "idempotent", "input", "output", "examples",
 ]);
 
-const KNOWN_SOURCE_FIELDS = new Set(["format", "location", "content", "description", "priority"]);
+const KNOWN_SOURCE_FIELDS = new Set(["format", "location", "content", "description", "preference"]);
 const KNOWN_BINDING_FIELDS = new Set([
-  "operation", "source", "ref", "priority", "description", "deprecated",
+  "operation", "source", "ref", "preference", "description", "deprecated",
   "inputTransform", "outputTransform",
 ]);
 const KNOWN_EXAMPLE_FIELDS = new Set(["description", "input", "output"]);

@@ -289,14 +289,14 @@ function testInterface(): OBInterface {
     },
     bindings: {
       "ping.main": { operation: "ping", source: "mock", ref: "ping" },
-      "getUser.main": { operation: "getUser", source: "mock", ref: "getUser", priority: 1 },
-      "getUser.bad": { operation: "getUser", source: "mock", ref: "badUser", priority: 99 },
+      "getUser.main": { operation: "getUser", source: "mock", ref: "getUser", preference: 99 },
+      "getUser.bad": { operation: "getUser", source: "mock", ref: "badUser", preference: 1 },
       "echo.transformed": {
         operation: "echo", source: "mock", ref: "echoInput", inputTransform: "idToUserId",
       },
-      "watchOrders.main": { operation: "watchOrders", source: "mock", ref: "watchOrders", priority: 1 },
+      "watchOrders.main": { operation: "watchOrders", source: "mock", ref: "watchOrders", preference: 99 },
       "watchOrders.challenge": {
-        operation: "watchOrders", source: "mock", ref: "watchThenChallenge", priority: 99,
+        operation: "watchOrders", source: "mock", ref: "watchThenChallenge", preference: 1,
       },
       "watchTyped.main": { operation: "watchTyped", source: "mock", ref: "streamBadSecond" },
       "chat.main": { operation: "chat", source: "mock", ref: "chat" },
@@ -730,30 +730,30 @@ describe("defaultBindingSelector", () => {
       .toThrow(BindingNotFoundError);
   });
 
-  it("prefers non-deprecated over deprecated regardless of priority (tier rule)", () => {
+  it("prefers non-deprecated over deprecated regardless of preference (tier rule)", () => {
     const iface: OBInterface = {
       openbindings: "0.2.0",
       operations: { op: {} },
       sources: { s: { format: "openapi@3.1", location: "x" } },
       bindings: {
-        "op.deprecated": { operation: "op", source: "s", deprecated: true, priority: 1 },
-        "op.fresh": { operation: "op", source: "s", priority: 10 },
+        "op.deprecated": { operation: "op", source: "s", deprecated: true, preference: 10 },
+        "op.fresh": { operation: "op", source: "s", preference: 1 },
       },
     };
     expect(defaultBindingSelector(iface, "op").key).toBe("op.fresh");
   });
 
-  it("lower priority wins within a tier; binding priority overrides source priority", () => {
+  it("higher preference wins within a tier; binding preference overrides source preference", () => {
     const iface: OBInterface = {
       openbindings: "0.2.0",
       operations: { op: {} },
       sources: {
-        cheap: { format: "f@1", location: "x", priority: 5 },
-        costly: { format: "f@1", location: "y", priority: 1 },
+        cheap: { format: "f@1", location: "x", preference: 1 },
+        costly: { format: "f@1", location: "y", preference: 5 },
       },
       bindings: {
-        "op.a": { operation: "op", source: "cheap", priority: 0 }, // overrides source 5
-        "op.b": { operation: "op", source: "costly" }, // inherits 1
+        "op.a": { operation: "op", source: "cheap", preference: 10 }, // overrides source 1
+        "op.b": { operation: "op", source: "costly" }, // inherits 5
       },
     };
     expect(defaultBindingSelector(iface, "op").key).toBe("op.a");
@@ -768,8 +768,8 @@ describe("defaultBindingSelector", () => {
         unsupported: { format: "exotic@9.9", location: "y" },
       },
       bindings: {
-        "op.exotic": { operation: "op", source: "unsupported", priority: 0 },
-        "op.plain": { operation: "op", source: "supported", priority: 10 },
+        "op.exotic": { operation: "op", source: "unsupported", preference: 10 },
+        "op.plain": { operation: "op", source: "supported", preference: 0 },
       },
     };
     const { key } = defaultBindingSelector(iface, "op", new Set(["mock@1.0"]));

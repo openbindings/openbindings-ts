@@ -584,10 +584,10 @@ function wireError(err: unknown): InvocationError {
 
 /**
  * Picks the best binding for an operation (OBI-T-09). Non-deprecated
- * bindings are preferred. Lower priority values win (binding priority
- * overrides source priority). Ties broken alphabetically. When
- * availableFormats is provided, bindings whose source format is not in the
- * set are skipped.
+ * bindings are preferred. Higher preference values win (binding preference
+ * overrides source preference; an absent preference is the neutral baseline
+ * of 0). Ties broken alphabetically. When availableFormats is provided,
+ * bindings whose source format is not in the set are skipped.
  */
 export function defaultBindingSelector(
   iface: OBInterface,
@@ -600,7 +600,7 @@ export function defaultBindingSelector(
 
   let bestKey: string | undefined;
   let best: BindingEntry | undefined;
-  let bestPri = Infinity;
+  let bestPref = -Infinity;
   let bestDeprecated = true;
 
   for (const [k, b] of Object.entries(iface.bindings)) {
@@ -611,8 +611,9 @@ export function defaultBindingSelector(
     // Skip bindings whose source format the invoker can't handle.
     if (availableFormats && source && !formatMatches(source.format, availableFormats)) continue;
 
-    // Binding priority overrides source priority.
-    const bPri = b.priority ?? source?.priority ?? Infinity;
+    // Binding preference overrides source preference; absent on both is the
+    // neutral baseline of 0.
+    const bPref = b.preference ?? source?.preference ?? 0;
 
     const betterDeprecation = bestDeprecated && !b.deprecated;
     const sameTier = (b.deprecated ?? false) === bestDeprecated;
@@ -620,12 +621,12 @@ export function defaultBindingSelector(
     if (
       !best ||
       betterDeprecation ||
-      (sameTier && bPri < bestPri) ||
-      (sameTier && bPri === bestPri && k < bestKey!)
+      (sameTier && bPref > bestPref) ||
+      (sameTier && bPref === bestPref && k < bestKey!)
     ) {
       bestKey = k;
       best = b;
-      bestPri = bPri;
+      bestPref = bPref;
       bestDeprecated = b.deprecated ?? false;
     }
   }
