@@ -273,12 +273,75 @@ export function contextSatisfies(
 }
 
 /**
+ * Maps a requirement family to every context field that belongs to it.
+ * REQUIREMENT_FIELDS names only the field whose presence gates satisfaction;
+ * this names the whole family so scoping can admit (for example) an oauth2
+ * refresh token alongside its access token. Any field not listed in a family
+ * is treated as non-secret configuration.
+ */
+const REQUIREMENT_FAMILY_FIELDS: Record<string, string[]> = {
+  "auth.bearer": ["bearerToken"],
+  "auth.apiKey": ["apiKey"],
+  "auth.basic": ["basic"],
+  "auth.oauth2": ["accessToken", "refreshToken", "clientSecret"],
+};
+
+const CREDENTIAL_FIELDS = new Set(Object.values(REQUIREMENT_FAMILY_FIELDS).flat());
+
+/**
+ * Returns the least-privilege subset of a stored context for a challenge
+ * (binding-invoker role). A CONTEXT_REQUIRED challenge is a scope, not a hint:
+ * the invoker receives only what it declared it needs. Every non-secret
+ * configuration field passes through unchanged; among the secret credential
+ * fields, only those belonging to the requirement families of the first
+ * alternative the context satisfies are admitted, and all other stored
+ * credentials are withheld. With no challenge there is nothing to scope, so the
+ * full context is returned (copied).
+ */
+export function scopeContext(
+  stored: Record<string, unknown>,
+  details: ContextRequiredDetails | null | undefined,
+): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  // Non-secret configuration always passes through.
+  for (const [k, v] of Object.entries(stored)) {
+    if (!CREDENTIAL_FIELDS.has(k)) out[k] = v;
+  }
+  if (!details) {
+    for (const [k, v] of Object.entries(stored)) {
+      if (CREDENTIAL_FIELDS.has(k)) out[k] = v;
+    }
+    return out;
+  }
+  for (const alt of details.alternatives) {
+    if (alt.requirements.length === 0) continue;
+    const satisfied = alt.requirements.every((req) => {
+      const field = REQUIREMENT_FIELDS[req.type] ?? req.type;
+      const v = stored[field];
+      return v !== undefined && v !== null && v !== "";
+    });
+    if (!satisfied) continue;
+    for (const req of alt.requirements) {
+      const fields = REQUIREMENT_FAMILY_FIELDS[req.type] ?? [req.type];
+      for (const f of fields) {
+        if (f in stored) out[f] = stored[f];
+      }
+    }
+    return out;
+  }
+  return out;
+}
+
+/**
  * Builds a read-only {@link ContextResolver} backed by a {@link ContextStore}:
  * the composition of the binding-invoker and context-store roles. It derives
  * the store key from the challenge's `target` by normalizing it
- * ({@link normalizeEndpoint}), returns the stored context when it satisfies
- * one of the challenge's alternatives, and declines (null) otherwise — at
- * which point the challenge surfaces to the caller unchanged.
+ * ({@link normalizeEndpoint}), returns the least-privilege subset of the stored
+ * context ({@link scopeContext}) when it satisfies one of the challenge's
+ * alternatives, and declines (null) otherwise — at which point the challenge
+ * surfaces to the caller unchanged. A CONTEXT_REQUIRED challenge is a scope,
+ * not a hint: only the satisfied alternative's credentials plus non-secret
+ * config are returned, never other stored credentials.
  *
  * Apps that resolve interactively (prompt, browser redirect, keychain)
  * supply their own resolver and MAY persist what they obtain for
@@ -289,7 +352,7 @@ export function storeContextResolver(store: ContextStore): ContextResolver {
   return async (details: ContextRequiredDetails) => {
     const ctx = await store.get(normalizeEndpoint(details.target));
     if (!ctx) return null;
-    return contextSatisfies(ctx, details) ? ctx : null;
+    return contextSatisfies(ctx, details) ? scopeContext(ctx, details) : null;
   };
 }
 

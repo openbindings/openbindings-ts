@@ -88,6 +88,11 @@ export type BindingSelector = (
  * consults a context store, reads an env var, prompts a keychain, or
  * returns a hardcoded value is the resolver's business — invisible to the
  * invoker and to bindings.
+ *
+ * A CONTEXT_REQUIRED challenge is a scope, not a hint. A resolver MUST return
+ * only the context that satisfies the selected alternative (the credentials it
+ * names plus non-secret configuration), never other stored credentials.
+ * {@link scopeContext} is the reference reduction.
  */
 export type ContextResolver = (
   details: ContextRequiredDetails,

@@ -60,6 +60,7 @@ export {
   normalizeEndpoint,
   buildAuthHeaders,
   contextSatisfies,
+  scopeContext,
   storeContextResolver,
 } from "./context.js";
 
