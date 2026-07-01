@@ -169,30 +169,90 @@ export class OperationInvoker {
     sig: OperationSignature<I, O>,
     opts?: InvokeOptions,
   ): Invocation<I, O> {
+    const { op, bindingKey, binding, source } = this.resolveBinding(obi, sig.key, opts?.bindingKey);
+
+    const callerInv = new InvocationImpl<I, O>({
+      signal: opts?.signal,
+      validateInput: makeInputValidator(op, obi, sig.key),
+    });
+
+    queueMicrotask(() => {
+      this.run(callerInv, obi, op, binding, bindingKey, source, opts?.context).catch((err) => {
+        callerInv.fireError(asInvocationError(err));
+      });
+    });
+
+    return callerInv;
+  }
+
+  /**
+   * Operation-layer side-effect-free preflight (the operation-invoker role
+   * `prepareOperation`), the by-reference counterpart to `prepareBinding`. It
+   * resolves `operation` on `obi` to a concrete binding (OBI-T-12 + OBI-T-09
+   * selection, or an `opts.bindingKey`-pinned binding) and reports that
+   * binding's context requirements without invoking or causing side effects.
+   * Resolves to null when requirements cannot be determined without invoking
+   * (the always-satisfiable answer); `opts.context` narrows the result to what
+   * it leaves unsatisfied. Composes the resolution with `prepareBinding` so
+   * callers preflight by operation without selecting a binding themselves.
+   */
+  prepareOperation(
+    obi: OBInterface,
+    operation: string,
+    opts?: InvokeOptions,
+  ): Promise<ContextRequiredDetails | null> {
+    const { op, binding, source } = this.resolveBinding(obi, operation, opts?.bindingKey);
+    return this.prepareBinding({
+      source: {
+        format: source.format,
+        location: source.location,
+        ...(source.content != null ? { content: source.content } : {}),
+      },
+      ref: binding.ref ?? "",
+      binding,
+      inputSchema: op.input ?? undefined,
+      interface: obi,
+      context: opts?.context,
+    });
+  }
+
+  /**
+   * Shared operation-layer resolution behind {@link invoke} and
+   * {@link prepareOperation}: resolves `operation` against obi's flat key+alias
+   * namespace (OBI-T-12), selects a binding (OBI-T-09) or uses the caller-pinned
+   * `bindingKey`, and looks up its source. Throws synchronously on a wiring
+   * failure (unknown operation, binding, or source).
+   */
+  private resolveBinding(
+    obi: OBInterface,
+    operation: string,
+    pinnedBindingKey?: string,
+  ): { op: Operation; bindingKey: string; binding: BindingEntry; source: Source } {
     const iface = obi;
     if (!iface) throw new MissingInterfaceError();
 
-    // OBI-T-12: resolve against the flat key+aliases namespace. Bindings
-    // are selected by the resolved canonical key, not the name used.
-    const resolved = resolveOperation(iface, sig.key);
+    const resolved = resolveOperation(iface, operation);
     if (!resolved) {
-      throw new OperationNotFoundError(sig.key, allOperationIdentifiers(iface));
+      throw new OperationNotFoundError(operation, allOperationIdentifiers(iface));
     }
     const { key: opKey, operation: op } = resolved;
 
+    // A pinned bindingKey narrows selection to one binding OF the resolved
+    // operation; it never replaces the operation. Addressing a binding *without*
+    // an operation (the contract's binding-alone form, which derives the
+    // operation) is a wire/dynamic concern — a caller with only a key does
+    // obi.bindings[key].operation and passes it here — so the native API stays
+    // operation-keyed.
     let bindingKey: string;
     let binding: BindingEntry;
-    if (opts?.bindingKey) {
-      const b = iface.bindings?.[opts.bindingKey];
-      if (!b) throw new BindingNotFoundError(opts.bindingKey);
-      // An explicit bindingKey must name a binding FOR the resolved operation.
-      // Without this check a caller could invoke any binding under the guise of
-      // any operation, applying the wrong operation's input/output schema and
-      // transforms. Same refusal (ERR_BINDING_NOT_FOUND) as the Go fix.
-      if (b.operation !== opKey) {
-        throw new BindingNotFoundError(opKey);
-      }
-      bindingKey = opts.bindingKey;
+    if (pinnedBindingKey) {
+      const b = iface.bindings?.[pinnedBindingKey];
+      if (!b) throw new BindingNotFoundError(pinnedBindingKey);
+      // The explicit binding must name a binding FOR the resolved operation.
+      // Otherwise a caller could invoke any binding under the guise of any
+      // operation, applying the wrong operation's schemas and transforms.
+      if (b.operation !== opKey) throw new BindingNotFoundError(opKey);
+      bindingKey = pinnedBindingKey;
       binding = b;
     } else {
       const selector = this.bindingSelector ?? ((i: OBInterface, o: string) =>
@@ -203,18 +263,7 @@ export class OperationInvoker {
     const source = iface.sources?.[binding.source];
     if (!source) throw new UnknownSourceError(bindingKey, binding.source);
 
-    const callerInv = new InvocationImpl<I, O>({
-      signal: opts?.signal,
-      validateInput: makeInputValidator(op, iface, sig.key),
-    });
-
-    queueMicrotask(() => {
-      this.run(callerInv, iface, op, binding, bindingKey, source, opts?.context).catch((err) => {
-        callerInv.fireError(asInvocationError(err));
-      });
-    });
-
-    return callerInv;
+    return { op, bindingKey, binding, source };
   }
 
   /**

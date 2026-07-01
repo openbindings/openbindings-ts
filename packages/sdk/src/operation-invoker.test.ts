@@ -773,3 +773,42 @@ describe("defaultBindingSelector", () => {
     expect(key).toBe("op.plain");
   });
 });
+
+describe("prepareOperation", () => {
+  it("reports the resolved binding's requirements without invoking", async () => {
+    const mock = new MockBindingInvoker({ requireBearer: true, preflight: true });
+    const op = makeInvoker(mock);
+    const details = await op.prepareOperation(testInterface(), "getUser");
+    expect(details).toEqual(BEARER_DETAILS);
+    expect(mock.prepares).toBe(1);
+    expect(mock.attempts).toBe(0);
+  });
+
+  it("narrows to satisfied when context is supplied", async () => {
+    const mock = new MockBindingInvoker({ requireBearer: true, preflight: true });
+    const op = makeInvoker(mock);
+    const details = await op.prepareOperation(testInterface(), "getUser", {
+      context: { bearerToken: "tok" },
+    });
+    expect(details).toBeNull();
+  });
+
+  it("yields null when the format exposes no preparer", async () => {
+    const op = makeInvoker(new MockBindingInvoker());
+    await expect(op.prepareOperation(testInterface(), "getUser")).resolves.toBeNull();
+  });
+
+  it("shares invoke's resolution: alias-aware and pinned binding", async () => {
+    const mock = new MockBindingInvoker({ requireBearer: true, preflight: true });
+    const op = makeInvoker(mock);
+    const details = await op.prepareOperation(testInterface(), "fetchUser", {
+      bindingKey: "getUser.main",
+    });
+    expect(details).toEqual(BEARER_DETAILS);
+  });
+
+  it("throws synchronously on wiring failures, like invoke", () => {
+    const op = makeInvoker(new MockBindingInvoker());
+    expect(() => op.prepareOperation(testInterface(), "nope")).toThrow();
+  });
+});
