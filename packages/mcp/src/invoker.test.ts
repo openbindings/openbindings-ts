@@ -303,7 +303,7 @@ describe("MCPInvoker prompts", () => {
     const messages = [{ role: "user", content: { type: "text", text: "Hi" } }];
     const { fn, calls } = mcpServer(() => ({ result: { messages } }));
     // binding present + inputSchema absent: the operation declares NO input
-    // (the creator emits no input schema for zero-argument prompts), so the
+    // (the synthesizer emits no input schema for zero-argument prompts), so the
     // caller never writes nor closes — the call must not park on a read.
     const call = new MCPInvoker().invokeBinding({
       source,

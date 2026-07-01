@@ -1,4 +1,4 @@
-export { OpenAPIInvoker, OpenAPICreator } from "./invoker.js";
+export { OpenAPIInvoker, OpenAPISynthesizer } from "./invoker.js";
 export { FORMAT_TOKEN, DEFAULT_SOURCE_NAME } from "./constants.js";
 export type {
   OpenAPIDocument,

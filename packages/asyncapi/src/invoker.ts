@@ -1,10 +1,10 @@
 import type {
   BindingInvoker,
-  InterfaceCreator,
+  InterfaceSynthesizer,
   SourceInspector,
   BindingInvocationArgs,
   ContextRequiredDetails,
-  CreateInput,
+  SynthesizeInput,
   Invocation,
   OBInterface,
   Source,
@@ -21,7 +21,7 @@ import {
 import type { AsyncAPIDocument } from "./asyncapi-types.js";
 import { FORMAT_TOKEN } from "./constants.js";
 import { runBinding, requiredContext, resolveServer } from "./invoke.js";
-import { convertToInterface } from "./create.js";
+import { convertToInterface } from "./synthesize.js";
 import { parseAsyncAPIDocument, parseRef, errorMessage } from "./util.js";
 import { WSPool } from "./ws-pool.js";
 
@@ -148,19 +148,19 @@ export class AsyncAPIInvoker implements BindingInvoker {
 }
 
 // ---------------------------------------------------------------------------
-// Creator
+// Synthesizer
 // ---------------------------------------------------------------------------
 
 /** Creates OBInterface definitions from AsyncAPI 3.x documents. */
-export class AsyncAPICreator implements InterfaceCreator, SourceInspector {
-  /** Returns the format tokens this creator supports. */
+export class AsyncAPISynthesizer implements InterfaceSynthesizer, SourceInspector {
+  /** Returns the format tokens this synthesizer supports. */
   formats(): FormatInfo[] {
     return [{ token: FORMAT_TOKEN, description: "AsyncAPI 3.x event-driven APIs" }];
   }
 
   /** Parses an AsyncAPI document and converts it into an OBInterface. */
-  async createInterface(
-    input: CreateInput,
+  async synthesizeInterface(
+    input: SynthesizeInput,
     options?: { signal?: AbortSignal },
   ): Promise<OBInterface> {
     if (!input.sources?.length) {

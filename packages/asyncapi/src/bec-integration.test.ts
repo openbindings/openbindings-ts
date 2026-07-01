@@ -1,7 +1,7 @@
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from "node:http";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { single, CONTEXT_REQUIRED, type OBInterface } from "@openbindings/sdk";
-import { AsyncAPIInvoker, AsyncAPICreator } from "./invoker.js";
+import { AsyncAPIInvoker, AsyncAPISynthesizer } from "./invoker.js";
 import { FORMAT_TOKEN } from "./constants.js";
 
 const SECRET = "test-token-abc";
@@ -162,8 +162,8 @@ describe("AsyncAPI binding invoker (real HTTP)", () => {
   }
 
   async function buildOBI(): Promise<OBInterface> {
-    const creator = new AsyncAPICreator();
-    return creator.createInterface({
+    const synthesizer = new AsyncAPISynthesizer();
+    return synthesizer.synthesizeInterface({
       sources: [{ format: FORMAT_TOKEN, content: JSON.stringify(makeAsyncAPISpec(port)) }],
     });
   }

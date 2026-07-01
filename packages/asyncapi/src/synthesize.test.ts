@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { convertToInterface } from "./create.js";
+import { convertToInterface } from "./synthesize.js";
 import { parseAsyncAPIDocument } from "./util.js";
 
 const MINIMAL_DOC = {

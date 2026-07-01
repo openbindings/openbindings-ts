@@ -1,7 +1,7 @@
 import type { OBInterface, BindingEntry, Source } from "./types.js";
 import type {
   BindingInvocationArgs,
-  CreateInput,
+  SynthesizeInput,
   FormatInfo,
   SourceInspection,
 } from "./invoker-types.js";
@@ -34,10 +34,10 @@ export interface BindingInvoker {
  * Creates OpenBindings interfaces from format-specific sources.
  * Independent of {@link BindingInvoker} -- an implementation may provide one, the other, or both.
  */
-export interface InterfaceCreator {
+export interface InterfaceSynthesizer {
   formats(): FormatInfo[];
-  createInterface(
-    input: CreateInput,
+  synthesizeInterface(
+    input: SynthesizeInput,
     options?: { signal?: AbortSignal },
   ): Promise<OBInterface>;
 }
@@ -98,10 +98,10 @@ export type ContextResolver = (
   details: ContextRequiredDetails,
 ) => Promise<Record<string, unknown> | null> | Record<string, unknown> | null;
 
-/** Type guard that checks whether a {@link BindingInvoker} also implements {@link InterfaceCreator}. */
-export function isInterfaceCreator(
+/** Type guard that checks whether a {@link BindingInvoker} also implements {@link InterfaceSynthesizer}. */
+export function isInterfaceSynthesizer(
   p: BindingInvoker,
-): p is BindingInvoker & InterfaceCreator {
-  return "createInterface" in p
-    && typeof (p as unknown as Record<string, unknown>)["createInterface"] === "function";
+): p is BindingInvoker & InterfaceSynthesizer {
+  return "synthesizeInterface" in p
+    && typeof (p as unknown as Record<string, unknown>)["synthesizeInterface"] === "function";
 }

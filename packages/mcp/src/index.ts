@@ -1,2 +1,2 @@
-export { MCPInvoker, MCPCreator } from "./invoker.js";
+export { MCPInvoker, MCPSynthesizer } from "./invoker.js";
 export { FORMAT_TOKEN, DEFAULT_SOURCE_NAME } from "./constants.js";

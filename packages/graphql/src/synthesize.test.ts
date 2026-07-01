@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { convertToInterface } from "./create.js";
+import { convertToInterface } from "./synthesize.js";
 import type { IntrospectionSchema } from "./introspection.js";
 
 describe("convertToInterface", () => {

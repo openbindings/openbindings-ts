@@ -1,15 +1,15 @@
-import type { BindingInvoker, InterfaceCreator, SourceInspector } from "./invokers.js";
+import type { BindingInvoker, InterfaceSynthesizer, SourceInspector } from "./invokers.js";
 import type {
   BindingInvocationArgs,
   FormatInfo,
-  CreateInput,
+  SynthesizeInput,
   SourceInspection,
 } from "./invoker-types.js";
 import type { ContextRequiredDetails, Invocation } from "./invocation.js";
 import type { OBInterface, Source } from "./types.js";
 import { type VersionRange, parseRange, matchesRange } from "./format-token.js";
 import { formatName } from "./helpers.js";
-import { NoInvokerError, NoCreatorError, NoSourcesError } from "./errors.js";
+import { NoInvokerError, NoSynthesizerError, NoSourcesError } from "./errors.js";
 
 interface InvokerEntry {
   range: VersionRange;
@@ -17,9 +17,9 @@ interface InvokerEntry {
   info: FormatInfo;
 }
 
-interface CreatorEntry {
+interface SynthesizerEntry {
   range: VersionRange;
-  creator: InterfaceCreator;
+  synthesizer: InterfaceSynthesizer;
   info: FormatInfo;
 }
 
@@ -107,16 +107,16 @@ export function combineInvokers(...invokers: BindingInvoker[]): CombinedInvoker 
 }
 
 /**
- * Returns a single InterfaceCreator that routes to the appropriate inner
- * creator based on the source format token. First match wins.
+ * Returns a single InterfaceSynthesizer that routes to the appropriate inner
+ * synthesizer based on the source format token. First match wins.
  */
-export function combineCreators(...creators: InterfaceCreator[]): InterfaceCreator {
-  const entries: CreatorEntry[] = [];
+export function combineSynthesizers(...synthesizers: InterfaceSynthesizer[]): InterfaceSynthesizer {
+  const entries: SynthesizerEntry[] = [];
   const byName = new Map<string, number[]>();
   const allFormats: FormatInfo[] = [];
 
-  for (const creator of creators) {
-    for (const info of creator.formats()) {
+  for (const synthesizer of synthesizers) {
+    for (const info of synthesizer.formats()) {
       let range: VersionRange;
       try {
         range = parseRange(info.token);
@@ -125,7 +125,7 @@ export function combineCreators(...creators: InterfaceCreator[]): InterfaceCreat
       }
 
       const idx = entries.length;
-      entries.push({ range, creator, info });
+      entries.push({ range, synthesizer, info });
 
       const indices = byName.get(range.name);
       if (indices) {
@@ -138,14 +138,14 @@ export function combineCreators(...creators: InterfaceCreator[]): InterfaceCreat
     }
   }
 
-  function findCreator(sourceFormat: string): InterfaceCreator | undefined {
+  function findSynthesizer(sourceFormat: string): InterfaceSynthesizer | undefined {
     const name = formatName(sourceFormat);
     const indices = byName.get(name);
     if (!indices) return undefined;
     for (const idx of indices) {
       const entry = entries[idx];
       if (entry.info.token === sourceFormat || matchesRange(entry.range, sourceFormat)) {
-        return entry.creator;
+        return entry.synthesizer;
       }
     }
     return undefined;
@@ -155,14 +155,14 @@ export function combineCreators(...creators: InterfaceCreator[]): InterfaceCreat
     formats(): FormatInfo[] {
       return [...allFormats];
     },
-    async createInterface(
-      input: CreateInput,
+    async synthesizeInterface(
+      input: SynthesizeInput,
       options?: { signal?: AbortSignal },
     ): Promise<OBInterface> {
       if (!input.sources?.length) throw new NoSourcesError();
-      const creator = findCreator(input.sources[0].format);
-      if (!creator) throw new NoCreatorError(input.sources[0].format);
-      return creator.createInterface(input, options);
+      const synthesizer = findSynthesizer(input.sources[0].format);
+      if (!synthesizer) throw new NoSynthesizerError(input.sources[0].format);
+      return synthesizer.synthesizeInterface(input, options);
     },
   };
 }
@@ -221,7 +221,7 @@ export function combineSourceInspectors(...inspectors: SourceInspector[]): Sourc
       options?: { signal?: AbortSignal },
     ): Promise<SourceInspection> {
       const inspector = findInspector(source.format);
-      if (!inspector) throw new NoCreatorError(source.format);
+      if (!inspector) throw new NoSynthesizerError(source.format);
       return inspector.inspectSource(source, options);
     },
   };

@@ -7,9 +7,9 @@ import {
   type BindingInvoker,
   type BindingInvocationArgs,
   type ContextRequiredDetails,
-  type CreateInput,
+  type SynthesizeInput,
   type FormatInfo,
-  type InterfaceCreator,
+  type InterfaceSynthesizer,
   type Invocation,
   type OBInterface,
   type Source,
@@ -19,7 +19,7 @@ import {
 import type { OpenAPIDocument, OpenAPIOperation } from "./types.js";
 import { FORMAT_TOKEN } from "./constants.js";
 import { requiredContext, resolveRequestBaseURL, runBinding } from "./invoke.js";
-import { convertToInterface } from "./create.js";
+import { convertToInterface } from "./synthesize.js";
 import { buildJsonPointerRef, errorMessage, loadOpenAPIDocument, parseRef } from "./util.js";
 
 // ---------------------------------------------------------------------------
@@ -143,19 +143,19 @@ export class OpenAPIInvoker implements BindingInvoker {
 }
 
 // ---------------------------------------------------------------------------
-// Creator
+// Synthesizer
 // ---------------------------------------------------------------------------
 
 /** Creates OBInterface definitions from OpenAPI specification documents. */
-export class OpenAPICreator implements InterfaceCreator, SourceInspector {
-  /** Returns the format tokens this creator supports. */
+export class OpenAPISynthesizer implements InterfaceSynthesizer, SourceInspector {
+  /** Returns the format tokens this synthesizer supports. */
   formats(): FormatInfo[] {
     return [{ token: FORMAT_TOKEN, description: "OpenAPI 3.x HTTP APIs" }];
   }
 
   /** Converts an OpenAPI source into an OBInterface, applying optional name/version/description overrides. */
-  async createInterface(
-    input: CreateInput,
+  async synthesizeInterface(
+    input: SynthesizeInput,
     options?: { signal?: AbortSignal },
   ): Promise<OBInterface> {
     if (!input.sources?.length) {

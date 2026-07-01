@@ -53,7 +53,7 @@ export interface InvokeOptions {
 }
 
 /** Describes a binding source for interface creation. */
-export interface CreateSource {
+export interface SynthesizeSource {
   format: string;
   name?: string;
   location?: string;
@@ -64,9 +64,9 @@ export interface CreateSource {
 }
 
 /** Input for creating an OpenBindings interface from format-specific sources. */
-export interface CreateInput {
+export interface SynthesizeInput {
   openbindingsVersion?: string;
-  sources?: CreateSource[];
+  sources?: SynthesizeSource[];
   name?: string;
   version?: string;
   description?: string;

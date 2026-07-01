@@ -32,8 +32,8 @@ export type {
   InvocationSource,
   BindingInvocationArgs,
   InvokeOptions,
-  CreateSource,
-  CreateInput,
+  SynthesizeSource,
+  SynthesizeInput,
   FormatInfo,
   BindableTarget,
   SourceInspection,
@@ -66,14 +66,14 @@ export {
 
 export type {
   BindingInvoker,
-  InterfaceCreator,
+  InterfaceSynthesizer,
   SourceInspector,
   TransformEvaluator,
   TransformEvaluatorWithBindings,
   BindingSelector,
   ContextResolver,
 } from "./invokers.js";
-export { isInterfaceCreator, isTransformEvaluatorWithBindings } from "./invokers.js";
+export { isInterfaceSynthesizer, isTransformEvaluatorWithBindings } from "./invokers.js";
 
 export {
   OperationInvoker,
@@ -84,7 +84,7 @@ export type { OperationInvokerOptions } from "./operation-invoker.js";
 export { operationSignature } from "./operation-signature.js";
 export type { OperationSignature } from "./operation-signature.js";
 
-export { combineInvokers, combineCreators, combineSourceInspectors, type CombinedInvoker } from "./combiners.js";
+export { combineInvokers, combineSynthesizers, combineSourceInspectors, type CombinedInvoker } from "./combiners.js";
 
 export { validateInterface } from "./validate.js";
 export type { ValidateOptions } from "./validate.js";
@@ -94,7 +94,7 @@ export type { ValidationFailure } from "./schema-validation.js";
 
 export {
   NoInvokerError,
-  NoCreatorError,
+  NoSynthesizerError,
   OperationNotFoundError,
   BindingNotFoundError,
   MissingInterfaceError,

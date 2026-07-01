@@ -6,11 +6,11 @@ export class NoInvokerError extends Error {
   }
 }
 
-/** Thrown when no creator matches the requested binding format. */
-export class NoCreatorError extends Error {
+/** Thrown when no synthesizer matches the requested binding format. */
+export class NoSynthesizerError extends Error {
   constructor(format: string) {
-    super(`openbindings: no creator for format: ${format}`);
-    this.name = "NoCreatorError";
+    super(`openbindings: no synthesizer for format: ${format}`);
+    this.name = "NoSynthesizerError";
   }
 }
 

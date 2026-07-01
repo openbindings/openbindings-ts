@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { convertToInterface } from "./create.js";
+import { convertToInterface } from "./synthesize.js";
 
 describe("convertToInterface", () => {
   it("converts tools to operations", () => {

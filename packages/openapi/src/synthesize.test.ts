@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { convertToInterface } from "./create.js";
+import { convertToInterface } from "./synthesize.js";
 
 const MINIMAL_SPEC = {
   openapi: "3.1.0",
@@ -108,13 +108,13 @@ describe("convertToInterface", () => {
   it("generates input schemas from request body", async () => {
     const iface = await convertToInterface(undefined, MINIMAL_SPEC);
 
-    const createInput = iface.operations["createUser"].input;
-    expect(createInput).toBeDefined();
-    const props = createInput!.properties as Record<string, unknown>;
+    const synthesizeInput = iface.operations["createUser"].input;
+    expect(synthesizeInput).toBeDefined();
+    const props = synthesizeInput!.properties as Record<string, unknown>;
     expect(props["name"]).toEqual({ type: "string" });
     expect(props["email"]).toEqual({ type: "string" });
-    expect(createInput!.required).toContain("email");
-    expect(createInput!.required).toContain("name");
+    expect(synthesizeInput!.required).toContain("email");
+    expect(synthesizeInput!.required).toContain("name");
   });
 
   it("generates output schemas from 200/201 responses", async () => {

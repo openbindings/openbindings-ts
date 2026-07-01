@@ -13,7 +13,7 @@ import {
   type ContextRequiredDetails,
   type OBInterface,
 } from "@openbindings/sdk";
-import { OpenAPIInvoker, OpenAPICreator } from "./invoker.js";
+import { OpenAPIInvoker, OpenAPISynthesizer } from "./invoker.js";
 
 const SECRET = "test-token-123";
 
@@ -178,7 +178,7 @@ describe("BEC Integration (real HTTP)", () => {
   });
 
   async function fetchIface(): Promise<OBInterface> {
-    const { iface } = await fetchInterface(specURL, { creators: [new OpenAPICreator()] });
+    const { iface } = await fetchInterface(specURL, { synthesizers: [new OpenAPISynthesizer()] });
     return iface;
   }
 

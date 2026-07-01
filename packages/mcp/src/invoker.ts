@@ -5,9 +5,9 @@ import {
   NoSourcesError,
   type BindingInvocationArgs,
   type BindingInvoker,
-  type CreateInput,
+  type SynthesizeInput,
   type FormatInfo,
-  type InterfaceCreator,
+  type InterfaceSynthesizer,
   type Invocation,
   type OBInterface,
   type Source,
@@ -16,7 +16,7 @@ import {
 } from "@openbindings/sdk";
 import { FORMAT_TOKEN } from "./constants.js";
 import { runMCPBinding } from "./invoke.js";
-import { discover, convertToInterface } from "./create.js";
+import { discover, convertToInterface } from "./synthesize.js";
 
 // ---------------------------------------------------------------------------
 // Invoker
@@ -52,17 +52,17 @@ export class MCPInvoker implements BindingInvoker {
 }
 
 // ---------------------------------------------------------------------------
-// Creator
+// Synthesizer
 // ---------------------------------------------------------------------------
 
 /** Creates OBInterface definitions by discovering an MCP server's capabilities. */
-export class MCPCreator implements InterfaceCreator, SourceInspector {
+export class MCPSynthesizer implements InterfaceSynthesizer, SourceInspector {
   formats(): FormatInfo[] {
     return [{ token: FORMAT_TOKEN, description: "MCP via Streamable HTTP" }];
   }
 
-  async createInterface(
-    input: CreateInput,
+  async synthesizeInterface(
+    input: SynthesizeInput,
     options?: { signal?: AbortSignal },
   ): Promise<OBInterface> {
     if (!input.sources?.length) {

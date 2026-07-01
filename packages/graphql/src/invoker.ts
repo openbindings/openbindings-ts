@@ -9,9 +9,9 @@ import {
   buildAuthHeaders,
   type BindingInvocationArgs,
   type BindingInvoker,
-  type CreateInput,
+  type SynthesizeInput,
   type FormatInfo,
-  type InterfaceCreator,
+  type InterfaceSynthesizer,
   type Invocation,
   type OBInterface,
   type Source,
@@ -34,7 +34,7 @@ import {
 } from "./invoke.js";
 import type { Field, IntrospectionSchema } from "./introspection.js";
 import { buildTypeMap, rootTypeName } from "./introspection.js";
-import { convertToInterface } from "./create.js";
+import { convertToInterface } from "./synthesize.js";
 
 function errMsg(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
@@ -198,17 +198,17 @@ export class GraphQLInvoker implements BindingInvoker {
 }
 
 // ---------------------------------------------------------------------------
-// Creator
+// Synthesizer
 // ---------------------------------------------------------------------------
 
 /** Creates OBInterface definitions by introspecting GraphQL endpoints. */
-export class GraphQLCreator implements InterfaceCreator, SourceInspector {
+export class GraphQLSynthesizer implements InterfaceSynthesizer, SourceInspector {
   formats(): FormatInfo[] {
     return [{ token: FORMAT_TOKEN, description: "GraphQL APIs" }];
   }
 
-  async createInterface(
-    input: CreateInput,
+  async synthesizeInterface(
+    input: SynthesizeInput,
     options?: { signal?: AbortSignal },
   ): Promise<OBInterface> {
     if (!input.sources?.length) throw new NoSourcesError();

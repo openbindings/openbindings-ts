@@ -1,7 +1,7 @@
 import type { OBInterface } from "./types.js";
-import type { InterfaceCreator } from "./invokers.js";
+import type { InterfaceSynthesizer } from "./invokers.js";
 import { isHttpUrl } from "./helpers.js";
-import { combineCreators } from "./combiners.js";
+import { combineSynthesizers } from "./combiners.js";
 import { parseDocument } from "./parse.js";
 import { isOBInterface } from "./compatibility.js";
 
@@ -14,11 +14,11 @@ export interface FetchInterfaceOptions {
   fetch?: typeof globalThis.fetch;
   signal?: AbortSignal;
   /**
-   * Creators for synthesizing OBIs from non-OBI sources (e.g. OpenAPI,
+   * Synthesizers for synthesizing OBIs from non-OBI sources (e.g. OpenAPI,
    * AsyncAPI). When the URL doesn't serve an OBI directly and well-known
-   * discovery fails, each creator is tried in turn.
+   * discovery fails, each synthesizer is tried in turn.
    */
-  creators?: InterfaceCreator[];
+  synthesizers?: InterfaceSynthesizer[];
 }
 
 export interface FetchedInterface {
@@ -30,7 +30,7 @@ export interface FetchedInterface {
 /**
  * Resolves an OBI from a URL. For HTTP URLs, tries direct fetch first,
  * then well-known discovery at `/.well-known/openbindings`. If neither
- * yields an OBI and creators are supplied, synthesizes from the URL's
+ * yields an OBI and synthesizers are supplied, synthesizes from the URL's
  * content (e.g., an OpenAPI doc).
  *
  * Throws if the OBI can't be acquired.
@@ -41,7 +41,7 @@ export async function fetchInterface(
 ): Promise<FetchedInterface> {
   const fetchFn = opts?.fetch ?? defaultFetch();
   const signal = opts?.signal;
-  const synthesizer = opts?.creators?.length ? combineCreators(...opts.creators) : null;
+  const synthesizer = opts?.synthesizers?.length ? combineSynthesizers(...opts.synthesizers) : null;
 
   if (isHttpUrl(url)) {
     const direct = await tryFetchOBI(fetchFn, url, signal);
@@ -58,14 +58,14 @@ export async function fetchInterface(
   }
 
   if (!synthesizer) {
-    throw new Error(`No OBI available at ${url} and no creators supplied for synthesis`);
+    throw new Error(`No OBI available at ${url} and no synthesizers supplied for synthesis`);
   }
 
   const formats = synthesizer.formats();
   let lastError: unknown;
   for (const info of formats) {
     try {
-      const iface = await synthesizer.createInterface(
+      const iface = await synthesizer.synthesizeInterface(
         { sources: [{ format: info.token, location: url }] },
         { signal },
       );
@@ -75,7 +75,7 @@ export async function fetchInterface(
     }
   }
 
-  throw lastError ?? new Error(`No creator could synthesize an interface from ${url}`);
+  throw lastError ?? new Error(`No synthesizer could synthesize an interface from ${url}`);
 }
 
 function defaultFetch(): typeof globalThis.fetch {
