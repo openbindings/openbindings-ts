@@ -17,6 +17,7 @@ import {
   ERR_EXECUTION_FAILED,
   ERR_REF_NOT_FOUND,
   single,
+  operationSignature,
   type OBInterface,
 } from "@openbindings/sdk";
 import { WorkersRpcInvoker, type WorkersRpcBinding } from "./index.js";
@@ -94,7 +95,7 @@ async function invokeOnce(
   op: string,
   input: unknown,
 ): Promise<unknown> {
-  const call = invoker.invoke({ interface: TEST_OBI, operation: op });
+  const call = invoker.invoke(TEST_OBI, operationSignature(op));
   await call.write(input);
   return single(call.outputs);
 }
@@ -150,7 +151,7 @@ describe("workers-rpc end-to-end via OperationInvoker", () => {
     };
     const invoker = buildInvoker(binding);
 
-    const call = invoker.invoke({ interface: TEST_OBI, operation: "ping" });
+    const call = invoker.invoke(TEST_OBI, operationSignature("ping"));
     await call.write({ message: "test" });
     await expect(call.closed).rejects.toMatchObject({
       code: ERR_EXECUTION_FAILED,
@@ -167,7 +168,7 @@ describe("workers-rpc end-to-end via OperationInvoker", () => {
     };
     const invoker = buildInvoker(binding);
 
-    const call = invoker.invoke({ interface: TEST_OBI, operation: "addItem" });
+    const call = invoker.invoke(TEST_OBI, operationSignature("addItem"));
     await expect(call.closed).rejects.toMatchObject({
       code: ERR_REF_NOT_FOUND,
       message: expect.stringContaining("addItem"),

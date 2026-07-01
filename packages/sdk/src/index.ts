@@ -31,7 +31,7 @@ export {
 export type {
   InvocationSource,
   BindingInvocationArgs,
-  OperationInvocationArgs,
+  InvokeOptions,
   CreateSource,
   CreateInput,
   FormatInfo,
@@ -80,6 +80,9 @@ export {
   defaultBindingSelector,
 } from "./operation-invoker.js";
 export type { OperationInvokerOptions } from "./operation-invoker.js";
+
+export { operationSignature } from "./operation-signature.js";
+export type { OperationSignature } from "./operation-signature.js";
 
 export { combineInvokers, combineCreators, combineSourceInspectors, type CombinedInvoker } from "./combiners.js";
 

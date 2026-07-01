@@ -39,6 +39,7 @@ import {
   ERR_OPERATION_GRAPH_EXIT,
   InvocationError,
   isTransformEvaluatorWithBindings,
+  operationSignature,
 } from "@openbindings/sdk";
 import { MAP_NOT_ARRAY, TIMEOUT_EXCEEDED, TRANSFORM_UNDEFINED, WRITE_REJECTED } from "./constants.js";
 import type { Graph, Node } from "./types.js";
@@ -527,12 +528,11 @@ export class Engine {
     if (c.started) return;
     c.started = true;
 
-    const call = this.invoker.invoke<unknown, unknown>({
-      interface: this.args.interface!,
-      operation: node.operation!,
-      context: this.args.context,
-      signal: this.abortController.signal,
-    });
+    const call = this.invoker.invoke<unknown, unknown>(
+      this.args.interface!,
+      operationSignature<unknown, unknown>(node.operation!),
+      { context: this.args.context, signal: this.abortController.signal },
+    );
     c.call = call;
     if (node.timeout !== undefined) {
       c.timer = setTimeout(() => {
@@ -638,12 +638,11 @@ export class Engine {
     }
     lineage.set(key, (lineage.get(key) ?? 0) + 1);
 
-    const call = this.invoker.invoke<unknown, unknown>({
-      interface: this.args.interface!,
-      operation: node.operation!,
-      context: this.args.context,
-      signal: this.abortController.signal,
-    });
+    const call = this.invoker.invoke<unknown, unknown>(
+      this.args.interface!,
+      operationSignature<unknown, unknown>(node.operation!),
+      { context: this.args.context, signal: this.abortController.signal },
+    );
     let timedOut = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     if (node.timeout !== undefined) {

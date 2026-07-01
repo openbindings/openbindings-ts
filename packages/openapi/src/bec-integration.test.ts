@@ -5,6 +5,7 @@ import {
   fetchInterface,
   normalizeEndpoint,
   single,
+  operationSignature,
   storeContextResolver,
   CONTEXT_REQUIRED,
   ERR_AUTH_REQUIRED,
@@ -196,7 +197,7 @@ describe("BEC Integration (real HTTP)", () => {
     const iface = await fetchIface();
 
     const before = protectedHits;
-    const call = opInvoker.invoke({ interface: iface, operation: "listItems" });
+    const call = opInvoker.invoke(iface, operationSignature("listItems"));
 
     await expect(call.closed).rejects.toMatchObject({
       code: CONTEXT_REQUIRED,
@@ -217,13 +218,13 @@ describe("BEC Integration (real HTTP)", () => {
     });
     const iface = await fetchIface();
 
-    const call1 = opInvoker.invoke({ interface: iface, operation: "listItems" });
+    const call1 = opInvoker.invoke(iface, operationSignature("listItems"));
     await expect(single(call1.outputs)).resolves.toEqual(ITEMS);
 
-    const call2 = opInvoker.invoke({ interface: iface, operation: "listItems" });
+    const call2 = opInvoker.invoke(iface, operationSignature("listItems"));
     await expect(single(call2.outputs)).resolves.toEqual(ITEMS);
 
-    const call3 = opInvoker.invoke({ interface: iface, operation: "getItem" });
+    const call3 = opInvoker.invoke(iface, operationSignature("getItem"));
     await call3.write({ id: 1 });
     await expect(single(call3.outputs)).resolves.toEqual({ id: 1, name: "Alpha" });
   });
@@ -238,9 +239,7 @@ describe("BEC Integration (real HTTP)", () => {
     });
     const iface = await fetchIface();
 
-    const call = opInvoker.invoke({
-      interface: iface,
-      operation: "listItems",
+    const call = opInvoker.invoke(iface, operationSignature("listItems"), {
       context: { bearerToken: SECRET },
     });
 
@@ -257,7 +256,7 @@ describe("BEC Integration (real HTTP)", () => {
     });
     const iface = await fetchIface();
 
-    const call = opInvoker.invoke({ interface: iface, operation: "listItems" });
+    const call = opInvoker.invoke(iface, operationSignature("listItems"));
     await expect(call.closed).rejects.toMatchObject({
       code: ERR_AUTH_REQUIRED,
       details: { status: 401 },
@@ -277,10 +276,10 @@ describe("BEC Integration (real HTTP)", () => {
     });
     const iface = await fetchIface();
 
-    const call1 = opInvoker1.invoke({ interface: iface, operation: "listItems" });
+    const call1 = opInvoker1.invoke(iface, operationSignature("listItems"));
     await expect(single(call1.outputs)).resolves.toEqual(ITEMS);
 
-    const call2 = opInvoker2.invoke({ interface: iface, operation: "listItems" });
+    const call2 = opInvoker2.invoke(iface, operationSignature("listItems"));
     await expect(call2.closed).rejects.toMatchObject({ code: CONTEXT_REQUIRED });
   });
 
@@ -298,7 +297,7 @@ describe("BEC Integration (real HTTP)", () => {
     await expect(invoker.prepareBinding(args)).resolves.toBeNull();
 
     // A (challenged) invocation loads and caches the document.
-    await opInvoker.invoke({ interface: iface, operation: "listItems" }).closed.catch(() => {});
+    await opInvoker.invoke(iface, operationSignature("listItems")).closed.catch(() => {});
 
     await expect(invoker.prepareBinding(args)).resolves.toMatchObject({
       target: targetURL(),

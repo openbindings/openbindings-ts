@@ -3,6 +3,7 @@ import {
   OperationInvoker,
   defaultBindingSelector,
 } from "./operation-invoker.js";
+import { operationSignature } from "./operation-signature.js";
 import {
   InvocationImpl,
   InvocationError,
@@ -320,7 +321,7 @@ function makeInvoker(
 describe("OperationInvoker wiring", () => {
   it("invokes a no-input operation: binding closes input, single yields the output [NI]", async () => {
     const op = makeInvoker();
-    const call = op.invoke({ interface: testInterface(), operation: "ping" });
+    const call = op.invoke(testInterface(), operationSignature("ping"));
     await expect(single(call.outputs)).resolves.toEqual({ ok: true });
     await expect(call.closed).resolves.toBeUndefined();
   });
@@ -328,20 +329,20 @@ describe("OperationInvoker wiring", () => {
   it("resolves aliases against the flat namespace (OBI-T-12) and selects by canonical key", async () => {
     const mock = new MockBindingInvoker();
     const op = makeInvoker(mock);
-    const call = op.invoke({ interface: testInterface(), operation: "fetchUser" });
+    const call = op.invoke(testInterface(), operationSignature("fetchUser"));
     await call.write({ id: "u1" });
     await expect(single(call.outputs)).resolves.toEqual({ id: "u1", name: "Ada" });
   });
 
   it("throws OperationNotFoundError synchronously for an unknown operation", () => {
     const op = makeInvoker();
-    expect(() => op.invoke({ interface: testInterface(), operation: "nope" }))
+    expect(() => op.invoke(testInterface(), operationSignature("nope")))
       .toThrow(OperationNotFoundError);
   });
 
   it("throws BindingNotFoundError synchronously for an unknown bindingKey", () => {
     const op = makeInvoker();
-    expect(() => op.invoke({ interface: testInterface(), operation: "ping", bindingKey: "nope" }))
+    expect(() => op.invoke(testInterface(), operationSignature("ping"), { bindingKey: "nope" }))
       .toThrow(BindingNotFoundError);
   });
 
@@ -349,7 +350,7 @@ describe("OperationInvoker wiring", () => {
     // getUser.main binds the getUser operation; pinning it under "ping" must be
     // refused, otherwise the wrong operation's schema/transforms would apply.
     const op = makeInvoker();
-    expect(() => op.invoke({ interface: testInterface(), operation: "ping", bindingKey: "getUser.main" }))
+    expect(() => op.invoke(testInterface(), operationSignature("ping"), { bindingKey: "getUser.main" }))
       .toThrow(BindingNotFoundError);
   });
 
@@ -357,7 +358,7 @@ describe("OperationInvoker wiring", () => {
     const iface = testInterface();
     delete iface.sources!["mock"];
     const op = makeInvoker();
-    expect(() => op.invoke({ interface: iface, operation: "ping", bindingKey: "ping.main" }))
+    expect(() => op.invoke(iface, operationSignature("ping"), { bindingKey: "ping.main" }))
       .toThrow(UnknownSourceError);
   });
 
@@ -374,7 +375,7 @@ describe("OperationInvoker wiring", () => {
     // The default selector skips unavailable formats and throws; pin the
     // binding to force the wiring error onto the handle path.
     const op = makeInvoker();
-    const call = op.invoke({ interface: iface, operation: "ping", bindingKey: "ping.main" });
+    const call = op.invoke(iface, operationSignature("ping"), { bindingKey: "ping.main" });
     await expect(call.closed).rejects.toMatchObject({ code: ERR_BINDING_NOT_FOUND });
   });
 
@@ -382,7 +383,7 @@ describe("OperationInvoker wiring", () => {
     const a = new MockBindingInvoker({ token: "mock@1.0" });
     const b = new MockBindingInvoker({ token: "other@2.0" });
     const op = new OperationInvoker([a, b], { transformEvaluator: evaluator });
-    const call = op.invoke({ interface: testInterface(), operation: "ping" });
+    const call = op.invoke(testInterface(), operationSignature("ping"));
     await call.closed;
     expect(a.attempts).toBe(1);
     expect(b.attempts).toBe(0);
@@ -392,7 +393,7 @@ describe("OperationInvoker wiring", () => {
     const fakeFetch = (() => Promise.reject(new Error("nope"))) as unknown as typeof globalThis.fetch;
     const mock = new MockBindingInvoker();
     const op = makeInvoker(mock, { fetch: fakeFetch });
-    await op.invoke({ interface: testInterface(), operation: "ping" }).closed;
+    await op.invoke(testInterface(), operationSignature("ping")).closed;
     expect(mock.fetches[0]).toBe(fakeFetch);
   });
 });
@@ -404,7 +405,7 @@ describe("OperationInvoker wiring", () => {
 describe("cardinalities", () => {
   it("server-streaming: one write, many outputs [SS]", async () => {
     const op = makeInvoker();
-    const call = op.invoke({ interface: testInterface(), operation: "watchOrders" });
+    const call = op.invoke(testInterface(), operationSignature("watchOrders"));
     await call.write({ accountId: "a1" });
     const out = await collect(call.outputs);
     expect(out.map((o) => (o as Record<string, unknown>)["status"])).toEqual([
@@ -414,7 +415,7 @@ describe("cardinalities", () => {
 
   it("client-streaming: caller owns close() [CS]", async () => {
     const op = makeInvoker();
-    const call = op.invoke({ interface: testInterface(), operation: "uploadChunks" });
+    const call = op.invoke(testInterface(), operationSignature("uploadChunks"));
     for (const c of ["a", "b", "c"]) await call.write({ chunk: c });
     await call.close();
     await expect(single(call.outputs)).resolves.toEqual({ count: 3 });
@@ -422,7 +423,7 @@ describe("cardinalities", () => {
 
   it("bidirectional: concurrent pump and drain [BD]", async () => {
     const op = makeInvoker();
-    const call = op.invoke({ interface: testInterface(), operation: "chat" });
+    const call = op.invoke(testInterface(), operationSignature("chat"));
     const pump = (async () => {
       for (const text of ["hi", "there"]) await call.write({ text });
       await call.close();
@@ -434,7 +435,7 @@ describe("cardinalities", () => {
   it("caller cancel propagates to the binding's signal", async () => {
     const mock = new MockBindingInvoker();
     const op = makeInvoker(mock);
-    const call = op.invoke({ interface: testInterface(), operation: "chat" });
+    const call = op.invoke(testInterface(), operationSignature("chat"));
     await call.write({ text: "hello" });
     await call.cancel();
     await expect(call.closed).rejects.toMatchObject({ code: ERR_CANCELLED });
@@ -450,7 +451,7 @@ describe("OBI-T-07 — input validation", () => {
   it("an invalid write rejects AND terminates; the binding never sees the message", async () => {
     const mock = new MockBindingInvoker();
     const op = makeInvoker(mock);
-    const call = op.invoke({ interface: testInterface(), operation: "getUser" });
+    const call = op.invoke(testInterface(), operationSignature("getUser"));
     await expect(call.write({ id: 42 })).rejects.toMatchObject({ code: ERR_VALIDATION_FAILED });
     await expect(call.closed).rejects.toMatchObject({ code: ERR_VALIDATION_FAILED });
     expect(mock.reads.flat()).toEqual([]);
@@ -458,14 +459,14 @@ describe("OBI-T-07 — input validation", () => {
 
   it("accepts valid input (resolving $ref into #/schemas)", async () => {
     const op = makeInvoker();
-    const call = op.invoke({ interface: testInterface(), operation: "getUser" });
+    const call = op.invoke(testInterface(), operationSignature("getUser"));
     await call.write({ id: "u1" });
     await expect(single(call.outputs)).resolves.toEqual({ id: "u1", name: "Ada" });
   });
 
   it("rejects unknown fields under additionalProperties:false via $ref", async () => {
     const op = makeInvoker();
-    const call = op.invoke({ interface: testInterface(), operation: "getUser" });
+    const call = op.invoke(testInterface(), operationSignature("getUser"));
     await expect(call.write({ id: "u1", extra: true })).rejects.toMatchObject({
       code: ERR_VALIDATION_FAILED,
     });
@@ -473,7 +474,7 @@ describe("OBI-T-07 — input validation", () => {
 
   it("skips validation when the operation declares no input schema", async () => {
     const op = makeInvoker();
-    const call = op.invoke({ interface: testInterface(), operation: "uploadChunks" });
+    const call = op.invoke(testInterface(), operationSignature("uploadChunks"));
     await call.write("anything at all");
     await call.close();
     await expect(single(call.outputs)).resolves.toEqual({ count: 1 });
@@ -488,7 +489,7 @@ describe("OBI-T-07 — input validation", () => {
     };
     const mock = new MockBindingInvoker();
     const op = makeInvoker(mock);
-    const call = op.invoke({ interface: iface, operation: "echo" });
+    const call = op.invoke(iface, operationSignature("echo"));
     await call.write({ id: "u1" }); // validates against the PRE-transform shape
     await expect(single(call.outputs)).resolves.toEqual({ userId: "u1" });
     expect(mock.reads.flat()).toEqual([{ userId: "u1" }]);
@@ -498,7 +499,7 @@ describe("OBI-T-07 — input validation", () => {
     const iface = testInterface();
     iface.bindings!["echo.transformed"]!.inputTransform = "boom";
     const op = makeInvoker();
-    const call = op.invoke({ interface: iface, operation: "echo" });
+    const call = op.invoke(iface, operationSignature("echo"));
     await call.write({ id: "u1" });
     await expect(call.closed).rejects.toMatchObject({ code: ERR_TRANSFORM_ERROR });
   });
@@ -511,9 +512,7 @@ describe("OBI-T-07 — input validation", () => {
 describe("OBI-T-08 — output validation", () => {
   it("an invalid output is NOT emitted; the invocation terminates", async () => {
     const op = makeInvoker();
-    const call = op.invoke({
-      interface: testInterface(),
-      operation: "getUser",
+    const call = op.invoke(testInterface(), operationSignature("getUser"), {
       bindingKey: "getUser.bad",
     });
     await call.write({ id: "u1" });
@@ -530,7 +529,7 @@ describe("OBI-T-08 — output validation", () => {
 
   it("applies per item for streaming: valid prefix delivered, then terminal [SS]", async () => {
     const op = makeInvoker();
-    const call = op.invoke({ interface: testInterface(), operation: "watchTyped" });
+    const call = op.invoke(testInterface(), operationSignature("watchTyped"));
     const seen: unknown[] = [];
     let caught: unknown;
     try {
@@ -546,7 +545,7 @@ describe("OBI-T-08 — output validation", () => {
     const iface = testInterface();
     iface.bindings!["watchTyped.main"]!.outputTransform = "breakShape";
     const op = makeInvoker();
-    const call = op.invoke({ interface: iface, operation: "watchTyped" });
+    const call = op.invoke(iface, operationSignature("watchTyped"));
     const seen: unknown[] = [];
     let caught: unknown;
     try {
@@ -561,7 +560,7 @@ describe("OBI-T-08 — output validation", () => {
 
   it("skips validation when the operation declares no output schema", async () => {
     const op = makeInvoker();
-    const call = op.invoke({ interface: testInterface(), operation: "ping" });
+    const call = op.invoke(testInterface(), operationSignature("ping"));
     await expect(single(call.outputs)).resolves.toEqual({ ok: true });
   });
 });
@@ -574,7 +573,7 @@ describe("CONTEXT_REQUIRED", () => {
   it("surfaces to the caller when no resolver is configured", async () => {
     const mock = new MockBindingInvoker({ requireBearer: true });
     const op = makeInvoker(mock);
-    const call = op.invoke({ interface: testInterface(), operation: "getUser" });
+    const call = op.invoke(testInterface(), operationSignature("getUser"));
     await call.write({ id: "u1" });
     await expect(call.closed).rejects.toMatchObject({
       code: CONTEXT_REQUIRED,
@@ -586,7 +585,7 @@ describe("CONTEXT_REQUIRED", () => {
     const mock = new MockBindingInvoker({ requireBearer: true });
     const resolver = vi.fn(async () => ({ bearerToken: "tok-123" }));
     const op = makeInvoker(mock, { contextResolver: resolver });
-    const call = op.invoke({ interface: testInterface(), operation: "getUser" });
+    const call = op.invoke(testInterface(), operationSignature("getUser"));
     await call.write({ id: "u1" }); // written ONCE
     await expect(single(call.outputs)).resolves.toEqual({ id: "u1", name: "Ada" });
 
@@ -605,7 +604,7 @@ describe("CONTEXT_REQUIRED", () => {
     const mock = new MockBindingInvoker();
     const resolver = vi.fn(async () => ({ bearerToken: "tok" }));
     const op = makeInvoker(mock, { contextResolver: resolver });
-    const call = op.invoke({ interface: testInterface(), operation: "uploadAuth" });
+    const call = op.invoke(testInterface(), operationSignature("uploadAuth"));
     const N = 6;
     for (let n = 1; n <= N; n++) await call.write({ n });
     await call.close();
@@ -625,7 +624,7 @@ describe("CONTEXT_REQUIRED", () => {
     // connection leak per validation failure.
     const mock = new MockBindingInvoker();
     const op = makeInvoker(mock);
-    const call = op.invoke({ interface: testInterface(), operation: "getUser" });
+    const call = op.invoke(testInterface(), operationSignature("getUser"));
     await expect(call.write({ id: 42 })).rejects.toMatchObject({ code: ERR_VALIDATION_FAILED });
     await expect(call.closed).rejects.toMatchObject({ code: ERR_VALIDATION_FAILED });
     // Give teardown propagation a few macrotasks.
@@ -637,7 +636,7 @@ describe("CONTEXT_REQUIRED", () => {
   it("surfaces when the resolver declines", async () => {
     const mock = new MockBindingInvoker({ requireBearer: true });
     const op = makeInvoker(mock, { contextResolver: async () => null });
-    const call = op.invoke({ interface: testInterface(), operation: "getUser" });
+    const call = op.invoke(testInterface(), operationSignature("getUser"));
     await call.write({ id: "u1" });
     await expect(call.closed).rejects.toMatchObject({ code: CONTEXT_REQUIRED });
     expect(mock.attempts).toBe(1);
@@ -647,7 +646,7 @@ describe("CONTEXT_REQUIRED", () => {
     const mock = new MockBindingInvoker({ challengeAlways: true });
     const resolver = vi.fn(async () => ({ bearerToken: "never-enough" }));
     const op = makeInvoker(mock, { contextResolver: resolver });
-    const call = op.invoke({ interface: testInterface(), operation: "getUser" });
+    const call = op.invoke(testInterface(), operationSignature("getUser"));
     await call.write({ id: "u1" });
     await expect(call.closed).rejects.toMatchObject({ code: CONTEXT_REQUIRED });
     expect(resolver.mock.calls.length).toBeLessThanOrEqual(4);
@@ -658,9 +657,7 @@ describe("CONTEXT_REQUIRED", () => {
     const mock = new MockBindingInvoker();
     const resolver = vi.fn(async () => ({ bearerToken: "tok" }));
     const op = makeInvoker(mock, { contextResolver: resolver });
-    const call = op.invoke({
-      interface: testInterface(),
-      operation: "watchOrders",
+    const call = op.invoke(testInterface(), operationSignature("watchOrders"), {
       bindingKey: "watchOrders.challenge",
     });
     const seen: unknown[] = [];
@@ -680,7 +677,7 @@ describe("CONTEXT_REQUIRED", () => {
     const mock = new MockBindingInvoker({ requireBearer: true, preflight: true });
     const resolver = vi.fn(async () => ({ bearerToken: "tok-pre" }));
     const op = makeInvoker(mock, { contextResolver: resolver });
-    const call = op.invoke({ interface: testInterface(), operation: "getUser" });
+    const call = op.invoke(testInterface(), operationSignature("getUser"));
     await call.write({ id: "u1" });
     await expect(single(call.outputs)).resolves.toEqual({ id: "u1", name: "Ada" });
 
@@ -694,7 +691,7 @@ describe("CONTEXT_REQUIRED", () => {
   it("preflight with no resolver surfaces CONTEXT_REQUIRED before any attempt", async () => {
     const mock = new MockBindingInvoker({ requireBearer: true, preflight: true });
     const op = makeInvoker(mock);
-    const call = op.invoke({ interface: testInterface(), operation: "getUser" });
+    const call = op.invoke(testInterface(), operationSignature("getUser"));
     await expect(call.closed).rejects.toMatchObject({ code: CONTEXT_REQUIRED });
     expect(mock.attempts).toBe(0);
   });
@@ -707,7 +704,7 @@ describe("CONTEXT_REQUIRED", () => {
 describe("metadata pass-through", () => {
   it("forwards binding header and trailer to the caller handle", async () => {
     const op = makeInvoker();
-    const call = op.invoke({ interface: testInterface(), operation: "ping" });
+    const call = op.invoke(testInterface(), operationSignature("ping"));
     expect(await collect(call.outputs)).toEqual([{ ok: true }]);
     await expect(call.header).resolves.toEqual({ "x-mock": ["ping"] });
     expect(call.trailer()).toEqual({ "x-mock-trailer": ["done"] });

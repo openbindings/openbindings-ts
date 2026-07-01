@@ -4,6 +4,18 @@
 
 ### Changed
 
+- **Operations are invoked through signatures.** Added `OperationSignature<I, O>`
+  (an inert `{ key }` carrying its input/output types as a phantom brand,
+  mirroring `TypedDocumentNode`) and the `operationSignature<I, O>(key)`
+  constructor. `OperationInvoker.invoke` now takes
+  `invoke<I, O>(obi, signature, opts?)` returning `Invocation<I, O>`: the
+  interface is a runtime argument (never part of the signature, so one signature
+  works against any interface that declares the key), and per-call `context` /
+  `bindingKey` / `signal` move to an `InvokeOptions` bag. The old
+  `invoke(args: OperationInvocationArgs)` form and the `OperationInvocationArgs`
+  type are removed. TypeScript ships the method form (generic methods are
+  expressible); Go uses a free `Invoke` function for the same model.
+
 - **Invocation is now a cardinality-agnostic handle.** `BindingInvoker.invokeBinding`
   and `OperationInvoker.invoke` return an `Invocation<I, O>` synchronously instead
   of an `AsyncIterable<InvocationOutput>`: the caller writes input messages
@@ -24,8 +36,9 @@
   error `details`.
   - `BindingInvocationInput` → `BindingInvocationArgs` (`{source, ref, binding?,
     context?, interface?, inputSchema?, signal?, fetch?}`; no `input`, no
-    `security`, no `store`, no `callbacks`); `OperationInvocationInput` →
-    `OperationInvocationArgs` (input flows through the handle).
+    `security`, no `store`, no `callbacks`); `OperationInvocationInput` is
+    removed (input flows through the handle; invocation goes through
+    `invoke(obi, signature, opts?)`, see above).
   - OBI-T-07 failures are terminal AND reject the offending `write` with the same
     `InvocationError`; OBI-T-08 failures are terminal and the invalid value is
     not emitted (previously surfaced data-alongside-error). Transforms evaluate
@@ -117,10 +130,9 @@
   schema.
 
 - **`InterfaceClient`.** The class and its associated
-  `InterfaceClientOptions`/`OperationEntry` types are gone. Generated typed
-  invokers (from `ob codegen`) wrap an `OperationInvoker` directly and
-  take the OBI per method call. Direct callers use
-  `OperationInvoker.invoke({ interface, operation, input, context })`.
+  `InterfaceClientOptions`/`OperationEntry` types are gone. `ob codegen` emits an
+  `OperationSignatures` namespace; callers pass a signature and the OBI to
+  `OperationInvoker.invoke(obi, signature, opts?)`.
 
 - **`InvocationOptions`.** Folded into `BindingContext`. Transport fields
   (`headers`, `cookies`, `environment`, `metadata`) are well-known keys

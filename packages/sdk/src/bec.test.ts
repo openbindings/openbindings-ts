@@ -15,6 +15,7 @@ import {
   OperationInvoker,
   InvocationImpl,
   single,
+  operationSignature,
 } from "./index.js";
 import type {
   ContextStore,
@@ -218,7 +219,7 @@ describe("context flow", () => {
     const seen: (Record<string, unknown> | undefined)[] = [];
     const op = new OperationInvoker([echoContextInvoker(seen)]);
     const ctx = { bearerToken: "tok", tenant: "acme" };
-    await single(op.invoke({ interface: iface, operation: "ping", context: ctx }).outputs);
+    await single(op.invoke(iface, operationSignature("ping"), { context: ctx }).outputs);
     expect(seen[0]).toEqual(ctx);
   });
 
@@ -227,7 +228,7 @@ describe("context flow", () => {
     const base = new OperationInvoker([echoContextInvoker(seen)]);
     const resolver = vi.fn(async () => null);
     const scoped = base.withRuntime(resolver);
-    await single(scoped.invoke({ interface: iface, operation: "ping" }).outputs);
+    await single(scoped.invoke(iface, operationSignature("ping")).outputs);
     expect(scoped.contextResolver).toBe(resolver);
     expect(base.contextResolver).toBeUndefined();
     expect(seen).toHaveLength(1); // shared registry still routes

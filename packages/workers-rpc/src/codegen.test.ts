@@ -1,67 +1,69 @@
 /**
  * Real-codegen integration test.
  *
- * Uses an `ob codegen` output shape (snapshot at `__codegen__/test-client.ts`)
- * — a typed invoker generated against a hand-authored workers-rpc OBI — and
- * exercises it against the `WorkersRpcInvoker` + a mock binding. This test
- * fails if any of these regress:
+ * Uses `ob codegen` output (snapshot at `__codegen__/test-client.ts`, generated
+ * from `__codegen__/test-service.obi.json`) — the OperationSignatures namespace
+ * for a hand-authored workers-rpc OBI — and exercises those generated signatures
+ * against the `WorkersRpcInvoker` + a mock binding through the SDK's
+ * `OperationInvoker.invoke`. Fails if any of these regress:
  *
- *   - codegen template emits a typed invoker that imports unavailable SDK exports
- *   - the generated invoker's per-operation methods don't reach the OperationInvoker
- *   - the invoker doesn't dispatch to the correct binding method
+ *   - codegen emits signatures that import unavailable SDK exports
+ *   - a generated signature doesn't dispatch through OperationInvoker.invoke
+ *   - the invoker doesn't reach the correct binding method
  *
- * The test-client.ts fixture should be regenerated after any change to:
- *   - the codegen typescript template (ob/internal/codegen/typescript.go)
- *   - the embedded OBI shape (the fixture is /tmp/workers-rpc-test.obi.json
- *     mirrored in this file's TEST_OBI_DESCRIPTION below)
+ * Regenerate the test-client.ts fixture after any change to the codegen
+ * typescript template (ob/internal/codegen/typescript.go) or the source OBI:
  *
- * Regen procedure:
- *   1. Save TEST_OBI_DESCRIPTION contents to a .obi.json file
- *   2. Run: ob codegen <file> --lang typescript -o packages/workers-rpc/src/__codegen__/test-client.ts
- *   3. Re-run this test
+ *   ob codegen packages/workers-rpc/src/__codegen__/test-service.obi.json \
+ *     --lang typescript -o packages/workers-rpc/src/__codegen__/test-client.ts
  */
 
 import { describe, it, expect } from "vitest";
-import { OperationInvoker, single, ERR_EXECUTION_FAILED } from "@openbindings/sdk";
-import { createTestWorkersRpcInvoker, CONTRACT } from "./__codegen__/test-client.js";
+import { OperationInvoker, single, ERR_EXECUTION_FAILED, type OBInterface } from "@openbindings/sdk";
+import { OperationSignatures } from "./__codegen__/test-client.js";
 import { WorkersRpcInvoker, type WorkersRpcBinding } from "./index.js";
 
 const buildInvoker = (binding: WorkersRpcBinding) =>
   new OperationInvoker([new WorkersRpcInvoker({ binding })]);
 
-// Mirror of the OBI used to generate test-client.ts. Kept here as a
-// reference; the codegen output embeds this OBI as a string constant
-// inside the generated module (`const INTERFACE = JSON.parse('...')`),
-// re-exported as `CONTRACT`. If the fixture is regenerated, this comment
-// block can be updated to point at the source OBI file location.
-const TEST_OBI_DESCRIPTION = `
-{
-  "openbindings": "0.1.0",
-  "name": "TestWorkersRpc",
-  "operations": {
-    "ping": { "input": {...}, "output": {...} },
-    "addItem": { "input": {...}, "output": {...} }
+// The runtime interface the generated signatures are invoked against. Mirrors
+// __codegen__/test-service.obi.json (the OBI the fixture was generated from);
+// signatures carry only operation keys, so the interface is supplied here at
+// call time rather than baked into the codegen output.
+const TEST_OBI: OBInterface = {
+  openbindings: "0.1.0",
+  name: "TestWorkersRpc",
+  version: "0.1.0",
+  operations: {
+    ping: {
+      description: "Health check",
+      input: { type: "object", properties: { message: { type: "string" } } },
+      output: { type: "object", required: ["echoed"], properties: { echoed: { type: "string" } } },
+    },
+    addItem: {
+      description: "Add an item to the store",
+      input: {
+        type: "object",
+        required: ["name"],
+        properties: { name: { type: "string" }, qty: { type: "integer" } },
+      },
+      output: { type: "object", properties: { ok: { type: "boolean" }, id: { type: "string" } } },
+    },
   },
-  "sources": { "rpc": { "format": "workers-rpc@^1.0.0", ... } },
-  "bindings": { "ping.rpc": {...}, "addItem.rpc": {...} }
-}
-`;
+  sources: { rpc: { format: "workers-rpc@^1.0.0", location: "workers-rpc://test-service" } },
+  bindings: {
+    "ping.rpc": { operation: "ping", source: "rpc", ref: "ping" },
+    "addItem.rpc": { operation: "addItem", source: "rpc", ref: "addItem" },
+  },
+};
 
 describe("ob codegen output for workers-rpc OBI", () => {
-  it("constructs a typed invoker over the embedded contract", () => {
-    const binding: WorkersRpcBinding = {
-      ping: async () => ({ echoed: "ok" }),
-      addItem: async () => ({ id: "id-1" }),
-    };
-    const invoker = createTestWorkersRpcInvoker(buildInvoker(binding));
-    // No exception means construction succeeded; the embedded CONTRACT is
-    // the default iface (workers-rpc OBIs ship in the codegen output).
-    expect(invoker).toBeDefined();
-    expect(CONTRACT.name).toBe("TestWorkersRpc");
-    void TEST_OBI_DESCRIPTION; // suppress unused warning
+  it("exposes a typed signature per operation", () => {
+    expect(OperationSignatures.ping.key).toBe("ping");
+    expect(OperationSignatures.addItem.key).toBe("addItem");
   });
 
-  it("dispatches the ping operation through the invoker", async () => {
+  it("dispatches the ping operation through a generated signature", async () => {
     const binding: WorkersRpcBinding = {
       ping: async (arg: unknown) => {
         const input = arg as { message?: string } | undefined;
@@ -69,15 +71,15 @@ describe("ob codegen output for workers-rpc OBI", () => {
       },
       addItem: async () => ({ id: "id-1" }),
     };
-    const invoker = createTestWorkersRpcInvoker(buildInvoker(binding));
+    const invoker = buildInvoker(binding);
 
-    const call = invoker.ping();
+    const call = invoker.invoke(TEST_OBI, OperationSignatures.ping);
     await call.write({ message: "hello" });
     const result = await single(call.outputs);
     expect(result).toEqual({ echoed: "pong: hello" });
   });
 
-  it("dispatches the addItem operation with input passthrough", async () => {
+  it("dispatches addItem with input passthrough", async () => {
     let received: unknown;
     const binding: WorkersRpcBinding = {
       ping: async () => ({ echoed: "" }),
@@ -86,9 +88,9 @@ describe("ob codegen output for workers-rpc OBI", () => {
         return { id: "newly-created" };
       },
     };
-    const invoker = createTestWorkersRpcInvoker(buildInvoker(binding));
+    const invoker = buildInvoker(binding);
 
-    const call = invoker.addItem();
+    const call = invoker.invoke(TEST_OBI, OperationSignatures.addItem);
     await call.write({ name: "widget", qty: 5 });
     const result = await single(call.outputs);
     expect(result).toEqual({ id: "newly-created" });
@@ -102,9 +104,9 @@ describe("ob codegen output for workers-rpc OBI", () => {
       },
       addItem: async () => ({ id: "x" }),
     };
-    const invoker = createTestWorkersRpcInvoker(buildInvoker(binding));
+    const invoker = buildInvoker(binding);
 
-    const call = invoker.ping();
+    const call = invoker.invoke(TEST_OBI, OperationSignatures.ping);
     await call.write({ message: "test" });
     await expect(call.closed).rejects.toMatchObject({
       code: ERR_EXECUTION_FAILED,

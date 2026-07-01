@@ -36,13 +36,15 @@ export interface BindingInvocationArgs {
 }
 
 /**
- * Arguments for invoking an OBI operation. The invoker resolves the
- * operation name (OBI-T-12), selects a binding (OBI-T-09), and returns an
- * {@link Invocation} handle; input messages flow through the handle.
+ * Optional, per-call inputs to `OperationInvoker.invoke`. All fields are
+ * usually omitted: invocation context is normally resolved by the invoker's
+ * contextResolver via the reactive CONTEXT_REQUIRED path, and the binding is
+ * normally selected by OBI-T-09. The operation and interface are not here: the
+ * operation comes from the {@link OperationSignature} and the interface is a
+ * positional argument, so one signature works against any interface.
  */
-export interface OperationInvocationArgs {
-  interface: OBInterface;
-  operation: string;
+export interface InvokeOptions {
+  /** Per-call OB invocation-context override (credentials/config as opaque well-known fields). */
   context?: Record<string, unknown>;
   /** When set, bypass the binding selector and use this binding key directly. */
   bindingKey?: string;

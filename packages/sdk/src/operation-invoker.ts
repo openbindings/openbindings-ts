@@ -2,9 +2,10 @@ import type { OBInterface, BindingEntry, Operation, Source, Transform, Transform
 import { resolveTransform } from "./types.js";
 import type {
   BindingInvocationArgs,
-  OperationInvocationArgs,
+  InvokeOptions,
   FormatInfo,
 } from "./invoker-types.js";
+import type { OperationSignature } from "./operation-signature.js";
 import type {
   BindingInvoker,
   BindingSelector,
@@ -163,23 +164,27 @@ export class OperationInvoker {
    * any earlier would pin metadata from an attempt that CONTEXT_REQUIRED
    * negotiation may yet discard and re-drive.
    */
-  invoke<I = unknown, O = unknown>(args: OperationInvocationArgs): Invocation<I, O> {
-    const iface = args.interface;
+  invoke<I = unknown, O = unknown>(
+    obi: OBInterface,
+    sig: OperationSignature<I, O>,
+    opts?: InvokeOptions,
+  ): Invocation<I, O> {
+    const iface = obi;
     if (!iface) throw new MissingInterfaceError();
 
     // OBI-T-12: resolve against the flat key+aliases namespace. Bindings
     // are selected by the resolved canonical key, not the name used.
-    const resolved = resolveOperation(iface, args.operation);
+    const resolved = resolveOperation(iface, sig.key);
     if (!resolved) {
-      throw new OperationNotFoundError(args.operation, allOperationIdentifiers(iface));
+      throw new OperationNotFoundError(sig.key, allOperationIdentifiers(iface));
     }
     const { key: opKey, operation: op } = resolved;
 
     let bindingKey: string;
     let binding: BindingEntry;
-    if (args.bindingKey) {
-      const b = iface.bindings?.[args.bindingKey];
-      if (!b) throw new BindingNotFoundError(args.bindingKey);
+    if (opts?.bindingKey) {
+      const b = iface.bindings?.[opts.bindingKey];
+      if (!b) throw new BindingNotFoundError(opts.bindingKey);
       // An explicit bindingKey must name a binding FOR the resolved operation.
       // Without this check a caller could invoke any binding under the guise of
       // any operation, applying the wrong operation's input/output schema and
@@ -187,7 +192,7 @@ export class OperationInvoker {
       if (b.operation !== opKey) {
         throw new BindingNotFoundError(opKey);
       }
-      bindingKey = args.bindingKey;
+      bindingKey = opts.bindingKey;
       binding = b;
     } else {
       const selector = this.bindingSelector ?? ((i: OBInterface, o: string) =>
@@ -199,12 +204,12 @@ export class OperationInvoker {
     if (!source) throw new UnknownSourceError(bindingKey, binding.source);
 
     const callerInv = new InvocationImpl<I, O>({
-      signal: args.signal,
-      validateInput: makeInputValidator(op, iface, args.operation),
+      signal: opts?.signal,
+      validateInput: makeInputValidator(op, iface, sig.key),
     });
 
     queueMicrotask(() => {
-      this.run(callerInv, iface, op, binding, bindingKey, source, args.context).catch((err) => {
+      this.run(callerInv, iface, op, binding, bindingKey, source, opts?.context).catch((err) => {
         callerInv.fireError(asInvocationError(err));
       });
     });
