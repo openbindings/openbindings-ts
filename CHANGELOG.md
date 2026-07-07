@@ -4,6 +4,32 @@
 
 ### Changed
 
+- **The consumer hook seam (specification + configuration = complete
+  invocation).** New core types `OutputDecoder`, `ResultClassifier`, and
+  `FieldRouter` — generic callbacks consulted by format invokers for the wire
+  questions a source artifact cannot answer, mirroring the Go SDK.
+  Consultation decline-chains per axis: per-invocation `InvokeOptions`
+  (`outputDecoder`/`resultClassifier`/`fieldRouter`) → invoker-level fields on
+  `OperationInvoker` (also constructible via `OperationInvokerOptions`) → the
+  format built-in, with the `USE_DEFAULT` sentinel as the uniform decline.
+  Hooks see an `InvokeSite` and a `RawResult`; failures carry tier provenance.
+  `snapshotHooks` exposes the both-tier snapshot to direct binding-layer
+  callers (`args.hooks`); `withRuntime` carries the hook fields. Success
+  stamps (`x-ob-decode`/`x-ob-classify`) and the unvalidated-assumption
+  warning (`x-ob-warning`) ride invocation metadata.
+
+- **BREAKING: content-independent decode/classify in the openapi and asyncapi
+  invokers (de-sniffed).** openapi now decodes by the response's Content-Type
+  HEADER (strict JSON for `application/json`/`+json` — a declared-JSON body
+  that fails to parse is a loud `ERR_RESPONSE_ERROR` — text otherwise) and
+  classifies success as 2xx through the seam; asyncapi decodes HTTP responses,
+  SSE events, and WebSocket frames by the operation's declared message
+  `contentType`, and no longer unwraps `{error}`/`{data}` convention envelopes
+  in the builtin (attach an `outputDecoder` for convention lanes). The
+  `maybeJSON` helper (payload sniffing) is REMOVED from the package surface —
+  `isJSONContentType` (header framing) replaces it; error details carry the
+  raw capture, never a parsed value.
+
 - **Operations are invoked through signatures.** Added `OperationSignature<I, O>`
   (an inert `{ key }` carrying its input/output types as a phantom brand,
   mirroring `TypedDocumentNode`) and the `operationSignature<I, O>(key)`

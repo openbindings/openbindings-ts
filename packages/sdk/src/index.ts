@@ -140,7 +140,30 @@ export type { CompatibilityIssue } from "./compatibility.js";
 export { resolveOperation, allOperationIdentifiers } from "./resolve-operation.js";
 export type { ResolvedOperation } from "./resolve-operation.js";
 
-export { formatName, maybeJSON, detectFormatVersion, isHttpUrl } from "./helpers.js";
+export { formatName, isJSONContentType, detectFormatVersion, isHttpUrl } from "./helpers.js";
+
+export {
+  InvokeHooks,
+  USE_DEFAULT,
+  assumptionWarning,
+  classifyThroughHooks,
+  decodeThroughHooks,
+  floorStamped,
+  newInvokeHooks,
+  nonDiscriminatingOutput,
+  siteFormatName,
+} from "./hooks.js";
+export type {
+  BindingPlan,
+  FieldRouter,
+  HookSlots,
+  InvocationPlan,
+  InvokeSite,
+  OutputDecoder,
+  PlanAxis,
+  RawResult,
+  ResultClassifier,
+} from "./hooks.js";
 
 export {
   CONTEXT_REQUIRED,

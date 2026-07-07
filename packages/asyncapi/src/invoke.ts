@@ -21,7 +21,6 @@ import {
   InvocationError,
   contextRequiredError,
   contextSatisfies,
-  maybeJSON,
   contextBearerToken,
   contextApiKey,
   contextBasicAuth,
@@ -42,6 +41,13 @@ import {
   type ContextAlternative,
   type ContextRequiredDetails,
   type Metadata,
+  isJSONContentType,
+  decodeThroughHooks,
+  USE_DEFAULT,
+  type InvokeHooks,
+  type InvokeSite,
+  type OutputDecoder,
+  type RawResult,
 } from "@openbindings/sdk";
 import type {
   AsyncAPIDocument,
@@ -511,14 +517,14 @@ async function runSSEReceive(
         }
         if (line === "" && dataLines.length > 0) {
           // Throws if the invocation terminated while parked: stop reading.
-          await h.emitOutput(parseSSEPayload(dataLines));
+          await h.emitOutput(await decodeSSEEvent(args, serverURL, asyncOp, resp, dataLines));
           dataLines = [];
         }
       }
     }
 
     if (dataLines.length > 0) {
-      await h.emitOutput(parseSSEPayload(dataLines));
+      await h.emitOutput(await decodeSSEEvent(args, serverURL, asyncOp, resp, dataLines));
     }
     h.closeOutput();
   } catch (e: unknown) {
@@ -615,57 +621,40 @@ async function runHTTPSend(
     return;
   }
 
-  let output: unknown;
-  if (respText.length > 0 && maybeJSON(respText)) {
-    try {
-      output = JSON.parse(respText);
-    } catch {
-      output = respText;
-    }
-  } else if (respText.length > 0) {
-    output = respText;
+  if (respText.length === 0) {
+    h.closeOutput();
+    return;
   }
 
-  if (output !== undefined) await h.emitOutput(output);
+  // Decode through the consultation seam (§6, content-independent): the
+  // operation's declared message contentType decides the lane — JSON for
+  // application/json and +json suffixes (a declared-JSON payload that
+  // fails to parse is loud), text otherwise. Never sniffed.
+  let output: unknown;
+  try {
+    output = await decodeThroughHooks(
+      args.hooks,
+      siteFor(args, serverURL),
+      { status: resp.status, body: respText, meta: headersToMetadata(resp.headers) },
+      builtinDecodeFor(declaredContentType(asyncOp)),
+    );
+  } catch (e: unknown) {
+    h.fireError(toInvocationError(e));
+    return;
+  }
+
+  // §4.5.2 success stamps: decode is spec/content-type (the message's
+  // declared contentType decides the lane), hook when overridden;
+  // classify is not-consulted (asyncapi runs no result classifier — the
+  // HTTP status guard above is transport, not a format verdict).
+  h.setTrailer(decodeTrailer(args.hooks, "spec/content-type"));
+  await h.emitOutput(output);
   h.closeOutput();
 }
 
 // ---------------------------------------------------------------------------
 // WebSocket frames
 // ---------------------------------------------------------------------------
-
-type WSFrame =
-  | { kind: "output"; value: unknown }
-  | { kind: "error"; error: unknown; message: string };
-
-/**
- * Interprets one socket frame. `{error}` frames are terminal stream errors;
- * `{data}` frames unwrap to the payload; everything else passes through.
- */
-function parseWSFrame(raw: string): WSFrame {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    return { kind: "output", value: raw };
-  }
-  if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-    const obj = parsed as Record<string, unknown>;
-    if (obj["error"]) {
-      const err = obj["error"];
-      const message =
-        err && typeof err === "object" &&
-        typeof (err as Record<string, unknown>)["message"] === "string"
-          ? ((err as Record<string, unknown>)["message"] as string)
-          : "server reported an error";
-      return { kind: "error", error: err, message };
-    }
-    if (obj["data"] !== undefined) {
-      return { kind: "output", value: obj["data"] };
-    }
-  }
-  return { kind: "output", value: parsed };
-}
 
 function buildWSURL(
   serverURL: string,
@@ -761,7 +750,7 @@ async function runWSReceive(
     return;
   }
 
-  const frames: WSFrame[] = [];
+  const frames: string[] = [];
   let overflowed = false;
   let socketClosed = false;
   let socketError: Error | undefined;
@@ -780,7 +769,7 @@ async function runWSReceive(
       notify();
       return;
     }
-    frames.push(parseWSFrame(data));
+    frames.push(data);
     notify();
   });
   const removeClose = pooled.onClose((err) => {
@@ -791,17 +780,34 @@ async function runWSReceive(
   const onAbort = () => notify();
   h.signal.addEventListener("abort", onAbort);
 
-  // Socket -> outputs. Owns the terminal transition.
+  // Socket -> outputs. Owns the terminal transition. Each frame is one
+  // delivery unit decoded through the consultation seam by the declared
+  // message contentType (status null — a WS frame has no completion
+  // status; never fabricated). Convention envelopes ({error}/{data}
+  // unwrapping) are consumer knowledge: a decode hook's job, never the
+  // builtin's.
+  const wsContentType = declaredContentType(asyncOp);
+  const wsSite = siteFor(args, serverURL);
   const outputPump = async (): Promise<void> => {
     while (true) {
       while (frames.length > 0 && !overflowed) {
         const frame = frames.shift()!;
-        if (frame.kind === "error") {
-          h.fireError(new InvocationError(ERR_STREAM_ERROR, frame.message, { error: frame.error }));
+        let out: unknown;
+        try {
+          out = await decodeThroughHooks(
+            args.hooks,
+            wsSite,
+            { status: null, body: frame, meta: {} },
+            builtinDecodeFor(wsContentType),
+          );
+        } catch (e: unknown) {
+          // A decode error mid-stream is terminal; already-emitted
+          // outputs stand (drain-before-terminal).
+          h.fireError(toInvocationError(e));
           return;
         }
         // Throws if the invocation terminated while parked: stop emitting.
-        await h.emitOutput(frame.value);
+        await h.emitOutput(out);
       }
       if (overflowed) {
         h.fireError(
@@ -957,30 +963,110 @@ function headersToMetadata(headers: Headers): Metadata {
   return md;
 }
 
-function parseSSEPayload(dataLines: string[]): unknown {
-  const raw = dataLines.join("\n");
-  try {
-    return JSON.parse(raw);
-  } catch {
-    return raw;
-  }
-}
-
 async function readErrorBody(resp: Response): Promise<unknown> {
+  // The raw capture, verbatim (details are diagnostics, never a decoded
+  // value — no sniffing on the failure path either).
   try {
     const text = await readResponseText(resp, MAX_RESPONSE_BYTES);
-    if (!text) return undefined;
-    if (maybeJSON(text)) {
-      try {
-        return JSON.parse(text);
-      } catch {
-        return text;
-      }
-    }
-    return text;
+    return text || undefined;
   } catch {
     return undefined;
   }
+}
+
+// ---------------------------------------------------------------------------
+// The consultation seam's format half
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns the operation's declared message contentType — the SPEC'S answer
+ * to the decode question, when the document gives one. Walks the
+ * operation's messages, then its reply messages; "" when nothing declares.
+ */
+function declaredContentType(asyncOp: AsyncAPIOperation | undefined): string {
+  for (const m of asyncOp?.messages ?? []) {
+    if (m.contentType) return m.contentType;
+  }
+  for (const m of asyncOp?.reply?.messages ?? []) {
+    if (m.contentType) return m.contentType;
+  }
+  return "";
+}
+
+/**
+ * Returns the builtin decoder for a declared message contentType: strict
+ * JSON for application/json and +json suffixes (a declared-JSON payload
+ * that fails to parse is loud), text otherwise; an empty body is a null
+ * output. Content-independent — the declaration decides, never the bytes.
+ */
+export function builtinDecodeFor(contentType: string): OutputDecoder {
+  const isJSON = isJSONContentType(contentType);
+  return (_site: InvokeSite, raw: RawResult): unknown => {
+    if (raw.body.length === 0) return null;
+    if (isJSON) {
+      try {
+        return JSON.parse(raw.body);
+      } catch (e: unknown) {
+        throw new InvocationError(
+          ERR_RESPONSE_ERROR,
+          `message declares ${JSON.stringify(contentType)} but the payload is not valid JSON: ${errorMessage(e)}`,
+        );
+      }
+    }
+    return raw.body;
+  };
+}
+
+/** Decodes one SSE event through the consultation seam. */
+async function decodeSSEEvent(
+  args: BindingInvocationArgs,
+  serverURL: string,
+  asyncOp: AsyncAPIOperation,
+  resp: Response,
+  dataLines: string[],
+): Promise<unknown> {
+  const raw: RawResult = {
+    status: resp.status,
+    body: dataLines.join("\n"),
+    meta: headersToMetadata(resp.headers),
+  };
+  return decodeThroughHooks(args.hooks, siteFor(args, serverURL), raw, builtinDecodeFor(declaredContentType(asyncOp)));
+}
+
+/**
+ * Completes the site for one dispatch with the format-known target (the
+ * resolved server URL). A missing site (direct format-package call) gets a
+ * minimal one so hook tables keyed on format/ref still match.
+ */
+function siteFor(args: BindingInvocationArgs, serverURL: string): InvokeSite {
+  const site: InvokeSite = args.site
+    ? { ...args.site }
+    : {
+        operation: args.binding?.operation ?? "",
+        invokedAs: args.binding?.operation ?? "",
+        bindingKey: "",
+        format: args.source.format,
+        ref: args.ref,
+        target: "",
+      };
+  if (site.target === "") site.target = serverURL;
+  return site;
+}
+
+/**
+ * Builds the §4.5.2 x-ob-decode stamp (and the fixed x-ob-classify
+ * not-consulted stamp — asyncapi runs no classifier) for a successful
+ * message decode, given the builtin decode provenance token.
+ */
+function decodeTrailer(hooks: InvokeHooks | null | undefined, builtinDecode: string): Metadata {
+  const decode = hooks?.decodeDecidedBy() === "hook" ? "hook" : builtinDecode;
+  return { "x-ob-decode": [decode], "x-ob-classify": ["not-consulted"] };
+}
+
+/** Converts a seam failure into the terminal InvocationError to surface. */
+function toInvocationError(e: unknown): InvocationError {
+  if (e instanceof InvocationError) return e;
+  return new InvocationError(ERR_RESPONSE_ERROR, errorMessage(e));
 }
 
 async function readResponseText(resp: Response, maxBytes: number): Promise<string> {

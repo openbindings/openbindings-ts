@@ -20,19 +20,19 @@ function makeAsyncAPISpec(port: number) {
       messages: {
         address: "/messages",
         messages: {
-          Msg: { payload: { type: "object" } },
+          Msg: { contentType: "application/json", payload: { type: "object" } },
         },
       },
       events: {
         address: "/events",
         messages: {
-          Event: { payload: { type: "object" } },
+          Event: { contentType: "application/json", payload: { type: "object" } },
         },
       },
       stream: {
         address: "/stream",
         messages: {
-          Tick: { payload: { type: "object" } },
+          Tick: { contentType: "application/json", payload: { type: "object" } },
         },
       },
     },
@@ -209,9 +209,10 @@ describe("AsyncAPI binding invoker (real HTTP)", () => {
     const call = invoker.invokeBinding({ source: source(), ref: "#/operations/sendOpenMessage" });
 
     await call.write({ text: "hi" });
+    // Details carry the RAW capture (diagnostics, never a decoded value).
     await expect(call.closed).rejects.toMatchObject({
       code: "ERR_AUTH_REQUIRED",
-      details: { status: 401, body: { error: "unauthorized" } },
+      details: { status: 401, body: JSON.stringify({ error: "unauthorized" }) },
     });
   });
 

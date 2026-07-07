@@ -2,8 +2,10 @@ import {
   InvocationError,
   contextRequiredError,
   contextSatisfies,
-  maybeJSON,
   isHttpUrl,
+  isJSONContentType,
+  classifyThroughHooks,
+  decodeThroughHooks,
   contextBearerToken,
   contextApiKey,
   contextBasicAuth,
@@ -18,7 +20,13 @@ import {
   ERR_CONNECT_FAILED,
   ERR_RESPONSE_ERROR,
   ERR_MISSING_INPUT,
+  USE_DEFAULT,
   type BindingHandle,
+  type InvokeHooks,
+  type InvokeSite,
+  type OutputDecoder,
+  type RawResult,
+  type ResultClassifier,
   type BindingInvocationArgs,
   type ContextAlternative,
   type ContextRequirement,
@@ -224,38 +232,135 @@ async function doHTTPRequest(
     return;
   }
 
-  let output: unknown;
-  if (respText.length > 0) {
-    if (maybeJSON(respText)) {
-      try {
-        output = JSON.parse(respText);
-      } catch {
-        output = respText;
-      }
-    } else {
-      output = respText;
-    }
-  }
-
   // Cancelled while in flight: the handle is already terminal.
   if (inv.signal.aborted) return;
 
   // Leading metadata (HTTP response headers) precedes the first emit.
   inv.setHeader(responseMetadata(resp));
 
-  if (resp.status >= 400) {
+  // Classify, then decode — both through the consultation seam
+  // (per-invocation hook → invoker-level hook → the format builtins
+  // below). §6's pinned rules, content-independent throughout: classify =
+  // success iff status ∈ 2xx (declared `responses` never change
+  // classification — they enrich failure details); decode = the response's
+  // Content-Type HEADER decides the lane (wire framing, not payload
+  // sniffing): JSON for application/json and +json suffixes, text
+  // otherwise, absent/unparseable header → text.
+  const raw: RawResult = { status: resp.status, body: respText, meta: responseMetadata(resp) };
+  const site = siteFor(args, baseURL);
+
+  let ok: boolean;
+  try {
+    ok = await classifyThroughHooks(args.hooks, site, raw, builtinClassify);
+  } catch (e: unknown) {
+    inv.fireError(toInvocationError(e));
+    return;
+  }
+  if (!ok) {
+    // The format's NATIVE failure: hooks change the verdict, never the
+    // error vocabulary. The raw body rides details for callers.
     inv.fireError(
       new InvocationError(
         httpErrorCode(resp.status),
         `HTTP ${resp.status} ${resp.statusText}`,
-        { status: resp.status, body: output },
+        { status: resp.status, ...(respText.length > 0 ? { body: respText } : {}) },
       ),
     );
     return;
   }
 
+  let output: unknown;
+  try {
+    output = await decodeThroughHooks(
+      args.hooks,
+      site,
+      raw,
+      decodeByContentType(resp.headers.get("content-type")),
+    );
+  } catch (e: unknown) {
+    inv.fireError(toInvocationError(e));
+    return;
+  }
+
+  // §4.5.2 success stamps: decode provenance is header/content-type when
+  // the builtin (the Content-Type lane) decided, hook when overridden;
+  // classify is always assumption/2xx unless a hook widened it.
+  inv.setTrailer(decodeClassifyTrailer(args.hooks, "header/content-type"));
   await inv.emitOutput(output);
   inv.closeOutput();
+}
+
+/**
+ * The openapi builtin result classifier: success iff the HTTP status is
+ * 2xx (the convention floor; declared responses refine failure DETAILS
+ * only, never classification).
+ */
+export function builtinClassify(_site: InvokeSite, raw: RawResult): boolean | typeof USE_DEFAULT {
+  return raw.status != null && raw.status >= 200 && raw.status < 300;
+}
+
+/**
+ * Returns the builtin decoder for one response's declared Content-Type
+ * header: strict JSON for application/json and +json suffixes (a
+ * declared-JSON body that fails to parse is a lying server — a loud
+ * ERR_RESPONSE_ERROR, never a silent string); text otherwise; an empty
+ * body is a null output.
+ */
+export function decodeByContentType(contentType: string | null): OutputDecoder {
+  const isJSON = isJSONContentType(contentType);
+  return (_site: InvokeSite, raw: RawResult): unknown => {
+    if (raw.body.length === 0) return null;
+    if (isJSON) {
+      try {
+        return JSON.parse(raw.body);
+      } catch (e: unknown) {
+        throw new InvocationError(
+          ERR_RESPONSE_ERROR,
+          `response declares ${JSON.stringify(contentType)} but the body is not valid JSON: ${errorMessage(e)}`,
+        );
+      }
+    }
+    return raw.body;
+  };
+}
+
+/**
+ * Completes the site for one dispatch with the format-known target (the
+ * resolved base URL). A missing site (direct format-package call) gets a
+ * minimal one so hook tables keyed on format/ref still match.
+ */
+function siteFor(args: BindingInvocationArgs, baseURL: string): InvokeSite {
+  const site: InvokeSite = args.site
+    ? { ...args.site }
+    : {
+        operation: args.binding?.operation ?? "",
+        invokedAs: args.binding?.operation ?? "",
+        bindingKey: "",
+        format: args.source.format,
+        ref: args.ref,
+        target: "",
+      };
+  if (site.target === "") site.target = baseURL;
+  return site;
+}
+
+/**
+ * Builds the §4.5.2 x-ob-decode/x-ob-classify success stamps for the HTTP
+ * lane, given the decode axis's builtin provenance token. A hook decision
+ * on either axis stamps "hook".
+ */
+function decodeClassifyTrailer(hooks: InvokeHooks | null | undefined, builtinDecode: string): Metadata {
+  let decode = builtinDecode;
+  let classify = "assumption/2xx";
+  if (hooks?.decodeDecidedBy() === "hook") decode = "hook";
+  if (hooks?.classifyDecidedBy() === "hook") classify = "hook";
+  return { "x-ob-decode": [decode], "x-ob-classify": [classify] };
+}
+
+/** Converts a seam failure into the terminal InvocationError to surface. */
+function toInvocationError(e: unknown): InvocationError {
+  if (e instanceof InvocationError) return e;
+  return new InvocationError(ERR_RESPONSE_ERROR, errorMessage(e));
 }
 
 /** Converts fetch Response headers into multi-valued invocation metadata. */

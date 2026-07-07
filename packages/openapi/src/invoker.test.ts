@@ -13,6 +13,8 @@ import {
   ERR_RESPONSE_ERROR,
   ERR_SOURCE_CONFIG_ERROR,
   ERR_SOURCE_LOAD_FAILED,
+  USE_DEFAULT,
+  newInvokeHooks,
 } from "@openbindings/sdk";
 import { OpenAPIInvoker } from "./invoker.js";
 
@@ -296,9 +298,11 @@ describe("invokeBinding — responses", () => {
     const { fetch } = mockFetch(() => jsonResponse({ error: "not found" }, 404));
     const call = new OpenAPIInvoker().invokeBinding({ source: SOURCE, ref: REF_PING, fetch });
 
+    // Details carry the RAW capture (diagnostics, never a decoded value —
+    // the §6 de-sniff removed failure-path parsing too).
     await expect(call.closed).rejects.toMatchObject({
       code: ERR_EXECUTION_FAILED,
-      details: { status: 404, body: { error: "not found" } },
+      details: { status: 404, body: JSON.stringify({ error: "not found" }) },
     });
   });
 
@@ -314,6 +318,52 @@ describe("invokeBinding — responses", () => {
     await expect(
       inv.invokeBinding({ source: SOURCE, ref: REF_PING, fetch: f403 }).closed,
     ).rejects.toMatchObject({ code: ERR_PERMISSION_DENIED, details: { status: 403 } });
+  });
+
+  it("consults consumer hooks through the seam (decode + classify)", async () => {
+    // The diff(1)-class election, HTTP flavor: a 404 the consumer declares
+    // a valid outcome (axios validateStatus), and a text lane the consumer
+    // decodes itself. Per-invocation hooks ride args.hooks (the carrier a
+    // direct binding-layer caller builds via OperationInvoker.snapshotHooks).
+    const hooks = newInvokeHooks(
+      {
+        classify: (_site, raw) => (raw.status === 404 ? true : USE_DEFAULT),
+        decode: (_site, raw) => (raw.body.length > 0 ? { missing: true, note: raw.body } : USE_DEFAULT),
+      },
+      {},
+    );
+    const { fetch } = mockFetch(
+      () => new Response("no such pet", { status: 404, headers: { "Content-Type": "text/plain" } }),
+    );
+    const call = new OpenAPIInvoker().invokeBinding({ source: SOURCE, ref: REF_PING, fetch, hooks });
+
+    const out = await single(call.outputs);
+    expect(out).toEqual({ missing: true, note: "no such pet" });
+    await call.closed;
+
+    // §4.5.2 success stamps name what decided each axis.
+    expect(call.trailer()).toMatchObject({ "x-ob-decode": ["hook"], "x-ob-classify": ["hook"] });
+  });
+
+  it("a declared-JSON body that fails to parse is loud, never a silent string", async () => {
+    const { fetch } = mockFetch(
+      () => new Response("not json {", { status: 200, headers: { "Content-Type": "application/json" } }),
+    );
+    const call = new OpenAPIInvoker().invokeBinding({ source: SOURCE, ref: REF_PING, fetch });
+    await expect(call.closed).rejects.toMatchObject({ code: ERR_RESPONSE_ERROR });
+  });
+
+  it("an undeclared lane decodes as text — the header decides, never the bytes", async () => {
+    // A JSON-shaped body WITHOUT a JSON Content-Type stays a string (the
+    // removed maybeJSON sniffer would have parsed it).
+    const { fetch } = mockFetch(
+      () => new Response(JSON.stringify({ ok: true }), { status: 200, headers: { "Content-Type": "text/plain" } }),
+    );
+    const call = new OpenAPIInvoker().invokeBinding({ source: SOURCE, ref: REF_PING, fetch });
+    const out = await single(call.outputs);
+    expect(out).toBe(JSON.stringify({ ok: true }));
+    await call.closed;
+    expect(call.trailer()).toMatchObject({ "x-ob-decode": ["header/content-type"], "x-ob-classify": ["assumption/2xx"] });
   });
 
   it("exposes response headers as leading metadata", async () => {
@@ -335,13 +385,15 @@ describe("invokeBinding — responses", () => {
     await expect(single(call.outputs)).resolves.toBe("plain text");
   });
 
-  it("emits a single undefined output for an empty body", async () => {
+  it("emits a single null output for an empty body", async () => {
     const { fetch } = mockFetch(() => new Response(null, { status: 204 }));
     const call = new OpenAPIInvoker().invokeBinding({ source: SOURCE, ref: REF_PING, fetch });
 
+    // An empty body decodes to null (the builtin's empty-unit answer),
+    // matching the Go SDK — never undefined, which JSON cannot carry.
     const outs: unknown[] = [];
     for await (const o of call.outputs) outs.push(o);
-    expect(outs).toEqual([undefined]);
+    expect(outs).toEqual([null]);
   });
 
   it("cancels the body stream when the response exceeds the size limit", async () => {

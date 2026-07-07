@@ -40,6 +40,15 @@ import {
 } from "./errcodes.js";
 import { matchesRange, parseRange } from "./format-token.js";
 import { buildSchemaDefs, compileExampleSchema, safeValidate } from "./schema-validation.js";
+import {
+  type FieldRouter,
+  type InvokeHooks,
+  type InvokeSite,
+  type OutputDecoder,
+  type ResultClassifier,
+  assumptionWarning,
+  newInvokeHooks,
+} from "./hooks.js";
 import type { Validator } from "@cfworker/json-schema";
 
 /**
@@ -60,6 +69,15 @@ export interface OperationInvokerOptions {
    */
   contextResolver?: ContextResolver;
   fetch?: typeof globalThis.fetch;
+  /**
+   * Invoker-level consumer hooks (specification + configuration = complete
+   * invocation): consulted after any per-invocation hook declines, before
+   * the format built-in. Site-guard your hook bodies (site.operation,
+   * siteFormatName) when the invoker serves multiple interfaces.
+   */
+  outputDecoder?: OutputDecoder;
+  resultClassifier?: ResultClassifier;
+  fieldRouter?: FieldRouter;
 }
 
 /**
@@ -92,6 +110,15 @@ export class OperationInvoker {
   readonly transformEvaluator?: TransformEvaluator;
   readonly contextResolver?: ContextResolver;
   readonly fetch?: typeof globalThis.fetch;
+  /**
+   * Invoker-level consumer hooks — mutable public fields (the Go SDK's
+   * house style): an embedder installs its standing table here after
+   * construction. Snapshotted per invoke; later mutation does not affect
+   * in-flight invocations.
+   */
+  outputDecoder?: OutputDecoder;
+  resultClassifier?: ResultClassifier;
+  fieldRouter?: FieldRouter;
 
   private readonly invoker: CombinedInvoker;
 
@@ -100,6 +127,9 @@ export class OperationInvoker {
     this.transformEvaluator = opts?.transformEvaluator;
     this.contextResolver = opts?.contextResolver;
     this.fetch = opts?.fetch;
+    this.outputDecoder = opts?.outputDecoder;
+    this.resultClassifier = opts?.resultClassifier;
+    this.fieldRouter = opts?.fieldRouter;
     this.invoker = combineInvokers(...invokers);
   }
 
@@ -125,11 +155,33 @@ export class OperationInvoker {
       transformEvaluator: this.transformEvaluator,
       contextResolver: resolver ?? this.contextResolver,
       fetch: fetchFn ?? this.fetch,
+      // Hook fields ride the copy (the Go SDK's struct-copy semantics).
+      outputDecoder: this.outputDecoder,
+      resultClassifier: this.resultClassifier,
+      fieldRouter: this.fieldRouter,
     });
     // Share the underlying combined-invoker registry rather than re-combining
     // (which would lose any invokers added via addBindingInvoker on the source).
     (cp as unknown as { invoker: CombinedInvoker }).invoker = this.invoker;
     return cp;
+  }
+
+  /**
+   * Composes per-invocation hooks over this invoker's invoker-level hooks
+   * into the seam carrier a direct binding-layer call passes as
+   * `args.hooks` — the same both-tier snapshot `invoke` takes at entry.
+   * Undefined axes simply decline down the chain (per-invocation →
+   * invoker-level → builtin). Null when both tiers are empty.
+   */
+  snapshotHooks(
+    decode?: OutputDecoder,
+    classify?: ResultClassifier,
+    route?: FieldRouter,
+  ): InvokeHooks | null {
+    return newInvokeHooks(
+      { decode, classify, route },
+      { decode: this.outputDecoder, classify: this.resultClassifier, route: this.fieldRouter },
+    );
   }
 
   formats(): FormatInfo[] {
@@ -142,10 +194,32 @@ export class OperationInvoker {
 
   /**
    * Binding-layer passthrough: invoke a resolved binding directly, without
-   * operation-layer validation, transforms, or context negotiation.
+   * operation-layer validation, transforms, or context negotiation. The
+   * seam carrier and a site are filled from the invoker level when the
+   * caller supplied none — this is what makes an embedder's invoker-level
+   * hook table reach direct binding-layer invocations. Direct callers who
+   * want different hooks pass their own (see snapshotHooks).
    */
   invokeBinding<I = unknown, O = unknown>(args: BindingInvocationArgs): Invocation<I, O> {
-    return this.invoker.invokeBinding<I, O>(this.withFetch(args));
+    return this.invoker.invokeBinding<I, O>(this.withFetch(this.fillBindingArgs(args)));
+  }
+
+  /** Completes a binding-layer call's args with the seam carrier and a site. Never mutates the caller's args. */
+  private fillBindingArgs(args: BindingInvocationArgs): BindingInvocationArgs {
+    if (args.hooks !== undefined && args.site !== undefined) return args;
+    const filled = { ...args };
+    if (filled.hooks === undefined) filled.hooks = this.snapshotHooks();
+    if (filled.site === undefined) {
+      filled.site = {
+        operation: args.binding?.operation ?? "",
+        invokedAs: args.binding?.operation ?? "",
+        bindingKey: "",
+        format: args.source.format,
+        ref: args.ref,
+        target: "",
+      };
+    }
+    return filled;
   }
 
   /** Side-effect-free preflight for a resolved binding (binding-invoker role `prepareBinding`). */
@@ -169,15 +243,28 @@ export class OperationInvoker {
     sig: OperationSignature<I, O>,
     opts?: InvokeOptions,
   ): Invocation<I, O> {
-    const { op, bindingKey, binding, source } = this.resolveBinding(obi, sig.key, opts?.bindingKey);
+    const { op, opKey, bindingKey, binding, source } = this.resolveBinding(obi, sig.key, opts?.bindingKey);
 
     const callerInv = new InvocationImpl<I, O>({
       signal: opts?.signal,
       validateInput: makeInputValidator(op, obi, sig.key),
     });
 
+    // Both hook tiers snapshot at invoke entry ("resolved once" = immunity
+    // to later field mutation; precedence applies at consultation time by
+    // decline-chaining).
+    const hooks = this.snapshotHooks(opts?.outputDecoder, opts?.resultClassifier, opts?.fieldRouter);
+    const site: InvokeSite = {
+      operation: opKey,
+      invokedAs: sig.key,
+      bindingKey,
+      format: source.format,
+      ref: binding.ref ?? "",
+      target: "",
+    };
+
     queueMicrotask(() => {
-      this.run(callerInv, obi, op, binding, bindingKey, source, opts?.context).catch((err) => {
+      this.run(callerInv, obi, op, binding, bindingKey, source, opts?.context, hooks, site).catch((err) => {
         callerInv.fireError(asInvocationError(err));
       });
     });
@@ -227,7 +314,7 @@ export class OperationInvoker {
     obi: OBInterface,
     operation: string,
     pinnedBindingKey?: string,
-  ): { op: Operation; bindingKey: string; binding: BindingEntry; source: Source } {
+  ): { op: Operation; opKey: string; bindingKey: string; binding: BindingEntry; source: Source } {
     const iface = obi;
     if (!iface) throw new MissingInterfaceError();
 
@@ -263,7 +350,7 @@ export class OperationInvoker {
     const source = iface.sources?.[binding.source];
     if (!source) throw new UnknownSourceError(bindingKey, binding.source);
 
-    return { op, bindingKey, binding, source };
+    return { op, opKey, bindingKey, binding, source };
   }
 
   /**
@@ -280,6 +367,8 @@ export class OperationInvoker {
     bindingKey: string,
     source: Source,
     initialContext: Record<string, unknown> | undefined,
+    hooks: InvokeHooks | null = null,
+    site?: InvokeSite,
   ): Promise<void> {
     const evaluator = this.transformEvaluator;
     if ((binding.inputTransform || binding.outputTransform) && !evaluator) {
@@ -319,6 +408,8 @@ export class OperationInvoker {
         interface: iface,
         context,
         signal: callerInv.signal,
+        hooks,
+        ...(site ? { site } : {}),
       });
 
     const mergeResolved = (resolved: Record<string, unknown>): void => {
@@ -550,8 +641,16 @@ export class OperationInvoker {
       // and nothing left to report.
       try {
         await forwardHeader(inner);
-        const t = terminalTrailer(inner);
-        if (t) callerInv.setTrailer(t);
+        const t = terminalTrailer(inner) ?? {};
+        // §4.5.3: the unvalidated-assumption warning rides the trailer on
+        // SUCCESS only (failures carry tier-precise provenance already),
+        // keyed on the format's own decode stamp — only an assumption
+        // lane can trigger it.
+        if (!surface) {
+          const w = assumptionWarning(t["x-ob-decode"]?.[0] ?? "", op.output);
+          if (w) t["x-ob-warning"] = [...(t["x-ob-warning"] ?? []), w];
+        }
+        if (Object.keys(t).length > 0) callerInv.setTrailer(t);
       } catch {
         // Caller handle already terminal; metadata can no longer land.
       }

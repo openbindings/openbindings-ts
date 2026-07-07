@@ -1,4 +1,5 @@
 import type { OBInterface, BindingEntry, JSONSchema, Operation } from "./types.js";
+import type { InvokeHooks, InvokeSite, OutputDecoder, ResultClassifier, FieldRouter } from "./hooks.js";
 
 /** Identifies the binding source for invocation. */
 export interface InvocationSource {
@@ -33,6 +34,19 @@ export interface BindingInvocationArgs {
   /** External cancellation; converges with the handle's `cancel()`. */
   signal?: AbortSignal;
   fetch?: typeof globalThis.fetch;
+  /**
+   * The consumer hook seam carrier (both tiers snapshotted). Populated by
+   * the operation invoker; direct binding-layer callers who want different
+   * hooks pass their own (OperationInvoker.snapshotHooks). Null/absent =
+   * builtins only.
+   */
+  hooks?: InvokeHooks | null;
+  /**
+   * The consultation site (canonical operation key, binding key, format,
+   * ref). Populated by the operation invoker; format invokers complete the
+   * target where they know it.
+   */
+  site?: InvokeSite;
 }
 
 /**
@@ -50,6 +64,14 @@ export interface InvokeOptions {
   bindingKey?: string;
   /** External cancellation; converges with the handle's `cancel()`. */
   signal?: AbortSignal;
+  /**
+   * Per-invocation consumer hooks (specification + configuration = complete
+   * invocation): the top decline-chain tier, over the invoker-level hooks,
+   * over the format built-in. Each axis declines independently.
+   */
+  outputDecoder?: OutputDecoder;
+  resultClassifier?: ResultClassifier;
+  fieldRouter?: FieldRouter;
 }
 
 /** Describes a binding source for interface creation. */
