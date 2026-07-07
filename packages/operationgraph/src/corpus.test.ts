@@ -66,6 +66,14 @@ interface ExecFixture {
   expected: {
     output?: unknown[];
     ordering?: "exact" | "set";
+    /**
+     * "set" compares ARRAY-VALUED output events as multisets (element
+     * order inside the array is implementation-defined — a buffer fed by
+     * concurrent each invocations), while the event stream itself still
+     * honors `ordering`. This engine's serial each produces array order
+     * today, but the harness honors the corpus schema regardless.
+     */
+    arrayOrdering?: "set";
     error?: boolean;
     errorDetail?: unknown;
   };
@@ -89,6 +97,16 @@ interface ValidationRule {
 const MOCK_FORMAT = "corpus-mock@1";
 
 const canon = (v: unknown): string => JSON.stringify(sortKeys(v));
+
+/**
+ * Normalizes array-valued output events for arrayOrdering:set comparison:
+ * each top-level array event's elements sort by canonical encoding
+ * (multiset semantics); the event stream's own order is untouched.
+ */
+const sortArraysCanonically = (events: unknown[]): unknown[] =>
+  events.map((ev) =>
+    Array.isArray(ev) ? [...ev].sort((a, b) => (canon(a) < canon(b) ? -1 : 1)) : ev,
+  );
 
 function sortKeys(v: unknown): unknown {
   if (Array.isArray(v)) return v.map(sortKeys);
@@ -291,11 +309,16 @@ describe.skipIf(!dir)("conformance corpus: execution", () => {
         ).toBeUndefined();
       }
 
-      const expected = fx.expected.output ?? [];
+      let expected = fx.expected.output ?? [];
+      let got = outputs;
+      if (fx.expected.arrayOrdering === "set") {
+        got = sortArraysCanonically(got);
+        expected = sortArraysCanonically(expected);
+      }
       if (fx.expected.ordering === "set") {
-        expect(outputs.map(canon).sort()).toEqual(expected.map(canon).sort());
+        expect(got.map(canon).sort()).toEqual(expected.map(canon).sort());
       } else {
-        expect(canon(outputs)).toBe(canon(expected));
+        expect(canon(got)).toBe(canon(expected));
       }
     });
   }
