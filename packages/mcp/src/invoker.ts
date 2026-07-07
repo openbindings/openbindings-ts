@@ -55,7 +55,7 @@ export class MCPInvoker implements BindingInvoker {
 // Synthesizer
 // ---------------------------------------------------------------------------
 
-/** Creates OBInterface definitions by discovering an MCP server's capabilities. */
+/** Synthesizes OBInterface definitions by discovering an MCP server's capabilities. */
 export class MCPSynthesizer implements InterfaceSynthesizer, SourceInspector {
   formats(): FormatInfo[] {
     return [{ token: FORMAT_TOKEN, description: "MCP via Streamable HTTP" }];

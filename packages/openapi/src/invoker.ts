@@ -146,7 +146,7 @@ export class OpenAPIInvoker implements BindingInvoker {
 // Synthesizer
 // ---------------------------------------------------------------------------
 
-/** Creates OBInterface definitions from OpenAPI specification documents. */
+/** Synthesizes OBInterface definitions from OpenAPI specification documents. */
 export class OpenAPISynthesizer implements InterfaceSynthesizer, SourceInspector {
   /** Returns the format tokens this synthesizer supports. */
   formats(): FormatInfo[] {

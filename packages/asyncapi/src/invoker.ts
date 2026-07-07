@@ -151,7 +151,7 @@ export class AsyncAPIInvoker implements BindingInvoker {
 // Synthesizer
 // ---------------------------------------------------------------------------
 
-/** Creates OBInterface definitions from AsyncAPI 3.x documents. */
+/** Synthesizes OBInterface definitions from AsyncAPI 3.x documents. */
 export class AsyncAPISynthesizer implements InterfaceSynthesizer, SourceInspector {
   /** Returns the format tokens this synthesizer supports. */
   formats(): FormatInfo[] {

@@ -31,8 +31,10 @@ export interface BindingInvoker {
 }
 
 /**
- * Creates OpenBindings interfaces from format-specific sources.
+ * Synthesizes OpenBindings interfaces from format-specific sources.
  * Independent of {@link BindingInvoker} -- an implementation may provide one, the other, or both.
+ * Synthesizers load sources fresh on every call; parsed-artifact caching belongs
+ * to invokers (authoring wants freshness).
  */
 export interface InterfaceSynthesizer {
   formats(): FormatInfo[];

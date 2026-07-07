@@ -22,6 +22,7 @@ npm install @openbindings/sdk
 - **`fetchInterface`** for resolving OBIs from URLs (well-known discovery, then synthesis from raw OpenAPI / AsyncAPI / etc. via supplied synthesizers)
 - **`OperationInvoker`** that dispatches operations to per-format binding invokers and applies transforms
 - **Preflight** via `prepareOperation`/`prepareBinding`: a side-effect-free report of the context an invocation would require (`ContextRequiredDetails` or `null`). Invokers implement `prepareBinding` only when they can derive requirements from their source (e.g. OpenAPI `securitySchemes`); the reactive `CONTEXT_REQUIRED` error remains authoritative
+- **`SourceInspector`** for discovering the bindable targets in a raw artifact before an OBI exists; format synthesizer classes implement both `InterfaceSynthesizer` and `SourceInspector`
 - **`ContextStore`** contract for per-origin invocation context (credentials and non-secret configuration) with scheme-agnostic key normalization
 
 The SDK defines the contracts that binding invokers implement but does not contain any format-specific logic. Format support is added by installing invoker packages like [`@openbindings/openapi`](https://www.npmjs.com/package/@openbindings/openapi) or [`@openbindings/asyncapi`](https://www.npmjs.com/package/@openbindings/asyncapi).

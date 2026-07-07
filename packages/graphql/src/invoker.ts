@@ -201,7 +201,7 @@ export class GraphQLInvoker implements BindingInvoker {
 // Synthesizer
 // ---------------------------------------------------------------------------
 
-/** Creates OBInterface definitions by introspecting GraphQL endpoints. */
+/** Synthesizes OBInterface definitions by introspecting GraphQL endpoints. */
 export class GraphQLSynthesizer implements InterfaceSynthesizer, SourceInspector {
   formats(): FormatInfo[] {
     return [{ token: FORMAT_TOKEN, description: "GraphQL APIs" }];

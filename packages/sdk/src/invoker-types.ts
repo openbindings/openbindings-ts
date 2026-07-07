@@ -74,7 +74,7 @@ export interface InvokeOptions {
   fieldRouter?: FieldRouter;
 }
 
-/** Describes a binding source for interface creation. */
+/** Describes a binding source for interface synthesis. */
 export interface SynthesizeSource {
   format: string;
   name?: string;
@@ -85,7 +85,7 @@ export interface SynthesizeSource {
   description?: string;
 }
 
-/** Input for creating an OpenBindings interface from format-specific sources. */
+/** Input for synthesizing an OpenBindings interface from format-specific sources. */
 export interface SynthesizeInput {
   openbindingsVersion?: string;
   sources?: SynthesizeSource[];
