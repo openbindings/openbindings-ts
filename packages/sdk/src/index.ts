@@ -113,6 +113,7 @@ export {
   isSupportedVersion,
   isValidSemver,
   isHigherMajorOrPre1MinorThanMaxTested,
+  isUnsupportedPrerelease,
 } from "./version.js";
 
 export type { FormatToken, VersionRange, RangeKind } from "./format-token.js";
