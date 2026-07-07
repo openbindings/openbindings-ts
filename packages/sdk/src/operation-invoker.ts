@@ -184,6 +184,12 @@ export class OperationInvoker {
     );
   }
 
+  /**
+   * All formats registered with this invoker. An aggregation convenience
+   * over the registered binding invokers; the operation-invoker role itself
+   * carries no listFormats operation (its format reach is dynamic, e.g. via
+   * delegates).
+   */
   formats(): FormatInfo[] {
     return this.invoker.formats();
   }
