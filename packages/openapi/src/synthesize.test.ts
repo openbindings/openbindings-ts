@@ -351,3 +351,23 @@ describe("convertToInterface — OpenAPI 3.0 dialect translation", () => {
   });
 });
 
+
+// Multi-source composition is implementation-defined; a single-source
+// synthesizer refuses extras loudly rather than silently using a subset.
+import { MultipleSourcesError } from "@openbindings/sdk";
+import { OpenAPISynthesizer } from "./index.js";
+import { describe as describeMS, expect as expectMS, it as itMS } from "vitest";
+
+describeMS("multi-source refusal", () => {
+  itMS("throws MultipleSourcesError for two sources", async () => {
+    const synth = new OpenAPISynthesizer();
+    await expectMS(
+      synth.synthesizeInterface({
+        sources: [
+          { format: "openapi@3.0", content: "{}" },
+          { format: "openapi@3.0", content: "{}" },
+        ],
+      }),
+    ).rejects.toBeInstanceOf(MultipleSourcesError);
+  });
+});

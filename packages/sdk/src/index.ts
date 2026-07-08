@@ -101,6 +101,7 @@ export {
   UnknownSourceError,
   NoTransformEvaluatorError,
   NoSourcesError,
+  MultipleSourcesError,
   TransformRefNotFoundError,
   EmptyTransformExpressionError,
   ValidationError,

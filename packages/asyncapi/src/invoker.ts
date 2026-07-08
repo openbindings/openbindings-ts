@@ -15,6 +15,7 @@ import {
   InvocationError,
   InvocationImpl,
   NoSourcesError,
+  MultipleSourcesError,
   ERR_RUNTIME,
   ERR_SOURCE_LOAD_FAILED,
 } from "@openbindings/sdk";
@@ -165,6 +166,9 @@ export class AsyncAPISynthesizer implements InterfaceSynthesizer, SourceInspecto
   ): Promise<OBInterface> {
     if (!input.sources?.length) {
       throw new NoSourcesError();
+    }
+    if (input.sources.length > 1) {
+      throw new MultipleSourcesError();
     }
     const src = input.sources[0];
     const doc = await parseAsyncAPIDocument(src.location, src.content, options);

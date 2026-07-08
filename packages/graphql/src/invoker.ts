@@ -6,6 +6,7 @@ import {
   InvocationError,
   InvocationImpl,
   NoSourcesError,
+  MultipleSourcesError,
   buildAuthHeaders,
   type BindingInvocationArgs,
   type BindingInvoker,
@@ -212,6 +213,7 @@ export class GraphQLSynthesizer implements InterfaceSynthesizer, SourceInspector
     options?: { signal?: AbortSignal },
   ): Promise<OBInterface> {
     if (!input.sources?.length) throw new NoSourcesError();
+    if (input.sources.length > 1) throw new MultipleSourcesError();
     const src = input.sources[0];
     if (!src.location) throw new Error("GraphQL source requires a location (endpoint URL)");
 

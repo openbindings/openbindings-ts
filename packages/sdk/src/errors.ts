@@ -71,6 +71,17 @@ export class NoSourcesError extends Error {
   }
 }
 
+/** Thrown by single-source synthesizers handed a multi-source input.
+ * Multi-source composition is implementation-defined; answering for a
+ * subset silently is never legitimate — synthesize per source and merge,
+ * or use a multi-source synthesizer. */
+export class MultipleSourcesError extends Error {
+  constructor() {
+    super("openbindings: this synthesizer composes one source per call; synthesize per source and merge, or use a multi-source synthesizer");
+    this.name = "MultipleSourcesError";
+  }
+}
+
 /** Thrown when a transform `$ref` reference cannot be resolved. */
 export class TransformRefNotFoundError extends Error {
   constructor(ref: string) {

@@ -3,6 +3,7 @@ import {
   InvocationError,
   InvocationImpl,
   NoSourcesError,
+  MultipleSourcesError,
   type BindingInvocationArgs,
   type BindingInvoker,
   type SynthesizeInput,
@@ -67,6 +68,9 @@ export class MCPSynthesizer implements InterfaceSynthesizer, SourceInspector {
   ): Promise<OBInterface> {
     if (!input.sources?.length) {
       throw new NoSourcesError();
+    }
+    if (input.sources.length > 1) {
+      throw new MultipleSourcesError();
     }
     const src = input.sources[0];
     if (!src.location) {
