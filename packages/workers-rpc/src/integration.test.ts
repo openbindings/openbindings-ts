@@ -23,7 +23,7 @@ import {
 import { WorkersRpcInvoker, type WorkersRpcBinding } from "./index.js";
 
 
-// A minimal OBI shaped exactly like what `ob create` + hand-edits
+// A minimal OBI shaped exactly like what `ob synthesize` + hand-edits
 // would produce for a workers-rpc surface. Two operations: one
 // happy-path (`ping`), one with structured business errors (`addItem`,
 // returning a discriminated-union result).

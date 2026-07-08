@@ -1,10 +1,10 @@
 # @openbindings/asyncapi
 
-AsyncAPI 3.x binding invoker and interface creator for the [OpenBindings](https://openbindings.com) TypeScript SDK.
+AsyncAPI 3.x binding invoker and interface synthesizer for the [OpenBindings](https://openbindings.com) TypeScript SDK.
 
 This package enables OpenBindings to invoke operations against AsyncAPI specs and synthesize OBI documents from them. It supports HTTP/SSE for event streaming, HTTP POST for sending messages, and WebSocket for bidirectional communication. Documents are parsed with `js-yaml` and `$ref` pointers resolved with `@openbindings/sdk`'s built-in dereferencer (browser-safe, no Node.js dependencies). Credentials are applied via the spec's security schemes.
 
-See the [spec](https://github.com/openbindings/spec) and the [roles overview](https://openbindings.com/interfaces) for how invokers and creators fit into the OpenBindings architecture.
+See the [spec](https://github.com/openbindings/spec) and the [invocation pattern](https://openbindings.com/spec/invocation-pattern) for how binding invokers and interface synthesizers fit into the OpenBindings architecture.
 
 ## Install
 
@@ -20,9 +20,9 @@ Requires [@openbindings/sdk](https://www.npmjs.com/package/@openbindings/sdk) (t
 
 ```typescript
 import { OperationInvoker } from "@openbindings/sdk";
-import { AsyncAPIInvoker, AsyncAPICreator } from "@openbindings/asyncapi";
+import { AsyncAPIInvoker } from "@openbindings/asyncapi";
 
-const invoker = new OperationInvoker([new AsyncAPIInvoker(), new AsyncAPICreator()]);
+const invoker = new OperationInvoker([new AsyncAPIInvoker()]);
 ```
 
 The invoker declares `asyncapi@^3.0.0` — it handles any AsyncAPI 3.x spec.
@@ -39,7 +39,7 @@ import { single } from "@openbindings/sdk";
 
 const invoker = new AsyncAPIInvoker();
 const source = {
-  format: "asyncapi@3.0",
+  format: "asyncapi@3.0.0",
   location: "https://api.example.com/asyncapi.json",
 };
 
@@ -75,14 +75,16 @@ satisfy, the invocation terminates with a `CONTEXT_REQUIRED` challenge before
 any connection is opened; `prepareBinding` performs the same check
 side-effect-free.
 
-### Create an interface from an AsyncAPI spec
+### Synthesize an interface from an AsyncAPI spec
 
 ```typescript
-const creator = new AsyncAPICreator();
+import { AsyncAPISynthesizer } from "@openbindings/asyncapi";
 
-const iface = await creator.createInterface({
+const synth = new AsyncAPISynthesizer();
+
+const iface = await synth.synthesizeInterface({
   sources: [{
-    format: "asyncapi@3.0",
+    format: "asyncapi@3.0.0",
     location: "https://api.example.com/asyncapi.json",
   }],
 });
@@ -119,7 +121,7 @@ When no security schemes are defined, falls back to bearer -> basic -> apiKey in
 
 For WebSocket connections, the bearer token is sent in the first message body (browsers cannot set headers on WebSocket upgrades). Query-param apiKeys are appended to the WebSocket URL.
 
-### Interface creation
+### Interface synthesis
 
 Converts an AsyncAPI 3.x document into an OBI by:
 - Parsing YAML/JSON and resolving all `$ref` pointers

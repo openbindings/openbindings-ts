@@ -1,10 +1,10 @@
 # @openbindings/mcp
 
-Model Context Protocol (MCP) binding invoker and interface creator for the [OpenBindings](https://openbindings.com) TypeScript SDK.
+Model Context Protocol (MCP) binding invoker and interface synthesizer for the [OpenBindings](https://openbindings.com) TypeScript SDK.
 
 This package enables OpenBindings to invoke operations against MCP servers and synthesize OBI documents from them. It connects to MCP servers via the Streamable HTTP transport, dispatches calls to tools, resources, resource templates, and prompts, and delivers results through the SDK's cardinality-agnostic `Invocation` handle. Built on `@modelcontextprotocol/sdk`.
 
-See the [spec](https://github.com/openbindings/spec) and the [roles overview](https://openbindings.com/interfaces) for how invokers and creators fit into the OpenBindings architecture.
+See the [spec](https://github.com/openbindings/spec) and the [invocation pattern](https://openbindings.com/spec/invocation-pattern) for how binding invokers and interface synthesizers fit into the OpenBindings architecture.
 
 ## Install
 
@@ -20,9 +20,9 @@ Requires [@openbindings/sdk](https://www.npmjs.com/package/@openbindings/sdk) (t
 
 ```typescript
 import { OperationInvoker } from "@openbindings/sdk";
-import { MCPInvoker, MCPCreator } from "@openbindings/mcp";
+import { MCPInvoker } from "@openbindings/mcp";
 
-const invoker = new OperationInvoker([new MCPInvoker(), new MCPCreator()]);
+const invoker = new OperationInvoker([new MCPInvoker()]);
 ```
 
 The invoker declares the date-versioned format token `mcp@2025-11-25`, matching the MCP protocol revision it implements. The MCP server must support the **Streamable HTTP** transport — stdio and the legacy SSE transport are not supported.
@@ -71,12 +71,14 @@ Refs follow MCP entity conventions:
 - `resources/<uri>` — read a resource (or a resource template `uriTemplate`)
 - `prompts/<name>` — render a prompt (input fields are stringified before being sent)
 
-### Create an interface from an MCP server
+### Synthesize an interface from an MCP server
 
 ```typescript
-const creator = new MCPCreator();
+import { MCPSynthesizer } from "@openbindings/mcp";
 
-const iface = await creator.createInterface({
+const synth = new MCPSynthesizer();
+
+const iface = await synth.synthesizeInterface({
   sources: [{
     format: "mcp@2025-11-25",
     location: "https://mcp.example.com",
@@ -84,7 +86,7 @@ const iface = await creator.createInterface({
 });
 ```
 
-The creator connects to the server, lists every advertised tool, resource, resource template, and prompt, and synthesizes an OBI with one operation per entity. The server's reported `name` and `version` are copied onto the resulting interface.
+The synthesizer connects to the server, lists every advertised tool, resource, resource template, and prompt, and synthesizes an OBI with one operation per entity. The server's reported `name` and `version` are copied onto the resulting interface.
 
 ## How it works
 
@@ -112,7 +114,7 @@ MCP has no native security scheme declarations. Headers are passed to the underl
 
 Context's `headers` field merges on top, and `cookies` join as a sorted `Cookie:` header.
 
-### Interface creation
+### Interface synthesis
 
 Converts an MCP server's published catalog into an OBI by:
 - Listing tools, resources, resource templates, and prompts (in that order)

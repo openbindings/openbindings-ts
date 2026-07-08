@@ -1,10 +1,10 @@
 # @openbindings/graphql
 
-GraphQL binding invoker and interface creator for the [OpenBindings](https://openbindings.com) TypeScript SDK.
+GraphQL binding invoker and interface synthesizer for the [OpenBindings](https://openbindings.com) TypeScript SDK.
 
 This package enables OpenBindings to invoke operations against GraphQL endpoints and synthesize OBI documents from GraphQL schemas via introspection. It builds queries, mutations, and subscriptions from operation refs, applies credentials, and delivers results through the SDK's cardinality-agnostic `Invocation` handle. Subscriptions stream over the `graphql-transport-ws` WebSocket protocol.
 
-See the [spec](https://github.com/openbindings/spec) and the [roles overview](https://openbindings.com/interfaces) for how invokers and creators fit into the OpenBindings architecture.
+See the [spec](https://github.com/openbindings/spec) and the [invocation pattern](https://openbindings.com/spec/invocation-pattern) for how binding invokers and interface synthesizers fit into the OpenBindings architecture.
 
 ## Install
 
@@ -20,9 +20,9 @@ Requires [@openbindings/sdk](https://www.npmjs.com/package/@openbindings/sdk) (t
 
 ```typescript
 import { OperationInvoker } from "@openbindings/sdk";
-import { GraphQLInvoker, GraphQLCreator } from "@openbindings/graphql";
+import { GraphQLInvoker } from "@openbindings/graphql";
 
-const invoker = new OperationInvoker([new GraphQLInvoker(), new GraphQLCreator()]);
+const invoker = new OperationInvoker([new GraphQLInvoker()]);
 ```
 
 The invoker declares the versionless `graphql` format token — it handles any GraphQL endpoint.
@@ -68,12 +68,14 @@ Refs follow the convention `Query/<field>`, `Mutation/<field>`, or `Subscription
 
 The invoker caches the introspected schema per endpoint on the invoker instance. Inline schemas are also supported via `Source.content` (full introspection response, `__schema` wrapper, or bare schema object).
 
-### Create an interface from a GraphQL endpoint
+### Synthesize an interface from a GraphQL endpoint
 
 ```typescript
-const creator = new GraphQLCreator();
+import { GraphQLSynthesizer } from "@openbindings/graphql";
 
-const iface = await creator.createInterface({
+const synth = new GraphQLSynthesizer();
+
+const iface = await synth.synthesizeInterface({
   sources: [{
     format: "graphql",
     location: "https://api.example.com/graphql",
@@ -81,7 +83,7 @@ const iface = await creator.createInterface({
 });
 ```
 
-The creator runs a standard introspection query against the endpoint and synthesizes an OBI with one operation per root field. Each operation's input schema embeds a `_query` const containing the pre-built GraphQL query string, so the invoker can reuse it without re-introspecting.
+The synthesizer runs a standard introspection query against the endpoint and synthesizes an OBI with one operation per root field. Each operation's input schema embeds a `_query` const containing the pre-built GraphQL query string, so the invoker can reuse it without re-introspecting.
 
 ## How it works
 
@@ -109,7 +111,7 @@ Context's `headers` field merges on top, and `cookies` join as a sorted `Cookie:
 
 For subscriptions, browsers cannot set custom headers on a WebSocket upgrade, so the `Authorization` header is forwarded inside the `connection_init` payload as `{ authorization: "Bearer ..." }` instead.
 
-### Interface creation
+### Interface synthesis
 
 Converts a GraphQL schema (via introspection) into an OBI by:
 - Walking the root types in fixed order: `Query`, then `Mutation`, then `Subscription`

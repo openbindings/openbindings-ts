@@ -1,10 +1,10 @@
 # @openbindings/openapi
 
-OpenAPI 3.x binding invoker and interface creator for the [OpenBindings](https://openbindings.com) TypeScript SDK.
+OpenAPI 3.x binding invoker and interface synthesizer for the [OpenBindings](https://openbindings.com) TypeScript SDK.
 
 This package enables OpenBindings to invoke operations against OpenAPI specs and synthesize OBI documents from them. It reads OpenAPI 3.x documents, constructs HTTP requests, applies credentials via security schemes, and delivers results through the SDK's cardinality-agnostic `Invocation` handle.
 
-See the [spec](https://github.com/openbindings/spec) and the [roles overview](https://openbindings.com/interfaces) for how invokers and creators fit into the OpenBindings architecture.
+See the [spec](https://github.com/openbindings/spec) and the [invocation pattern](https://openbindings.com/spec/invocation-pattern) for how binding invokers and interface synthesizers fit into the OpenBindings architecture.
 
 ## Install
 
@@ -20,9 +20,9 @@ Requires [@openbindings/sdk](https://www.npmjs.com/package/@openbindings/sdk) (t
 
 ```typescript
 import { OperationInvoker } from "@openbindings/sdk";
-import { OpenAPIInvoker, OpenAPICreator } from "@openbindings/openapi";
+import { OpenAPIInvoker } from "@openbindings/openapi";
 
-const invoker = new OperationInvoker([new OpenAPIInvoker(), new OpenAPICreator()]);
+const invoker = new OperationInvoker([new OpenAPIInvoker()]);
 ```
 
 The invoker declares `openapi@^3.0.0` — it handles any OpenAPI 3.x spec.
@@ -38,7 +38,7 @@ const invoker = new OpenAPIInvoker();
 
 const call = invoker.invokeBinding({
   source: {
-    format: "openapi@3.1",
+    format: "openapi@3.1.0",
     location: "https://api.example.com/openapi.json",
   },
   ref: "#/paths/~1users~1{id}/get",
@@ -67,14 +67,16 @@ from the spec's `securitySchemes`. `prepareBinding(args)` runs the same
 derivation as a side-effect-free preflight (it never fetches the source
 document; it uses inline content or a previously cached document).
 
-### Create an interface from an OpenAPI spec
+### Synthesize an interface from an OpenAPI spec
 
 ```typescript
-const creator = new OpenAPICreator();
+import { OpenAPISynthesizer } from "@openbindings/openapi";
 
-const iface = await creator.createInterface({
+const synth = new OpenAPISynthesizer();
+
+const iface = await synth.synthesizeInterface({
   sources: [{
-    format: "openapi@3.1",
+    format: "openapi@3.1.0",
     location: "https://api.example.com/openapi.json",
   }],
 });
@@ -104,7 +106,7 @@ Credentials are applied based on the OpenAPI spec's security configuration:
 
 When no security schemes are defined, falls back to bearer -> basic -> apiKey in that order.
 
-### Interface creation
+### Interface synthesis
 
 Converts an OpenAPI 3.x document into an OBI by:
 - Resolving all `$ref` pointers for fully inlined schemas

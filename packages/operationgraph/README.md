@@ -30,7 +30,7 @@ The engine drives the graph mailbox-style: each node runs in its own async loop,
 The invoker needs a reference to the `OperationInvoker` so its `operation` and `each` nodes can recurse into other operations on the same OBI. Because the dependency is mutual, register it after construction:
 
 ```typescript
-import { OperationInvoker } from "@openbindings/sdk";
+import { OperationInvoker, operationSignature } from "@openbindings/sdk";
 import { OperationGraphInvoker } from "@openbindings/operationgraph";
 import { OpenAPIInvoker } from "@openbindings/openapi";
 
@@ -42,10 +42,7 @@ operationInvoker.addBindingInvoker(operationGraph);
 After that, the operation-graph invoker behaves like any other format invoker. Caller writes stream into the graph (each write becomes one event at the `input` node, rooting a lineage); the graph back-closes the caller's input side when its contents stop accepting input (e.g. the trivial unary wrapper closes after the first write, exactly like direct invocation):
 
 ```typescript
-const call = operationInvoker.invoke({
-  interface: iface,
-  operation: "summarizeOrder",
-});
+const call = operationInvoker.invoke(iface, operationSignature("summarizeOrder"));
 await call.write({ orderId: "abc123" }); // a unary wrapper back-closes input here
 
 for await (const event of call.outputs) {
