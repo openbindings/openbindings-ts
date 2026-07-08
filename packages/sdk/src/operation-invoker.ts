@@ -47,6 +47,7 @@ import {
   type OutputDecoder,
   type ResultClassifier,
   assumptionWarning,
+  floorStamped,
   newInvokeHooks,
 } from "./hooks.js";
 import type { Validator } from "@cfworker/json-schema";
@@ -591,11 +592,21 @@ export class OperationInvoker {
             const r = safeValidate(outputValidator, data);
             if (!r.valid) {
               await inner.cancel();
-              surface = new InvocationError(
-                ERR_VALIDATION_FAILED,
-                `openbindings: output validation failed for "${bindingKey}": ${r.errors.join("; ")}`,
-                { failures: r.failures },
-              );
+              let msg = `openbindings: output validation failed for "${bindingKey}": ${r.errors.join("; ")}`;
+              // Contract-decided teaching + decode-lane provenance in the
+              // MESSAGE, not only the x-ob-decode trailer stamp (mirrors
+              // the Go SDK): a hook-decoded value failing a floor-stamped
+              // schema means the CONTRACT still declares the floor; any
+              // other mismatch may be a wrong decode lane, and the
+              // first-touch reader needs the pointer where they look.
+              const tier = hooks?.decodeDecidedBy() ?? "";
+              if (floorStamped(op.output) && tier === "hook") {
+                msg +=
+                  " — the synthesized schema still declares the floor's string; elect the real output schema (`ob operation output-schema`)";
+              } else if (tier !== "") {
+                msg += ` (output decoded by the ${tier} tier; a wrong decode lane yields this class of mismatch — the x-ob-decode trailer stamp carries the lane)`;
+              }
+              surface = new InvocationError(ERR_VALIDATION_FAILED, msg, { failures: r.failures });
               break;
             }
           }
