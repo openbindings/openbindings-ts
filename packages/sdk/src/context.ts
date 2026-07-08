@@ -13,6 +13,8 @@ import type { ContextResolver } from "./invokers.js";
  * interoperability.
  *
  * The SDK stores and retrieves context but never inspects its contents.
+ * Setting null removes the entry (the published contract pins
+ * set-null ≡ delete, so get's null uniformly means "no entry").
  * The published openbindings.key-value-store interface standardizes this
  * same get/set/delete capability where a store sits across a wire.
  * Async because browser/persistent stores are inherently async.

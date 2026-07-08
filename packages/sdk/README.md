@@ -46,9 +46,19 @@ for await (const item of call.outputs) {
 }
 ```
 
-For compile-time-typed operations, run `ob codegen <obi> --lang typescript` to generate an `OperationSignatures` namespace, one typed `OperationSignature<I, O>` per operation, that you pass to this same `invoke` for fully-typed input and output.
+For compile-time-typed operations, run `ob codegen <obi> --lang typescript` to generate an `OperationSignatures` namespace, one typed `OperationSignature<I, O>` per operation, that you pass to this same `invoke` for fully-typed input and output. (`ob` is the OpenBindings CLI, shipped separately: `brew install --cask openbindings/tap/ob` or `go install github.com/openbindings/ob/cmd/ob@latest`. The dynamic `operationSignature("...")` path needs no codegen.)
 
 See the [monorepo README](https://github.com/openbindings/openbindings-ts#readme) for full documentation.
+
+## Consumer configuration (hooks)
+
+Where a binding format's specification doesn't answer a wire question, the consumer configures the answer — the SDK never guesses from payload bytes. Three hook axes cover the three wire questions:
+
+- **Decode** (`outputDecoder`) — how raw bytes become an output value when the format doesn't say (e.g. which lane a CLI's stdout carries).
+- **Classify** (`resultClassifier`) — which outcomes are success when the format doesn't say (e.g. diff(1)-style exit codes).
+- **Route** (`fieldRouter`) — which channel an input field rides; included for cross-SDK parity (no TS-native format consults it today).
+
+A hook declines by returning the `USE_DEFAULT` sentinel, falling through the chain: per-invocation (`InvokeOptions`) → invoker-level (`OperationInvokerOptions`) → the format's content-independent built-in assumption. Formats whose specifications answer their own wire questions (OpenAPI) never consult hooks; the configuration burden is the honest signal of a format's completeness. See the [invocation-configuration guide](https://openbindings.com/spec/invocation-configuration) for the full model.
 
 ## Transforms (invoking tools only)
 
