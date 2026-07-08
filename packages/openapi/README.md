@@ -110,7 +110,7 @@ When no security schemes are defined, falls back to bearer -> basic -> apiKey in
 
 Converts an OpenAPI 3.x document into an OBI by:
 - Resolving all `$ref` pointers for fully inlined schemas
-- Extracting operations from each path + method combination
+- Extracting operations from each path + method combination, paths sorted alphabetically for deterministic output (same artifact → identical OBI, matching the Go SDK)
 - Building input schemas from parameters and request bodies
 - Building output schemas from success responses (200, 201, 202)
 - Generating JSON Pointer refs for each binding

@@ -115,7 +115,7 @@ For subscriptions, browsers cannot set custom headers on a WebSocket upgrade, so
 
 Converts a GraphQL schema (via introspection) into an OBI by:
 - Walking the root types in fixed order: `Query`, then `Mutation`, then `Subscription`
-- Iterating fields within each root type alphabetically (skipping introspection fields prefixed with `__`)
+- Iterating fields within each root type alphabetically (skipping introspection fields prefixed with `__`) — deterministic output: the same schema synthesizes an identical OBI, matching the Go SDK
 - Building input schemas from field arguments, with each operation's input also containing a `_query` const string holding the pre-built query
 - Building output schemas from field return types, recursively converted to JSON Schema with cycle protection (no `$ref` pointers — types are inlined directly)
 - Generating `<RootType>/<field>` refs for each binding
