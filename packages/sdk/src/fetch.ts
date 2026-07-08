@@ -87,6 +87,44 @@ function defaultFetch(): typeof globalThis.fetch {
   ))) as typeof globalThis.fetch;
 }
 
+/**
+ * Caps how much of a fetched interface document is read (1 MiB — matched
+ * byte-for-byte by the Go SDK). Exceeding it is a loud error, never a
+ * truncation that would surface as a confusing parse failure.
+ */
+const MAX_FETCH_BYTES = 1 << 20;
+
+async function readCapped(resp: Response): Promise<string> {
+  const reader = resp.body?.getReader();
+  if (!reader) {
+    // No streaming body (some fetch polyfills): buffer, then check.
+    const text = await resp.text();
+    if (new TextEncoder().encode(text).length > MAX_FETCH_BYTES) {
+      throw new Error(`openbindings: interface document exceeds the ${MAX_FETCH_BYTES}-byte fetch cap`);
+    }
+    return text;
+  }
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.length;
+    if (total > MAX_FETCH_BYTES) {
+      await reader.cancel();
+      throw new Error(`openbindings: interface document exceeds the ${MAX_FETCH_BYTES}-byte fetch cap`);
+    }
+    chunks.push(value);
+  }
+  const buf = new Uint8Array(total);
+  let offset = 0;
+  for (const c of chunks) {
+    buf.set(c, offset);
+    offset += c.length;
+  }
+  return new TextDecoder().decode(buf);
+}
+
 async function tryFetchOBI(
   fetchFn: typeof globalThis.fetch,
   url: string,
@@ -97,7 +135,7 @@ async function tryFetchOBI(
     headers: { Accept: "application/vnd.openbindings+json, application/json" },
   });
   if (!resp.ok) return null;
-  const text = await resp.text();
+  const text = await readCapped(resp);
   let body: unknown;
   try {
     body = JSON.parse(text);
