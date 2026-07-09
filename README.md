@@ -121,6 +121,12 @@ await call.write({ id: "item_1" });
 const item = await single(call.outputs);
 ```
 
+`write`'s error contract makes both styles above safe: every rejection is
+truthful — a flow signal or, when a terminal has already fired, the terminal
+error itself — and the output side always carries the authoritative verdict.
+Handling a write rejection is optional fast-fail, never required for
+correctness, and `close()` never rejects.
+
 Client-streaming and bidirectional callers own `close()` (and drive input and
 output from separate async contexts); lifecycle is observable via `closed`,
 leading/trailing metadata via `header`/`trailer()`, and termination via
