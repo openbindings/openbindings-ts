@@ -142,19 +142,22 @@ export interface Invocation<I = unknown, O = unknown> {
    * the message is enqueued (not processed); parks while the bounded input
    * buffer is full (backpressure).
    *
-   * Rejects (with `InvocationError`) if input has been closed, OBI-T-07
-   * validation failed, or the binding refused the message. A T-07 /
-   * binding-refused rejection also closes the invocation terminally; a
-   * "wrote after close" rejection does not. Convention: pick one
-   * error-observation point (usually `closed` or the iterator throw) and
-   * don't handle the same failure on both paths.
+   * Every rejection is truthful: a flow signal (`ERR_INPUT_CLOSED` once the
+   * input side has closed), an OBI-T-07 validation error (terminal — the
+   * same error surfaces on both faces), or, when a terminal has already
+   * fired, the terminal error itself, never a weaker substitute. The output
+   * side remains the authoritative verdict: a write racing a clean
+   * completion can reject with `ERR_INVOCATION_CLOSED` even though the
+   * invocation succeeded. Treat write rejections as fast-fail, not as the
+   * outcome; pick one error-observation point (usually `closed` or the
+   * iterator throw) and don't handle the same failure on both paths.
    */
   write(input: I): Promise<void>;
 
   /**
-   * Graceful close: signal that no more input is coming. Idempotent.
-   * The invocation continues; outputs flow until the binding closes its
-   * output side. For abrupt termination, use `cancel()` instead.
+   * Graceful close: signal that no more input is coming. Idempotent; it
+   * never rejects. The invocation continues; outputs flow until the binding
+   * closes its output side. For abrupt termination, use `cancel()` instead.
    *
    * Bindings close the input side themselves when they know better
    * (no-input and unary operations), so callers only own `close()` for
