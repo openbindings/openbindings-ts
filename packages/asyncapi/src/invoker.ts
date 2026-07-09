@@ -70,6 +70,15 @@ export class AsyncAPIInvoker implements BindingInvoker {
   }
 
   /**
+   * Shuts down all pooled WebSocket connections. After close returns, the
+   * invoker should not be used for new invocations. Mirrors the Go SDK's
+   * Close discipline on resource-holding invokers.
+   */
+  close(): void {
+    this.wsPool.closeAll();
+  }
+
+  /**
    * Invokes a single binding, returning the invocation handle synchronously.
    * Construction is inert; the binding's work is scheduled asynchronously
    * and all pre-dispatch failures (including CONTEXT_REQUIRED) are raised
