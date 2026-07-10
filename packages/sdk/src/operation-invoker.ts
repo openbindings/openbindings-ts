@@ -602,7 +602,7 @@ export class OperationInvoker {
               const tier = hooks?.decodeDecidedBy() ?? "";
               if (floorStamped(op.output) && tier === "hook") {
                 msg +=
-                  " — the synthesized schema still declares the floor's string; elect the real output schema (`ob operation output-schema`)";
+                  " — the synthesized schema still declares the floor's string; elect the real output schema (a stored output-schema election on the operation)";
               } else if (tier !== "") {
                 msg += ` (the response was decoded as ${describeDecodeTier(tier)}; if the service actually returned a different shape — say JSON without a Content-Type header — this mismatch is the symptom, and the fix is the response's declared type or a custom OutputDecoder)`;
               }
