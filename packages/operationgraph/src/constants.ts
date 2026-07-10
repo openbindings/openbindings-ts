@@ -15,8 +15,9 @@ export const TRANSFORM_UNDEFINED = "TRANSFORM_UNDEFINED";
 
 /**
  * The format version this implementation supports. OG-T-02 (mirroring the
- * core spec's OBI-T-04): refuse a higher major version, and a higher minor
- * version while the format is pre-1.0.
+ * core spec's OBI-T-04): refuse a higher major version or one below the
+ * supported minimum (pre-1.0, both bounds apply to minors), and refuse
+ * prereleases absent declared support.
  */
 export const SUPPORTED_MAJOR = 0;
 export const SUPPORTED_MINOR = 2;

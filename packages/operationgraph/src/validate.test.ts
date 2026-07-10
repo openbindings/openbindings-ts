@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  checkVersion,
   validateGraph,
   allowedNodeFields,
   requiredNodeFields,
@@ -95,4 +96,25 @@ describe("node field rules exports", () => {
       }
     }
   });
+});
+
+// OG-T-02: the full mirror of OBI-T-04 — upward refusal (higher major;
+// higher minor pre-1.0), downward refusal (below the supported minimum),
+// and prerelease refusal absent declared support.
+describe("checkVersion (OG-T-02)", () => {
+  const cases: Array<[string, string | null]> = [
+    ["0.2.0", null],
+    ["0.2.9", null], // higher patch within the supported minor never refuses
+    ["0.3.0", "supports up to"],
+    ["1.0.0", "supports up to"],
+    ["0.1.0", "supports no lower than"],
+    ["0.2.0-beta.1", "prerelease"],
+  ];
+  for (const [version, want] of cases) {
+    it(`${version} -> ${want ?? "accepted"}`, () => {
+      const refusal = checkVersion(version);
+      if (want === null) expect(refusal).toBeNull();
+      else expect(refusal).toContain(want);
+    });
+  }
 });

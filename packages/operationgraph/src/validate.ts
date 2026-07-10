@@ -27,6 +27,12 @@ export function checkVersion(version: string): string | null {
   if (major > SUPPORTED_MAJOR || (SUPPORTED_MAJOR === 0 && major === 0 && minor > SUPPORTED_MINOR)) {
     return `OG-T-02: graph declares openbindings.operation-graph ${version}; this implementation supports up to ${SUPPORTED_MAJOR}.${SUPPORTED_MINOR}.x`;
   }
+  if (major < SUPPORTED_MAJOR || (SUPPORTED_MAJOR === 0 && major === 0 && minor < SUPPORTED_MINOR)) {
+    return `OG-T-02: graph declares openbindings.operation-graph ${version}; this implementation supports no lower than ${SUPPORTED_MAJOR}.${SUPPORTED_MINOR}.x`;
+  }
+  if (m[4]) {
+    return `OG-T-02: graph declares prerelease openbindings.operation-graph ${version}; this implementation declares no prerelease support`;
+  }
   return null;
 }
 
