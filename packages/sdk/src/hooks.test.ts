@@ -156,7 +156,7 @@ describe("snapshot composition (the direct binding-layer affordance)", () => {
   });
 });
 
-describe("contract inspectors + the §4.5.3 warning", () => {
+describe("contract inspectors + the the conventions record warning", () => {
   const floor = { type: "string", "x-ob": { floor: "text" } };
 
   it("floorStamped and nonDiscriminatingOutput read the contract", () => {

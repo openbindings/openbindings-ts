@@ -299,7 +299,7 @@ describe("invokeBinding — responses", () => {
     const call = new OpenAPIInvoker().invokeBinding({ source: SOURCE, ref: REF_PING, fetch });
 
     // Details carry the RAW capture (diagnostics, never a decoded value —
-    // the §6 de-sniff removed failure-path parsing too).
+    // the content-independence de-sniff removed failure-path parsing too).
     await expect(call.closed).rejects.toMatchObject({
       code: ERR_EXECUTION_FAILED,
       details: { status: 404, body: JSON.stringify({ error: "not found" }) },
@@ -341,7 +341,7 @@ describe("invokeBinding — responses", () => {
     expect(out).toEqual({ missing: true, note: "no such pet" });
     await call.closed;
 
-    // §4.5.2 success stamps name what decided each axis.
+    // the conventions record success stamps name what decided each axis.
     expect(call.trailer()).toMatchObject({ "x-ob-decode": ["hook"], "x-ob-classify": ["hook"] });
   });
 
