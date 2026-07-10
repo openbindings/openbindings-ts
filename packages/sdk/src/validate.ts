@@ -111,7 +111,7 @@ export function validateInterface(
   if (iface.schemas) {
     for (const k of Object.keys(iface.schemas).sort()) {
       validateIdent(errs, "schemas key", k);
-      walkSchema(errs, `schemas["${k}"]`, iface.schemas[k]);
+      walkSchema(errs, `schemas["${k}"]`, iface.schemas[k], iface, false);
     }
   }
 
@@ -162,10 +162,10 @@ export function validateInterface(
 
     // Walk operation input/output schemas for OBI-D-05/D-07/D-08.
     if (op.input != null) {
-      walkSchema(errs, `operations["${k}"].input`, op.input);
+      walkSchema(errs, `operations["${k}"].input`, op.input, iface, false);
     }
     if (op.output != null) {
-      walkSchema(errs, `operations["${k}"].output`, op.output);
+      walkSchema(errs, `operations["${k}"].output`, op.output, iface, false);
     }
 
     // OBI-D-03: example keys must match the identifier pattern.
@@ -375,11 +375,43 @@ function referenceIsAbsolute(raw: string): boolean {
  * `properties`/`patternProperties`/`$defs`/etc. are not themselves treated
  * as schema keywords.
  */
-function walkSchema(errs: string[], prefix: string, schema: unknown): void {
+/**
+ * Whether an RFC 6901 JSON Pointer (the fragment with its leading # removed)
+ * resolves to an existing location in the document. Existence only:
+ * OBI-D-16 does not type-check the target.
+ */
+function docPointerResolves(doc: unknown, pointer: string): boolean {
+  if (pointer === "") return true; // bare # addresses the document root
+  if (!pointer.startsWith("/")) return false;
+  let cur: unknown = doc;
+  for (const raw of pointer.slice(1).split("/")) {
+    const tok = raw.replaceAll("~1", "/").replaceAll("~0", "~");
+    if (Array.isArray(cur)) {
+      const idx = /^\d+$/.test(tok) ? Number(tok) : -1;
+      if (idx < 0 || idx >= cur.length) return false;
+      cur = cur[idx];
+    } else if (typeof cur === "object" && cur !== null) {
+      if (!(tok in (cur as Record<string, unknown>))) return false;
+      cur = (cur as Record<string, unknown>)[tok];
+    } else {
+      return false;
+    }
+  }
+  return true;
+}
+
+function walkSchema(errs: string[], prefix: string, schema: unknown, doc?: unknown, inID?: boolean): void {
   if (typeof schema !== "object" || schema === null || Array.isArray(schema)) {
     return;
   }
   const s = schema as Record<string, unknown>;
+
+  // A schema that declares its own $id is a distinct schema resource: its
+  // $ref (and its subtree's) resolve against that resource's base per §10,
+  // so OBI-D-16's root-context resolution check does not apply inside it.
+  if (typeof s.$id === "string") {
+    inID = true;
+  }
 
   if (typeof s.$schema === "string" && s.$schema !== DRAFT_2020_12_URI) {
     errs.push(`${prefix}.$schema: "${s.$schema}" must equal "${DRAFT_2020_12_URI}" (OBI-D-06)`);
@@ -393,6 +425,10 @@ function walkSchema(errs: string[], prefix: string, schema: unknown): void {
       errs.push(`${prefix}.$ref: "${s.$ref}" must be a same-document fragment or an absolute URI, not a relative reference (OBI-D-05)`);
     } else if (s.$ref.startsWith("#") && s.$ref !== "#" && !s.$ref.startsWith("#/")) {
       errs.push(`${prefix}.$ref: "${s.$ref}" is a plain-name fragment; a same-document schema $ref is a JSON Pointer fragment (bare # or #/...), and the schemas map is the document's named-schema mechanism (OBI-D-05)`);
+    } else if ((s.$ref === "#" || s.$ref.startsWith("#/")) && !inID && doc !== undefined) {
+      if (!docPointerResolves(doc, s.$ref.slice(1))) {
+        errs.push(`${prefix}.$ref: "${s.$ref}" does not resolve within the document (OBI-D-16)`);
+      }
     }
   }
   if (typeof s.$id === "string" && !referenceIsAbsolute(s.$id)) {
@@ -405,15 +441,15 @@ function walkSchema(errs: string[], prefix: string, schema: unknown): void {
       if (typeof v === "object" && v !== null && !Array.isArray(v)) {
         const m = v as Record<string, unknown>;
         for (const sk of Object.keys(m).sort()) {
-          walkSchema(errs, `${prefix}.${k}.${sk}`, m[sk]);
+          walkSchema(errs, `${prefix}.${k}.${sk}`, m[sk], doc, inID);
         }
       }
     } else if (SINGLE_SCHEMA_KEYWORDS.has(k)) {
-      walkSchema(errs, `${prefix}.${k}`, v);
+      walkSchema(errs, `${prefix}.${k}`, v, doc, inID);
     } else if (ARRAY_SCHEMA_KEYWORDS.has(k)) {
       if (Array.isArray(v)) {
         for (let i = 0; i < v.length; i++) {
-          walkSchema(errs, `${prefix}.${k}[${i}]`, v[i]);
+          walkSchema(errs, `${prefix}.${k}[${i}]`, v[i], doc, inID);
         }
       }
     }

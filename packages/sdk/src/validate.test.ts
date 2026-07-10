@@ -42,6 +42,27 @@ describe("validateInterface", () => {
     expect(() => validateInterface(iface)).toThrow("OBI-D-05");
   });
 
+  it("rejects a dangling same-document $ref (OBI-D-16)", () => {
+    const iface = minimalInterface();
+    iface.schemas = { Task: { type: "object" } };
+    iface.operations.getUser.output = { $ref: "#/schemas/Missing" };
+    expect(() => validateInterface(iface)).toThrow("does not resolve within the document (OBI-D-16)");
+  });
+
+  it("skips D-16 for $refs under a nested $id (resource-internal)", () => {
+    const iface = minimalInterface();
+    iface.schemas = {
+      Task: {
+        $id: "https://example.com/task.schema.json",
+        type: "object",
+        properties: { parent: { $ref: "#/$defs/base" } },
+        $defs: { base: { type: "string" } },
+      },
+    };
+    iface.operations.getUser.output = { $ref: "#/schemas/Task" };
+    expect(() => validateInterface(iface)).not.toThrow();
+  });
+
   it("rejects a plain-name ($anchor) fragment $ref (OBI-D-05)", () => {
     const iface = minimalInterface();
     iface.schemas = { User: { $anchor: "user", type: "object" } };
