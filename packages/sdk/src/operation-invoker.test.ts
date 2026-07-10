@@ -495,6 +495,18 @@ describe("OBI-T-07 — input validation", () => {
     });
   });
 
+  it("fails closed when the input schema carries an external $ref it cannot resolve", async () => {
+    // T-07 validates against the FULLY RESOLVED schema: an external $ref
+    // with no fetcher is an invocation error, never a partial pass.
+    const iface = testInterface();
+    iface.operations.getUser.input = { $ref: "https://example.com/schemas/user-input.json" };
+    const mock = new MockBindingInvoker();
+    const op = makeInvoker(mock);
+    const call = op.invoke(iface, operationSignature("getUser"));
+    await expect(call.write({ id: "u1" })).rejects.toMatchObject({ code: ERR_VALIDATION_FAILED });
+    expect(mock.reads.flat()).toEqual([]); // the binding never saw the message
+  });
+
   it("skips validation when the operation declares no input schema", async () => {
     const op = makeInvoker();
     const call = op.invoke(testInterface(), operationSignature("uploadChunks"));
