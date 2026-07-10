@@ -190,7 +190,7 @@
             { "type": "object" },
             { "type": "string", "minLength": 1 }
           ],
-          "description": "Binding artifact content, embedded directly. Object for JSON-based formats, string for text formats (e.g. KDL, protobuf). If both location and content are present, implementations MUST prefer content."
+          "description": "Binding artifact content, embedded directly. Object for JSON-based formats, string for text formats (e.g. KDL, protobuf). content always carries the artifact; a source carrying both location and content is interpreted per the binding format's conventions (OBI-T-15)."
         },
         "description": {
           "type": "string",
