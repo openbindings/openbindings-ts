@@ -13,7 +13,13 @@
  * the SDK's public error and result types are stable across any future
  * swap. See STABILITY.md.
  */
-import { Validator, type OutputUnit } from "@cfworker/json-schema";
+import {
+  Validator,
+  schemaArrayKeyword,
+  schemaKeyword,
+  schemaMapKeyword,
+  type OutputUnit,
+} from "@cfworker/json-schema";
 import type { OBInterface } from "./types.js";
 import obiSchema from "./openbindings.schema.json" with { type: "json" };
 
@@ -155,8 +161,42 @@ export function compileExampleSchema(
   schema: unknown,
   defs: Record<string, unknown> | undefined,
 ): Validator {
-  const root = buildCompoundSchema(schema, defs);
+  const root = stripFormatAssertions(buildCompoundSchema(schema, defs));
   return new Validator(root as object, "2020-12");
+}
+
+/**
+ * Copy of a schema tree with `format` keywords removed. §6.2: at OBI
+ * validation boundaries `format` is an annotation, never an assertion —
+ * the validator backend asserts known formats unconditionally, so the
+ * compiled view drops the keyword. Recursion follows the backend's own
+ * keyword-shape tables, so a property NAMED "format" (a key under
+ * `properties`, `$defs`, ...) is untouched. Non-schema members are shared
+ * by reference: the copy never mutates its input.
+ */
+function stripFormatAssertions(node: unknown): unknown {
+  if (typeof node !== "object" || node === null || Array.isArray(node)) {
+    return node;
+  }
+  const src = node as Record<string, unknown>;
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(src)) {
+    if (k === "format") continue;
+    if (schemaKeyword[k] && typeof v === "object" && v !== null && !Array.isArray(v)) {
+      out[k] = stripFormatAssertions(v);
+    } else if (schemaArrayKeyword[k] && Array.isArray(v)) {
+      out[k] = v.map(stripFormatAssertions);
+    } else if (schemaMapKeyword[k] && typeof v === "object" && v !== null && !Array.isArray(v)) {
+      const m: Record<string, unknown> = {};
+      for (const [mk, mv] of Object.entries(v as Record<string, unknown>)) {
+        m[mk] = stripFormatAssertions(mv);
+      }
+      out[k] = m;
+    } else {
+      out[k] = v;
+    }
+  }
+  return out;
 }
 
 /**

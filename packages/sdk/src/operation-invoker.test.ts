@@ -507,6 +507,21 @@ describe("OBI-T-07 — input validation", () => {
     expect(mock.reads.flat()).toEqual([]); // the binding never saw the message
   });
 
+  it("format is annotation-only at the boundary; pattern is the assertion lane", async () => {
+    // §6.2: a tool MUST NOT reject a value for violating `format`.
+    const iface = testInterface();
+    iface.operations.getUser.input = { type: "string", format: "email" };
+    const op = makeInvoker();
+    const call = op.invoke(iface, operationSignature("getUser"));
+    await expect(call.write("not-an-email")).resolves.toBeUndefined();
+
+    const iface2 = testInterface();
+    iface2.operations.getUser.input = { type: "string", pattern: "^[^@]+@[^@]+$" };
+    const op2 = makeInvoker();
+    const call2 = op2.invoke(iface2, operationSignature("getUser"));
+    await expect(call2.write("not-an-email")).rejects.toMatchObject({ code: ERR_VALIDATION_FAILED });
+  });
+
   it("skips validation when the operation declares no input schema", async () => {
     const op = makeInvoker();
     const call = op.invoke(testInterface(), operationSignature("uploadChunks"));
