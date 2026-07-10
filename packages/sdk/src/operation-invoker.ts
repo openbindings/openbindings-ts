@@ -187,7 +187,7 @@ export class OperationInvoker {
 
   /**
    * All formats registered with this invoker. An aggregation convenience
-   * over the registered binding invokers; the operation-invoker role itself
+   * over the registered binding invokers; the operation-invoker interface itself
    * carries no listFormats operation (its format reach is dynamic, e.g. via
    * delegates).
    */
@@ -229,7 +229,7 @@ export class OperationInvoker {
     return filled;
   }
 
-  /** Side-effect-free preflight for a resolved binding (binding-invoker role `prepareBinding`). */
+  /** Side-effect-free preflight for a resolved binding (binding-invoker interface `prepareBinding`). */
   prepareBinding(args: BindingInvocationArgs): Promise<ContextRequiredDetails | null> {
     return this.invoker.prepareBinding(this.withFetch(args));
   }
@@ -280,7 +280,7 @@ export class OperationInvoker {
   }
 
   /**
-   * Operation-layer side-effect-free preflight (the operation-invoker role
+   * Operation-layer side-effect-free preflight (the operation-invoker interface
    * `prepareOperation`), the by-reference counterpart to `prepareBinding`. It
    * resolves `operation` on `obi` to a concrete binding (OBI-T-12 + OBI-T-09
    * selection, or an `opts.bindingKey`-pinned binding) and reports that
@@ -423,7 +423,7 @@ export class OperationInvoker {
       context = { ...(context ?? {}), ...resolved };
     };
 
-    // Preflight (binding-invoker role `prepareBinding`): collapse
+    // Preflight (binding-invoker interface `prepareBinding`): collapse
     // knowable-upfront context challenges into the clean
     // no-input-consumed case before anything is forwarded.
     try {
@@ -659,10 +659,11 @@ export class OperationInvoker {
       try {
         await forwardHeader(inner);
         const t = terminalTrailer(inner) ?? {};
-        // §4.5.3: the unvalidated-assumption warning rides the trailer on
-        // SUCCESS only (failures carry tier-precise provenance already),
-        // keyed on the format's own decode stamp — only an assumption
-        // lane can trigger it.
+        // Per the conventions record's recommended built-in defaults
+        // (spec/formats/README.md): the unvalidated-assumption warning
+        // rides the trailer on SUCCESS only (failures carry tier-precise
+        // provenance already), keyed on the format's own decode stamp —
+        // only an assumption lane can trigger it.
         if (!surface) {
           const w = assumptionWarning(t["x-ob-decode"]?.[0] ?? "", op.output);
           if (w) t["x-ob-warning"] = [...(t["x-ob-warning"] ?? []), w];

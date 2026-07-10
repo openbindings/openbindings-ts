@@ -12,7 +12,9 @@ export function formatName(token: string): string {
  * Reports whether a Content-Type header declares a JSON body:
  * application/json or any +json structured-suffix type. Absent or
  * unparseable → NOT JSON. This is wire framing (the header decides the
- * decode lane), never payload sniffing — the §6 pinned decode rule.
+ * decode lane), never payload sniffing — the pinned decode rule of the
+ * conventions record's recommended built-in defaults
+ * (spec/formats/README.md).
  * (Replaces the removed `maybeJSON` payload sniffer: content-dependent
  * defaults are banned; a wrong lane must fail loudly or be elected
  * explicitly, never guessed from the bytes.)

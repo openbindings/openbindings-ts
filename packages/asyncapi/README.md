@@ -102,10 +102,15 @@ const iface = await synth.synthesizeInterface({
    - **receive + http/https**: SSE subscribe — each event is one output
    - **receive + ws/wss**: WebSocket subscribe — each frame is one output;
      caller inputs are forwarded to the socket as control/subscription frames
-   - **send + http/https**: HTTP POST (unary) — first input is the message,
-     the response body is the single output
+   - **send + http/https**: HTTP POST (unary) — the first input is the
+     message body; a 202/204 acknowledgment yields zero outputs, otherwise
+     the decoded response body is the single output
    - **send + ws/wss**: client-streaming publish — each input is one frame;
      closing input completes the call
+
+### Consumer hooks
+
+Each message's bytes-to-value rule is chosen from its declared content type (the message `contentType` on the operation's messages, then its reply messages): strict JSON for `application/json` and `+json` suffixes (a declared-JSON payload that fails to parse is a loud error), text otherwise — decided by the declaration, never sniffed from the payload. This format **consults the consumer hooks seam**: an `outputDecoder` hook (per-invocation `InvokeOptions` or invoker-level `OperationInvokerOptions`) may override the builtin rule for a message. The HTTP send lane records decode provenance in its trailer metadata (`x-ob-decode`: `spec/content-type` or `hook`). Classification is not consulted (`x-ob-classify`: `not-consulted`) — message-oriented transports have no per-message success status the way HTTP does, so this format runs no result classifier; transport-level HTTP errors terminate the handle as transport failures.
 
 ### Credential application
 

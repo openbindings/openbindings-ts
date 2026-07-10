@@ -7,9 +7,10 @@ import type { JSONSchema } from "./types.js";
 // invocation. Where a binding-source format's specification is lacking,
 // the gap is made up in CONSUMER CONFIGURATION — these hooks — never by OB
 // authoring the missing coverage into a document and never by OBI
-// absorbing format conventions. Design record:
-// ob-pj/invocation-configuration-design.md (v8); this file mirrors the Go
-// SDK's hooks.go so the two SDKs answer the wire questions identically.
+// absorbing format conventions. The model is stated in the conventions
+// record's completeness-spectrum section (spec/formats/README.md); this
+// file mirrors the Go SDK's hooks.go so the two SDKs answer the wire
+// questions identically.
 //
 // Generic SHAPE, protocol-specific HANDLING: one set of signatures serves
 // every format; the callback body switches on the site (formatName,
@@ -192,7 +193,9 @@ export class InvokeHooks {
   private readonly invokerLevel: HookSlots;
   // Tier-blind success provenance ("hook" | "builtin") — the failure paths
   // are tier-precise; success provenance is not. Read by the
-  // contract-decided teaching and the §4.5.2 stamps.
+  // contract-decided teaching and the x-ob-decode/x-ob-classify provenance
+  // stamps (per the conventions record's recommended built-in defaults,
+  // spec/formats/README.md).
   private decodeDecided = "";
   private classifyDecided = "";
 
@@ -369,7 +372,8 @@ async function runBuiltinClassify(
 }
 
 // ---------------------------------------------------------------------------
-// Contract inspectors + the §4.5.3 warning
+// Contract inspectors + the unvalidated-assumption warning (per the
+// conventions record's recommended built-in defaults, spec/formats/README.md)
 // ---------------------------------------------------------------------------
 
 /**
@@ -388,7 +392,7 @@ export function floorStamped(schema: JSONSchema | undefined | null): boolean {
 /**
  * Reports whether an output contract cannot catch a wrong decode lane:
  * absent, empty, or admitting bare strings. Content-independent contract
- * inspection (the §4.5.3 warning's trigger arms).
+ * inspection (the unvalidated-assumption warning's trigger arms).
  */
 export function nonDiscriminatingOutput(schema: JSONSchema | undefined | null): boolean {
   if (!schema || typeof schema !== "object") return true;
@@ -408,9 +412,11 @@ export function nonDiscriminatingOutput(schema: JSONSchema | undefined | null): 
 }
 
 /**
- * Composes the §4.5.3 unvalidated/undiscriminating-assumption warning: it
- * fires when an ASSUMPTION decoded the output (decodeStamp is the format's
- * §4.5.2 x-ob-decode trailer stamp — "assumption/<detail>" means the
+ * Composes the unvalidated/undiscriminating-assumption warning the
+ * conventions record's recommended built-in defaults call for
+ * (spec/formats/README.md): it fires when an ASSUMPTION decoded the output
+ * (decodeStamp is the format's x-ob-decode trailer stamp —
+ * "assumption/<detail>" means the
  * documented default ran; "hook", "header/...", "spec/...", or absent mean
  * it did not) AND the output contract cannot catch a wrong lane (no
  * schema, a non-discriminating schema, or a floor-stamped schema).

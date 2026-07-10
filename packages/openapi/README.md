@@ -93,7 +93,29 @@ const iface = await synth.synthesizeInterface({
 4. Derives auth requirements from the operation's (or document's) `security` and challenges `CONTEXT_REQUIRED` when the context can't satisfy them — before any request is dispatched
 5. Reads the input message from the handle and classifies its fields as path, query, header, or body parameters based on the OpenAPI parameter definitions
 6. Applies credentials from the context using the spec's `securitySchemes` (bearer, basic, apiKey, oauth2 with correct placement)
-7. Makes the HTTP request, sets the response headers as leading metadata, and emits the parsed response body (HTTP error statuses terminate the handle with `{ status, body }` details)
+7. Makes the HTTP request, sets the response headers as leading metadata, classifies the outcome (success iff status is 2xx; error statuses terminate the handle with `{ status, body }` details), decodes the body by the response's `Content-Type` header (strict JSON for `application/json` and `+json` suffixes, text otherwise), and emits the value — classification and decode both run through the consumer hooks seam, and the trailer metadata carries `x-ob-decode`/`x-ob-classify` provenance stamps
+
+### Base URL override
+
+By default the request target is the spec's first `servers[]` entry (a relative server URL like `/api/v3` is resolved against the source `location`'s origin). To send the same OBI at a different host, e.g. staging or a local mock, set `metadata.baseURL` in the invocation context:
+
+```typescript
+context: {
+  metadata: { baseURL: "https://staging.example.com" },
+  bearerToken: "tok_123",
+}
+```
+
+`metadata.baseURL` takes precedence over the spec's `servers`. When absent and the spec has no server URL, invocation fails with a message telling you to set one or the other.
+
+### Consumer hooks
+
+HTTP leaves wire questions the OpenAPI document does not settle: which bytes-to-value rule to apply and whether a given response counts as success. This format **consults the consumer hooks seam** for both:
+
+- **Decode** — the builtin rule is chosen from the response `Content-Type` header; an `outputDecoder` hook may override it.
+- **Classify** — the builtin verdict is HTTP status (2xx success; declared `responses` refine failure details, never classification); a `resultClassifier` hook may reclassify (a 200 envelope carrying an application error, say).
+
+Hooks are configured per invocation (`InvokeOptions`) or invoker-level (`OperationInvokerOptions`); a hook declines to the next tier by returning `USE_DEFAULT`. Each invocation records how each axis was decided in its trailer metadata (`x-ob-decode`: `header/content-type` or `hook`; `x-ob-classify`: `assumption/2xx` or `hook`), so a caller can see whether their hook fired.
 
 ### Credential application
 

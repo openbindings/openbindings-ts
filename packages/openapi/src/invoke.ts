@@ -244,8 +244,9 @@ async function doHTTPRequest(
 
   // Classify, then decode — both through the consultation seam
   // (per-invocation hook → invoker-level hook → the format builtins
-  // below). §6's pinned rules, content-independent throughout: classify =
-  // success iff status ∈ 2xx (declared `responses` never change
+  // below). The conventions record's pinned rules (recommended built-in
+  // defaults, spec/formats/README.md), content-independent throughout:
+  // classify = success iff status ∈ 2xx (declared `responses` never change
   // classification — they enrich failure details); decode = the response's
   // Content-Type HEADER decides the lane (wire framing, not payload
   // sniffing): JSON for application/json and +json suffixes, text
@@ -286,9 +287,11 @@ async function doHTTPRequest(
     return;
   }
 
-  // §4.5.2 success stamps: decode provenance is header/content-type when
-  // the builtin (the Content-Type lane) decided, hook when overridden;
-  // classify is always assumption/2xx unless a hook widened it.
+  // Success provenance stamps (per the conventions record's recommended
+  // built-in defaults, spec/formats/README.md): decode provenance is
+  // header/content-type when the builtin (the Content-Type lane) decided,
+  // hook when overridden; classify is always assumption/2xx unless a hook
+  // widened it.
   inv.setTrailer(decodeClassifyTrailer(args.hooks, "header/content-type"));
   await inv.emitOutput(output);
   inv.closeOutput();
@@ -349,9 +352,10 @@ function siteFor(args: BindingInvocationArgs, baseURL: string): InvokeSite {
 }
 
 /**
- * Builds the §4.5.2 x-ob-decode/x-ob-classify success stamps for the HTTP
- * lane, given the decode axis's builtin provenance token. A hook decision
- * on either axis stamps "hook".
+ * Builds the x-ob-decode/x-ob-classify success stamps (the provenance the
+ * conventions record's recommended built-in defaults call for,
+ * spec/formats/README.md) for the HTTP lane, given the decode axis's
+ * builtin provenance token. A hook decision on either axis stamps "hook".
  */
 function decodeClassifyTrailer(hooks: InvokeHooks | null | undefined, builtinDecode: string): Metadata {
   let decode = builtinDecode;

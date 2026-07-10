@@ -22,7 +22,7 @@ export interface BindingInvoker {
   /**
    * Optional side-effect-free preflight: reports the context the binding
    * would require for this invocation (the `prepareBinding` operation of
-   * the openbindings.binding-invoker role), or null when the binding can
+   * the openbindings.binding-invoker interface), or null when the binding can
    * proceed. Lets the operation layer resolve context BEFORE the caller
    * streams input, collapsing knowable-upfront challenges into the clean
    * no-input-consumed case.

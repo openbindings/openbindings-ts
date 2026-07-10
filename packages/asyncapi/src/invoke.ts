@@ -626,10 +626,12 @@ async function runHTTPSend(
     return;
   }
 
-  // Decode through the consultation seam (§6, content-independent): the
-  // operation's declared message contentType decides the lane — JSON for
-  // application/json and +json suffixes (a declared-JSON payload that
-  // fails to parse is loud), text otherwise. Never sniffed.
+  // Decode through the consultation seam — content-independent, per the
+  // conventions record's recommended built-in defaults
+  // (spec/formats/README.md): the operation's declared message contentType
+  // decides the lane — JSON for application/json and +json suffixes (a
+  // declared-JSON payload that fails to parse is loud), text otherwise.
+  // Never sniffed.
   let output: unknown;
   try {
     output = await decodeThroughHooks(
@@ -643,10 +645,12 @@ async function runHTTPSend(
     return;
   }
 
-  // §4.5.2 success stamps: decode is spec/content-type (the message's
-  // declared contentType decides the lane), hook when overridden;
-  // classify is not-consulted (asyncapi runs no result classifier — the
-  // HTTP status guard above is transport, not a format verdict).
+  // Success provenance stamps (per the conventions record's recommended
+  // built-in defaults, spec/formats/README.md): decode is
+  // spec/content-type (the message's declared contentType decides the
+  // lane), hook when overridden; classify is not-consulted (asyncapi runs
+  // no result classifier — the HTTP status guard above is transport, not
+  // a format verdict).
   h.setTrailer(decodeTrailer(args.hooks, "spec/content-type"));
   await h.emitOutput(output);
   h.closeOutput();
@@ -1054,9 +1058,10 @@ function siteFor(args: BindingInvocationArgs, serverURL: string): InvokeSite {
 }
 
 /**
- * Builds the §4.5.2 x-ob-decode stamp (and the fixed x-ob-classify
- * not-consulted stamp — asyncapi runs no classifier) for a successful
- * message decode, given the builtin decode provenance token.
+ * Builds the x-ob-decode stamp (and the fixed x-ob-classify not-consulted
+ * stamp — asyncapi runs no classifier) for a successful message decode,
+ * given the builtin decode provenance token, per the conventions record's
+ * recommended built-in defaults (spec/formats/README.md).
  */
 function decodeTrailer(hooks: InvokeHooks | null | undefined, builtinDecode: string): Metadata {
   const decode = hooks?.decodeDecidedBy() === "hook" ? "hook" : builtinDecode;

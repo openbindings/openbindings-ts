@@ -209,7 +209,12 @@ function stripFormatAssertions(node: unknown): unknown {
  * on cfworker (or any future replacement) directly.
  */
 export interface ValidationFailure {
-  /** JSON Pointer into the instance, e.g. "/results/0/name". Empty string for the root. */
+  /**
+   * Instance location as the underlying validator reports it: a
+   * URI-fragment JSON Pointer, e.g. "#/results/0/name" ("#" for the
+   * root). Empty string when the validator threw before producing a
+   * location.
+   */
   path: string;
   /** Human-readable diagnostic (e.g., "Instance type \"null\" is invalid. Expected \"string\"."). */
   message: string;

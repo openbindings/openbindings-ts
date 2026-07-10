@@ -263,7 +263,7 @@ export function normalizeEndpoint(url: string): string {
 /**
  * True when the stored context can satisfy every requirement of at least one
  * alternative. An alternative with no requirements never satisfies (the
- * binding-invoker role requires at least one requirement per alternative;
+ * binding-invoker interface requires at least one requirement per alternative;
  * treating a malformed empty alternative as vacuously satisfied would hand
  * stored context to any challenge).
  */
@@ -300,7 +300,7 @@ const CREDENTIAL_FIELDS = new Set(Object.values(REQUIREMENT_FAMILY_FIELDS).flat(
 
 /**
  * Returns the least-privilege subset of a stored context for a challenge
- * (binding-invoker role). A CONTEXT_REQUIRED challenge is a scope, not a hint:
+ * (binding-invoker interface). A CONTEXT_REQUIRED challenge is a scope, not a hint:
  * the invoker receives only what it declared it needs. Every non-secret
  * configuration field passes through unchanged; among the secret credential
  * fields, only those belonging to the requirement families of the first
@@ -344,7 +344,7 @@ export function scopeContext(
 
 /**
  * Builds a read-only {@link ContextResolver} backed by a {@link ContextStore}:
- * the composition of the binding-invoker and context-store roles. It derives
+ * the composition of the binding-invoker and context-store contracts. It derives
  * the store key from the challenge's `target` by normalizing it
  * ({@link normalizeEndpoint}), returns the least-privilege subset of the stored
  * context ({@link scopeContext}) when it satisfies one of the challenge's

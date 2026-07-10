@@ -422,9 +422,9 @@ export function validateGraph(
     // OG-V-18: embedded schemas are 2020-12 objects — $schema, when
     // present, pinned to the 2020-12 URI; $vocabulary nowhere within.
     for (const [field, embedded] of [
-      ["schema", (node as Record<string, unknown>).schema],
-      ["until", (node as Record<string, unknown>).until],
-      ["through", (node as Record<string, unknown>).through],
+      ["schema", (node as unknown as Record<string, unknown>).schema],
+      ["until", (node as unknown as Record<string, unknown>).until],
+      ["through", (node as unknown as Record<string, unknown>).through],
     ] as Array<[string, unknown]>) {
       if (embedded === undefined) continue;
       if (typeof embedded !== "object" || embedded === null || Array.isArray(embedded)) {

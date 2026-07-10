@@ -1,7 +1,7 @@
 /**
  * Canonical invocation error codes. Wire values are SCREAMING_SNAKE with an
  * `ERR_` prefix, plus the un-prefixed negotiation signal `CONTEXT_REQUIRED`,
- * matching the `openbindings.binding-invoker` role. The Go SDK uses the same
+ * matching the `openbindings.binding-invoker` interface. The Go SDK uses the same
  * values for the same failure classes, so consumers switching on `code` are
  * portable for every code an invocation handle can carry. (One idiom split:
  * wiring errors — unknown operation/binding/source — THROW synchronously in
@@ -39,10 +39,10 @@ export const ERR_TOO_MANY_INPUTS = "ERR_TOO_MANY_INPUTS";
 /** A required input message never arrived before the input side closed. */
 export const ERR_MISSING_INPUT = "ERR_MISSING_INPUT";
 
-/** Frame-protocol violation (binding-invoker role wire protocol). */
+/** Frame-protocol violation (binding-invoker interface wire protocol). */
 export const ERR_PROTOCOL = "ERR_PROTOCOL";
 
-/** Transport closed without a terminal frame (binding-invoker role wire protocol). */
+/** Transport closed without a terminal frame (binding-invoker interface wire protocol). */
 export const ERR_TRANSPORT_CLOSED = "ERR_TRANSPORT_CLOSED";
 
 /**

@@ -58,7 +58,7 @@ export class InvocationError extends Error {
 export type Metadata = Record<string, string[]>;
 
 // ---------------------------------------------------------------------------
-// Context negotiation shapes (openbindings.binding-invoker role)
+// Context negotiation shapes (the openbindings.binding-invoker interface)
 // ---------------------------------------------------------------------------
 
 /**
@@ -84,7 +84,7 @@ export interface ContextAlternative {
 
 /**
  * The details payload of a `CONTEXT_REQUIRED` terminal error, per the
- * `openbindings.binding-invoker` role. `alternatives` is disjunctive:
+ * `openbindings.binding-invoker` interface. `alternatives` is disjunctive:
  * satisfying any one alternative suffices.
  */
 export interface ContextRequiredDetails {
@@ -120,8 +120,8 @@ export function isContextRequired(
 }
 
 /**
- * Maps standard requirement families (binding-invoker role) to the well-known
- * context field that satisfies them (context-store role). The context store
+ * Maps standard requirement families (the binding-invoker interface) to the well-known
+ * context field that satisfies them (the context-store contract). The context store
  * (context.ts) resolves satisfaction against this same map.
  */
 export const REQUIREMENT_FIELDS: Record<string, string> = {
