@@ -19,6 +19,35 @@ export const SEMVER_RE =
  * OG-T-02: refuses a graph declaring a format version this implementation
  * does not support. Returns an error message, or null when supported.
  */
+/**
+ * OG-V-18 on one embedded schema object: $schema, when present, equals the
+ * 2020-12 dialect URI, and $vocabulary appears nowhere within the tree.
+ */
+function validateEmbeddedSchema(
+  report: (message: string) => void,
+  prefix: string,
+  s: Record<string, unknown>,
+): void {
+  const draft202012 = "https://json-schema.org/draft/2020-12/schema";
+  if (typeof s.$schema === "string" && s.$schema !== draft202012) {
+    report(`${prefix}: $schema "${s.$schema}" must equal "${draft202012}" (OG-V-18)`);
+  }
+  if ("$vocabulary" in s) {
+    report(`${prefix}: $vocabulary is forbidden in embedded schemas (OG-V-18)`);
+  }
+  for (const [k, v] of Object.entries(s)) {
+    if (Array.isArray(v)) {
+      v.forEach((item, i) => {
+        if (typeof item === "object" && item !== null && !Array.isArray(item)) {
+          validateEmbeddedSchema(report, `${prefix}.${k}[${i}]`, item as Record<string, unknown>);
+        }
+      });
+    } else if (typeof v === "object" && v !== null) {
+      validateEmbeddedSchema(report, `${prefix}.${k}`, v as Record<string, unknown>);
+    }
+  }
+}
+
 export function checkVersion(version: string): string | null {
   const m = SEMVER_RE.exec(version);
   if (!m) return `version "${version}" is not a SemVer 2.0.0 string`;
@@ -368,6 +397,29 @@ export function validateGraph(
           nodeKeys: [key],
         });
       }
+    }
+
+    // OG-V-18: embedded schemas are 2020-12 objects — $schema, when
+    // present, pinned to the 2020-12 URI; $vocabulary nowhere within.
+    for (const [field, embedded] of [
+      ["schema", (node as Record<string, unknown>).schema],
+      ["until", (node as Record<string, unknown>).until],
+      ["through", (node as Record<string, unknown>).through],
+    ] as Array<[string, unknown]>) {
+      if (embedded === undefined) continue;
+      if (typeof embedded !== "object" || embedded === null || Array.isArray(embedded)) {
+        issues.push({
+          rule: "OG-V-18",
+          message: `node "${key}" ${field} must be a JSON Schema 2020-12 object`,
+          nodeKeys: [key],
+        });
+        continue;
+      }
+      validateEmbeddedSchema(
+        (message) => issues.push({ rule: "OG-V-18", message, nodeKeys: [key] }),
+        `node "${key}" ${field}`,
+        embedded as Record<string, unknown>,
+      );
     }
 
     // OG-V-13: buffer until/through mutual exclusivity.
