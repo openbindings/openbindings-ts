@@ -5,7 +5,10 @@ import { validateInterface, type ValidateOptions } from "./validate.js";
 import {
   isValidSemver,
   isHigherMajorOrPre1MinorThanMaxTested,
+  isLowerThanMinSupported,
+  isUnsupportedPrerelease,
   MAX_TESTED_VERSION,
+  MIN_SUPPORTED_VERSION,
 } from "./version.js";
 
 /**
@@ -65,6 +68,19 @@ export function parseDocument(input: string | Uint8Array): OBInterface {
       if (isHigherMajorOrPre1MinorThanMaxTested(ver)) {
         throw new ValidationError([
           `openbindings: "${ver}" exceeds this SDK's MaxTestedVersion "${MAX_TESTED_VERSION}" (OBI-T-04)`,
+        ]);
+      }
+      // The refusal runs downward too (below MinSupported; pre-1.0 lower
+      // minor), and prereleases refuse absent declared support — the same
+      // gates validateInterface applies, with identical messages.
+      if (isLowerThanMinSupported(ver)) {
+        throw new ValidationError([
+          `openbindings: "${ver}" is below this SDK's MinSupportedVersion "${MIN_SUPPORTED_VERSION}" (OBI-T-04)`,
+        ]);
+      }
+      if (isUnsupportedPrerelease(ver)) {
+        throw new ValidationError([
+          `openbindings: "${ver}" is a pre-release this SDK does not declare support for (OBI-T-04)`,
         ]);
       }
     } catch (err) {

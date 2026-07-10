@@ -106,3 +106,18 @@ describe("formatValidationErrors", () => {
     expect(formatValidationErrors("just a string")).toBe("just a string");
   });
 });
+
+// OBI-T-04 downward + prerelease refusal on the PARSE path (not only
+// validateInterface): every entry point refuses identically.
+describe("parseDocument version refusal (OBI-T-04, both directions)", () => {
+  const doc = (v: string) => JSON.stringify({ openbindings: v, operations: {} });
+  it("refuses below MinSupportedVersion", () => {
+    expect(() => parseDocument(doc("0.1.0"))).toThrow("below this SDK's MinSupportedVersion");
+  });
+  it("refuses an undeclared prerelease", () => {
+    expect(() => parseDocument(doc("0.2.0-rc.1"))).toThrow("pre-release this SDK does not declare support for");
+  });
+  it("accepts a higher patch", () => {
+    expect(() => parseDocument(doc("0.2.9"))).not.toThrow();
+  });
+});
