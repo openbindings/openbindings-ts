@@ -42,6 +42,13 @@ describe("validateInterface", () => {
     expect(() => validateInterface(iface)).toThrow("OBI-D-05");
   });
 
+  it("rejects a plain-name ($anchor) fragment $ref (OBI-D-05)", () => {
+    const iface = minimalInterface();
+    iface.schemas = { User: { $anchor: "user", type: "object" } };
+    iface.operations.getUser.output = { $ref: "#user" };
+    expect(() => validateInterface(iface)).toThrow("plain-name fragment");
+  });
+
   it("accepts a same-document fragment $ref", () => {
     const iface = minimalInterface();
     iface.schemas = { User: { type: "object" } };

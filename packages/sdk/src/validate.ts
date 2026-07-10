@@ -391,6 +391,8 @@ function walkSchema(errs: string[], prefix: string, schema: unknown): void {
     validateURIRef(errs, `${prefix}.$ref`, s.$ref);
     if (!s.$ref.startsWith("#") && !referenceIsAbsolute(s.$ref)) {
       errs.push(`${prefix}.$ref: "${s.$ref}" must be a same-document fragment or an absolute URI, not a relative reference (OBI-D-05)`);
+    } else if (s.$ref.startsWith("#") && s.$ref !== "#" && !s.$ref.startsWith("#/")) {
+      errs.push(`${prefix}.$ref: "${s.$ref}" is a plain-name fragment; a same-document schema $ref is a JSON Pointer fragment (bare # or #/...), and the schemas map is the document's named-schema mechanism (OBI-D-05)`);
     }
   }
   if (typeof s.$id === "string" && !referenceIsAbsolute(s.$id)) {
