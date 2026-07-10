@@ -19,9 +19,27 @@ export const SEMVER_RE =
  * OG-T-02: refuses a graph declaring a format version this implementation
  * does not support. Returns an error message, or null when supported.
  */
+// Keyword-shape tables for the OG-V-18 walk: recursion follows JSON Schema
+// 2020-12 keyword shapes so property NAMES under `properties`/`$defs`/etc.
+// are schema content, never treated as keywords (the same discipline as the
+// core SDK's schema walk).
+const EMBEDDED_MAP_KEYWORDS = new Set([
+  "properties", "patternProperties", "$defs", "definitions", "dependentSchemas",
+]);
+const EMBEDDED_SINGLE_KEYWORDS = new Set([
+  "items", "additionalItems", "unevaluatedItems", "contains",
+  "additionalProperties", "unevaluatedProperties", "propertyNames", "not",
+  "if", "then", "else", "contentSchema",
+]);
+const EMBEDDED_ARRAY_KEYWORDS = new Set(["prefixItems", "allOf", "anyOf", "oneOf"]);
+
+const isObj = (v: unknown): v is Record<string, unknown> =>
+  typeof v === "object" && v !== null && !Array.isArray(v);
+
 /**
  * OG-V-18 on one embedded schema object: $schema, when present, equals the
- * 2020-12 dialect URI, and $vocabulary appears nowhere within the tree.
+ * 2020-12 dialect URI, and $vocabulary appears at no schema position within
+ * the tree. Recursion is keyword-shape-aware: only schema positions walk.
  */
 function validateEmbeddedSchema(
   report: (message: string) => void,
@@ -36,14 +54,16 @@ function validateEmbeddedSchema(
     report(`${prefix}: $vocabulary is forbidden in embedded schemas (OG-V-18)`);
   }
   for (const [k, v] of Object.entries(s)) {
-    if (Array.isArray(v)) {
+    if (EMBEDDED_MAP_KEYWORDS.has(k) && isObj(v)) {
+      for (const [mk, mv] of Object.entries(v)) {
+        if (isObj(mv)) validateEmbeddedSchema(report, `${prefix}.${k}.${mk}`, mv);
+      }
+    } else if (EMBEDDED_SINGLE_KEYWORDS.has(k) && isObj(v)) {
+      validateEmbeddedSchema(report, `${prefix}.${k}`, v);
+    } else if (EMBEDDED_ARRAY_KEYWORDS.has(k) && Array.isArray(v)) {
       v.forEach((item, i) => {
-        if (typeof item === "object" && item !== null && !Array.isArray(item)) {
-          validateEmbeddedSchema(report, `${prefix}.${k}[${i}]`, item as Record<string, unknown>);
-        }
+        if (isObj(item)) validateEmbeddedSchema(report, `${prefix}.${k}[${i}]`, item);
       });
-    } else if (typeof v === "object" && v !== null) {
-      validateEmbeddedSchema(report, `${prefix}.${k}`, v as Record<string, unknown>);
     }
   }
 }
