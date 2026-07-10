@@ -3,8 +3,10 @@ import { isTransformRef } from "./types.js";
 import {
   isValidSemver,
   isHigherMajorOrPre1MinorThanMaxTested,
+  isLowerThanMinSupported,
   isUnsupportedPrerelease,
   MAX_TESTED_VERSION,
+  MIN_SUPPORTED_VERSION,
 } from "./version.js";
 import { ValidationError } from "./errors.js";
 import { validateAgainstOBISchema, validateExamplesAgainstOpSchemas } from "./schema-validation.js";
@@ -70,9 +72,11 @@ const URI_REF_ALLOWED = (() => {
  * Throws {@link ValidationError} if problems are found.
  *
  * Unconditionally enforces OBI-D-12 (openbindings field is a valid SemVer
- * 2.0.0 string) and OBI-T-04 (refuse to load when the document's major
- * version is higher than this SDK's MAX_TESTED_VERSION, or — while
- * MAX_TESTED_VERSION is pre-1.0 — when its minor is higher).
+ * 2.0.0 string) and OBI-T-04 (refuse versions outside the supported range in
+ * EITHER direction: a higher major — or, pre-1.0, a higher minor — than
+ * MAX_TESTED_VERSION, and likewise anything below MIN_SUPPORTED_VERSION;
+ * processing a document under the wrong version's rules misreads it both
+ * ways).
  */
 export function validateInterface(
   iface: OBInterface,
@@ -91,6 +95,8 @@ export function validateInterface(
     try {
       if (isHigherMajorOrPre1MinorThanMaxTested(ver)) {
         errs.push(`openbindings: "${ver}" exceeds this SDK's MaxTestedVersion "${MAX_TESTED_VERSION}" (OBI-T-04)`);
+      } else if (isLowerThanMinSupported(ver)) {
+        errs.push(`openbindings: "${ver}" is below this SDK's MinSupportedVersion "${MIN_SUPPORTED_VERSION}" (OBI-T-04)`);
       } else if (isUnsupportedPrerelease(ver)) {
         errs.push(`openbindings: "${ver}" is a pre-release this SDK does not declare support for (OBI-T-04)`);
       }
@@ -194,7 +200,7 @@ export function validateInterface(
     if (hasLoc) {
       validateURIRef(errs, `sources["${k}"].location`, src.location!);
       if (!referenceIsAbsolute(src.location!)) {
-        errs.push(`sources["${k}"].location: "${src.location}" must be an absolute URI or a format-defined absolute address, not a relative reference (OBI-D-05)`);
+        errs.push(`sources["${k}"].location: "${src.location}" must be an absolute URI or a format-defined absolute address, not a relative reference (OBI-D-05); a local artifact can be embedded as the source's content instead (a file:// URL is machine-coupled and resolves only on the authoring machine)`);
       }
     }
     if (opts.rejectUnknownTypedFields) {

@@ -1,4 +1,5 @@
 import type { ContextRequiredDetails } from "./invocation.js";
+import { REQUIREMENT_FIELDS } from "./invocation.js";
 import type { ContextResolver } from "./invokers.js";
 
 // ---------------------------------------------------------------------------
@@ -11,6 +12,21 @@ import type { ContextResolver } from "./invokers.js";
  * Values are opaque context records — credentials, headers, cookies,
  * environment, metadata — using well-known field names for cross-invoker
  * interoperability.
+ *
+ * The well-known credential fields, by the requirement family they satisfy:
+ *
+ * ```text
+ * auth.bearer  →  "bearerToken"
+ * auth.apiKey  →  "apiKey"
+ * auth.basic   →  "basic" (a { username, password } object)
+ * auth.oauth2  →  "accessToken" (plus "refreshToken", "clientSecret")
+ * ```
+ *
+ * so satisfying a bearer challenge for an origin is one call:
+ *
+ * ```ts
+ * await store.set(normalizeContextKey(target), { bearerToken: token });
+ * ```
  *
  * The SDK stores and retrieves context but never inspects its contents.
  * Setting null removes the entry (the published contract pins
@@ -245,17 +261,6 @@ export function normalizeEndpoint(url: string): string {
 // ---------------------------------------------------------------------------
 
 /**
- * Maps standard requirement families (binding-invoker role) to the
- * well-known context field that satisfies them (context-store role).
- */
-const REQUIREMENT_FIELDS: Record<string, string> = {
-  "auth.bearer": "bearerToken",
-  "auth.apiKey": "apiKey",
-  "auth.basic": "basic",
-  "auth.oauth2": "accessToken",
-};
-
-/**
  * True when the stored context can satisfy every requirement of at least one
  * alternative. An alternative with no requirements never satisfies (the
  * binding-invoker role requires at least one requirement per alternative;
@@ -347,6 +352,12 @@ export function scopeContext(
  * surfaces to the caller unchanged. A CONTEXT_REQUIRED challenge is a scope,
  * not a hint: only the satisfied alternative's credentials plus non-secret
  * config are returned, never other stored credentials.
+ *
+ * A stored entry that does NOT satisfy the challenge (wrong field name, empty
+ * value) is a decline like any other: the challenge surfaces, and the
+ * {@link InvocationError} message names the requirement family and the context
+ * field that would satisfy it — check the stored entry's keys against that
+ * field name.
  *
  * Apps that resolve interactively (prompt, browser redirect, keychain)
  * supply their own resolver and MAY persist what they obtain for

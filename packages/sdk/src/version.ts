@@ -46,6 +46,29 @@ export function isHigherMajorOrPre1MinorThanMaxTested(v: string): boolean {
  * release, so against a non-prerelease MAX_TESTED_VERSION no prerelease is in
  * range. Non-prerelease versions and build metadata are never flagged.
  */
+/**
+ * Reports whether v falls below the SDK's MIN_SUPPORTED_VERSION in the sense
+ * OBI-T-04 mandates refusal — the downward half of the rule: a version
+ * outside the supported range in either direction is refused rather than
+ * processed under the wrong rules (pre-1.0 minors may change field semantics
+ * both ways). Mirrors the upward rule's granularity: lower major always
+ * refuses; a lower minor refuses only while the floor is pre-1.0 (post-1.0
+ * minors are additive, so an older minor within a supported major reads
+ * safely). Patch is never a refusal trigger.
+ */
+export function isLowerThanMinSupported(v: string): boolean {
+  const parsed = parseSemverStrict(v);
+  if (!parsed) {
+    throw new Error(`invalid semver: ${JSON.stringify(v)}`);
+  }
+  const min = parseSemverStrict(MIN_SUPPORTED_VERSION)!;
+  if (parsed.major < min.major) return true;
+  if (min.major === 0 && parsed.major === 0 && parsed.minor < min.minor) {
+    return true;
+  }
+  return false;
+}
+
 export function isUnsupportedPrerelease(v: string): boolean {
   const parsed = parseSemverStrict(v);
   if (!parsed || parsed.preRelease.length === 0) return false;

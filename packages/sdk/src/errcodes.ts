@@ -139,6 +139,47 @@ export const ERR_OPERATION_GRAPH_EXIT = "ERR_OPERATION_GRAPH_EXIT";
 export const ERR_UNSUPPORTED_FORMAT_VERSION = "ERR_UNSUPPORTED_FORMAT_VERSION";
 
 /**
+ * The union of every canonical code an invocation handle can carry, derived
+ * from the constants above so the two never drift. A consumer switching on
+ * {@link InvocationError.code} gets exhaustive autocomplete for these. The
+ * `code` field itself is typed `InvocationErrorCode | (string & {})`: the
+ * `(string & {})` arm admits third-party invoker codes without collapsing the
+ * literal suggestions, so known codes still autocomplete while unknown ones
+ * still type-check.
+ */
+export type InvocationErrorCode =
+  | typeof ERR_CANCELLED
+  | typeof ERR_ALREADY_CONSUMED
+  | typeof ERR_EXPECTED_SINGLE
+  | typeof ERR_INPUT_CLOSED
+  | typeof ERR_INVOCATION_CLOSED
+  | typeof ERR_TOO_MANY_INPUTS
+  | typeof ERR_MISSING_INPUT
+  | typeof ERR_PROTOCOL
+  | typeof ERR_TRANSPORT_CLOSED
+  | typeof CONTEXT_REQUIRED
+  | typeof ERR_OPERATION_NOT_FOUND
+  | typeof ERR_UNKNOWN_SOURCE
+  | typeof ERR_AUTH_REQUIRED
+  | typeof ERR_PERMISSION_DENIED
+  | typeof ERR_INVALID_REF
+  | typeof ERR_REF_NOT_FOUND
+  | typeof ERR_SOURCE_LOAD_FAILED
+  | typeof ERR_SOURCE_CONFIG_ERROR
+  | typeof ERR_CONNECT_FAILED
+  | typeof ERR_EXECUTION_FAILED
+  | typeof ERR_RESPONSE_ERROR
+  | typeof ERR_STREAM_ERROR
+  | typeof ERR_TIMEOUT
+  | typeof ERR_BINDING_NOT_FOUND
+  | typeof ERR_TRANSFORM_ERROR
+  | typeof ERR_VALIDATION_FAILED
+  | typeof ERR_RUNTIME
+  | typeof ERR_EVENT_LIMIT_EXCEEDED
+  | typeof ERR_OPERATION_GRAPH_EXIT
+  | typeof ERR_UNSUPPORTED_FORMAT_VERSION;
+
+/**
  * Maps an HTTP status code to a standard error code.
  * Shared utility for format invokers that handle HTTP responses.
  */

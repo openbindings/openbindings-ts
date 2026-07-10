@@ -98,7 +98,11 @@ export async function runBinding(
   // before any request is dispatched.
   const details = requiredContext(doc, op, args.context, baseURL);
   if (details) {
-    inv.fireError(contextRequiredError(requirementSummary(details), details));
+    // Prose only; the SDK's InvocationError appends the requirement facts
+    // (target + satisfying context fields), matching the Go format.
+    inv.fireError(
+      contextRequiredError("OpenAPI operation requires authentication context", details),
+    );
     return;
   }
 
@@ -536,13 +540,6 @@ function absolutize(url: string, baseURL: string): string {
   } catch {
     return url;
   }
-}
-
-function requirementSummary(details: ContextRequiredDetails): string {
-  const types = [
-    ...new Set(details.alternatives.flatMap((a) => a.requirements.map((r) => r.type))),
-  ];
-  return `${types.join(" or ")} required`;
 }
 
 // ---------------------------------------------------------------------------

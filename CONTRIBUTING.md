@@ -14,15 +14,30 @@ All changes land on `main` via squash-merged PRs. No direct commits to `main`.
 
 ```bash
 pnpm install
-pnpm -r build
-pnpm test
-pnpm lint   # per-package tsc --noEmit across the workspace
+pnpm -r build   # builds every package (the SDK first; formats depend on it)
+pnpm test       # runs the whole workspace's vitest suites, all packages at once
+pnpm lint       # per-package tsc --noEmit across the workspace
 ```
+
+`pnpm test` (root `vitest run`) discovers every `*.test.ts` across all packages,
+so it is the full suite, not just the SDK's. To exercise one package, use
+`pnpm --filter @openbindings/<pkg> test`.
+
+## Format parity is a non-goal
+
+The Go and TS **core** SDKs are behaviorally identical (same types, error
+codes, invocation semantics). **Format coverage is not paritized.** The TS
+workspace ships no gRPC, Connect, or CLI/usage invoker by design: a browser or
+Worker consumer delegates protocol work to a running `ob start` rather than
+reimplementing every wire protocol in the page. Do not port those formats to
+TS; the real gap worth closing is a single frame-protocol client that delegates
+to `ob`. See `ob-pj/.claude/release-readiness.md` for the named, deliberate
+non-mirrors.
 
 ## Releasing
 
 This is a pnpm workspace monorepo. All packages currently version in lockstep
-(single `vX.Y.Z` tag covers all six packages).
+(a single `vX.Y.Z` tag covers every package under `packages/`).
 
 ```bash
 # From the workspace root, bump each package.json to the new version, then:

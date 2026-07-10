@@ -354,6 +354,29 @@ describe("OperationInvoker wiring", () => {
       .toThrow(BindingNotFoundError);
   });
 
+  it("names the missing format in BindingNotFoundError when a binding's format has no registered invoker", () => {
+    // The operation HAS a binding, but its source format has no registered
+    // invoker. The error must send the reader to their OperationInvoker
+    // construction, not to auditing the OBI.
+    const iface: OBInterface = {
+      openbindings: "0.2.0",
+      operations: { doThing: {} },
+      sources: { svc: { format: "grpc@1.0" } },
+      bindings: { "doThing.svc": { operation: "doThing", source: "svc", ref: "x" } },
+    };
+    let msg = "";
+    try {
+      defaultBindingSelector(iface, "doThing", new Set(["openapi@3.1.0"]));
+      throw new Error("expected BindingNotFoundError");
+    } catch (e) {
+      expect(e).toBeInstanceOf(BindingNotFoundError);
+      msg = (e as Error).message;
+    }
+    expect(msg).toContain('"doThing.svc" requires format grpc@1.0');
+    expect(msg).toContain("registered invoker formats: [openapi@3.1.0]");
+    expect(msg).toContain("OperationInvoker constructor");
+  });
+
   it("throws UnknownSourceError synchronously when the binding's source is missing", () => {
     const iface = testInterface();
     delete iface.sources!["mock"];

@@ -5,7 +5,7 @@ import { ValidationError } from "./index.js";
 
 function minimalInterface(): OBInterface {
   return {
-    openbindings: "0.1.0",
+    openbindings: "0.2.0",
     operations: {
       getUser: {
         input: { type: "object" },
@@ -199,7 +199,7 @@ describe("validateInterface example validation (OBI-D-11)", () => {
       },
     };
     return {
-      openbindings: "0.1.0",
+      openbindings: "0.2.0",
       operations: { createUser: op as any },
       sources: {
         main: { format: "openapi@3.1", location: "https://example.com/api.json" },
@@ -252,7 +252,7 @@ describe("validateInterface example validation (OBI-D-11)", () => {
 
   it("skips operations without examples gracefully", () => {
     const iface: OBInterface = {
-      openbindings: "0.1.0",
+      openbindings: "0.2.0",
       operations: {
         noExamples: {
           input: { type: "object" },
@@ -338,5 +338,15 @@ describe("validateInterface example validation edge cases (OBI-D-11)", () => {
       },
     };
     expect(() => validateInterface(iface)).toThrow(/OBI-D-11/);
+  });
+});
+
+// OBI-T-04's refusal runs downward too: a version below the SDK's minimum is
+// refused rather than processed under the wrong rules (pre-1.0 minors may
+// change field semantics in either direction). Mirrors the Go SDK's message.
+describe("OBI-T-04 downward refusal", () => {
+  it("refuses a document below MIN_SUPPORTED_VERSION", () => {
+    expect(() => validateInterface({ openbindings: "0.1.0", operations: {} }))
+      .toThrowError(/below this SDK's MinSupportedVersion "0\.2\.0" \(OBI-T-04\)/);
   });
 });

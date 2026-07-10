@@ -24,17 +24,27 @@ import {
   ERR_INPUT_CLOSED,
   ERR_INVOCATION_CLOSED,
 } from "./errcodes.js";
+import type { InvocationErrorCode } from "./errcodes.js";
 
 /**
  * The structured error type for all terminal invocation failures. A class
  * (not a plain shape) so it carries a stack trace and supports `instanceof`.
  */
 export class InvocationError extends Error {
-  readonly code: string;
+  readonly code: InvocationErrorCode | (string & {});
   readonly details?: unknown;
 
-  constructor(code: string, message: string, details?: unknown) {
-    super(message);
+  constructor(code: InvocationErrorCode | (string & {}), message: string, details?: unknown) {
+    // A CONTEXT_REQUIRED challenge is actionable only through its details; an
+    // error string that hides the target and the requirement families strands
+    // whoever sees it in a log. Formats write the prose, the challenge writes
+    // the facts (mirrors the Go SDK's InvocationError.Error()).
+    let rendered = message || code;
+    if (code === CONTEXT_REQUIRED) {
+      const summary = contextRequirementSummary(details);
+      if (summary) rendered = `${rendered} (${summary})`;
+    }
+    super(rendered);
     this.name = "InvocationError";
     this.code = code;
     if (details !== undefined) this.details = details;
@@ -107,6 +117,44 @@ export function isContextRequired(
     typeof d.target === "string" &&
     Array.isArray(d.alternatives)
   );
+}
+
+/**
+ * Maps standard requirement families (binding-invoker role) to the well-known
+ * context field that satisfies them (context-store role). The context store
+ * (context.ts) resolves satisfaction against this same map.
+ */
+export const REQUIREMENT_FIELDS: Record<string, string> = {
+  "auth.bearer": "bearerToken",
+  "auth.apiKey": "apiKey",
+  "auth.basic": "basic",
+  "auth.oauth2": "accessToken",
+};
+
+/**
+ * Renders `target: <t>; satisfied by: auth.bearer (context field "bearerToken"),
+ * or ...` for a CONTEXT_REQUIRED challenge's alternatives. Returns "" when
+ * `details` is not a usable ContextRequiredDetails. Mirrors the Go SDK's
+ * contextRequirementSummary; used by InvocationError to append the facts.
+ */
+export function contextRequirementSummary(details: unknown): string {
+  const d = details as ContextRequiredDetails | undefined;
+  if (!d || typeof d !== "object" || !Array.isArray(d.alternatives)) return "";
+  const alts: string[] = [];
+  for (const alt of d.alternatives) {
+    const reqs: string[] = [];
+    for (const req of alt.requirements ?? []) {
+      const field = REQUIREMENT_FIELDS[req.type];
+      reqs.push(field ? `${req.type} (context field "${field}")` : req.type);
+    }
+    if (reqs.length > 0) alts.push(reqs.join(" + "));
+  }
+  const target = typeof d.target === "string" ? d.target : "";
+  if (target === "" && alts.length === 0) return "";
+  const parts: string[] = [];
+  if (target !== "") parts.push(`target: ${target}`);
+  if (alts.length > 0) parts.push(`satisfied by: ${alts.join(", or ")}`);
+  return parts.join("; ");
 }
 
 // ---------------------------------------------------------------------------

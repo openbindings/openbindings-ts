@@ -604,7 +604,7 @@ export class OperationInvoker {
                 msg +=
                   " — the synthesized schema still declares the floor's string; elect the real output schema (`ob operation output-schema`)";
               } else if (tier !== "") {
-                msg += ` (output decoded by the ${tier} tier; a wrong decode lane yields this class of mismatch — the x-ob-decode trailer stamp carries the lane)`;
+                msg += ` (the response was decoded as ${describeDecodeTier(tier)}; if the service actually returned a different shape — say JSON without a Content-Type header — this mismatch is the symptom, and the fix is the response's declared type or a custom OutputDecoder)`;
               }
               surface = new InvocationError(ERR_VALIDATION_FAILED, msg, { failures: r.failures });
               break;
@@ -743,6 +743,22 @@ function asInvocationError(err: unknown): InvocationError {
   );
 }
 
+/**
+ * Renders a decode tier for a first-touch error message: the seam's internal
+ * names ("builtin", "hook") become plain descriptions. Mirrors the Go SDK's
+ * describeDecodeTier.
+ */
+function describeDecodeTier(tier: string): string {
+  switch (tier) {
+    case "builtin":
+      return "the format's default rule";
+    case "hook":
+      return "your custom OutputDecoder";
+    default:
+      return tier;
+  }
+}
+
 /** Converts wiring errors (no invoker for format) raised mid-run into terminal invocation errors. */
 function wireError(err: unknown): InvocationError {
   if (err instanceof InvocationError) return err;
@@ -772,6 +788,12 @@ export function defaultBindingSelector(
   let best: BindingEntry | undefined;
   let bestPref = -Infinity;
   let bestDeprecated = true;
+  // Bindings that matched the operation but were skipped because no registered
+  // invoker handles their source format. The distinction is load-bearing for
+  // the error: "the document has no binding" sends the reader to audit the
+  // OBI; "the binding needs a format you didn't register" sends them to their
+  // own OperationInvoker construction.
+  const formatSkipped = new Map<string, string>(); // binding key -> required format
 
   for (const [k, b] of Object.entries(iface.bindings)) {
     if (b.operation !== opKey) continue;
@@ -779,7 +801,10 @@ export function defaultBindingSelector(
     const source = iface.sources?.[b.source];
 
     // Skip bindings whose source format the invoker can't handle.
-    if (availableFormats && source && !formatMatches(source.format, availableFormats)) continue;
+    if (availableFormats && source && !formatMatches(source.format, availableFormats)) {
+      formatSkipped.set(k, source.format);
+      continue;
+    }
 
     // Binding preference overrides source preference; absent on both is the
     // neutral baseline of 0.
@@ -801,7 +826,20 @@ export function defaultBindingSelector(
     }
   }
 
-  if (!best || !bestKey) throw new BindingNotFoundError(opKey);
+  if (!best || !bestKey) {
+    if (formatSkipped.size > 0) {
+      const needs = [...formatSkipped.keys()]
+        .sort()
+        .map((k) => `"${k}" requires format ${formatSkipped.get(k)}`)
+        .join(", ");
+      const registered = availableFormats ? [...availableFormats].sort().join(", ") : "";
+      throw new BindingNotFoundError(
+        opKey,
+        `binding ${needs}; registered invoker formats: [${registered}] (did you register the format's invoker in the OperationInvoker constructor?)`,
+      );
+    }
+    throw new BindingNotFoundError(opKey);
+  }
   return { key: bestKey, binding: best };
 }
 

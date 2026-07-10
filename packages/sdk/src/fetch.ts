@@ -43,9 +43,17 @@ export async function fetchInterface(
   const signal = opts?.signal;
   const synthesizer = opts?.synthesizers?.length ? combineSynthesizers(...opts.synthesizers) : null;
 
+  // The resolution chain has up to three steps (direct OBI, well-known
+  // discovery, per-format synthesis). On total failure the caller gets the
+  // WHOLE trail: reporting only the last step's raw error hands a user who
+  // pointed at an API's HTML root a third-party parse error with no statement
+  // of what was tried or how to fix it. Mirrors the Go SDK.
+  const trail: string[] = [];
+
   if (isHttpUrl(url)) {
     const direct = await tryFetchOBI(fetchFn, url, signal);
-    if (direct) return { iface: direct, synthesized: false };
+    if (direct.iface) return { iface: direct.iface, synthesized: false };
+    trail.push(`direct fetch: ${direct.result}`);
 
     if (!shouldSkipWellKnownDiscovery(url)) {
       const wellKnown = await tryFetchOBI(
@@ -53,29 +61,43 @@ export async function fetchInterface(
         url.replace(/\/+$/, "") + WELL_KNOWN_PATH,
         signal,
       );
-      if (wellKnown) return { iface: wellKnown, synthesized: false };
+      if (wellKnown.iface) return { iface: wellKnown.iface, synthesized: false };
+      trail.push(`${WELL_KNOWN_PATH}: ${wellKnown.result}`);
     }
   }
 
   if (!synthesizer) {
-    throw new Error(`No OBI available at ${url} and no synthesizers supplied for synthesis`);
+    if (trail.length > 0) {
+      throw new Error(
+        `no OBI available at ${sanitizeUrl(url)} (${trail.join("; ")}) and no synthesizers supplied for synthesis`,
+      );
+    }
+    throw new Error(
+      `no OBI available at ${sanitizeUrl(url)} and no synthesizers supplied for synthesis`,
+    );
   }
 
-  const formats = synthesizer.formats();
-  let lastError: unknown;
-  for (const info of formats) {
+  for (const info of synthesizer.formats()) {
+    let iface: OBInterface;
     try {
-      const iface = await synthesizer.synthesizeInterface(
+      iface = await synthesizer.synthesizeInterface(
         { sources: [{ format: info.token, location: url }] },
         { signal },
       );
-      return { iface, synthesized: true };
     } catch (e) {
-      lastError = e;
+      trail.push(`synthesize as ${info.token}: ${errText(e)}`);
+      continue;
     }
+    if (iface && iface.operations && Object.keys(iface.operations).length > 0) {
+      return { iface, synthesized: true };
+    }
+    trail.push(`synthesize as ${info.token}: no operations derived`);
   }
 
-  throw lastError ?? new Error(`No synthesizer could synthesize an interface from ${url}`);
+  throw new Error(
+    `could not resolve an OBI from ${sanitizeUrl(url)}:\n  ${trail.join("\n  ")}\n` +
+      `hint: if the target serves a raw spec (OpenAPI, AsyncAPI, ...), pass the spec document's own URL`,
+  );
 }
 
 function defaultFetch(): typeof globalThis.fetch {
@@ -125,25 +147,57 @@ async function readCapped(resp: Response): Promise<string> {
   return new TextDecoder().decode(buf);
 }
 
+/**
+ * One step in the resolution chain. `iface` is set only on a hit; `result` is
+ * a one-line summary for the failure trail: the error, an `HTTP <status>`, "not
+ * an OBI" (reachable JSON that is not an OBI document), or "ok".
+ */
+interface FetchStep {
+  iface: OBInterface | null;
+  result: string;
+}
+
 async function tryFetchOBI(
   fetchFn: typeof globalThis.fetch,
   url: string,
   signal?: AbortSignal,
-): Promise<OBInterface | null> {
-  const resp = await fetchFn(url, {
-    signal,
-    headers: { Accept: "application/vnd.openbindings+json, application/json" },
-  });
-  if (!resp.ok) return null;
-  const text = await readCapped(resp);
+): Promise<FetchStep> {
+  let resp: Response;
+  try {
+    resp = await fetchFn(url, {
+      signal,
+      headers: { Accept: "application/vnd.openbindings+json, application/json" },
+    });
+  } catch (e) {
+    return { iface: null, result: errText(e) };
+  }
+  if (!resp.ok) return { iface: null, result: `HTTP ${resp.status}` };
+  let text: string;
+  try {
+    text = await readCapped(resp);
+  } catch (e) {
+    return { iface: null, result: errText(e) };
+  }
   let body: unknown;
   try {
     body = JSON.parse(text);
-  } catch {
-    return null;
+  } catch (e) {
+    // A parse error is a real failure, not "not an OBI" (which is reserved
+    // for reachable JSON that simply isn't an OBI document) — mirrors Go.
+    return { iface: null, result: errText(e) };
   }
-  if (isOBInterface(body)) return parseDocument(text);
-  return null;
+  if (isOBInterface(body)) return { iface: parseDocument(text), result: "ok" };
+  return { iface: null, result: "not an OBI" };
+}
+
+function errText(e: unknown): string {
+  return e instanceof Error ? e.message : String(e);
+}
+
+/** Strips a query string for user-facing messages (mirrors Go's sanitizeURL). */
+function sanitizeUrl(u: string): string {
+  const idx = u.indexOf("?");
+  return idx >= 0 ? u.slice(0, idx) : u;
 }
 
 function shouldSkipWellKnownDiscovery(url: string): boolean {

@@ -454,3 +454,29 @@ describe("bidi & drive", () => {
     await expect(inv.closed).rejects.toMatchObject({ code: CONTEXT_REQUIRED });
   });
 });
+
+describe("InvocationError CONTEXT_REQUIRED rendering", () => {
+  it("appends the target and satisfying context field to the message (mirrors Go Error())", () => {
+    const err = new InvocationError(CONTEXT_REQUIRED, "OpenAPI operation requires authentication context", {
+      target: "https://api.example.com",
+      alternatives: [
+        { requirements: [{ type: "auth.bearer" }] },
+        { requirements: [{ type: "auth.apiKey" }] },
+      ],
+    });
+    expect(err.message).toBe(
+      'OpenAPI operation requires authentication context (target: https://api.example.com; ' +
+        'satisfied by: auth.bearer (context field "bearerToken"), or auth.apiKey (context field "apiKey"))',
+    );
+  });
+
+  it("leaves non-CONTEXT_REQUIRED messages untouched", () => {
+    const err = new InvocationError(ERR_VALIDATION_FAILED, "output validation failed", { failures: [] });
+    expect(err.message).toBe("output validation failed");
+  });
+
+  it("does not append when details carry no target and no alternatives", () => {
+    const err = new InvocationError(CONTEXT_REQUIRED, "context required", { target: "", alternatives: [] });
+    expect(err.message).toBe("context required");
+  });
+});

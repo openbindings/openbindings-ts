@@ -200,6 +200,7 @@ export {
   ERR_VALIDATION_FAILED,
   httpErrorCode,
 } from "./errcodes.js";
+export type { InvocationErrorCode } from "./errcodes.js";
 
 export { dereference } from "./deref.js";
 

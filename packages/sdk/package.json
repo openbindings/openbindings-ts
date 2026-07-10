@@ -28,7 +28,6 @@
     "api",
     "sdk",
     "openapi",
-    "grpc",
     "mcp"
   ],
   "license": "Apache-2.0",

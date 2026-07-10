@@ -50,6 +50,49 @@ For compile-time-typed operations, run `ob codegen <obi> --lang typescript` to g
 
 See the [monorepo README](https://github.com/openbindings/openbindings-ts#readme) for full documentation.
 
+## Results, errors, and idioms
+
+Outputs stream as bare values; a terminal failure rejects the output iteration (and `call.closed`) with an `InvocationError`:
+
+```typescript
+import { InvocationError, ERR_AUTH_REQUIRED, isContextRequired } from "@openbindings/sdk";
+
+try {
+  const call = invoker.invoke(iface, operationSignature("listItems"));
+  await call.write({ limit: 10 });
+  for await (const item of call.outputs) console.log(item);
+} catch (err) {
+  if (isContextRequired(err)) {
+    // A negotiation signal, not a failure: err.details names the target and
+    // which context fields satisfy it, and err.message already carries that
+    // summary. Resolve context and retry.
+    console.error(err.message);
+  } else if (err instanceof InvocationError && err.code === ERR_AUTH_REQUIRED) {
+    // The service rejected the credentials — refresh and retry.
+  } else {
+    throw err;
+  }
+}
+```
+
+`InvocationError.code` is typed `InvocationErrorCode | (string & {})`: the canonical codes autocomplete while a third-party invoker's own code still type-checks.
+
+Two idioms worth knowing:
+
+- **No-input operations** — call `close()`, or nothing at all (a binding that needs no input dispatches without one).
+- **Operations that require input** — forgetting to `write()` parks the binding until cancellation (`cancel()` or an aborted `AbortSignal`), whose terminal error diagnoses the never-written input. Calling `close()` with no prior `write()` fails fast with `ERR_MISSING_INPUT` naming the missing parameter.
+
+Client-streaming and bidirectional callers own `close()` (and drive `write()` and `outputs` concurrently); `cancel()` tears the invocation down. `close()` is idempotent and never rejects.
+
+## Running in the browser
+
+The core SDK is isomorphic (standard `fetch`, `AbortSignal`, `structuredClone` — no Node built-ins). But the format packages that reach a service — gRPC, Connect, the CLI/usage lane — are not portable to the browser, and a same-origin policy blocks a page from calling most third-party APIs directly. So the browser story is delegation, not native invocation:
+
+- Run `ob start` (the OpenBindings CLI) as a local companion. It exposes a served OBI whose bindings the browser invokes over HTTP against `localhost`, and `ob` performs the real protocol work (gRPC, Connect, MCP, credentials) out of the page.
+- For OpenAPI/AsyncAPI targets that send permissive CORS headers, `@openbindings/openapi` and `@openbindings/asyncapi` invoke directly from the page; inject a `fetch` via `OperationInvokerOptions` if you need to route through a proxy for the ones that do not.
+
+This is deliberate: format parity with the Go SDK is a non-goal (see [CONTRIBUTING](../../CONTRIBUTING.md)). A browser consumer delegates to `ob` rather than reimplementing every wire protocol in the page.
+
 ## Consumer configuration (hooks)
 
 Where a binding format's specification doesn't answer a wire question, the consumer configures the answer — the SDK never guesses from payload bytes. Three hook axes cover the three wire questions:
@@ -58,7 +101,7 @@ Where a binding format's specification doesn't answer a wire question, the consu
 - **Classify** (`resultClassifier`) — which outcomes are success when the format doesn't say (e.g. diff(1)-style exit codes).
 - **Route** (`fieldRouter`) — which channel an input field rides; included for cross-SDK parity (no TS-native format consults it today).
 
-A hook declines by returning the `USE_DEFAULT` sentinel, falling through the chain: per-invocation (`InvokeOptions`) → invoker-level (`OperationInvokerOptions`) → the format's content-independent built-in assumption. Formats whose specifications answer their own wire questions (OpenAPI) never consult hooks; the configuration burden is the honest signal of a format's completeness. See the [invocation-configuration guide](https://openbindings.com/spec/invocation-configuration) for the full model.
+A hook declines by returning the `USE_DEFAULT` sentinel, falling through the chain: per-invocation (`InvokeOptions`) → invoker-level (`OperationInvokerOptions`) → the format's content-independent built-in assumption. Formats over HTTP (OpenAPI, AsyncAPI) consult the seam because the transport leaves decode and success genuinely open — a `Content-Type`-less body, a 200 that wraps an application error — and ship decidable built-ins a hook may override. Self-describing formats (gRPC, MCP, Connect, GraphQL) never consult: message type and status determine everything, so there is nothing to override. The configuration burden is the honest signal of a format's completeness. See the [invocation-configuration guide](https://openbindings.com/spec/invocation-configuration) for the full model.
 
 ## Transforms (invoking tools only)
 
