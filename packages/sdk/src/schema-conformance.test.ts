@@ -123,6 +123,29 @@ describe("boundary validation conformance", () => {
     expect(() => compileExampleSchema(badAnchor, undefined)).toThrow("unresolvable $ref");
   });
 
+  // OBI-D-05's carve-out: a $dynamicRef/$dynamicAnchor pair confined inside
+  // a schema declaring its own $id is that resource's internal business
+  // (full 2020-12 recursive-extension semantics apply within it). The
+  // invocation-boundary compiler (assertFullyResolvable) must not treat
+  // $dynamicRef as a resolvable-reference it needs to chase — it does not
+  // participate in same-document reference resolution (mirrors OBI-D-16's
+  // note and the Go SDK's TestValidateAgainstSchema_DynamicPairInsideEmbeddedID).
+  it("does not choke on a legal $dynamicRef/$dynamicAnchor pair inside an embedded $id resource", () => {
+    const defs = {
+      Tree: {
+        $id: "https://example.com/tree.schema.json",
+        $dynamicAnchor: "node",
+        type: "object",
+        properties: {
+          children: { type: "array", items: { $dynamicRef: "#node" } },
+        },
+      },
+    };
+    const v = compileExampleSchema({ $ref: "#/$defs/Tree" }, defs);
+    expect(v.validate({ children: [{ children: [] }] }).valid).toBe(true);
+    expect(v.validate({ children: [{ children: "nope" }] }).valid).toBe(false);
+  });
+
   it("reports ALL failures with Go's pointer dialect", () => {
     const v = compileExampleSchema(
       { properties: { a: { type: "number" }, b: { type: "number" } } },

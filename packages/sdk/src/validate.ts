@@ -444,7 +444,9 @@ function validateLocation(errs: string[], prefix: string, raw: string): void {
  * Walks a JSON Schema 2020-12 value and applies:
  *   - OBI-D-06: $schema, where present, MUST equal the 2020-12 dialect URI.
  *   - OBI-D-07: $vocabulary keyword forbidden anywhere in any schema.
- *   - OBI-D-05: $ref and $id values MUST be absolute or same-document and well-formed.
+ *   - OBI-D-05: $ref and $id values MUST be absolute or same-document and
+ *     well-formed; $dynamicRef and $dynamicAnchor do not appear at OBI
+ *     positions at all.
  *
  * Recursion follows JSON Schema keyword shapes so that property names under
  * `properties`/`patternProperties`/`$defs`/etc. are not themselves treated
@@ -493,6 +495,18 @@ function walkSchema(errs: string[], prefix: string, schema: unknown, doc?: unkno
   }
   if ("$vocabulary" in s) {
     errs.push(`${prefix}: $vocabulary keyword is forbidden in OBI documents (OBI-D-07)`);
+  }
+  // The dynamic pair does not appear at OBI positions at all: dynamic
+  // resolution follows the runtime dynamic scope rather than the document
+  // (§10 clause 2). Inside a schema declaring its own $id, both are that
+  // resource's internal business — the same scope carve-out as $ref/$anchor.
+  if (!inID) {
+    if ("$dynamicRef" in s) {
+      errs.push(`${prefix}: $dynamicRef does not appear at OBI positions; dynamic resolution follows the runtime dynamic scope rather than the document (OBI-D-05)`);
+    }
+    if ("$dynamicAnchor" in s) {
+      errs.push(`${prefix}: $dynamicAnchor does not appear at OBI positions; it would be a second named-schema mechanism competing with the schemas map, as $anchor would (OBI-D-05)`);
+    }
   }
   if (typeof s.$ref === "string") {
     validateURIRef(errs, `${prefix}.$ref`, s.$ref);

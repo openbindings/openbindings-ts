@@ -122,6 +122,55 @@ describe("validateInterface", () => {
     expect(() => validateInterface(iface)).not.toThrow();
   });
 
+  it("rejects $dynamicRef at an operation output position (OBI-D-05)", () => {
+    // OBI-D-05: the dynamic pair does not appear at OBI positions at all.
+    const iface = minimalInterface();
+    iface.operations.getUser.output = { $dynamicRef: "#node" };
+    expect(() => validateInterface(iface)).toThrow(/\$dynamicRef does not appear at OBI positions.*OBI-D-05/);
+  });
+
+  it("rejects $dynamicAnchor in the schemas map (OBI-D-05)", () => {
+    // OBI-D-05: $dynamicAnchor would be a second named-schema mechanism
+    // competing with the schemas map, exactly as $anchor would.
+    const iface = minimalInterface();
+    iface.schemas = { Task: { $dynamicAnchor: "task", type: "object" } };
+    iface.operations.getUser.output = { $ref: "#/schemas/Task" };
+    expect(() => validateInterface(iface)).toThrow(/\$dynamicAnchor does not appear at OBI positions.*OBI-D-05/);
+  });
+
+  it("permits the dynamic pair inside an embedded $id-declaring schema", () => {
+    // A schema resource declaring its own $id may use the dynamic pair
+    // internally, per the same scope rule as $ref/$anchor — including full
+    // 2020-12 recursive-extension semantics (a sibling $dynamicAnchor plus a
+    // nested $dynamicRef referencing it).
+    const iface = minimalInterface();
+    iface.schemas = {
+      Tree: {
+        $id: "https://example.com/tree.schema.json",
+        $dynamicAnchor: "node",
+        type: "object",
+        properties: {
+          children: { type: "array", items: { $dynamicRef: "#node" } },
+        },
+      },
+    };
+    iface.operations.getUser.output = { $ref: "#/schemas/Tree" };
+    expect(() => validateInterface(iface)).not.toThrow();
+  });
+
+  it("treats a property NAMED $dynamicRef under properties as data, not a keyword", () => {
+    // Keyword-shape-aware, mirroring the same guard already in place for $ref.
+    const iface = minimalInterface();
+    iface.operations.getUser.output = {
+      type: "object",
+      properties: {
+        $dynamicRef: { type: "string" },
+        $dynamicAnchor: { type: "string" },
+      },
+    };
+    expect(() => validateInterface(iface)).not.toThrow();
+  });
+
   it("rejects an unsupported pre-release openbindings version (OBI-T-04)", () => {
     const iface = minimalInterface();
     iface.openbindings = "0.2.0-rc.1";
