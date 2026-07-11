@@ -446,7 +446,9 @@ function validateLocation(errs: string[], prefix: string, raw: string): void {
  *   - OBI-D-07: $vocabulary keyword forbidden anywhere in any schema.
  *   - OBI-D-05: $ref and $id values MUST be absolute or same-document and
  *     well-formed; $dynamicRef and $dynamicAnchor do not appear at OBI
- *     positions at all.
+ *     positions at all. A nested $id inside a schema that already declares
+ *     one is resource-internal and exempt from the absoluteness check, per
+ *     §10 clause 2.
  *
  * Recursion follows JSON Schema keyword shapes so that property names under
  * `properties`/`patternProperties`/`$defs`/etc. are not themselves treated
@@ -458,6 +460,15 @@ function validateLocation(errs: string[], prefix: string, raw: string): void {
  * OBI-D-16 does not type-check the target.
  */
 function docPointerResolves(doc: unknown, pointer: string): boolean {
+  // The fragment is the pointer's URI-fragment representation (RFC 6901
+  // §6): percent-decode the whole fragment first, then evaluate the
+  // result as a JSON Pointer (§10). Malformed percent-encoding simply
+  // fails to resolve — it is already a D-05 char-screen violation upstream.
+  try {
+    pointer = decodeURIComponent(pointer);
+  } catch {
+    return false;
+  }
   if (pointer === "") return true; // bare # addresses the document root
   if (!pointer.startsWith("/")) return false;
   let cur: unknown = doc;
@@ -482,6 +493,13 @@ function walkSchema(errs: string[], prefix: string, schema: unknown, doc?: unkno
     return;
   }
   const s = schema as Record<string, unknown>;
+
+  // wasInID captures the incoming scope before the mutation below: it
+  // distinguishes an $id at an OBI position (must be absolute, OBI-D-05)
+  // from a nested $id inside a schema that already declares one (resolves
+  // against that resource's base per JSON Schema 2020-12 and MAY be
+  // relative — resource-internal, §10 clause 2).
+  const wasInID = inID;
 
   // A schema that declares its own $id is a distinct schema resource: its
   // $ref (and its subtree's) resolve against that resource's base per §10,
@@ -523,7 +541,7 @@ function walkSchema(errs: string[], prefix: string, schema: unknown, doc?: unkno
       }
     }
   }
-  if (typeof s.$id === "string" && !referenceIsAbsolute(s.$id)) {
+  if (typeof s.$id === "string" && !wasInID && !referenceIsAbsolute(s.$id)) {
     errs.push(`${prefix}.$id: "${s.$id}" must be an absolute URI (OBI-D-05)`);
   }
 

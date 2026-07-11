@@ -122,6 +122,49 @@ describe("validateInterface", () => {
     expect(() => validateInterface(iface)).not.toThrow();
   });
 
+  it("permits a nested relative $id inside an embedded $id-declaring schema", () => {
+    // §10 clause 2 / OBI-D-05: a nested $id inside a schema that already
+    // declares its own $id resolves against that resource's base per JSON
+    // Schema 2020-12 and MAY be relative — resource-internal, the same
+    // scope carve-out as $ref/$anchor/dynamic-pair.
+    const iface = minimalInterface();
+    iface.schemas = {
+      Task: {
+        $id: "https://example.com/task.schema.json",
+        type: "object",
+        $defs: { kind: { $id: "kind.schema.json", type: "string" } },
+      },
+    };
+    iface.operations.getUser.output = { $ref: "#/schemas/Task" };
+    expect(() => validateInterface(iface)).not.toThrow();
+  });
+
+  it("rejects a relative $id at an OBI position (OBI-D-05)", () => {
+    const iface = minimalInterface();
+    iface.schemas = { Task: { $id: "task.schema.json", type: "object" } };
+    iface.operations.getUser.output = { $ref: "#/schemas/Task" };
+    expect(() => validateInterface(iface)).toThrow('$id: "task.schema.json" must be an absolute URI (OBI-D-05)');
+  });
+
+  it("resolves a percent-encoded fragment before RFC 6901 evaluation (OBI-D-16)", () => {
+    // #/schemas/T%61sk addresses the schemas key Task, exactly as
+    // #/schemas/Task does — RFC 6901 §6: decode the fragment first, then
+    // evaluate the result as a JSON Pointer.
+    const iface = minimalInterface();
+    iface.schemas = { Task: { type: "object" } };
+    iface.operations.getUser.output = { $ref: "#/schemas/T%61sk" };
+    expect(() => validateInterface(iface)).not.toThrow();
+  });
+
+  it("rejects a dangling percent-encoded fragment (OBI-D-16)", () => {
+    // Decoding does not weaken referential integrity: a percent-encoded
+    // fragment that decodes to a genuinely-missing location still fails.
+    const iface = minimalInterface();
+    iface.schemas = { Task: { type: "object" } };
+    iface.operations.getUser.output = { $ref: "#/schemas/M%69ssing" };
+    expect(() => validateInterface(iface)).toThrow("does not resolve within the document (OBI-D-16)");
+  });
+
   it("rejects $dynamicRef at an operation output position (OBI-D-05)", () => {
     // OBI-D-05: the dynamic pair does not appear at OBI positions at all.
     const iface = minimalInterface();

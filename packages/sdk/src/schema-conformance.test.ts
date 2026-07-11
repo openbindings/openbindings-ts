@@ -47,6 +47,32 @@ describe("boundary validation conformance", () => {
     ).toThrow("unresolvable $ref");
   });
 
+  // RFC 6901 §6 / §10: the fragment is percent-decoded first, then
+  // evaluated as a JSON Pointer — #/schemas/T%61sk addresses the schemas
+  // key Task end to end (compile-time resolvability AND the underlying
+  // json-schema-library compile backend), exactly as #/schemas/Task does.
+  // json-schema-library (via @sagold/json-pointer) already decodes
+  // per-token when the pointer string carries a literal '#', so no
+  // additional normalization is needed where refs are handed to it — only
+  // the SDK's own static-resolvability walk (resolveFragment) needed the
+  // decode-first fix.
+  it("a percent-encoded same-document fragment resolves before RFC 6901 evaluation", () => {
+    const v = compileExampleSchema(
+      { $ref: "#/schemas/T%61sk" },
+      { Task: { type: "object", required: ["id"], properties: { id: { type: "string" } } } },
+    );
+    expect(v.validate({ id: "x" }).valid).toBe(true);
+    expect(v.validate({}).valid).toBe(false);
+  });
+
+  it("a dangling percent-encoded same-document fragment still refuses at compile", () => {
+    // Decoding does not weaken fail-closed resolvability: a percent-encoded
+    // fragment that decodes to a genuinely-missing location still refuses.
+    expect(() =>
+      compileExampleSchema({ $ref: "#/schemas/M%69ssing" }, { Task: { type: "object" } }),
+    ).toThrow("unresolvable $ref");
+  });
+
   // T-07/T-08's "whole governing schema" is the static closure REACHABLE
   // from the governing root (keyword subschemas + reference targets,
   // transitively). A lexically-present but unreachable entry never

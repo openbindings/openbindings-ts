@@ -433,6 +433,15 @@ function resolveFragment(
   scope: Record<string, unknown>,
   base: string,
 ): RefTarget | typeof NOT_FOUND {
+  // The fragment is the pointer's URI-fragment representation (RFC 6901
+  // §6): percent-decode the whole fragment first, then evaluate the
+  // result as a JSON Pointer (§10). Malformed percent-encoding simply
+  // fails to resolve — it is already a D-05 char-screen violation upstream.
+  try {
+    fragment = decodeURIComponent(fragment);
+  } catch {
+    return NOT_FOUND;
+  }
   if (fragment === "") return { node: scope, scope, base };
   if (fragment.startsWith("/")) {
     let cur: unknown = scope;
