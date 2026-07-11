@@ -18,15 +18,21 @@ import {
   type SourceInspector,
 } from "@openbindings/sdk";
 import type { OpenAPIDocument, OpenAPIOperation } from "./types.js";
-import { FORMAT_TOKEN } from "./constants.js";
+import { DEFAULT_SOURCE_NAME, FORMAT_TOKEN } from "./constants.js";
 import { requiredContext, resolveRequestBaseURL, runBinding } from "./invoke.js";
-import { convertToInterface } from "./synthesize.js";
+import { convertToInterface, deriveOperationKey, HTTP_METHODS } from "./synthesize.js";
 import { buildJsonPointerRef, errorMessage, loadOpenAPIDocument, parseRef } from "./util.js";
 
 // ---------------------------------------------------------------------------
 // Shared doc-cache helper
 // ---------------------------------------------------------------------------
 
+// loadDoc loads an OpenAPI doc, caching by location within one Invoker
+// instance. A content+location invocation bypasses the cache READ (content
+// is authoritative — no fetch happens) but still WRITES the parsed result
+// under the location key, so a later location-only prepareBinding is served
+// warm (Go parity: cachedLoadDocument primes e.docCache[location] even on
+// the content-provided path).
 async function loadDoc(
   cache: Map<string, OpenAPIDocument>,
   location?: string,
@@ -34,7 +40,12 @@ async function loadDoc(
   options?: { signal?: AbortSignal },
   fetchFn?: typeof globalThis.fetch,
 ): Promise<OpenAPIDocument> {
-  if (content != null || !location) {
+  if (content != null) {
+    const doc = await loadOpenAPIDocument(location, content, options, fetchFn);
+    if (location) cache.set(location, doc);
+    return doc;
+  }
+  if (!location) {
     return loadOpenAPIDocument(location, content, options, fetchFn);
   }
   const cached = cache.get(location);
@@ -93,7 +104,13 @@ export class OpenAPIInvoker implements BindingInvoker {
     let doc: OpenAPIDocument | undefined;
     if (args.source.content != null) {
       try {
-        doc = await loadOpenAPIDocument(args.source.location, args.source.content);
+        // Side-effect-free preflight: internal $refs still resolve locally,
+        // but external $ref fetches are disabled (Go parity: prepareDoc's
+        // content path uses a loader with external refs NOT allowed — "no
+        // I/O").
+        doc = await loadOpenAPIDocument(args.source.location, args.source.content, {
+          allowExternalRefs: false,
+        });
       } catch {
         return null;
       }
@@ -167,6 +184,16 @@ export class OpenAPISynthesizer implements InterfaceSynthesizer, SourceInspector
     }
     const src = input.sources[0];
     const iface = await convertToInterface(src.location, src.content, options, input.onWarning);
+    // Content-fed synthesis: the emitted source must stay invocable. A
+    // source needs location or content; with no location, dropping the
+    // provided content would emit neither (Go parity: invoker.go's
+    // SynthesizeInterface embeds src.Content verbatim into the same branch).
+    if (!src.location && src.content != null) {
+      const entry = iface.sources?.[DEFAULT_SOURCE_NAME];
+      if (entry) {
+        entry.content = typeof src.content === "string" ? src.content : JSON.stringify(src.content);
+      }
+    }
     if (input.name) iface.name = input.name;
     if (input.version) iface.version = input.version;
     if (input.description) iface.description = input.description;
@@ -183,17 +210,24 @@ export class OpenAPISynthesizer implements InterfaceSynthesizer, SourceInspector
 
     if (!doc.paths) return { targets, exhaustive: true };
 
-    const methods = ["get", "put", "post", "delete", "options", "head", "patch", "trace"];
+    const usedKeys = new Set<string>();
     for (const [pathStr, pathItemRaw] of Object.entries(doc.paths).sort(([a], [b]) => a.localeCompare(b))) {
       if (pathStr.startsWith("x-") || !pathItemRaw || typeof pathItemRaw !== "object") continue;
       const pathItem = pathItemRaw as Record<string, unknown>;
-      for (const method of methods) {
+      for (const method of HTTP_METHODS) {
         const op = pathItem[method];
         if (!op || typeof op !== "object") continue;
-        const opObj = op as { description?: string; summary?: string };
+        const opObj = op as OpenAPIOperation;
+        // Suggest the same operation key SynthesizeInterface would assign
+        // for this target. The iteration order and usedKeys de-duplication
+        // here match convertToInterface's, so inspection previews exactly
+        // what synthesis names (Go parity: list_refs.go InspectSource).
+        const opKey = deriveOperationKey(opObj, pathStr, method, usedKeys);
+        usedKeys.add(opKey);
         const desc = opObj.description || opObj.summary || undefined;
         targets.push({
           ref: buildJsonPointerRef(pathStr, method),
+          operationKey: opKey,
           operation: desc ? { description: desc } : undefined,
         });
       }

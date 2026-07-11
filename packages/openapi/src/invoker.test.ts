@@ -154,7 +154,7 @@ describe("invokeBinding — request construction", () => {
     expect(requests).toHaveLength(1);
     expect(requests[0].url).toBe("https://api.example.com/v1/ping");
     expect(requests[0].method).toBe("GET");
-    expect(requests[0].headers.get("Accept")).toBe("application/json");
+    expect(requests[0].headers.get("Accept")).toBe("application/json, text/event-stream");
     await expect(call.closed).resolves.toBeUndefined();
   });
 
@@ -258,6 +258,147 @@ describe("invokeBinding — request construction", () => {
     await single(call.outputs);
 
     expect(requests[0].url).toBe("https://api.example.com/v1/users/a%2Fb%3Fc%23d");
+  });
+
+  // Pins byte-for-byte parity with Go's encodePathValue (TestEncodePathValue_
+  // MatchesEncodeURIComponent / TestClassifyInput_PathValuesPercentEncoded):
+  // encodeURIComponent's unreserved set (ALPHA/DIGIT/-_.!~*'()) is exactly
+  // the byte set encodePathValue hand-rolls, UTF-8 bytewise for multibyte
+  // characters.
+  it("percent-encodes multibyte UTF-8 path values byte-identically to Go's encodePathValue", async () => {
+    const { fetch, requests } = mockFetch(() => jsonResponse({ id: "x" }));
+    const call = new OpenAPIInvoker().invokeBinding({ source: SOURCE, ref: REF_GET_USER, fetch });
+
+    await call.write({ id: "héllo" });
+    await single(call.outputs);
+
+    expect(requests[0].url).toBe("https://api.example.com/v1/users/h%C3%A9llo");
+  });
+
+  // Tier 1: the invoke.ts comment claiming "the document is dereferenced at
+  // load" used to be false — parameters expressed as {"$ref": "..."} carried
+  // no name/in and fell through to body routing. Mirrors Go's
+  // TestIntegration_RefParametersRouteCorrectly.
+  it("$ref'd parameters route by their resolved name/in, never fall to the body", async () => {
+    const spec = {
+      openapi: "3.0.3",
+      info: { title: "t", version: "1" },
+      servers: [{ url: "https://api.example.com/v1" }],
+      paths: {
+        "/users/{id}": {
+          get: {
+            operationId: "getUser",
+            parameters: [
+              { $ref: "#/components/parameters/IdParam" },
+              { $ref: "#/components/parameters/VerboseParam" },
+            ],
+            responses: { "200": { description: "ok" } },
+          },
+        },
+      },
+      components: {
+        parameters: {
+          IdParam: { name: "id", in: "path", required: true, schema: { type: "string" } },
+          VerboseParam: { name: "verbose", in: "query", schema: { type: "boolean" } },
+        },
+      },
+    };
+    const { fetch, requests } = mockFetch(() => jsonResponse({ ok: true }));
+    const call = new OpenAPIInvoker().invokeBinding({
+      source: { format: "openapi@3.0", content: spec },
+      ref: "#/paths/~1users~1{id}/get",
+      fetch,
+    });
+
+    await call.write({ id: "u1", verbose: true });
+    await single(call.outputs);
+
+    expect(requests[0].url).toBe("https://api.example.com/v1/users/u1?verbose=true");
+    // A GET with no requestBody has nowhere for a body-routed field to go —
+    // unresolved $ref params previously vanished silently instead of
+    // routing to the path/query.
+    expect(requests[0].body == null).toBe(true);
+  });
+
+  // Tier 1: Go routes declared `in: cookie` params to a Cookie header; the
+  // TS invoker had no cookie case at all. Mirrors Go's
+  // TestClassifyInput_CookieParamsGoToCookieHeader.
+  it("declared cookie parameters join a sorted Cookie header, never the body", async () => {
+    const spec = {
+      openapi: "3.1.0",
+      info: { title: "t", version: "1" },
+      servers: [{ url: "https://api.example.com/v1" }],
+      paths: {
+        "/session": {
+          get: {
+            parameters: [
+              { name: "session_id", in: "cookie", schema: { type: "string" } },
+              { name: "csrf", in: "cookie", schema: { type: "string" } },
+            ],
+            responses: { "200": { description: "ok" } },
+          },
+        },
+      },
+    };
+    const { fetch, requests } = mockFetch(() => jsonResponse({ ok: true }));
+    const call = new OpenAPIInvoker().invokeBinding({
+      source: { format: "openapi@3.1", content: spec },
+      ref: "#/paths/~1session/get",
+      fetch,
+    });
+
+    await call.write({ session_id: "s-1", csrf: "c-2" });
+    await single(call.outputs);
+
+    expect(requests[0].headers.get("Cookie")).toBe("csrf=c-2; session_id=s-1");
+    expect(requests[0].body == null).toBe(true);
+  });
+
+  // Verify item: media-type parameters ("; charset=utf-8") must never change
+  // whether a declared request body counts as JSON for the field-collision
+  // rule. Mirrors Go's TestBodyPropertyNames_MediaTypeParameters (already
+  // correct on the TS side — this pins it).
+  it("recognizes a JSON body content-type carrying media-type parameters for the collision rule", async () => {
+    const spec = {
+      openapi: "3.1.0",
+      info: { title: "t", version: "1" },
+      servers: [{ url: "https://api.example.com/v1" }],
+      paths: {
+        "/users/{id}": {
+          put: {
+            operationId: "updateUser",
+            parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }],
+            requestBody: {
+              required: true,
+              content: {
+                "application/json; charset=utf-8": {
+                  schema: {
+                    type: "object",
+                    properties: { id: { type: "string" }, name: { type: "string" } },
+                    required: ["id", "name"],
+                  },
+                },
+              },
+            },
+            responses: { "200": { description: "ok" } },
+          },
+        },
+      },
+    };
+    const { fetch, requests } = mockFetch(() => jsonResponse({ ok: true }));
+    const call = new OpenAPIInvoker().invokeBinding({
+      source: { format: "openapi@3.1", content: spec },
+      ref: "#/paths/~1users~1{id}/put",
+      fetch,
+    });
+
+    await call.write({ id: "u1", name: "Ada" });
+    await single(call.outputs);
+
+    // The collision rule only fires when bodyPropertyNames sees through the
+    // "; charset=utf-8" parameter: id must ride both the path AND the body.
+    expect(requests[0].url).toBe("https://api.example.com/v1/users/u1");
+    expect(JSON.parse(requests[0].body as string)).toEqual({ id: "u1", name: "Ada" });
   });
 
   it("dispatches immediately with empty input under the operation-layer no-input convention", async () => {
@@ -478,6 +619,117 @@ describe("invokeBinding — responses", () => {
 
     await expect(call.closed).rejects.toMatchObject({ code: ERR_CANCELLED });
     expect(requests[0].signal?.aborted).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tier 2: SSE server-streaming (sse.ts wired into invoke.ts's decode path)
+// ---------------------------------------------------------------------------
+
+/** Builds a `text/event-stream` Response from raw SSE-framed chunks. */
+function sseResponse(
+  chunks: string[],
+  init?: { status?: number; headers?: Record<string, string> },
+): Response {
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      for (const chunk of chunks) controller.enqueue(encoder.encode(chunk));
+      controller.close();
+    },
+  });
+  return new Response(stream, {
+    status: init?.status ?? 200,
+    headers: { "Content-Type": "text/event-stream", ...init?.headers },
+  });
+}
+
+describe("invokeBinding — SSE responses", () => {
+  it("requests text/event-stream alongside JSON via Accept", async () => {
+    const { fetch, requests } = mockFetch(() => jsonResponse({ pong: true }));
+    const call = new OpenAPIInvoker().invokeBinding({ source: SOURCE, ref: REF_PING, fetch });
+    await single(call.outputs);
+    expect(requests[0].headers.get("Accept")).toBe("application/json, text/event-stream");
+  });
+
+  it("streams one output per SSE event and closes cleanly at stream end", async () => {
+    const { fetch } = mockFetch(() =>
+      sseResponse(['data: {"id":"1","msg":"first"}\n\n', 'data: {"id":"2","msg":"second"}\n\n']),
+    );
+    const call = new OpenAPIInvoker().invokeBinding({ source: SOURCE, ref: REF_PING, fetch });
+
+    const events: unknown[] = [];
+    for await (const e of call.outputs) events.push(e);
+    await call.closed;
+
+    // Default decode follows the Content-Type header (text/event-stream ->
+    // text lane), so each event's data arrives as a raw string — a JSON
+    // event payload is an OutputDecoder hook case, not a builtin sniff.
+    expect(events).toEqual(['{"id":"1","msg":"first"}', '{"id":"2","msg":"second"}']);
+  });
+
+  it("joins multiple data: lines for one event with a literal newline", async () => {
+    const { fetch } = mockFetch(() => sseResponse(["data: line one\ndata: line two\ndata: line three\n\n"]));
+    const call = new OpenAPIInvoker().invokeBinding({ source: SOURCE, ref: REF_PING, fetch });
+
+    await expect(single(call.outputs)).resolves.toBe("line one\nline two\nline three");
+  });
+
+  it("rides event:/id:/retry: as per-event metadata (x-sse-*), never the output value", async () => {
+    const hooks = newInvokeHooks(
+      {
+        decode: (_site, raw) => {
+          const event = raw.meta["x-sse-event"]?.[0];
+          const id = raw.meta["x-sse-id"]?.[0];
+          if (!event && !id) return USE_DEFAULT;
+          return { event, id, data: JSON.parse(raw.body) };
+        },
+      },
+      {},
+    );
+    const { fetch } = mockFetch(() =>
+      sseResponse([
+        'data: {"msg":"first"}\n\n',
+        'event: progress\nid: 42\ndata: {"msg":"third"}\n\n',
+      ]),
+    );
+    const call = new OpenAPIInvoker().invokeBinding({ source: SOURCE, ref: REF_PING, fetch, hooks });
+
+    const events: unknown[] = [];
+    for await (const e of call.outputs) events.push(e);
+
+    // No event:/id: on the first unit: the hook declines (USE_DEFAULT) and
+    // the builtin text lane returns the raw string, unwrapped.
+    expect(events[0]).toBe('{"msg":"first"}');
+    expect(events[1]).toEqual({ event: "progress", id: "42", data: { msg: "third" } });
+  });
+
+  it("ignores comment lines (leading colon)", async () => {
+    const { fetch } = mockFetch(() =>
+      sseResponse([": this is a comment, should be ignored\n\n", 'data: {"id":"survivor"}\n\n']),
+    );
+    const call = new OpenAPIInvoker().invokeBinding({ source: SOURCE, ref: REF_PING, fetch });
+
+    await expect(single(call.outputs)).resolves.toBe('{"id":"survivor"}');
+  });
+
+  it("a non-2xx text/event-stream response is a normal HTTP failure, not a stream", async () => {
+    const { fetch } = mockFetch(() => sseResponse(["data: nope\n\n"], { status: 500 }));
+    const call = new OpenAPIInvoker().invokeBinding({ source: SOURCE, ref: REF_PING, fetch });
+
+    await expect(call.closed).rejects.toMatchObject({
+      code: ERR_EXECUTION_FAILED,
+      details: { status: 500 },
+    });
+  });
+
+  it("a 2xx JSON (non-SSE) response stays a plain unary invocation", async () => {
+    const { fetch } = mockFetch(() => jsonResponse({ pong: true }));
+    const call = new OpenAPIInvoker().invokeBinding({ source: SOURCE, ref: REF_PING, fetch });
+
+    const events: unknown[] = [];
+    for await (const e of call.outputs) events.push(e);
+    expect(events).toEqual([{ pong: true }]);
   });
 });
 
@@ -913,6 +1165,45 @@ describe("prepareBinding", () => {
     });
   });
 
+  // Go parity: prepareDoc's content path uses a loader with external refs
+  // NOT allowed ("no I/O") — the side-effect-free preflight promise must
+  // hold even when the inline content itself declares an external $ref.
+  it("never fetches, even when inline content declares an external $ref", async () => {
+    const spec = {
+      ...BEARER,
+      paths: {
+        "/data": {
+          get: {
+            security: [{ bearerAuth: [] }],
+            parameters: [{ $ref: "https://external.example/components.json#/params/Trace" }],
+            responses: { "200": { description: "OK" } },
+          },
+        },
+      },
+    };
+    const originalFetch = globalThis.fetch;
+    let fetchCalled = false;
+    globalThis.fetch = ((...args: Parameters<typeof fetch>) => {
+      fetchCalled = true;
+      return originalFetch(...args);
+    }) as typeof fetch;
+    try {
+      const details = await new OpenAPIInvoker().prepareBinding({
+        source: authSource(spec),
+        ref: REF_DATA,
+      });
+      expect(fetchCalled).toBe(false);
+      // Go parity: kin-openapi's loader rejects the WHOLE document the
+      // instant it meets a disallowed external ref (loader.go:
+      // allowsExternalRefs), regardless of where that ref sits — prepareDoc
+      // returns nil on that error, so PrepareBinding reports no requirement
+      // rather than fetching. Silent-fallback, never a thrown error.
+      expect(details).toBeNull();
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it("returns null when context satisfies the requirement", async () => {
     const details = await new OpenAPIInvoker().prepareBinding({
       source: authSource(BEARER),
@@ -956,6 +1247,33 @@ describe("prepareBinding", () => {
     });
     await expect(call.closed).rejects.toMatchObject({ code: CONTEXT_REQUIRED });
 
+    const details = await inv.prepareBinding({
+      source: { format: "openapi@3.1", location: SPEC_URL },
+      ref: REF_DATA,
+    });
+    expect(details).toMatchObject({ target: "https://api.example.com" });
+  });
+
+  // Tier 2: a content+location invocation primes the location-keyed cache,
+  // so a later location-only preflight is served warm without ever
+  // fetching. Mirrors Go's TestPrepareBinding_UsesCachePrimedFromContent.
+  it("a content+location invocation primes the location-keyed cache for a later location-only preflight", async () => {
+    const SPEC_URL = "https://example.test/openapi.json";
+    const inv = new OpenAPIInvoker();
+    const { fetch, requests } = mockFetch(() => jsonResponse({}));
+
+    // Content is authoritative: no fetch of SPEC_URL happens here, but the
+    // parse must still land in the location-keyed cache.
+    const call = inv.invokeBinding({
+      source: { format: "openapi@3.1", location: SPEC_URL, content: BEARER },
+      ref: REF_DATA,
+      fetch,
+    });
+    await expect(call.closed).rejects.toMatchObject({ code: CONTEXT_REQUIRED });
+    expect(requests).toHaveLength(0);
+
+    // Location-only preflight: prepareBinding's location-only path never
+    // fetches, so a non-null result here proves the cache was warm.
     const details = await inv.prepareBinding({
       source: { format: "openapi@3.1", location: SPEC_URL },
       ref: REF_DATA,

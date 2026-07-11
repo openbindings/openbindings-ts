@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { convertToInterface } from "./synthesize.js";
+import { DEFAULT_SOURCE_NAME } from "./constants.js";
 
 const MINIMAL_SPEC = {
   openapi: "3.1.0",
@@ -414,5 +415,106 @@ describe("param/body field collision", () => {
     const props = (iface.operations.updateUser.input as { properties: Record<string, unknown> })
       .properties;
     expect(Object.keys(props).sort()).toEqual(["id", "name"]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// InspectSource operationKey (Go parity: list_refs.go's InspectSource calls
+// the SAME deriveOperationKey/httpMethods synthesis uses, so a caller
+// previewing bindable targets sees the exact key SynthesizeInterface would
+// assign.)
+// ---------------------------------------------------------------------------
+
+describe("inspectSource", () => {
+  const SPEC_WITH_COLLISION = {
+    openapi: "3.1.0",
+    info: { title: "t", version: "1" },
+    paths: {
+      "/users": {
+        get: { responses: { "200": { description: "ok" } } },
+        post: { operationId: "createUser", responses: { "201": { description: "created" } } },
+      },
+      "/users/{id}": {
+        // operationId collides with the fallback key /users GET would have
+        // produced ("users.get") — de-duplication must kick in, and it must
+        // pick the SAME key convertToInterface itself would pick.
+        get: { operationId: "users.get", responses: { "200": { description: "ok" } } },
+      },
+    },
+  };
+
+  it("suggests the same operationKey synthesis would assign, including de-duplication", async () => {
+    const inspection = await new OpenAPISynthesizer().inspectSource({
+      format: "openapi@3.1",
+      content: SPEC_WITH_COLLISION,
+    });
+    const byRef = Object.fromEntries(inspection.targets.map((t) => [t.ref, t.operationKey]));
+
+    expect(byRef["#/paths/~1users/get"]).toBe("users.get");
+    expect(byRef["#/paths/~1users/post"]).toBe("createUser");
+    expect(byRef["#/paths/~1users~1{id}/get"]).toBe("users.get_2");
+  });
+
+  it("matches convertToInterface's own operation keys exactly", async () => {
+    const iface = await convertToInterface(undefined, SPEC_WITH_COLLISION);
+    const inspection = await new OpenAPISynthesizer().inspectSource({
+      format: "openapi@3.1",
+      content: SPEC_WITH_COLLISION,
+    });
+
+    for (const target of inspection.targets) {
+      expect(Object.keys(iface.operations)).toContain(target.operationKey);
+      expect(iface.bindings?.[`${target.operationKey}.${DEFAULT_SOURCE_NAME}`]?.ref).toBe(target.ref);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Content-fed synthesis: a source needs location or content; dropping the
+// provided content when no location was given would emit an uninvocable
+// source (Go parity: invoker.go's SynthesizeInterface — "the emitted source
+// must stay invocable").
+// ---------------------------------------------------------------------------
+
+describe("content-fed synthesis", () => {
+  it("embeds the artifact verbatim into the source when no location is given", async () => {
+    const content = JSON.stringify({
+      openapi: "3.0.3",
+      info: { title: "T", version: "1.0.0" },
+      paths: { "/x": { get: { operationId: "getX", responses: { "200": { description: "ok" } } } } },
+    });
+    const iface = await new OpenAPISynthesizer().synthesizeInterface({
+      sources: [{ format: "openapi@3.0", content }],
+    });
+
+    const src = iface.sources?.[DEFAULT_SOURCE_NAME];
+    expect(src?.location).toBeUndefined();
+    expect(src?.content).toBe(content);
+  });
+
+  it("does not invent a location, and embeds a non-string content as JSON text", async () => {
+    const content = {
+      openapi: "3.0.3",
+      info: { title: "T", version: "1.0.0" },
+      paths: {},
+    };
+    const iface = await new OpenAPISynthesizer().synthesizeInterface({
+      sources: [{ format: "openapi@3.0", content }],
+    });
+
+    const src = iface.sources?.[DEFAULT_SOURCE_NAME];
+    expect(src?.location).toBeUndefined();
+    expect(JSON.parse(src?.content as string)).toEqual(content);
+  });
+
+  it("does not re-embed content when a location is present (location is provenance)", async () => {
+    const content = { openapi: "3.0.3", info: { title: "T", version: "1" }, paths: {} };
+    const iface = await new OpenAPISynthesizer().synthesizeInterface({
+      sources: [{ format: "openapi@3.0", location: "https://example.com/openapi.json", content }],
+    });
+
+    const src = iface.sources?.[DEFAULT_SOURCE_NAME];
+    expect(src?.location).toBe("https://example.com/openapi.json");
+    expect(src?.content).toBeUndefined();
   });
 });

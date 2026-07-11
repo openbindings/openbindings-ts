@@ -42,6 +42,7 @@ import type {
   OpenAPIOAuthFlow,
 } from "./types.js";
 import { errorMessage, mergeParameters, parseRef } from "./util.js";
+import { isSSEContentType, streamSSE } from "./sse.js";
 
 const MAX_RESPONSE_BYTES = 10 * 1024 * 1024;
 
@@ -187,7 +188,10 @@ async function doHTTPRequest(
   }
 
   const fetchHeaders = new Headers();
-  fetchHeaders.set("Accept", "application/json");
+  // Accept both JSON and Server-Sent Events. Servers that support SSE will
+  // return text/event-stream when streaming; otherwise we get JSON as
+  // before (Go parity: runBinding sets the same Accept value).
+  fetchHeaders.set("Accept", "application/json, text/event-stream");
 
   for (const [k, v] of Object.entries(headerParams)) {
     fetchHeaders.set(k, String(v));
@@ -230,19 +234,34 @@ async function doHTTPRequest(
     return;
   }
 
+  // Leading metadata (HTTP response headers) precedes the first emit.
+  const invocationMeta = responseMetadata(resp);
+  inv.setHeader(invocationMeta);
+
+  const contentType = resp.headers.get("content-type");
+  const site = siteFor(args, baseURL);
+
+  // SSE dispatch: a 2xx response with text/event-stream content type is a
+  // streaming response. Hand the (still-open) response to the SSE streamer,
+  // which takes ownership of reading/closing the body and the terminal
+  // transition (Go parity: runBinding's isSSEContentType gate, run once
+  // here on the initial response status, before any body read).
+  if (resp.status >= 200 && resp.status < 300 && isSSEContentType(contentType)) {
+    await streamSSE(resp, args, site, inv, invocationMeta, decodeByContentType(contentType));
+    return;
+  }
+
   let respText: string;
   try {
     respText = await readResponseText(resp, MAX_RESPONSE_BYTES);
   } catch (e: unknown) {
+    if (inv.signal.aborted) return;
     inv.fireError(new InvocationError(ERR_RESPONSE_ERROR, errorMessage(e)));
     return;
   }
 
   // Cancelled while in flight: the handle is already terminal.
   if (inv.signal.aborted) return;
-
-  // Leading metadata (HTTP response headers) precedes the first emit.
-  inv.setHeader(responseMetadata(resp));
 
   // Classify, then decode — both through the consultation seam
   // (per-invocation hook → invoker-level hook → the format builtins
@@ -253,8 +272,7 @@ async function doHTTPRequest(
   // Content-Type HEADER decides the lane (wire framing, not payload
   // sniffing): JSON for application/json and +json suffixes, text
   // otherwise, absent/unparseable header → text.
-  const raw: RawResult = { status: resp.status, body: respText, meta: responseMetadata(resp) };
-  const site = siteFor(args, baseURL);
+  const raw: RawResult = { status: resp.status, body: respText, meta: invocationMeta };
 
   let ok: boolean;
   try {
@@ -278,12 +296,7 @@ async function doHTTPRequest(
 
   let output: unknown;
   try {
-    output = await decodeThroughHooks(
-      args.hooks,
-      site,
-      raw,
-      decodeByContentType(resp.headers.get("content-type")),
-    );
+    output = await decodeThroughHooks(args.hooks, site, raw, decodeByContentType(contentType));
   } catch (e: unknown) {
     inv.fireError(toInvocationError(e));
     return;
@@ -629,6 +642,7 @@ function classifyInput(
   const query: Record<string, unknown> = {};
   const headers: Record<string, unknown> = {};
   const body: Record<string, unknown> = {};
+  const cookies: Record<string, unknown> = {};
 
   const paramClassification = new Map<string, string>();
   for (const p of params) {
@@ -654,6 +668,9 @@ function classifyInput(
       case "header":
         headers[name] = value;
         break;
+      case "cookie":
+        cookies[name] = value;
+        break;
       default:
         body[name] = value;
     }
@@ -665,6 +682,15 @@ function classifyInput(
     if (bodyProps?.has(name)) {
       body[name] = value;
     }
+  }
+
+  // Declared cookie params travel in a Cookie header (sorted for a
+  // deterministic value), never in the body. Context-supplied cookies are
+  // appended separately by applyContext via headers.append (Go parity:
+  // classifyInput's Cookie-header composition).
+  if (Object.keys(cookies).length > 0) {
+    const names = Object.keys(cookies).sort();
+    headers["Cookie"] = names.map((n) => `${n}=${cookies[n]}`).join("; ");
   }
 
   return { resolvedPath, query, headers, body };

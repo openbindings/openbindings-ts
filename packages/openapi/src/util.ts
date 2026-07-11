@@ -1,5 +1,6 @@
 import type { OpenAPIDocument, OpenAPIParameter } from "./types.js";
 import { VALID_METHODS } from "./constants.js";
+import { dereference } from "@openbindings/sdk";
 import yaml from "js-yaml";
 
 const NON_KEY_CHARS = /[^a-zA-Z0-9._-]/g;
@@ -44,42 +45,74 @@ export function buildJsonPointerRef(path: string, method: string): string {
   return `#/paths/${escaped}/${method.toLowerCase()}`;
 }
 
-/** Loads and parses an OpenAPI document from a URL location or inline content (JSON or YAML). */
+/**
+ * Loads and parses an OpenAPI document from a URL location or inline content
+ * (JSON or YAML), then fully dereferences it in place: every `$ref` —
+ * parameter, request/response schema, path item, or anything else — is
+ * resolved before the document reaches invocation or synthesis logic (Go
+ * parity: the kin-openapi loader resolves every `$ref` once, at load time,
+ * so downstream code — `mergeParameters`, `classifyInput` — always sees
+ * direct `name`/`in` values, never a `{"$ref": ...}` indirection).
+ *
+ * External refs are followed via `fetchFn` (or the global `fetch`) unless
+ * `options.allowExternalRefs` is explicitly `false`, which keeps the parse
+ * side-effect-free for content-only loads (Go parity: `prepareBinding`'s
+ * content path disables external I/O — "never fetches").
+ */
 export async function loadOpenAPIDocument(
   location?: string,
   content?: unknown,
-  options?: { signal?: AbortSignal },
+  options?: { signal?: AbortSignal; allowExternalRefs?: boolean },
   fetchFn?: typeof globalThis.fetch,
 ): Promise<OpenAPIDocument> {
+  let raw: unknown;
   if (content != null) {
-    if (typeof content === "string") return parseJSONOrYAML(content) as OpenAPIDocument;
-    if (typeof content === "object") return content as OpenAPIDocument;
-    return structuredClone(content) as OpenAPIDocument;
-  }
-  if (!location) {
-    throw new Error("source must have location or content");
+    if (typeof content === "string") raw = parseJSONOrYAML(content);
+    else if (typeof content === "object") raw = content;
+    else raw = structuredClone(content);
+  } else {
+    if (!location) {
+      throw new Error("source must have location or content");
+    }
+
+    const doFetch = fetchFn ?? fetch;
+    const resp = await doFetch(location, { signal: options?.signal });
+    if (!resp.ok) {
+      throw new Error(`failed to fetch ${location}: ${resp.status} ${resp.statusText}`);
+    }
+
+    let text: string;
+    try {
+      text = await resp.text();
+    } catch (e: unknown) {
+      throw new Error(`failed to read response body from ${location}: ${errorMessage(e)}`);
+    }
+
+    try {
+      raw = parseJSONOrYAML(text);
+    } catch {
+      const preview = text.length > 120 ? text.slice(0, 120) + "..." : text;
+      throw new Error(`failed to parse response from ${location}: ${preview}`);
+    }
   }
 
-  const doFetch = fetchFn ?? fetch;
-  const resp = await doFetch(location, { signal: options?.signal });
-  if (!resp.ok) {
-    throw new Error(`failed to fetch ${location}: ${resp.status} ${resp.statusText}`);
-  }
-
-  let text: string;
-  try {
-    text = await resp.text();
-  } catch (e: unknown) {
-    throw new Error(`failed to read response body from ${location}: ${errorMessage(e)}`);
-  }
-
-  try {
-    return parseJSONOrYAML(text) as OpenAPIDocument;
-  } catch {
-    const preview = text.length > 120 ? text.slice(0, 120) + "..." : text;
-    throw new Error(`failed to parse response from ${location}: ${preview}`);
-  }
+  const allowExternalRefs = options?.allowExternalRefs ?? true;
+  return dereference<OpenAPIDocument>(raw as Record<string, unknown>, {
+    baseUrl: location,
+    parse: parseJSONOrYAML,
+    signal: options?.signal,
+    fetch: allowExternalRefs ? (fetchFn ?? fetch) : blockExternalRefFetch,
+  });
 }
+
+/**
+ * Rejects any external `$ref` fetch. Used to keep a content-only document
+ * parse side-effect-free (Go parity: `prepareBinding`'s content path never
+ * touches the network — internal `#/...` refs still resolve locally).
+ */
+const blockExternalRefFetch: typeof globalThis.fetch = (() => {
+  throw new Error("external $ref resolution is disabled for this load");
+}) as unknown as typeof globalThis.fetch;
 
 /** Merges path-level and operation-level parameters, with operation parameters taking precedence. */
 export function mergeParameters(

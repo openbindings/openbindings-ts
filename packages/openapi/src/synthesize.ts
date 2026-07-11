@@ -1,6 +1,5 @@
 import type { OBInterface, Operation, BindingEntry, JSONSchema, Source, SynthesizerWarning } from "@openbindings/sdk";
-import { MAX_TESTED_VERSION, detectFormatVersion, dereference } from "@openbindings/sdk";
-import yaml from "js-yaml";
+import { MAX_TESTED_VERSION, detectFormatVersion } from "@openbindings/sdk";
 import type {
   OpenAPIDocument,
   OpenAPIMediaType,
@@ -26,14 +25,10 @@ export async function convertToInterface(
   options?: { signal?: AbortSignal },
   onWarning?: (warning: SynthesizerWarning) => void,
 ): Promise<OBInterface> {
-  const rawDoc = await loadOpenAPIDocument(location, content, options);
-  // Resolve all $ref pointers so extracted schemas are fully inlined,
-  // matching Go's kin-openapi behavior.
-  const doc = await dereference(rawDoc as Record<string, unknown>, {
-    baseUrl: location,
-    parse: (text) => yaml.load(text) as Record<string, unknown>,
-    signal: options?.signal,
-  }) as unknown as OpenAPIDocument;
+  // loadOpenAPIDocument fully dereferences (every $ref, internal and
+  // external, matching Go's kin-openapi loader), so extracted schemas are
+  // already inlined here.
+  const doc = await loadOpenAPIDocument(location, content, options);
   const formatVersion = detectFormatVersion(doc.openapi ?? "3.0");
 
   const sourceEntry: Source = {
@@ -105,9 +100,22 @@ export async function convertToInterface(
   return iface;
 }
 
-const HTTP_METHODS = ["get", "put", "post", "delete", "options", "head", "patch", "trace"];
+/**
+ * Iteration order for path-item methods. Exported so `inspectSource`
+ * (invoker.ts) walks paths in the exact same order `convertToInterface`
+ * does — inspection previews exactly what synthesis would name (Go
+ * parity: list_refs.go's `httpMethods` is the same slice `synthesize.go`
+ * uses).
+ */
+export const HTTP_METHODS = ["get", "put", "post", "delete", "options", "head", "patch", "trace"];
 
-function deriveOperationKey(
+/**
+ * Derives the operation key SynthesizeInterface would assign. Exported so
+ * `inspectSource` (invoker.ts) can suggest the same key synthesis would
+ * pick, given the same `used` de-duplication set walked in the same order
+ * (Go parity: list_refs.go's InspectSource calls this exact function).
+ */
+export function deriveOperationKey(
   op: OpenAPIOperation,
   path: string,
   method: string,
