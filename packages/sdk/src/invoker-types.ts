@@ -92,6 +92,27 @@ export interface SynthesizeInput {
   name?: string;
   version?: string;
   description?: string;
+  /**
+   * Invoked by synthesizers that encounter non-fatal limitations during
+   * interface construction (e.g., a field-name collision the flatten
+   * resolves deterministically). The synthesizer still produces a valid
+   * interface; the warning surfaces what was lost or approximated.
+   * Undefined means warnings are dropped silently. Mirrors the Go SDK's
+   * SynthesizeInput.OnWarning.
+   */
+  onWarning?: (warning: SynthesizerWarning) => void;
+}
+
+/**
+ * A non-fatal limitation encountered while building an interface from a
+ * source. Codes are stable and format-namespaced (e.g.
+ * "openapi.param_body_collision"); `path` locates the affected member in
+ * dotted notation. Mirrors the Go SDK's SynthesizerWarning.
+ */
+export interface SynthesizerWarning {
+  code: string;
+  message: string;
+  path?: string;
 }
 
 /** Describes a binding format supported by an invoker. */

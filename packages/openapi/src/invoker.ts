@@ -166,7 +166,7 @@ export class OpenAPISynthesizer implements InterfaceSynthesizer, SourceInspector
       throw new MultipleSourcesError();
     }
     const src = input.sources[0];
-    const iface = await convertToInterface(src.location, src.content, options);
+    const iface = await convertToInterface(src.location, src.content, options, input.onWarning);
     if (input.name) iface.name = input.name;
     if (input.version) iface.version = input.version;
     if (input.description) iface.description = input.description;

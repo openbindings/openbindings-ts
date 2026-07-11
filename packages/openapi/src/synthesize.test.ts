@@ -371,3 +371,48 @@ describeMS("multi-source refusal", () => {
     ).rejects.toBeInstanceOf(MultipleSourcesError);
   });
 });
+
+// Field-collision rule, synthesis half: the parameter/body merge is
+// deterministic (body schema wins) and never silent — a synthesizer
+// warning names the field and the delivery rule. Also closes the TS
+// warning-channel gap (SynthesizeInput.onWarning, mirroring Go).
+describe("param/body field collision", () => {
+  it("warns and flattens to one field", async () => {
+    const spec = {
+      openapi: "3.1.0",
+      info: { title: "t", version: "1" },
+      paths: {
+        "/users/{id}": {
+          put: {
+            operationId: "updateUser",
+            parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }],
+            requestBody: {
+              required: true,
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    properties: { id: { type: "string" }, name: { type: "string" } },
+                    required: ["id", "name"],
+                  },
+                },
+              },
+            },
+            responses: { "200": { description: "ok" } },
+          },
+        },
+      },
+    };
+    const warnings: Array<{ code: string; path?: string }> = [];
+    const iface = await new OpenAPISynthesizer().synthesizeInterface({
+      sources: [{ format: "openapi@3.1", content: spec }],
+      onWarning: (w) => warnings.push(w),
+    });
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0].code).toBe("openapi.param_body_collision");
+    expect(warnings[0].path).toBe("operations.updateUser.input.properties.id");
+    const props = (iface.operations.updateUser.input as { properties: Record<string, unknown> })
+      .properties;
+    expect(Object.keys(props).sort()).toEqual(["id", "name"]);
+  });
+});

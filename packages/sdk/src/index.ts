@@ -34,6 +34,7 @@ export type {
   InvokeOptions,
   SynthesizeSource,
   SynthesizeInput,
+  SynthesizerWarning,
   FormatInfo,
   BindableTarget,
   SourceInspection,

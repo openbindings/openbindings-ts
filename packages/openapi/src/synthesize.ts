@@ -1,4 +1,4 @@
-import type { OBInterface, Operation, BindingEntry, JSONSchema, Source } from "@openbindings/sdk";
+import type { OBInterface, Operation, BindingEntry, JSONSchema, Source, SynthesizerWarning } from "@openbindings/sdk";
 import { MAX_TESTED_VERSION, detectFormatVersion, dereference } from "@openbindings/sdk";
 import yaml from "js-yaml";
 import type {
@@ -24,6 +24,7 @@ export async function convertToInterface(
   location?: string,
   content?: unknown,
   options?: { signal?: AbortSignal },
+  onWarning?: (warning: SynthesizerWarning) => void,
 ): Promise<OBInterface> {
   const rawDoc = await loadOpenAPIDocument(location, content, options);
   // Resolve all $ref pointers so extracted schemas are fully inlined,
@@ -79,7 +80,7 @@ export async function convertToInterface(
         obiOp.tags = opObj.tags;
       }
 
-      const inputSchema = buildInputSchema(opObj, pathParams);
+      const inputSchema = buildInputSchema(opObj, pathParams, opKey, onWarning);
       if (inputSchema) {
         obiOp.input = translateSchemaDialect(inputSchema, formatVersion) as JSONSchema;
       }
@@ -126,7 +127,12 @@ function deriveOperationKey(
   return uniqueKey(key, used);
 }
 
-function buildInputSchema(op: OpenAPIOperation, pathParams: OpenAPIParameter[]): JSONSchema | undefined {
+function buildInputSchema(
+  op: OpenAPIOperation,
+  pathParams: OpenAPIParameter[],
+  opKey: string,
+  onWarning?: (warning: SynthesizerWarning) => void,
+): JSONSchema | undefined {
   const properties: Record<string, unknown> = {};
   const required: string[] = [];
 
@@ -145,7 +151,21 @@ function buildInputSchema(op: OpenAPIOperation, pathParams: OpenAPIParameter[]):
     if (bodySchema) {
       const bodyProps = bodySchema.properties as Record<string, unknown> | undefined;
       if (bodyProps && typeof bodyProps === "object") {
-        Object.assign(properties, bodyProps);
+        for (const [k, v] of Object.entries(bodyProps)) {
+          // Field-collision rule: a name declared as a parameter AND a
+          // body property flattens to ONE input field (the body's schema
+          // wins deterministically); at invocation the one value is
+          // delivered to every declared wire location. Warn so the merge
+          // is never silent.
+          if (k in properties) {
+            onWarning?.({
+              code: "openapi.param_body_collision",
+              message: `field "${k}" is declared as a parameter and a body property; the flattened input carries one field (body schema shown) whose value is delivered to both wire locations at invocation`,
+              path: `operations.${opKey}.input.properties.${k}`,
+            });
+          }
+          properties[k] = v;
+        }
         if (Array.isArray(bodySchema.required)) {
           required.push(...bodySchema.required);
         }

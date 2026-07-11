@@ -186,6 +186,49 @@ describe("invokeBinding — request construction", () => {
     });
   });
 
+  it("a field declared as parameter AND body property is delivered to both wire locations", async () => {
+    // Field-collision rule: PUT /users/{id} with id also in the body
+    // sends ONE caller value to the path AND the body.
+    const spec = {
+      openapi: "3.1.0",
+      info: { title: "t", version: "1" },
+      servers: [{ url: "https://api.example.com/v1" }],
+      paths: {
+        "/users/{id}": {
+          put: {
+            operationId: "updateUser",
+            parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }],
+            requestBody: {
+              required: true,
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    properties: { id: { type: "string" }, name: { type: "string" } },
+                    required: ["id", "name"],
+                  },
+                },
+              },
+            },
+            responses: { "200": { description: "ok" } },
+          },
+        },
+      },
+    };
+    const { fetch, requests } = mockFetch(() => jsonResponse({ ok: true }));
+    const call = new OpenAPIInvoker().invokeBinding({
+      source: { format: "openapi@3.1", content: spec },
+      ref: "#/paths/~1users~1{id}/put",
+      fetch,
+    });
+
+    await call.write({ id: "u1", name: "Ada" });
+    await single(call.outputs);
+
+    expect(requests[0].url).toBe("https://api.example.com/v1/users/u1");
+    expect(JSON.parse(requests[0].body as string)).toEqual({ id: "u1", name: "Ada" });
+  });
+
   it("errors ERR_MISSING_INPUT when input closes bare on a required-input operation", async () => {
     const { fetch, requests } = mockFetch(() => jsonResponse({}));
     const call = new OpenAPIInvoker().invokeBinding({ source: SOURCE, ref: REF_GET_USER, fetch });

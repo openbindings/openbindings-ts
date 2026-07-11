@@ -35,6 +35,7 @@ import {
 } from "@openbindings/sdk";
 import type {
   OpenAPIDocument,
+  OpenAPIMediaType,
   OpenAPIOperation,
   OpenAPIParameter,
   OpenAPISecurityScheme,
@@ -173,6 +174,7 @@ async function doHTTPRequest(
     allParams,
     inputMap,
     pathTemplate,
+    bodyPropertyNames(op),
   );
 
   let reqURL = baseURL + resolvedPath;
@@ -599,10 +601,30 @@ interface ParamClassification {
   body: Record<string, unknown>;
 }
 
+/**
+ * The JSON request body's declared top-level property names. Used for the
+ * field-collision rule: a flattened input field that is both a parameter
+ * and a body property is delivered to both wire locations. The document is
+ * dereferenced at load, so schema values are direct.
+ */
+function bodyPropertyNames(op: OpenAPIOperation): Set<string> | undefined {
+  const content = op.requestBody?.content;
+  if (!content) return undefined;
+  for (const [contentType, media] of Object.entries(content)) {
+    const mt = contentType.split(";", 1)[0].trim();
+    if (mt !== "application/json" && !mt.endsWith("+json")) continue;
+    const props = (media as OpenAPIMediaType | undefined)?.schema?.properties;
+    if (!props || typeof props !== "object") return undefined;
+    return new Set(Object.keys(props));
+  }
+  return undefined;
+}
+
 function classifyInput(
   params: OpenAPIParameter[],
   input: Record<string, unknown>,
   pathTemplate: string,
+  bodyProps?: Set<string>,
 ): ParamClassification {
   const query: Record<string, unknown> = {};
   const headers: Record<string, unknown> = {};
@@ -634,6 +656,14 @@ function classifyInput(
         break;
       default:
         body[name] = value;
+    }
+    // One name, one value, delivered to EVERY declared wire location: a
+    // field that is both a parameter and a body property (PUT /users/{id}
+    // with id in the body) rides the parameter location AND stays in the
+    // body — the flattened contract says what, the wire locations are
+    // plumbing.
+    if (bodyProps?.has(name)) {
+      body[name] = value;
     }
   }
 
