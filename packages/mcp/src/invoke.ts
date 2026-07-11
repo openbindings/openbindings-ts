@@ -17,6 +17,10 @@ import {
   type BindingHandle,
   type BindingInvocationArgs,
   type Metadata,
+  decodeThroughHooks,
+  type InvokeSite,
+  type InvokeHooks,
+  type RawResult,
 } from "@openbindings/sdk";
 import { CLIENT_NAME, CLIENT_VERSION } from "./constants.js";
 
@@ -170,13 +174,14 @@ export async function runMCPBinding(
   };
 
   // --- Dispatch. ---
+  const site = siteFor(args, location);
   try {
     switch (entityType) {
       case "tools":
-        await runTool(client, name, input, inv, setHeaderOnce);
+        await runTool(client, name, input, inv, setHeaderOnce, site, args.hooks);
         break;
       case "resources":
-        await runResource(client, name, inv, setHeaderOnce);
+        await runResource(client, name, inv, setHeaderOnce, site, args.hooks);
         break;
       case "prompts":
         await runPrompt(client, name, input, inv, setHeaderOnce);
@@ -199,6 +204,8 @@ async function runTool(
   toolArgs: Record<string, unknown>,
   inv: BindingHandle<unknown, unknown>,
   setHeaderOnce: () => void,
+  site: InvokeSite,
+  hooks: InvokeHooks | undefined,
 ): Promise<void> {
   // Progress callbacks are synchronous; chain the emits so they stay
   // ordered and observe emitOutput's backpressure without a side buffer.
@@ -231,11 +238,52 @@ async function runTool(
     throw new InvocationError(ERR_EXECUTION_FAILED, extractContent(result.content));
   }
 
-  // Prefer structuredContent if available.
-  const output = result.structuredContent ?? parseContent(result.content);
+  // structuredContent is MCP's declared structured lane (2025-11-25:
+  // servers MUST conform it to outputSchema) and wins outright. A single
+  // text content is a STRING by the content-independent builtin —
+  // JSON-in-text is the spec's backwards-compatibility shadow of
+  // structuredContent, and parsing it is a consumer choice made through
+  // the decode seam, never a payload sniff.
+  let output: unknown;
+  let decodeStamp: string;
+  if (result.structuredContent !== undefined && result.structuredContent !== null) {
+    output = result.structuredContent;
+    decodeStamp = "structuredContent";
+  } else if (
+    Array.isArray(result.content) &&
+    result.content.length === 1 &&
+    result.content[0].type === "text" &&
+    typeof result.content[0].text === "string"
+  ) {
+    output = await decodeThroughHooks(
+      hooks,
+      site,
+      { body: result.content[0].text },
+      builtinTextDecode,
+    );
+    decodeStamp = decodeStampFor(hooks, "text");
+  } else {
+    output = parseContent(result.content);
+    decodeStamp = "content";
+  }
   setHeaderOnce();
+  inv.setTrailer({ "x-ob-decode": [decodeStamp], "x-ob-classify": ["protocol/isError"] });
   await inv.emitOutput(output);
   inv.closeOutput();
+}
+
+/**
+ * The MCP text builtin: the value is the text, verbatim.
+ * Content-independent per the conventions record; JSON-in-text consumers
+ * opt in with a decode hook.
+ */
+function builtinTextDecode(_site: InvokeSite, raw: RawResult): unknown {
+  return typeof raw.body === "string" ? raw.body : String(raw.body);
+}
+
+/** Names the decode lane for the x-ob-decode stamp ("hook" when a hook decided). */
+function decodeStampFor(hooks: InvokeHooks | undefined, builtin: string): string {
+  return hooks?.decodeDecidedBy?.() === "hook" ? "hook" : builtin;
 }
 
 /** Read an MCP resource. */
@@ -244,10 +292,17 @@ async function runResource(
   uri: string,
   inv: BindingHandle<unknown, unknown>,
   setHeaderOnce: () => void,
+  site: InvokeSite,
+  hooks: InvokeHooks | undefined,
 ): Promise<void> {
   const result = await client.readResource({ uri }, { signal: inv.signal });
 
+  // Resources carry a DECLARED mimeType, so the builtin is the same
+  // header-driven lane HTTP uses: json/+json parses strictly (a parse
+  // failure is a loud error, never a silent fall-through), anything else
+  // is text, and the payload's shape never picks the lane.
   let output: unknown;
+  let decodeStamp = "content";
   const contents = result.contents;
   if (!contents || contents.length === 0) {
     output = null;
@@ -255,11 +310,9 @@ async function runResource(
     const c = contents[0];
     const text = "text" in c ? (c as { text: string }).text : undefined;
     if (text) {
-      try {
-        output = JSON.parse(text);
-      } catch {
-        output = text;
-      }
+      const mimeType = ("mimeType" in c ? (c as { mimeType?: string }).mimeType : undefined) ?? "";
+      output = await decodeThroughHooks(hooks, site, { body: text }, builtinMimeDecode(mimeType));
+      decodeStamp = decodeStampFor(hooks, "declared/mime-type");
     } else {
       output = c;
     }
@@ -268,8 +321,48 @@ async function runResource(
   }
 
   setHeaderOnce();
+  inv.setTrailer({ "x-ob-decode": [decodeStamp] });
   await inv.emitOutput(output);
   inv.closeOutput();
+}
+
+/**
+ * The resource builtin: the declared mimeType decides the lane.
+ * application/json and +json parse strictly; a declared-JSON body that
+ * does not parse is a loud invocation error.
+ */
+function builtinMimeDecode(mimeType: string): (site: InvokeSite, raw: RawResult) => unknown {
+  return (_site, raw) => {
+    const mt = mimeType.split(";", 1)[0].trim();
+    const body = typeof raw.body === "string" ? raw.body : String(raw.body);
+    if (mt === "application/json" || mt.endsWith("+json")) {
+      try {
+        return JSON.parse(body);
+      } catch (e) {
+        throw new InvocationError(
+          ERR_EXECUTION_FAILED,
+          `resource declares ${mimeType} but its text is not valid JSON: ${(e as Error).message}`,
+        );
+      }
+    }
+    return body;
+  };
+}
+
+/** Builds the hook-consultation site for an MCP binding. */
+function siteFor(args: BindingInvocationArgs, target: string): InvokeSite {
+  const site: InvokeSite = args.site
+    ? { ...args.site }
+    : {
+        operation: args.binding?.operation ?? "",
+        invokedAs: args.binding?.operation ?? "",
+        bindingKey: "",
+        format: args.source.format,
+        ref: args.ref,
+        target: "",
+      };
+  if (site.target === "") site.target = target;
+  return site;
 }
 
 /** Get an MCP prompt. */

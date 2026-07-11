@@ -121,12 +121,14 @@ const textResult = (text: string): RpcReply => ({
 // ---------------------------------------------------------------------------
 
 describe("MCPInvoker tools", () => {
-  it("invokes a tool: write + single, JSON text content parsed", async () => {
+  it("invokes a tool: write + single; text content is a STRING, never sniffed", async () => {
+    // MCP 2025-11-25 defines JSON-in-text as the backwards-compatibility
+    // shadow of structuredContent; a client never parses text by shape.
     const { fn, calls } = mcpServer(() => textResult('{"tempC":20}'));
     const call = new MCPInvoker().invokeBinding({ source, ref: "tools/get_weather", fetch: fn });
 
     await call.write({ city: "Oslo" });
-    await expect(single(call.outputs)).resolves.toEqual({ tempC: 20 });
+    await expect(single(call.outputs)).resolves.toEqual('{"tempC":20}');
     await expect(call.closed).resolves.toBeUndefined();
 
     expect(calls).toHaveLength(1);
@@ -270,9 +272,11 @@ describe("MCPInvoker tools", () => {
 // ---------------------------------------------------------------------------
 
 describe("MCPInvoker resources", () => {
-  it("reads a resource without any input (no-input recipe)", async () => {
+  it("reads a resource without any input (no-input recipe); declared JSON parses", async () => {
+    // Resources decode by their DECLARED mimeType — the header-driven
+    // lane, never a payload sniff.
     const { fn, calls } = mcpServer(() => ({
-      result: { contents: [{ uri: "file:///data.json", text: '{"a":1}' }] },
+      result: { contents: [{ uri: "file:///data.json", mimeType: "application/json", text: '{"a":1}' }] },
     }));
     const call = new MCPInvoker().invokeBinding({ source, ref: "resources/file:///data.json", fetch: fn });
 
@@ -280,6 +284,22 @@ describe("MCPInvoker resources", () => {
     await expect(single(call.outputs)).resolves.toEqual({ a: 1 });
     expect(calls[0].method).toBe("resources/read");
     expect(calls[0].params.uri).toBe("file:///data.json");
+  });
+
+  it("a resource with no declared JSON mimeType stays text, whatever its shape", async () => {
+    const { fn } = mcpServer(() => ({
+      result: { contents: [{ uri: "file:///notes.txt", mimeType: "text/plain", text: '{"a":1}' }] },
+    }));
+    const call = new MCPInvoker().invokeBinding({ source, ref: "resources/file:///notes.txt", fetch: fn });
+    await expect(single(call.outputs)).resolves.toEqual('{"a":1}');
+  });
+
+  it("declared-JSON that does not parse is a loud error, never a silent string", async () => {
+    const { fn } = mcpServer(() => ({
+      result: { contents: [{ uri: "file:///bad.json", mimeType: "application/json", text: "{not json" }] },
+    }));
+    const call = new MCPInvoker().invokeBinding({ source, ref: "resources/file:///bad.json", fetch: fn });
+    await expect(single(call.outputs)).rejects.toMatchObject({ code: ERR_EXECUTION_FAILED });
   });
 
   it("returns the raw contents array for multi-content responses", async () => {

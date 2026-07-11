@@ -96,8 +96,8 @@ The synthesizer connects to the server, lists every advertised tool, resource, r
 2. Reads the input message from the handle (tools and prompts; resource reads close the input side on entry) and closes input so callers never have to
 3. **Opens a fresh MCP session per call** via `StreamableHTTPClientTransport`. There is no session caching — every execution is a new connect/close cycle.
 4. Dispatches based on entity type:
-   - **`tools/<name>`:** calls `client.callTool`. Progress notifications are emitted as outputs as they arrive. The final output prefers `structuredContent` if the tool returns one, otherwise parses the `content` array (single text item is JSON-parsed if possible; multi-text items are joined; mixed content is returned as-is).
-   - **`resources/<uri>`:** calls `client.readResource`. Single text content is JSON-parsed if possible. Multi-content responses are returned as the raw `contents` array.
+   - **`tools/<name>`:** calls `client.callTool`. Progress notifications are emitted as outputs as they arrive. The final output prefers `structuredContent` (MCP's declared structured lane); absent it, a single text content is a **string, verbatim** — JSON-in-text is MCP's backwards-compatibility shadow of `structuredContent`, and parsing it is a consumer choice made through a `DecodeOutput` hook, never a payload sniff. Multi-text items are joined; mixed content is returned as-is.
+   - **`resources/<uri>`:** calls `client.readResource`. Single text content decodes by its **declared `mimeType`** (the HTTP header rule: `application/json`/`+json` parses strictly, with a loud error on malformed JSON; anything else stays text). Multi-content responses are returned as the raw `contents` array.
    - **`prompts/<name>`:** calls `client.getPrompt`. Output is `{ messages, description? }`.
 5. Sets the entity call's HTTP response headers as the handle's leading metadata, then closes the output side (or fires the terminal error).
 6. Closes the client in a `finally` block.
