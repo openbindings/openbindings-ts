@@ -63,6 +63,21 @@ describe("validateInterface", () => {
     expect(() => validateInterface(iface)).not.toThrow();
   });
 
+  it("permits a plain-name fragment inside an embedded $id-declaring schema", () => {
+    // OBI-D-05's pointer-form rule carves out $id scopes (same rule as D-16).
+    const iface = minimalInterface();
+    iface.schemas = {
+      Task: {
+        $id: "https://example.com/task.schema.json",
+        type: "object",
+        properties: { kind: { $ref: "#kindAnchor" } },
+        $defs: { kind: { $anchor: "kindAnchor", type: "string" } },
+      },
+    };
+    iface.operations.getUser.output = { $ref: "#/schemas/Task" };
+    expect(() => validateInterface(iface)).not.toThrow();
+  });
+
   it("rejects a plain-name ($anchor) fragment $ref (OBI-D-05)", () => {
     const iface = minimalInterface();
     iface.schemas = { User: { $anchor: "user", type: "object" } };
