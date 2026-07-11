@@ -13,11 +13,27 @@ interface MCPDiscovery {
   prompts: Array<{ name: string; description?: string; arguments?: Array<{ name: string; description?: string; required?: boolean }> }>;
 }
 
+/** Options threaded through discovery: cancellation and the fetch seam. */
+export interface DiscoverOptions {
+  signal?: AbortSignal;
+  /**
+   * Overrides the fetch implementation the Streamable HTTP transport uses
+   * to reach the MCP server during discovery. Mirrors the Go SDK's
+   * WithSynthesizerHTTPClient (client.go/invoker.go): a corporate proxy,
+   * mTLS client certificate, or custom CA pool that the invocation lane
+   * needs is needed here too, since discovery connects live.
+   */
+  fetch?: typeof globalThis.fetch;
+}
+
 /** Discover capabilities from an MCP server. */
-export async function discover(url: string, signal?: AbortSignal): Promise<MCPDiscovery> {
-  const transport = new StreamableHTTPClientTransport(new URL(url));
+export async function discover(url: string, options?: DiscoverOptions): Promise<MCPDiscovery> {
+  const transport = new StreamableHTTPClientTransport(
+    new URL(url),
+    options?.fetch ? { fetch: options.fetch } : undefined,
+  );
   const client = new Client({ name: CLIENT_NAME, version: CLIENT_VERSION });
-  await client.connect(transport);
+  await client.connect(transport, options?.signal ? { signal: options.signal } : undefined);
 
   try {
     const serverVersion = client.getServerVersion();
@@ -79,13 +95,50 @@ export async function discover(url: string, signal?: AbortSignal): Promise<MCPDi
   }
 }
 
-/** Sanitize a name for use as an OBI operation key. */
-function sanitizeKey(name: string): string {
+/**
+ * The standard MCP GetPromptResult output schema: an object with a
+ * required `messages` array (each item shaped {role, content}) and an
+ * optional `description`. Mirrors the Go SDK's promptOutputSchema()
+ * (synthesize.go) field for field -- the convention record's Invocation
+ * shape section states prompts output "{messages, description?}", so
+ * `messages` is required and `description` is not.
+ */
+function promptOutputSchema(): JSONSchema {
+  return {
+    type: "object",
+    properties: {
+      description: { type: "string", description: "Optional description of the prompt result" },
+      messages: {
+        type: "array",
+        description: "Sequence of LLM messages",
+        items: {
+          type: "object",
+          properties: {
+            role: { type: "string" },
+            content: {},
+          },
+          required: ["role", "content"],
+        },
+      },
+    },
+    required: ["messages"],
+  } as JSONSchema;
+}
+
+/**
+ * Sanitize a name for use as an OBI operation key. Exported (alongside
+ * {@link resolveKey}) so inspectSource can suggest the same operationKey
+ * synthesizeInterface assigns, matching the Go SDK's InspectSource
+ * (list_refs.go), which shares this exact key-assignment logic with
+ * SynthesizeInterface "so an inspection previews exactly what synthesis
+ * names."
+ */
+export function sanitizeKey(name: string): string {
   return name.replace(/[^a-zA-Z0-9._-]/g, "_").replace(/^_+|_+$/g, "") || "unnamed";
 }
 
 /** Resolve key collisions by prefixing with entity type. */
-function resolveKey(key: string, entityType: string, used: Map<string, string>): string {
+export function resolveKey(key: string, entityType: string, used: Map<string, string>): string {
   if (!used.has(key)) return key;
   const prefixed = `${entityType}_${key}`;
   if (!used.has(prefixed)) return prefixed;
@@ -188,13 +241,7 @@ export function convertToInterface(disc: MCPDiscovery, location?: string): OBInt
     }
 
     // Standard prompt output schema.
-    op.output = {
-      type: "object",
-      properties: {
-        messages: { type: "array" },
-        description: { type: "string" },
-      },
-    } as JSONSchema;
+    op.output = promptOutputSchema();
 
     operations[opKey] = op;
     bindings[`${opKey}.${DEFAULT_SOURCE_NAME}`] = { operation: opKey, source: DEFAULT_SOURCE_NAME, ref };

@@ -81,6 +81,37 @@ describe("convertToInterface", () => {
     expect(binding.ref).toBe("prompts/summarize");
   });
 
+  it("prompt output schema requires messages and describes each message's shape (Go parity)", () => {
+    // The convention record's Invocation shape section states prompts
+    // output "{messages, description?}" -- messages required, description
+    // optional. Go's promptOutputSchema() (synthesize.go) matches that:
+    // required:[messages] plus an items schema describing role/content.
+    // TS's inline schema had no `required` at all (contradicting the
+    // record's own "messages, description?" shape) and no items schema.
+    const iface = convertToInterface({
+      tools: [],
+      resources: [],
+      resourceTemplates: [],
+      prompts: [{ name: "review", description: "Review code" }],
+    });
+
+    const output = iface.operations.review.output as Record<string, unknown>;
+    expect(output.type).toBe("object");
+    expect(output.required).toEqual(["messages"]);
+
+    const properties = output.properties as Record<string, unknown>;
+    expect(properties.messages).toBeDefined();
+    const messages = properties.messages as Record<string, unknown>;
+    expect(messages.type).toBe("array");
+
+    const items = messages.items as Record<string, unknown>;
+    expect(items.type).toBe("object");
+    expect(items.required).toEqual(["role", "content"]);
+    const itemProps = items.properties as Record<string, unknown>;
+    expect(itemProps.role).toBeDefined();
+    expect(itemProps.content).toBeDefined();
+  });
+
   it("handles key collisions", () => {
     const iface = convertToInterface({
       tools: [{ name: "fetch" }],

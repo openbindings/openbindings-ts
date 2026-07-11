@@ -9,7 +9,7 @@ import {
   ERR_VALIDATION_FAILED,
   single,
 } from "@openbindings/sdk";
-import { MCPInvoker } from "./invoker.js";
+import { MCPInvoker, MCPSynthesizer } from "./invoker.js";
 
 // ---------------------------------------------------------------------------
 // Fake MCP server (Streamable HTTP over a fetch stub)
@@ -137,6 +137,18 @@ describe("MCPInvoker tools", () => {
     expect(calls[0].params.arguments).toEqual({ city: "Oslo" });
   });
 
+  it("joins multiple text content blocks verbatim, never JSON-sniffed, even when one looks like JSON", async () => {
+    // Exercises the real wiring's parseContent lane (reached because there
+    // are two content items, not one) end to end, per the de-sniff ruling.
+    const { fn } = mcpServer(() => ({
+      result: { content: [{ type: "text", text: "note:" }, { type: "text", text: '{"a":1}' }] },
+    }));
+    const call = new MCPInvoker().invokeBinding({ source, ref: "tools/multi", fetch: fn });
+
+    await call.write({});
+    await expect(single(call.outputs)).resolves.toBe('note:\n{"a":1}');
+  });
+
   it("prefers structuredContent over the content array", async () => {
     const { fn } = mcpServer(() => ({
       result: { content: [{ type: "text", text: "ignored" }], structuredContent: { ok: true } },
@@ -183,6 +195,41 @@ describe("MCPInvoker tools", () => {
     expect(outputs[1]).toMatchObject({ progress: 2, total: 2 });
     expect(outputs[2]).toBe("done");
     await expect(call.closed).resolves.toBeUndefined();
+  });
+
+  it("NAMED GAP: preserves an explicit total:0 the server sent, unlike Go", async () => {
+    // Go's runTool (invoke.go) builds the progress map with `if p.Total !=
+    // 0`, because the go-mcp SDK's ProgressNotificationParams.Total is a
+    // plain (non-pointer) float64 tagged `json:"total,omitempty"` -- its
+    // own doc comment says "Zero means unknown" -- so Go cannot distinguish
+    // an explicit total:0 from an absent total once go-mcp has unmarshaled
+    // it; both collapse to the Go zero value and get dropped. TS's zod
+    // schema (ProgressSchema: total is z.optional(z.number())) has no such
+    // collapse: an explicit total:0 on the wire survives into the emitted
+    // object. This is a real, verified divergence forced by the two SDKs'
+    // underlying MCP libraries, not a choice either binding author made;
+    // tracked as a named gap (see final report) rather than "fixed" on
+    // either side, since aligning would mean either bypassing go-mcp's
+    // typed API to hand-parse raw JSON-RPC (disproportionate to a total=0
+    // edge case) or teaching TS to lie about a value the server actually
+    // sent.
+    const { fn } = mcpServer((req) => ({
+      sse: [
+        {
+          jsonrpc: "2.0",
+          method: "notifications/progress",
+          params: { progressToken: req.params._meta?.progressToken, progress: 1, total: 0 },
+        },
+        { jsonrpc: "2.0", id: req.id, result: { content: [{ type: "text", text: "done" }] } },
+      ],
+    }));
+    const call = new MCPInvoker().invokeBinding({ source, ref: "tools/long_job", fetch: fn });
+
+    await call.write({});
+    const outputs: unknown[] = [];
+    for await (const o of call.outputs) outputs.push(o);
+
+    expect(outputs[0]).toEqual({ progress: 1, total: 0 });
   });
 
   it("maps a tool isError result to ERR_EXECUTION_FAILED", async () => {
@@ -368,6 +415,24 @@ describe("MCPInvoker failures", () => {
     expect(fetches()).toBe(0);
   });
 
+  it("fails a non-HTTP location scheme pre-dispatch with ERR_SOURCE_CONFIG_ERROR (Go parity)", async () => {
+    // Go's IsHTTPURL precheck (invoke.go) rejects a non-http(s) location
+    // before any I/O with ERR_SOURCE_CONFIG_ERROR; TS previously had no
+    // such precheck, so a bad scheme fell through to whatever the
+    // transport/URL machinery did with it (ERR_RUNTIME for a string
+    // that fails URL parsing, or straight through to the network for a
+    // syntactically valid non-http URL like ftp://).
+    const { fn, fetches } = mcpServer(() => textResult("ok"));
+    const call = new MCPInvoker().invokeBinding({
+      source: { format: "mcp@2025-11-25", location: "ftp://mcp.example.com" },
+      ref: "resources/file:///x",
+      fetch: fn,
+    });
+
+    await expect(call.closed).rejects.toMatchObject({ code: ERR_SOURCE_CONFIG_ERROR });
+    expect(fetches()).toBe(0);
+  });
+
   it("fails a missing endpoint pre-dispatch with ERR_SOURCE_CONFIG_ERROR", async () => {
     const { fn, fetches } = mcpServer(() => textResult("ok"));
     const call = new MCPInvoker().invokeBinding({
@@ -402,5 +467,103 @@ describe("MCPInvoker failures", () => {
       code: ERR_PERMISSION_DENIED,
       details: { status: 403 },
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// MCPSynthesizer (discovery: synthesizeInterface + inspectSource)
+// ---------------------------------------------------------------------------
+
+/**
+ * A fetch stub that answers `initialize` plus the four list-discovery
+ * calls (tools, resources, resource templates, prompts) the way a real
+ * MCP server with one tool, one resource, and one prompt would. Reused
+ * for both synthesizeInterface and inspectSource,
+ * whose discovery lane is otherwise identical (list_refs_test.go /
+ * TestInspectSource_RefsMatchSynthesizeInterface asserts the Go SDK's two
+ * entry points agree; this is the TS-side discovery fixture).
+ */
+function discoveryServer(): { fn: typeof fetch; fetches: () => number } {
+  let fetchCount = 0;
+  const fn: typeof fetch = async (_input, init) => {
+    fetchCount++;
+    const method = init?.method ?? "GET";
+    if (method === "GET") return new Response(null, { status: 405 });
+    if (method === "DELETE") return new Response(null, { status: 200 });
+
+    const msg = JSON.parse(String(init?.body)) as { id?: number | string; method: string };
+    const reply = (result: unknown) =>
+      jsonResponse({ jsonrpc: "2.0", id: msg.id, result });
+
+    switch (msg.method) {
+      case "initialize":
+        return reply({
+          protocolVersion: "2025-11-25",
+          capabilities: { tools: {}, resources: {}, prompts: {} },
+          serverInfo: { name: "fake-server", version: "1.0.0" },
+        });
+      case "tools/list":
+        return reply({
+          tools: [{ name: "get_weather", description: "Get weather for a city", inputSchema: { type: "object", properties: {} } }],
+        });
+      case "resources/list":
+        return reply({ resources: [{ name: "config", uri: "file:///etc/config.json", description: "Config file" }] });
+      case "resources/templates/list":
+        return reply({ resourceTemplates: [] });
+      case "prompts/list":
+        return reply({ prompts: [{ name: "summarize", description: "Summarize text" }] });
+      default:
+        if (msg.id === undefined) return new Response(null, { status: 202 }); // notifications (e.g. initialized)
+        return reply({});
+    }
+  };
+  return { fn, fetches: () => fetchCount };
+}
+
+describe("MCPSynthesizer", () => {
+  it("inspectSource suggests the same operationKey synthesizeInterface assigns (Go parity)", async () => {
+    // Go's InspectSource (list_refs.go) stamps BindableTarget.OperationKey
+    // with the same SanitizeKey + collision-resolved key SynthesizeInterface
+    // assigns, sharing one usedKeys map across all four entity kinds, "so an
+    // inspection previews exactly what synthesis names." TS's inspectSource
+    // pushed {ref, operation} only -- operationKey was never set.
+    const { fn: synthFetch } = discoveryServer();
+    const iface = await new MCPSynthesizer({ fetch: synthFetch }).synthesizeInterface({
+      sources: [{ format: "mcp@2025-11-25", location: ENDPOINT }],
+    });
+
+    const { fn: inspectFetch } = discoveryServer();
+    const inspection = await new MCPSynthesizer({ fetch: inspectFetch }).inspectSource({
+      format: "mcp@2025-11-25",
+      location: ENDPOINT,
+    });
+
+    expect(inspection.targets.length).toBeGreaterThan(0);
+    for (const target of inspection.targets) {
+      expect(target.operationKey).toBeDefined();
+      // The suggested key must resolve to an operation synthesizeInterface
+      // actually produced for the same ref, under the same binding source.
+      const binding = Object.values(iface.bindings ?? {}).find((b) => b.ref === target.ref);
+      expect(binding).toBeDefined();
+      expect(target.operationKey).toBe(binding!.operation);
+    }
+  });
+
+  it("uses the constructor-injected fetch for discovery (Go's WithSynthesizerHTTPClient parity)", async () => {
+    // Go's Synthesizer takes an httpClient at construction (WithSynthesizerHTTPClient,
+    // invoker.go) that discover() rides for proxy/mTLS/custom-CA setups;
+    // TS's discover() previously had no seam at all -- always the ambient
+    // global fetch, with no way to reach a server behind that kind of setup.
+    const { fn, fetches } = discoveryServer();
+    const synthesizer = new MCPSynthesizer({ fetch: fn });
+
+    await synthesizer.synthesizeInterface({
+      sources: [{ format: "mcp@2025-11-25", location: ENDPOINT }],
+    });
+    expect(fetches()).toBeGreaterThan(0);
+
+    const before = fetches();
+    await synthesizer.inspectSource({ format: "mcp@2025-11-25", location: ENDPOINT });
+    expect(fetches()).toBeGreaterThan(before);
   });
 });

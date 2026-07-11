@@ -45,6 +45,16 @@ async function readFirst<T>(it: AsyncIterable<T>): Promise<T | undefined> {
 }
 
 /**
+ * Reports whether s starts with http:// or https:// (Go SDK's IsHTTPURL
+ * parity). A prefix check rather than `new URL()` validity: it must reject
+ * a wrong-but-syntactically-valid scheme (ftp://, ws://) the same way it
+ * rejects garbage, and it must do so before any URL parsing or network I/O.
+ */
+function isHTTPURL(s: string): boolean {
+  return s.startsWith("http://") || s.startsWith("https://");
+}
+
+/**
  * Maps a thrown error to an InvocationError. JSON-RPC errors carry the MCP
  * error code/data in details; HTTP-status errors map via httpErrorCode;
  * anything else falls back to the phase's code (ERR_CONNECT_FAILED during
@@ -93,6 +103,15 @@ export async function runMCPBinding(
   if (!location) {
     inv.fireError(
       new InvocationError(ERR_SOURCE_CONFIG_ERROR, "MCP source requires a location (endpoint URL)"),
+    );
+    return;
+  }
+  if (!isHTTPURL(location)) {
+    inv.fireError(
+      new InvocationError(
+        ERR_SOURCE_CONFIG_ERROR,
+        `MCP source location must be an HTTP or HTTPS URL, got ${JSON.stringify(location)}`,
+      ),
     );
     return;
   }
@@ -406,20 +425,23 @@ function extractContent(content: unknown): string {
     .join("\n");
 }
 
-/** Parse MCP content array into a usable value. */
-function parseContent(content: unknown): unknown {
+/**
+ * Parse MCP content array into a usable value. Reached only for content
+ * shapes runTool's single-text-string fast path doesn't cover (multiple
+ * items, non-text items, or a malformed single "text" item whose text
+ * field isn't a string) -- exported for direct unit coverage of that edge.
+ *
+ * De-sniff ruling: text is never JSON-parsed by shape, including the
+ * single-item case. There used to be a "single text content: try JSON
+ * parse" branch here; it contradicted the ruling and is gone. A single
+ * text item now falls into the allText join below, same as any other
+ * all-text array, and comes out verbatim.
+ */
+export function parseContent(content: unknown): unknown {
   if (!Array.isArray(content) || content.length === 0) return content;
 
-  // Single text content: try JSON parse.
-  if (content.length === 1 && content[0].type === "text" && content[0].text) {
-    try {
-      return JSON.parse(content[0].text);
-    } catch {
-      return content[0].text;
-    }
-  }
-
-  // Check if all items are text. If so, join them.
+  // Check if all items are text. If so, join them verbatim (a single-item
+  // array collapses to that one item's text; no separator is added).
   const allText = content.every(
     (c: { type?: string }) => c.type === "text",
   );

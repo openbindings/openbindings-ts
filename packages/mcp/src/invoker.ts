@@ -17,7 +17,7 @@ import {
 } from "@openbindings/sdk";
 import { FORMAT_TOKEN } from "./constants.js";
 import { runMCPBinding } from "./invoke.js";
-import { discover, convertToInterface } from "./synthesize.js";
+import { discover, convertToInterface, sanitizeKey, resolveKey } from "./synthesize.js";
 
 // ---------------------------------------------------------------------------
 // Invoker
@@ -56,8 +56,27 @@ export class MCPInvoker implements BindingInvoker {
 // Synthesizer
 // ---------------------------------------------------------------------------
 
+/** Constructor options for {@link MCPSynthesizer}. */
+export interface MCPSynthesizerOptions {
+  /**
+   * Overrides the fetch implementation discovery uses to reach the MCP
+   * server. Mirrors the Go SDK's WithSynthesizerHTTPClient (invoker.go): a
+   * corporate proxy, mTLS client certificate, or custom CA pool that the
+   * invocation lane needs (BindingInvocationArgs.fetch) is needed here
+   * too, since discovery connects live. Unset means the ambient global
+   * fetch, same as before this option existed.
+   */
+  fetch?: typeof globalThis.fetch;
+}
+
 /** Synthesizes OBInterface definitions by discovering an MCP server's capabilities. */
 export class MCPSynthesizer implements InterfaceSynthesizer, SourceInspector {
+  private readonly fetchImpl?: typeof globalThis.fetch;
+
+  constructor(options?: MCPSynthesizerOptions) {
+    this.fetchImpl = options?.fetch;
+  }
+
   formats(): FormatInfo[] {
     return [{ token: FORMAT_TOKEN, description: "MCP via Streamable HTTP" }];
   }
@@ -77,7 +96,7 @@ export class MCPSynthesizer implements InterfaceSynthesizer, SourceInspector {
       throw new Error("MCP source requires a location (endpoint URL)");
     }
 
-    const disc = await discover(src.location, options?.signal);
+    const disc = await discover(src.location, { signal: options?.signal, fetch: this.fetchImpl });
     const iface = convertToInterface(disc, src.location);
     if (input.name) iface.name = input.name;
     if (input.version) iface.version = input.version;
@@ -85,26 +104,46 @@ export class MCPSynthesizer implements InterfaceSynthesizer, SourceInspector {
     return iface;
   }
 
-  /** Lists all bindable targets (tools, resources, prompts) from an MCP server. */
+  /**
+   * Lists all bindable targets (tools, resources, prompts) from an MCP
+   * server. Each target's operationKey is the same SanitizeKey +
+   * collision-resolved key synthesizeInterface would assign it (one
+   * usedKeys map shared across all four entity kinds, in the same
+   * tools/resources/resourceTemplates/prompts order convertToInterface
+   * uses), so an inspection previews exactly what synthesis names.
+   */
   async inspectSource(
     source: Source,
     options?: { signal?: AbortSignal },
   ): Promise<SourceInspection> {
     if (!source.location) throw new Error("MCP source requires a location (endpoint URL)");
-    const disc = await discover(source.location, options?.signal);
+    const disc = await discover(source.location, { signal: options?.signal, fetch: this.fetchImpl });
     const targets: SourceInspection["targets"] = [];
+    const usedKeys = new Map<string, string>();
 
     for (const tool of disc.tools.sort((a, b) => a.name.localeCompare(b.name))) {
-      targets.push({ ref: `tools/${tool.name}`, operation: tool.description ? { description: tool.description } : undefined });
+      const ref = `tools/${tool.name}`;
+      const operationKey = resolveKey(sanitizeKey(tool.name), "tool", usedKeys);
+      usedKeys.set(operationKey, ref);
+      targets.push({ ref, operationKey, operation: tool.description ? { description: tool.description } : undefined });
     }
     for (const res of disc.resources.sort((a, b) => a.name.localeCompare(b.name))) {
-      targets.push({ ref: `resources/${res.uri}`, operation: res.description ? { description: res.description } : undefined });
+      const ref = `resources/${res.uri}`;
+      const operationKey = resolveKey(sanitizeKey(res.name), "resource", usedKeys);
+      usedKeys.set(operationKey, ref);
+      targets.push({ ref, operationKey, operation: res.description ? { description: res.description } : undefined });
     }
     for (const tmpl of disc.resourceTemplates.sort((a, b) => a.name.localeCompare(b.name))) {
-      targets.push({ ref: `resources/${tmpl.uriTemplate}`, operation: tmpl.description ? { description: tmpl.description } : undefined });
+      const ref = `resources/${tmpl.uriTemplate}`;
+      const operationKey = resolveKey(sanitizeKey(tmpl.name), "resource_template", usedKeys);
+      usedKeys.set(operationKey, ref);
+      targets.push({ ref, operationKey, operation: tmpl.description ? { description: tmpl.description } : undefined });
     }
     for (const prompt of disc.prompts.sort((a, b) => a.name.localeCompare(b.name))) {
-      targets.push({ ref: `prompts/${prompt.name}`, operation: prompt.description ? { description: prompt.description } : undefined });
+      const ref = `prompts/${prompt.name}`;
+      const operationKey = resolveKey(sanitizeKey(prompt.name), "prompt", usedKeys);
+      usedKeys.set(operationKey, ref);
+      targets.push({ ref, operationKey, operation: prompt.description ? { description: prompt.description } : undefined });
     }
 
     return { targets, exhaustive: true };

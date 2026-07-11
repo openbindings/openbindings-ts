@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseRef } from "./invoke.js";
+import { parseRef, parseContent } from "./invoke.js";
 
 describe("parseRef", () => {
   it("parses tool ref", () => {
@@ -36,5 +36,37 @@ describe("parseRef", () => {
 
   it("rejects trailing slash", () => {
     expect(() => parseRef("tools/")).toThrow();
+  });
+});
+
+describe("parseContent", () => {
+  // De-sniff ruling: decode is decided by declared/structural rules, never
+  // by tasting the payload. A single text block whose text happens to
+  // parse as JSON must still come back as the verbatim string -- a latent
+  // "single text content: try JSON parse" branch used to sniff this case
+  // (reachable only for a malformed non-string "text" field in practice,
+  // since runTool's fast path intercepts every valid single-text-string
+  // result before parseContent is ever called); it's deleted, and this
+  // pins the invariant directly on the function.
+  it("returns a single text block verbatim, never JSON-parsed, even when it looks like JSON", () => {
+    const result = parseContent([{ type: "text", text: '{"tempC":20}' }]);
+    expect(result).toBe('{"tempC":20}');
+  });
+
+  it("joins multiple text blocks verbatim, never JSON-parsed, even when one block looks like JSON", () => {
+    const result = parseContent([
+      { type: "text", text: "prefix" },
+      { type: "text", text: '{"a":1}' },
+    ]);
+    expect(result).toBe('prefix\n{"a":1}');
+  });
+
+  it("passes mixed content types through as an array", () => {
+    const content = [{ type: "text", text: "hi" }, { type: "image", mimeType: "image/png", data: "..." }];
+    expect(parseContent(content)).toBe(content);
+  });
+
+  it("passes an empty array through unchanged", () => {
+    expect(parseContent([])).toEqual([]);
   });
 });
