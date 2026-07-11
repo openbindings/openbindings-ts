@@ -42,6 +42,36 @@ describe("validateInterface", () => {
     expect(() => validateInterface(iface)).toThrow("OBI-D-05");
   });
 
+  // OBI-D-05: a sources[*].location may be a format-defined absolute address
+  // (e.g. a gRPC host:port), not only a URI. These need no base URI and must
+  // not be rejected as relative references, including IP-literal and IPv6
+  // hosts that a URL parser cannot parse as a URI. Mirrors the Go SDK's
+  // TestInterfaceValidate_SourceLocationFormatDefinedAddress.
+  it.each([
+    "grpc.example.com:443",
+    "localhost:50051",
+    "10.0.0.1:443",
+    "[::1]:443",
+    "dns:///grpc.example.com:443",
+    "https://api.example.com/openapi.json",
+  ])("accepts format-defined absolute address %s as a source location (OBI-D-05)", (addr) => {
+    const iface = minimalInterface();
+    iface.sources!.main = { format: "grpc@1.0", location: addr };
+    delete iface.bindings;
+    expect(() => validateInterface(iface)).not.toThrow();
+  });
+
+  // OBI-D-05: a relative reference needs a base URI and is not allowed.
+  // Mirrors the Go SDK's TestInterfaceValidate_SourceLocationRelativeRejected.
+  it.each(["./openapi.json", "openapi.json", "../api/openapi.json", "/abs/openapi.json"])(
+    "rejects relative source location %s (OBI-D-05)",
+    (loc) => {
+      const iface = minimalInterface();
+      iface.sources!.main.location = loc;
+      expect(() => validateInterface(iface)).toThrow("not a relative reference (OBI-D-05)");
+    },
+  );
+
   it("rejects a dangling same-document $ref (OBI-D-16)", () => {
     const iface = minimalInterface();
     iface.schemas = { Task: { type: "object" } };

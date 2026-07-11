@@ -116,6 +116,7 @@ export {
   isSupportedVersion,
   isValidSemver,
   isHigherMajorOrPre1MinorThanMaxTested,
+  isLowerThanMinSupported,
   isUnsupportedPrerelease,
 } from "./version.js";
 

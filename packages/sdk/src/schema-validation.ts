@@ -301,15 +301,29 @@ const isObj = (v: unknown): v is Record<string, unknown> =>
   typeof v === "object" && v !== null && !Array.isArray(v);
 
 /**
- * Walks the compound schema (keyword-shape-aware) and throws on the
- * first `$ref` that cannot resolve within it: same-document pointers
- * must point at an existing location; absolute URIs must match an
- * embedded schema's `$id` (with any fragment resolving inside that
- * resource). Fail-closed: an exotic reference this walk cannot prove
- * resolvable is refused with the ref named, never validated partially.
+ * Walks the governing schema's static closure (keyword-shape-aware) and
+ * throws on the first `$ref` that cannot resolve within the document:
+ * same-document pointers must point at an existing location; absolute
+ * URIs must match an embedded schema's `$id` (with any fragment
+ * resolving inside that resource). Fail-closed: an exotic reference
+ * this walk cannot prove resolvable is refused with the ref named,
+ * never validated partially.
+ *
+ * The closure is REACHABILITY-scoped, mirroring the Go SDK's compiler:
+ * T-07/T-08's "whole governing schema" is everything evaluation can
+ * statically reach from the governing root — its keyword subschemas
+ * plus every reference target, transitively (an unresolvable anyOf
+ * branch still fails even when a value would not reach it). A schema
+ * that is lexically present but unreachable (an unreferenced `$defs`
+ * entry, an unrelated document-schemas entry merged into the compound)
+ * never participates in any verdict and must not poison the boundary;
+ * a dangling same-document ref there is OBI-D-16's document-level
+ * concern, not an invocation refusal.
  */
 function assertFullyResolvable(root: Record<string, unknown>): void {
-  // Pass 1: collect embedded $id resources.
+  // Pass 1 (lexical): collect embedded $id resources across the whole
+  // compound — identity resolution is in-document wherever the resource
+  // sits (§10), even inside an entry nothing references directly.
   const idResources = new Map<string, Record<string, unknown>>();
   (function collectIds(node: unknown): void {
     if (!isObj(node)) return;
@@ -317,9 +331,12 @@ function assertFullyResolvable(root: Record<string, unknown>): void {
     walkSchemaChildren(node, collectIds);
   })(root);
 
-  // Pass 2: check every $ref in its scope.
-  (function check(node: unknown, scope: Record<string, unknown>, base: string): void {
-    if (!isObj(node)) return;
+  // Pass 2 (reachable): follow keyword subschemas and $ref targets from
+  // the governing root only.
+  const visited = new Set<unknown>();
+  (function visit(node: unknown, scope: Record<string, unknown>, base: string): void {
+    if (!isObj(node) || visited.has(node)) return;
+    visited.add(node);
     let currentScope = scope;
     let currentBase = base;
     if (typeof node.$id === "string") {
@@ -327,9 +344,10 @@ function assertFullyResolvable(root: Record<string, unknown>): void {
       currentBase = node.$id;
     }
     if (typeof node.$ref === "string") {
-      assertRefResolves(node.$ref, currentScope, currentBase, root, idResources);
+      const target = resolveRefTarget(node.$ref, currentScope, currentBase, idResources);
+      visit(target.node, target.scope, target.base);
     }
-    walkSchemaChildren(node, (child) => check(child, currentScope, currentBase));
+    walkReachableChildren(node, (child) => visit(child, currentScope, currentBase));
   })(root, root, "");
 }
 
@@ -345,13 +363,35 @@ function walkSchemaChildren(node: Record<string, unknown>, visit: (child: unknow
   }
 }
 
-function assertRefResolves(
+// walkReachableChildren visits the keyword subschemas evaluation can reach
+// from a schema node. Identical to walkSchemaChildren except that `$defs`
+// and `definitions` entries are NOT visited structurally: they become
+// reachable only through a $ref that targets them.
+const REACHABLE_MAP_KEYWORDS = new Set(["properties", "patternProperties", "dependentSchemas"]);
+function walkReachableChildren(node: Record<string, unknown>, visit: (child: unknown) => void): void {
+  for (const [k, v] of Object.entries(node)) {
+    if (REACHABLE_MAP_KEYWORDS.has(k) && isObj(v)) {
+      for (const mv of Object.values(v)) visit(mv);
+    } else if (SCHEMA_SINGLE_KEYWORDS.has(k) && isObj(v)) {
+      visit(v);
+    } else if (SCHEMA_ARRAY_KEYWORDS.has(k) && Array.isArray(v)) {
+      for (const item of v) visit(item);
+    }
+  }
+}
+
+interface RefTarget {
+  node: unknown;
+  scope: Record<string, unknown>;
+  base: string;
+}
+
+function resolveRefTarget(
   ref: string,
   scope: Record<string, unknown>,
   base: string,
-  root: Record<string, unknown>,
   idResources: Map<string, Record<string, unknown>>,
-): void {
+): RefTarget {
   const fail = (): never => {
     throw new Error(`unresolvable $ref ${JSON.stringify(ref)} (fully-resolved validation, OBI-T-07/T-08; external schemas are not fetched)`);
   };
@@ -359,8 +399,9 @@ function assertRefResolves(
     const fragment = ref.slice(1);
     // Inside an $id resource, fragments resolve within that resource;
     // at root scope, within the compound root.
-    if (!fragmentResolves(fragment, scope)) fail();
-    return;
+    const target = resolveFragment(fragment, scope, base);
+    if (target === NOT_FOUND) return fail();
+    return target;
   }
   // Absolute or relative URI: resolve against the scope's base, then
   // match an embedded $id resource.
@@ -372,43 +413,64 @@ function assertRefResolves(
   }
   const [resourceUri, fragment = ""] = uri.split("#", 2);
   const resource = idResources.get(resourceUri);
-  if (!resource) fail();
-  if (fragment && !fragmentResolves(fragment, resource!)) fail();
+  if (!resource) return fail();
+  const target = resolveFragment(fragment, resource, resourceUri);
+  if (target === NOT_FOUND) return fail();
+  return target;
 }
 
-/** Whether a fragment ("" root, "/a/b" pointer, "name" anchor) resolves within a schema tree. */
-function fragmentResolves(fragment: string, scope: Record<string, unknown>): boolean {
-  if (fragment === "") return true;
+/** Sentinel distinguishing "fragment did not resolve" from a resolved undefined/null value. */
+const NOT_FOUND = Symbol("not-found");
+
+/**
+ * Resolves a fragment ("" root, "/a/b" pointer, "name" anchor) within a
+ * schema tree, returning the target with its resolution scope (a pointer
+ * that lands in — or passes through — a nested $id resource adopts that
+ * resource as the scope its internal refs resolve against), or NOT_FOUND.
+ */
+function resolveFragment(
+  fragment: string,
+  scope: Record<string, unknown>,
+  base: string,
+): RefTarget | typeof NOT_FOUND {
+  if (fragment === "") return { node: scope, scope, base };
   if (fragment.startsWith("/")) {
     let cur: unknown = scope;
+    let curScope = scope;
+    let curBase = base;
     for (const raw of fragment.slice(1).split("/")) {
       const tok = raw.replaceAll("~1", "/").replaceAll("~0", "~");
       if (Array.isArray(cur)) {
         const idx = /^\d+$/.test(tok) ? Number(tok) : -1;
-        if (idx < 0 || idx >= cur.length) return false;
+        if (idx < 0 || idx >= cur.length) return NOT_FOUND;
         cur = cur[idx];
       } else if (isObj(cur)) {
-        if (!(Object.prototype.hasOwnProperty.call(cur, tok))) return false;
+        if (!(Object.prototype.hasOwnProperty.call(cur, tok))) return NOT_FOUND;
         cur = cur[tok];
       } else {
-        return false;
+        return NOT_FOUND;
+      }
+      if (isObj(cur) && typeof cur.$id === "string") {
+        curScope = cur;
+        curBase = cur.$id;
       }
     }
-    return true;
+    return { node: cur, scope: curScope, base: curBase };
   }
   // Plain-name anchor: search $anchor within the scope, not crossing
   // into nested $id resources (which are their own anchor scopes).
-  let found = false;
+  let found: unknown = NOT_FOUND;
   (function search(node: unknown, isRoot: boolean): void {
-    if (found || !isObj(node)) return;
+    if (found !== NOT_FOUND || !isObj(node)) return;
     if (!isRoot && typeof node.$id === "string") return;
     if (node.$anchor === fragment) {
-      found = true;
+      found = node;
       return;
     }
     walkSchemaChildren(node, (child) => search(child, false));
   })(scope, true);
-  return found;
+  if (found === NOT_FOUND) return NOT_FOUND;
+  return { node: found, scope, base };
 }
 
 /**

@@ -22,7 +22,9 @@ import { fileURLToPath } from "node:url";
 import {
   validateDocument,
   isHigherMajorOrPre1MinorThanMaxTested,
+  isLowerThanMinSupported,
   MAX_TESTED_VERSION,
+  MIN_SUPPORTED_VERSION,
 } from "../src/index.js";
 
 interface FixtureTest {
@@ -31,6 +33,7 @@ interface FixtureTest {
   valid: boolean;
   violates?: string[];
   requiresMaxTested?: string;
+  requiresMinSupported?: string;
 }
 
 interface Fixture {
@@ -104,6 +107,28 @@ function runOne(rule: string, t: FixtureTest): Result {
           expected: t.valid,
           actual: false,
           reason: `requires SDK MaxTested >= ${t.requiresMaxTested}; current is ${MAX_TESTED_VERSION}`,
+        };
+      }
+    } catch {
+      // fall through and run normally
+    }
+  }
+  if (t.requiresMinSupported) {
+    // Downward-refusal tests apply only when the SDK's minimum supported
+    // version is at or above the annotation's value.
+    try {
+      if (
+        !isLowerThanMinSupported(t.requiresMinSupported) &&
+        t.requiresMinSupported !== MIN_SUPPORTED_VERSION
+      ) {
+        return {
+          rule,
+          test: t.description,
+          passed: false,
+          skipped: true,
+          expected: t.valid,
+          actual: false,
+          reason: `requires SDK MinSupported >= ${t.requiresMinSupported}; current is ${MIN_SUPPORTED_VERSION}`,
         };
       }
     } catch {

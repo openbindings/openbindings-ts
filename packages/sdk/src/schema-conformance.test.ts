@@ -47,6 +47,45 @@ describe("boundary validation conformance", () => {
     ).toThrow("unresolvable $ref");
   });
 
+  // T-07/T-08's "whole governing schema" is the static closure REACHABLE
+  // from the governing root (keyword subschemas + reference targets,
+  // transitively). A lexically-present but unreachable entry never
+  // participates in a verdict and must not poison the boundary — mirrors
+  // the Go SDK's compiler, which resolves lazily from the root.
+  it("an unreferenced $defs entry with an external $ref does not poison the boundary", () => {
+    const v = compileExampleSchema(
+      { type: "string", $defs: { dead: { $ref: "https://example.com/never-fetched.json" } } },
+      undefined,
+    );
+    expect(v.validate("hi").valid).toBe(true);
+  });
+
+  it("an unrelated document-schemas entry with an external $ref does not poison other operations", () => {
+    const v = compileExampleSchema(
+      { type: "string" },
+      { Unused: { $ref: "https://example.com/never-fetched.json" } },
+    );
+    expect(v.validate("hi").valid).toBe(true);
+  });
+
+  it("an external $ref reached only through a $defs reference still refuses", () => {
+    expect(() =>
+      compileExampleSchema(
+        { $ref: "#/$defs/a", $defs: { a: { $ref: "https://example.com/never-fetched.json" } } },
+        undefined,
+      ),
+    ).toThrow("unresolvable $ref");
+  });
+
+  it("a document-schemas entry reached from the governing root still refuses on its external $ref", () => {
+    expect(() =>
+      compileExampleSchema(
+        { $ref: "#/$defs/Used" },
+        { Used: { $ref: "https://example.com/never-fetched.json" } },
+      ),
+    ).toThrow("unresolvable $ref");
+  });
+
   it("an absolute $ref matching an embedded $id resolves locally (§10: not external)", () => {
     const v = compileExampleSchema(
       {

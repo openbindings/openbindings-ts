@@ -198,10 +198,7 @@ export function validateInterface(
     // OBI-D-05: sources[*].location must be a well-formed, absolute reference
     // (absolute URI or a format-defined absolute address; never relative).
     if (hasLoc) {
-      validateURIRef(errs, `sources["${k}"].location`, src.location!);
-      if (!referenceIsAbsolute(src.location!)) {
-        errs.push(`sources["${k}"].location: "${src.location}" must be an absolute URI or a format-defined absolute address, not a relative reference (OBI-D-05); a local artifact can be embedded as the source's content instead (a file:// URL is machine-coupled and resolves only on the authoring machine)`);
-      }
+      validateLocation(errs, `sources["${k}"].location`, src.location!);
     }
     if (opts.rejectUnknownTypedFields) {
       appendUnknown(errs, `sources["${k}"]`, src, KNOWN_SOURCE_FIELDS);
@@ -326,23 +323,33 @@ function isHex(c: number): boolean {
   return (c >= 0x30 && c <= 0x39) || (c >= 0x61 && c <= 0x66) || (c >= 0x41 && c <= 0x46);
 }
 
-function validateURIRef(errs: string[], prefix: string, raw: string): void {
-  if (!raw) return;
+// screenURIChars reports whether raw contains only characters permitted in a
+// URI reference per RFC 3986, with well-formed percent-encoding. On the first
+// violation it appends an error and returns false. URL parsers are too
+// permissive (they accept or encode whitespace, backticks, and angle
+// brackets), so this screen runs before any structural parse.
+function screenURIChars(errs: string[], prefix: string, raw: string): boolean {
   for (let i = 0; i < raw.length; i++) {
     const c = raw.charCodeAt(i);
     if (c === 0x25 /* % */) {
       if (i + 2 >= raw.length || !isHex(raw.charCodeAt(i + 1)) || !isHex(raw.charCodeAt(i + 2))) {
         errs.push(`${prefix}: "${raw}" contains malformed percent-encoding (OBI-D-05)`);
-        return;
+        return false;
       }
       i += 2;
       continue;
     }
     if (!URI_REF_ALLOWED.has(c)) {
       errs.push(`${prefix}: "${raw}" contains character "${raw[i]}" not allowed in a URI reference (OBI-D-05)`);
-      return;
+      return false;
     }
   }
+  return true;
+}
+
+function validateURIRef(errs: string[], prefix: string, raw: string): void {
+  if (!raw) return;
+  if (!screenURIChars(errs, prefix, raw)) return;
   // Best-effort structural parse. URL constructor requires a base for relative
   // refs; use a placeholder so we accept relative URIs (RFC 3986 §4.1).
   try {
@@ -352,16 +359,84 @@ function validateURIRef(errs: string[], prefix: string, raw: string): void {
   }
 }
 
-// referenceIsAbsolute reports whether raw is an absolute reference for OBI-D-05
-// purposes: an absolute URI (has a scheme) or a format-defined absolute address
-// (e.g. a gRPC host:port, which parses with a scheme). Same-document fragments
-// and relative-path references are not absolute.
+// referenceIsAbsolute reports whether raw is an absolute URI (has a scheme).
+// Used for schema $ref/$id, which are always URI-form: a same-document fragment
+// or an absolute URI. Source locations use validateLocation instead, which also
+// admits non-scheme format-defined absolute addresses such as a gRPC host:port.
 function referenceIsAbsolute(raw: string): boolean {
   try {
     new URL(raw);
     return true;
   } catch {
     return false;
+  }
+}
+
+// isRelativeReference reports whether raw is a relative reference per RFC 3986
+// §4.2: one with no scheme and no authority, needing a base URI to resolve
+// (./x, ../x, x.json, /abs/path, //host/path). The discriminator is whether a
+// ':' appears before the first '/', '?', or '#'; a relative reference has none.
+// Both absolute URIs (https://...) and format-defined absolute addresses
+// (grpc.example.com:443, 10.0.0.1:443, [::1]:443) are therefore non-relative.
+function isRelativeReference(raw: string): boolean {
+  for (let i = 0; i < raw.length; i++) {
+    switch (raw[i]) {
+      case ":":
+        return false;
+      case "/":
+      case "?":
+      case "#":
+        return true;
+    }
+  }
+  return true;
+}
+
+// hasURIScheme reports whether raw begins with an RFC 3986 scheme followed by
+// ':' (ALPHA *( ALPHA / DIGIT / "+" / "-" / "." ) ":"). URI-form locations get
+// the strict structural parse; a scheme-less format-defined absolute address
+// (an IP-literal host:port) does not, and is left to its format to interpret.
+function hasURIScheme(raw: string): boolean {
+  for (let i = 0; i < raw.length; i++) {
+    const c = raw.charCodeAt(i);
+    if (raw[i] === ":") return i > 0;
+    const alpha = (c >= 0x41 && c <= 0x5a) || (c >= 0x61 && c <= 0x7a);
+    if (i === 0) {
+      if (!alpha) return false;
+      continue;
+    }
+    const digit = c >= 0x30 && c <= 0x39;
+    if (!alpha && !digit && raw[i] !== "+" && raw[i] !== "-" && raw[i] !== ".") return false;
+  }
+  return false;
+}
+
+// validateLocation checks OBI-D-05 for a sources[*].location: it MUST be an
+// absolute URI or a format-defined absolute address (e.g. a gRPC host:port),
+// never a relative reference. The character screen applies to every location;
+// the strict structural parse applies only to URI-form locations (those
+// carrying a URI scheme). A scheme-less format-defined absolute address (an
+// IP-literal host:port like 10.0.0.1:443 or [::1]:443) is exempt from RFC
+// 3986 well-formedness: its syntax is the binding format's concern, not OBI's
+// (OBI-D-05, §10). referenceIsAbsolute is deliberately not reused here: it
+// treats a location as absolute only when the URL parser infers a scheme, so
+// it would admit a hostname:port (host misread as scheme) yet reject an
+// IP-literal one.
+function validateLocation(errs: string[], prefix: string, raw: string): void {
+  if (!raw) return;
+  if (isRelativeReference(raw)) {
+    errs.push(
+      `${prefix}: "${raw}" must be an absolute URI or a format-defined absolute address, not a relative reference (OBI-D-05); a local artifact can be embedded as the source's content instead (a file:// URL is machine-coupled and resolves only on the authoring machine)`,
+    );
+    return;
+  }
+  if (!screenURIChars(errs, prefix, raw)) return;
+  if (hasURIScheme(raw)) {
+    try {
+      new URL(raw);
+    } catch {
+      errs.push(`${prefix}: "${raw}" is not a well-formed URI reference (OBI-D-05)`);
+    }
   }
 }
 
