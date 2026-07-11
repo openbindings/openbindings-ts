@@ -35,7 +35,7 @@ import {
 } from "./invoke.js";
 import type { Field, IntrospectionSchema } from "./introspection.js";
 import { buildTypeMap, rootTypeName } from "./introspection.js";
-import { convertToInterface } from "./synthesize.js";
+import { convertToInterface, resolveKey, sanitizeKey } from "./synthesize.js";
 
 function errMsg(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
@@ -138,6 +138,16 @@ export class GraphQLInvoker implements BindingInvoker {
       buildFor = (input) => buildQueryFromIntrospection(schema, rootType, fieldName, input);
     }
 
+    // Operation-layer no-input convention (checked last so it can override
+    // the GraphQL-native signal above, mirroring openapi/asyncapi/mcp's
+    // identical operation-layer override): the call came through the
+    // operation layer for an operation that declares no input at all.
+    // Dispatch with empty input even when the field takes GraphQL
+    // arguments the OBI did not express.
+    if (args.binding !== undefined && args.inputSchema === undefined) {
+      wantsInput = false;
+    }
+
     // The GraphQL variables object is the single input message, read from
     // the handle. No-argument fields skip the read entirely; a caller that
     // closes without writing dispatches with empty variables.
@@ -181,20 +191,31 @@ export class GraphQLInvoker implements BindingInvoker {
     fetchFn: typeof globalThis.fetch,
     signal?: AbortSignal,
   ): Promise<IntrospectionSchema> {
-    // Key by the full endpoint URL (origin + path + query): two GraphQL
-    // endpoints on one host must not share introspected schemas.
-    let key: string;
-    try {
-      const u = new URL(url);
-      key = u.origin + u.pathname + u.search;
-    } catch {
-      key = url;
-    }
+    const key = introspectionCacheKey(url);
     const cached = this.schemaCache.get(key);
     if (cached) return cached;
     const schema = await introspect(url, headers, fetchFn, signal);
     this.schemaCache.set(key, schema);
     return schema;
+  }
+}
+
+/**
+ * Normalizes an endpoint URL to a schema cache key, preserving the full
+ * target (origin + path + query) — keying by origin alone would let two
+ * endpoints on one host share a schema (wrong results). Host case is
+ * already normalized by the URL parser; a trailing slash and surrounding
+ * whitespace still collapse to one key (Go parity: introspectionCacheKey
+ * in invoker.go).
+ */
+function introspectionCacheKey(endpoint: string): string {
+  const trimmed = endpoint.trim();
+  try {
+    const u = new URL(trimmed);
+    const path = u.pathname.replace(/\/+$/, "");
+    return u.origin + path + u.search;
+  } catch {
+    return trimmed;
   }
 }
 
@@ -241,14 +262,22 @@ export class GraphQLSynthesizer implements InterfaceSynthesizer, SourceInspector
       { label: "Subscription", typeName: rootTypeName(schema, "Subscription") },
     ];
 
+    // Suggest the same operation key convertToInterface assigns (same
+    // sanitizeKey + resolveKey collision resolution against the root type),
+    // so an inspection previews exactly what synthesis names (Go parity:
+    // list_refs.go).
+    const usedKeys = new Map<string, string>();
     for (const rt of rootTypes) {
       if (!rt.typeName) continue;
       const t = tm.get(rt.typeName);
       if (!t?.fields) continue;
       for (const f of [...t.fields].sort((a, b) => a.name.localeCompare(b.name))) {
         if (f.name.startsWith("__")) continue;
+        const ref = `${rt.label}/${f.name}`;
+        const operationKey = resolveKey(sanitizeKey(f.name), rt.label.toLowerCase(), usedKeys);
+        usedKeys.set(operationKey, ref);
         const desc = f.description || undefined;
-        targets.push({ ref: `${rt.label}/${f.name}`, operation: desc ? { description: desc } : undefined });
+        targets.push({ ref, operationKey, operation: desc ? { description: desc } : undefined });
       }
     }
 

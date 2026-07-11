@@ -232,9 +232,50 @@ interface GraphQLHTTPResult {
 }
 
 /**
+ * Response body cap, matching the Go invoker's maxResponseBytes: an
+ * unbounded GraphQL response (a single overlarge field, a runaway
+ * introspection dump) must not be buffered without limit.
+ */
+const MAX_RESPONSE_BYTES = 10 * 1024 * 1024;
+
+/**
+ * Reads a Response body as text, refusing past maxBytes. Cancels the body
+ * stream before bailing so the connection doesn't sit pinned on the
+ * remaining bytes.
+ */
+async function readResponseText(resp: Response, maxBytes: number): Promise<string> {
+  if (!resp.body) return resp.text();
+
+  const reader = resp.body.getReader();
+  const decoder = new TextDecoder();
+  const chunks: string[] = [];
+  let total = 0;
+
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > maxBytes) {
+        await reader.cancel().catch(() => {});
+        throw new Error(`response exceeds ${maxBytes} byte limit`);
+      }
+      chunks.push(decoder.decode(value, { stream: true }));
+    }
+    chunks.push(decoder.decode());
+  } finally {
+    reader.releaseLock();
+  }
+
+  return chunks.join("");
+}
+
+/**
  * Send a GraphQL query over HTTP POST. Non-2xx statuses throw an
  * InvocationError coded via httpErrorCode with `{ status, body }` details;
- * network and parse failures propagate as-is.
+ * network and parse failures propagate as-is. The body is read under the
+ * 10MB cap BEFORE the status check (Go parity: the cap applies to every
+ * response, success or failure alike).
  */
 async function doGraphQLHTTP(
   url: string,
@@ -260,15 +301,16 @@ async function doGraphQLHTTP(
     signal,
   });
 
+  const text = await readResponseText(resp, MAX_RESPONSE_BYTES);
+
   if (!resp.ok) {
-    const text = await resp.text().catch(() => "");
     throw new InvocationError(httpErrorCode(resp.status), `HTTP ${resp.status}: ${text}`, {
       status: resp.status,
       body: text,
     });
   }
 
-  const respBody: GraphQLResponse = await resp.json();
+  const respBody: GraphQLResponse = JSON.parse(text);
   return { body: respBody, headers: metadataFromHeaders(resp.headers) };
 }
 

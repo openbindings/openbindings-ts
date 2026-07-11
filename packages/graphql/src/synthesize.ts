@@ -201,11 +201,14 @@ function unionToJSONSchema(name: string, tm: TypeMap, visited: Set<string>): Rec
 // Key helpers
 // ---------------------------------------------------------------------------
 
-function sanitizeKey(name: string): string {
+/** Exported for reuse by GraphQLSynthesizer.inspectSource, so an inspection
+ * previews exactly what synthesis would name (Go parity: list_refs.go
+ * reuses the same collision-resolution helpers SynthesizeInterface uses). */
+export function sanitizeKey(name: string): string {
   return name.replace(/[^a-zA-Z0-9._-]/g, "_").replace(/^_+|_+$/g, "") || "unnamed";
 }
 
-function resolveKey(key: string, entityType: string, used: Map<string, string>): string {
+export function resolveKey(key: string, entityType: string, used: Map<string, string>): string {
   if (!used.has(key)) return key;
   const prefixed = `${entityType}_${key}`;
   if (!used.has(prefixed)) return prefixed;

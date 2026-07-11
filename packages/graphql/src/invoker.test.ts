@@ -10,7 +10,7 @@ import {
   ERR_STREAM_ERROR,
   single,
 } from "@openbindings/sdk";
-import { GraphQLInvoker } from "./invoker.js";
+import { GraphQLInvoker, GraphQLSynthesizer } from "./invoker.js";
 import type { IntrospectionSchema } from "./introspection.js";
 
 // ---------------------------------------------------------------------------
@@ -128,6 +128,26 @@ describe("GraphQLInvoker unary", () => {
     expect(calls[0].body.variables).toBeUndefined();
   });
 
+  it("honors the operation-layer no-input convention even when the field takes GraphQL arguments", async () => {
+    // A caller through the operation layer for an operation the OBI declares
+    // with NO input schema must dispatch without ever reading — even though
+    // "Query/user" takes a GraphQL `id` argument per the introspected
+    // schema. The operation's own declared contract wins (parity with
+    // openapi/asyncapi/mcp's identical operation-layer override).
+    const { fn, calls } = mockFetch(() => jsonResponse({ data: { user: null } }));
+    const call = new GraphQLInvoker().invokeBinding({
+      source,
+      ref: "Query/user",
+      binding: { operation: "user", source: "graphql" },
+      // inputSchema deliberately omitted (undefined).
+      fetch: fn,
+    });
+
+    // No write, no close: the binding must close input on entry.
+    await expect(single(call.outputs)).resolves.toBeNull();
+    expect(calls[0].body.variables).toBeUndefined();
+  }, 2000);
+
   it("exposes HTTP response headers as leading metadata", async () => {
     const { fn } = mockFetch(() =>
       jsonResponse({ data: { ping: "pong" } }, {
@@ -226,6 +246,25 @@ describe("GraphQLInvoker unary", () => {
     expect(new Set(introspections.map((c) => c.url)).size).toBe(2);
   });
 
+  it("collapses a trailing slash in the introspection cache key (Go parity)", async () => {
+    const { fn, calls } = mockFetch((body) =>
+      body.query.includes("__schema")
+        ? jsonResponse({ data: { __schema: testSchema } })
+        : jsonResponse({ data: { ping: "pong" } }),
+    );
+    const invoker = new GraphQLInvoker();
+    const bare = { format: "graphql", location: "https://api.example.com/graphql" };
+    const trailingSlash = { format: "graphql", location: "https://api.example.com/graphql/" };
+
+    await expect(single(invoker.invokeBinding({ source: bare, ref: "Query/ping", fetch: fn }).outputs)).resolves.toBe("pong");
+    await expect(single(invoker.invokeBinding({ source: trailingSlash, ref: "Query/ping", fetch: fn }).outputs)).resolves.toBe("pong");
+
+    // Same endpoint, trailing slash aside: one cached schema (matches the
+    // Go invoker's introspectionCacheKey, which TrimRights the path).
+    const introspections = calls.filter((c) => c.body.query.includes("__schema"));
+    expect(introspections).toHaveLength(1);
+  });
+
   it("maps GraphQL response errors to ERR_EXECUTION_FAILED with errors details", async () => {
     const { fn } = mockFetch(() => jsonResponse({ errors: [{ message: "boom" }] }));
     const call = new GraphQLInvoker().invokeBinding({ source, ref: "Query/ping", fetch: fn });
@@ -254,6 +293,31 @@ describe("GraphQLInvoker unary", () => {
       code: ERR_PERMISSION_DENIED,
       details: { status: 403 },
     });
+  });
+
+  it("refuses an oversized response with the same cap and error as the Go invoker", async () => {
+    let bodyCancelled = false;
+    const huge = new Uint8Array(1024 * 1024); // 1 MiB per chunk
+    const stream = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        controller.enqueue(huge);
+      },
+      cancel() {
+        bodyCancelled = true;
+      },
+    });
+    const fn: typeof fetch = async () => new Response(stream, { status: 200 });
+    const call = new GraphQLInvoker().invokeBinding({ source, ref: "Query/ping", fetch: fn });
+
+    // Go's doGraphQLHTTP maps a non-httpError (the cap overflow) through the
+    // query/mutation dispatch's generic branch to ErrCodeExecutionFailed;
+    // this mirrors that exactly rather than reusing openapi's
+    // ERR_RESPONSE_ERROR (a deliberate graphql-format choice, not a gap).
+    await expect(call.closed).rejects.toMatchObject({
+      code: ERR_EXECUTION_FAILED,
+      message: expect.stringContaining("byte limit"),
+    });
+    expect(bodyCancelled).toBe(true);
   });
 
   it("fails a malformed ref pre-dispatch without any I/O", async () => {
@@ -478,5 +542,25 @@ describe("GraphQLInvoker subscriptions", () => {
     const { call } = await start("Subscription/onOrder");
 
     await expect(call.header).resolves.toEqual({});
+  });
+});
+
+// ---------------------------------------------------------------------------
+// GraphQLSynthesizer.inspectSource
+// ---------------------------------------------------------------------------
+
+describe("GraphQLSynthesizer inspectSource", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("suggests the same operationKey synthesizeInterface would assign (Go parity)", async () => {
+    vi.stubGlobal("fetch", async () => jsonResponse({ data: { __schema: testSchema } }));
+
+    const insp = await new GraphQLSynthesizer().inspectSource({ format: "graphql", location: ENDPOINT });
+    const byRef = new Map(insp.targets.map((t) => [t.ref, t]));
+
+    expect(byRef.get("Query/user")?.operationKey).toBe("user");
+    expect(byRef.get("Subscription/onOrder")?.operationKey).toBe("onOrder");
   });
 });
