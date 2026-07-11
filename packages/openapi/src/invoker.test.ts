@@ -751,7 +751,8 @@ describe("invokeBinding — context negotiation", () => {
       code: CONTEXT_REQUIRED,
       details: {
         target: "https://api.example.com",
-        alternatives: [{ requirements: [{ type: "auth.bearer" }] }],
+        // R2.a ruling: the requirement carries `name`, the securitySchemes key.
+        alternatives: [{ requirements: [{ type: "auth.bearer", name: "bearerAuth" }] }],
       },
     });
     expect(requests).toHaveLength(0);
@@ -801,7 +802,7 @@ describe("invokeBinding — context negotiation", () => {
 
     await expect(call.closed).rejects.toMatchObject({
       code: CONTEXT_REQUIRED,
-      details: { alternatives: [{ requirements: [{ type: "auth.basic" }] }] },
+      details: { alternatives: [{ requirements: [{ type: "auth.basic", name: "basicAuth" }] }] },
     });
   });
 
@@ -820,6 +821,67 @@ describe("invokeBinding — context negotiation", () => {
 
     await single(call.outputs);
     expect(requests[0].headers.get("X-API-Key")).toBe("k1");
+  });
+
+  it("carries the requirement's addressable name — the securitySchemes key, distinct from the apiKey's wire-placement name", async () => {
+    const spec = authSpec({
+      securitySchemes: { key: { type: "apiKey", name: "X-API-Key", in: "header" } },
+      security: [{ key: [] }],
+    });
+    const { fetch } = mockFetch(() => jsonResponse({}));
+    await expect(
+      new OpenAPIInvoker().invokeBinding({ source: authSource(spec), ref: REF_DATA, fetch }).closed,
+    ).rejects.toMatchObject({
+      code: CONTEXT_REQUIRED,
+      // "key" (the securitySchemes key) is the requirement's name, NOT
+      // "X-API-Key" (the scheme's own wire-placement name field).
+      details: { alternatives: [{ requirements: [{ type: "auth.apiKey", name: "key" }] }] },
+    });
+  });
+
+  // R2.d ruling: two ANDed apiKey schemes with different names, placed in
+  // different wire locations, must resolve to distinct keys via `apiKeys`
+  // rather than colliding on the single `apiKey` field.
+  it("distinguishes two ANDed apiKey schemes by name via the apiKeys map", async () => {
+    const spec = authSpec({
+      securitySchemes: {
+        headerKey: { type: "apiKey", name: "X-Header-Key", in: "header" },
+        queryKey: { type: "apiKey", name: "api_key", in: "query" },
+      },
+      security: [{ headerKey: [], queryKey: [] }],
+    });
+    const inv = new OpenAPIInvoker();
+
+    // Missing context: the AND-requirement challenge names both schemes.
+    const { fetch: f1 } = mockFetch(() => jsonResponse({}));
+    await expect(
+      inv.invokeBinding({ source: authSource(spec), ref: REF_DATA, fetch: f1 }).closed,
+    ).rejects.toMatchObject({
+      code: CONTEXT_REQUIRED,
+      details: {
+        alternatives: [
+          {
+            requirements: [
+              { type: "auth.apiKey", name: "headerKey" },
+              { type: "auth.apiKey", name: "queryKey" },
+            ],
+          },
+        ],
+      },
+    });
+
+    // Both keys supplied via the apiKeys map, keyed by name: each lands in
+    // its own scheme's declared wire location.
+    const { fetch: f2, requests: r2 } = mockFetch(() => jsonResponse({}));
+    const call = inv.invokeBinding({
+      source: authSource(spec),
+      ref: REF_DATA,
+      context: { apiKeys: { headerKey: "hk-1", queryKey: "qk-1" } },
+      fetch: f2,
+    });
+    await single(call.outputs);
+    expect(r2[0].headers.get("X-Header-Key")).toBe("hk-1");
+    expect(r2[0].url).toBe("https://api.example.com/data?api_key=qk-1");
   });
 
   it("places an apiKey in its declared query parameter", async () => {
@@ -890,6 +952,8 @@ describe("invokeBinding — context negotiation", () => {
                 type: "auth.oauth2",
                 tokenUrl: "https://auth.example.com/token",
                 scopes: ["read", "write"],
+                // R2.b ruling: grantType names the SELECTED flow.
+                grantType: "client_credentials",
               },
             ],
           },
@@ -939,6 +1003,7 @@ describe("invokeBinding — context negotiation", () => {
                 authorizeUrl: "https://api.example.com/oauth/authorize",
                 tokenUrl: "https://auth.example.com/oauth/token",
                 scopes: ["read", "write"],
+                grantType: "authorization_code",
               },
             ],
           },
@@ -975,6 +1040,29 @@ describe("invokeBinding — context negotiation", () => {
         ],
       },
     });
+  });
+
+  // R2.b ruling: "openIdConnect-derived requirements carry no grantType
+  // unless a flow is genuinely selected" — an openIdConnect scheme declares
+  // no `flows`, so no flow is ever selected here.
+  it("carries no grantType for a bare openIdConnect requirement (no flow selected)", async () => {
+    const spec = authSpec({
+      securitySchemes: {
+        oidc: {
+          type: "openIdConnect",
+          openIdConnectUrl: "https://auth.example.com/.well-known/openid-configuration",
+        },
+      },
+      security: [{ oidc: [] }],
+    });
+    const { fetch } = mockFetch(() => jsonResponse({}));
+    const err = await new OpenAPIInvoker()
+      .invokeBinding({ source: authSource(spec), ref: REF_DATA, fetch })
+      .closed.catch((e: unknown) => e);
+    const req = (
+      err as { details: { alternatives: Array<{ requirements: Array<Record<string, unknown>> }> } }
+    ).details.alternatives[0].requirements[0];
+    expect(req).not.toHaveProperty("grantType");
   });
 
   it("maps openIdConnect to auth.oauth2 and applies an accessToken as a bearer", async () => {
@@ -1045,6 +1133,41 @@ describe("invokeBinding — context negotiation", () => {
                 type: "auth.oauth2",
                 tokenUrl: "https://auth.example.com/password/token",
                 scopes: ["pw"],
+                grantType: "password",
+              },
+            ],
+          },
+        ],
+      },
+    });
+  });
+
+  it("selects the implicit flow (and grantType) when declared alongside token-only flows, but below authorizationCode", async () => {
+    const spec = authSpec({
+      securitySchemes: {
+        oauth: {
+          type: "oauth2",
+          flows: {
+            clientCredentials: { tokenUrl: "https://auth.example.com/client-credentials/token" },
+            implicit: { authorizationUrl: "https://auth.example.com/implicit/authorize" },
+          },
+        },
+      },
+      security: [{ oauth: [] }],
+    });
+    const { fetch } = mockFetch(() => jsonResponse({}));
+    await expect(
+      new OpenAPIInvoker().invokeBinding({ source: authSource(spec), ref: REF_DATA, fetch }).closed,
+    ).rejects.toMatchObject({
+      code: CONTEXT_REQUIRED,
+      details: {
+        alternatives: [
+          {
+            requirements: [
+              {
+                type: "auth.oauth2",
+                authorizeUrl: "https://auth.example.com/implicit/authorize",
+                grantType: "implicit",
               },
             ],
           },
@@ -1084,6 +1207,7 @@ describe("invokeBinding — context negotiation", () => {
                 type: "auth.oauth2",
                 authorizeUrl: "https://auth.example.com/authorize",
                 tokenUrl: "https://auth.example.com/authcode/token",
+                grantType: "authorization_code",
               },
             ],
           },
@@ -1202,6 +1326,115 @@ describe("invokeBinding — context negotiation", () => {
     expect(requests).toHaveLength(1);
   });
 
+  // ---------------------------------------------------------------------
+  // R2.c ruling: unmapped schemes are SURFACED as typed requirements
+  // instead of silently dropped, so the alternative stays discoverable and
+  // a document whose every alternative is unmappable still produces a
+  // pre-dispatch CONTEXT_REQUIRED challenge instead of dispatching
+  // unauthenticated into a blind 401.
+  // ---------------------------------------------------------------------
+
+  it("surfaces an unmapped http scheme as auth.http.<scheme> instead of dropping the alternative", async () => {
+    const spec = authSpec({
+      securitySchemes: { digestAuth: { type: "http", scheme: "digest" } },
+      security: [{ digestAuth: [] }],
+    });
+    const { fetch, requests } = mockFetch(() => jsonResponse({}));
+    await expect(
+      new OpenAPIInvoker().invokeBinding({ source: authSource(spec), ref: REF_DATA, fetch }).closed,
+    ).rejects.toMatchObject({
+      code: CONTEXT_REQUIRED,
+      details: {
+        alternatives: [{ requirements: [{ type: "auth.http.digest", name: "digestAuth" }] }],
+      },
+    });
+    // Pre-dispatch: no request was ever made unauthenticated (the OLD
+    // behavior dropped this alternative entirely, so alternatives.length
+    // was 0, requiredContext returned null, and the request WOULD have
+    // dispatched here with no Authorization header at all).
+    expect(requests).toHaveLength(0);
+  });
+
+  it("surfaces an unmapped scheme type verbatim as auth.<type> (mutualTLS)", async () => {
+    const spec = authSpec({
+      securitySchemes: { mtls: { type: "mutualTLS" } },
+      security: [{ mtls: [] }],
+    });
+    const { fetch, requests } = mockFetch(() => jsonResponse({}));
+    await expect(
+      new OpenAPIInvoker().invokeBinding({ source: authSource(spec), ref: REF_DATA, fetch }).closed,
+    ).rejects.toMatchObject({
+      code: CONTEXT_REQUIRED,
+      details: { alternatives: [{ requirements: [{ type: "auth.mutualTLS", name: "mtls" }] }] },
+    });
+    expect(requests).toHaveLength(0);
+  });
+
+  it("passes the artifact's scheme description through onto a surfaced unmapped requirement", async () => {
+    const spec = authSpec({
+      securitySchemes: {
+        digestAuth: { type: "http", scheme: "digest", description: "Digest auth per RFC 7616" },
+      },
+      security: [{ digestAuth: [] }],
+    });
+    const { fetch } = mockFetch(() => jsonResponse({}));
+    await expect(
+      new OpenAPIInvoker().invokeBinding({ source: authSource(spec), ref: REF_DATA, fetch }).closed,
+    ).rejects.toMatchObject({
+      details: {
+        alternatives: [
+          {
+            requirements: [
+              { type: "auth.http.digest", name: "digestAuth", description: "Digest auth per RFC 7616" },
+            ],
+          },
+        ],
+      },
+    });
+  });
+
+  it("an unmapped alternative never blocks a different, mapped alternative from being selected", async () => {
+    const spec = authSpec({
+      securitySchemes: {
+        bearerAuth: { type: "http", scheme: "bearer" },
+        digestAuth: { type: "http", scheme: "digest" },
+      },
+      security: [{ bearerAuth: [] }, { digestAuth: [] }],
+    });
+    const { fetch, requests } = mockFetch(() => jsonResponse({}));
+    const call = new OpenAPIInvoker().invokeBinding({
+      source: authSource(spec),
+      ref: REF_DATA,
+      context: { bearerToken: "tok" },
+      fetch,
+    });
+    await single(call.outputs);
+    expect(requests[0].headers.get("Authorization")).toBe("Bearer tok");
+  });
+
+  it("a document whose EVERY alternative is unmappable challenges CONTEXT_REQUIRED instead of dispatching unauthenticated", async () => {
+    const spec = authSpec({
+      securitySchemes: {
+        digestAuth: { type: "http", scheme: "digest" },
+        mtls: { type: "mutualTLS" },
+      },
+      security: [{ digestAuth: [] }, { mtls: [] }],
+    });
+    const { fetch, requests } = mockFetch(() => jsonResponse({}));
+    await expect(
+      new OpenAPIInvoker().invokeBinding({ source: authSource(spec), ref: REF_DATA, fetch }).closed,
+    ).rejects.toMatchObject({
+      code: CONTEXT_REQUIRED,
+      details: {
+        alternatives: [
+          { requirements: [{ type: "auth.http.digest", name: "digestAuth" }] },
+          { requirements: [{ type: "auth.mutualTLS", name: "mtls" }] },
+        ],
+      },
+    });
+    expect(requests).toHaveLength(0);
+  });
+
   it("merges context headers and cookies into the request", async () => {
     const { fetch, requests } = mockFetch(() => jsonResponse({ pong: true }));
     const call = new OpenAPIInvoker().invokeBinding({
@@ -1244,7 +1477,7 @@ describe("prepareBinding", () => {
 
     expect(details).toEqual({
       target: "https://api.example.com",
-      alternatives: [{ requirements: [{ type: "auth.bearer" }] }],
+      alternatives: [{ requirements: [{ type: "auth.bearer", name: "bearerAuth" }] }],
     });
   });
 

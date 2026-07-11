@@ -50,6 +50,7 @@ export type {
 export {
   contextBearerToken,
   contextApiKey,
+  contextApiKeyFor,
   contextBasicAuth,
   contextString,
   contextHeaders,

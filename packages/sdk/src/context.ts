@@ -1,4 +1,4 @@
-import type { ContextRequiredDetails } from "./invocation.js";
+import type { ContextRequiredDetails, ContextRequirement } from "./invocation.js";
 import { REQUIREMENT_FIELDS } from "./invocation.js";
 import type { ContextResolver } from "./invokers.js";
 
@@ -125,6 +125,32 @@ export function contextApiKey(ctx: Record<string, unknown> | null | undefined): 
   if (!ctx) return "";
   const v = ctx["apiKey"];
   return typeof v === "string" ? v : "";
+}
+
+/** Returns the well-known `apiKeys` field from context as a typed string-string map. */
+function contextApiKeys(ctx: Record<string, unknown> | null | undefined): Record<string, string> {
+  return extractStringMap(ctx, "apiKeys");
+}
+
+/**
+ * Resolves the API key for one named requirement: the requirement's
+ * `name`-keyed entry in the well-known `apiKeys` map first, falling back to
+ * the single well-known `apiKey` convenience when `name` is absent or not
+ * carried in the map. This is the one lookup every apiKey-family credential
+ * application should use (openapi/asyncapi's scheme-driven placement, and
+ * the resolvers above) so two ANDed apiKey schemes with different names
+ * resolve to distinct keys instead of colliding on the single `apiKey`
+ * field.
+ */
+export function contextApiKeyFor(
+  ctx: Record<string, unknown> | null | undefined,
+  name?: string,
+): string {
+  if (name) {
+    const named = contextApiKeys(ctx)[name];
+    if (named) return named;
+  }
+  return contextApiKey(ctx);
 }
 
 /** Returns the well-known basic auth fields from context, or `null` if absent. */
@@ -292,6 +318,29 @@ export function normalizeEndpoint(url: string): string {
 // ---------------------------------------------------------------------------
 
 /**
+ * True when one requirement is satisfied by the stored context. Every family
+ * but `auth.apiKey` gates on the presence of its single well-known field
+ * (REQUIREMENT_FIELDS); `auth.apiKey` is name-aware — a requirement carrying
+ * a `name` (two ANDed API keys are otherwise indistinguishable) is satisfied
+ * by that name's entry in `apiKeys`, falling back to the single `apiKey`
+ * convenience, via the same precedence {@link contextApiKeyFor} uses for
+ * credential application. An unrecognized `type` falls back to looking up a
+ * field of that same name, which stored context never carries, so it is
+ * always unsatisfiable (an invoker surfaces such a requirement so its
+ * alternative is discoverable, never so it becomes selectable at this
+ * layer — rule 10 of the binding-invoker interface: no resolver here, no
+ * invented satisfaction convention).
+ */
+function requirementSatisfied(ctx: Record<string, unknown>, req: ContextRequirement): boolean {
+  if (req.type === "auth.apiKey") {
+    return contextApiKeyFor(ctx, typeof req.name === "string" ? req.name : undefined) !== "";
+  }
+  const field = REQUIREMENT_FIELDS[req.type] ?? req.type;
+  const v = ctx[field];
+  return v !== undefined && v !== null && v !== "";
+}
+
+/**
  * True when the stored context can satisfy every requirement of at least one
  * alternative. An alternative with no requirements never satisfies (the
  * binding-invoker interface requires at least one requirement per alternative;
@@ -303,13 +352,7 @@ export function contextSatisfies(
   details: ContextRequiredDetails,
 ): boolean {
   return details.alternatives.some(
-    (alt) =>
-      alt.requirements.length > 0 &&
-      alt.requirements.every((req) => {
-        const field = REQUIREMENT_FIELDS[req.type] ?? req.type;
-        const v = ctx[field];
-        return v !== undefined && v !== null && v !== "";
-      }),
+    (alt) => alt.requirements.length > 0 && alt.requirements.every((req) => requirementSatisfied(ctx, req)),
   );
 }
 
@@ -318,16 +361,46 @@ export function contextSatisfies(
  * REQUIREMENT_FIELDS names only the field whose presence gates satisfaction;
  * this names the whole family so scoping can admit (for example) an oauth2
  * refresh token alongside its access token. Any field not listed in a family
- * is treated as non-secret configuration.
+ * is treated as non-secret configuration. `auth.apiKey` lists both `apiKey`
+ * and `apiKeys` so the whole-map field is withheld from unconditional
+ * non-secret passthrough below (`CREDENTIAL_FIELDS`); scopeContext admits
+ * `apiKeys` narrowed to the selected alternative's named entries only (never
+ * the whole map — see admitApiKey), so this list is not used to copy it
+ * verbatim the way it is for every other family.
  */
 const REQUIREMENT_FAMILY_FIELDS: Record<string, string[]> = {
   "auth.bearer": ["bearerToken"],
-  "auth.apiKey": ["apiKey"],
+  "auth.apiKey": ["apiKey", "apiKeys"],
   "auth.basic": ["basic"],
   "auth.oauth2": ["accessToken", "refreshToken", "clientSecret"],
 };
 
 const CREDENTIAL_FIELDS = new Set(Object.values(REQUIREMENT_FAMILY_FIELDS).flat());
+
+/**
+ * Admits the API key credential for one `auth.apiKey` requirement into the
+ * scoped output, least-privilege: a named requirement admits only that
+ * name's entry from `stored.apiKeys` (merged into `out.apiKeys`, never the
+ * whole map), falling back to the flat `stored.apiKey` when the requirement
+ * carries no `name` or the map lacks that entry — mirrors
+ * {@link contextApiKeyFor}'s read precedence, applied to scoping instead of
+ * a single read.
+ */
+function admitApiKey(
+  stored: Record<string, unknown>,
+  out: Record<string, unknown>,
+  name: string | undefined,
+): void {
+  if (name) {
+    const map = stored["apiKeys"];
+    if (map && typeof map === "object" && !Array.isArray(map) && name in (map as Record<string, unknown>)) {
+      const existing = (out["apiKeys"] as Record<string, unknown> | undefined) ?? {};
+      out["apiKeys"] = { ...existing, [name]: (map as Record<string, unknown>)[name] };
+      return;
+    }
+  }
+  if ("apiKey" in stored) out["apiKey"] = stored["apiKey"];
+}
 
 /**
  * Returns the least-privilege subset of a stored context for a challenge
@@ -356,13 +429,13 @@ export function scopeContext(
   }
   for (const alt of details.alternatives) {
     if (alt.requirements.length === 0) continue;
-    const satisfied = alt.requirements.every((req) => {
-      const field = REQUIREMENT_FIELDS[req.type] ?? req.type;
-      const v = stored[field];
-      return v !== undefined && v !== null && v !== "";
-    });
+    const satisfied = alt.requirements.every((req) => requirementSatisfied(stored, req));
     if (!satisfied) continue;
     for (const req of alt.requirements) {
+      if (req.type === "auth.apiKey") {
+        admitApiKey(stored, out, typeof req.name === "string" ? req.name : undefined);
+        continue;
+      }
       const fields = REQUIREMENT_FAMILY_FIELDS[req.type] ?? [req.type];
       for (const f of fields) {
         if (f in stored) out[f] = stored[f];

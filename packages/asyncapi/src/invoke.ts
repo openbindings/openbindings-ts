@@ -23,6 +23,7 @@ import {
   contextSatisfies,
   contextBearerToken,
   contextApiKey,
+  contextApiKeyFor,
   contextBasicAuth,
   contextString,
   contextHeaders,
@@ -39,6 +40,7 @@ import {
   type BindingHandle,
   type BindingInvocationArgs,
   type ContextAlternative,
+  type ContextRequirement,
   type ContextRequiredDetails,
   type Metadata,
   isJSONContentType,
@@ -52,10 +54,13 @@ import {
 import type {
   AsyncAPIDocument,
   AsyncAPIOperation,
+  AsyncAPIOAuthFlow,
+  AsyncAPIOAuthFlows,
   AsyncAPISecurityScheme,
   AsyncAPIServer,
 } from "./asyncapi-types.js";
 import { isSecurityScheme } from "./asyncapi-types.js";
+import { REF_NAME_TAG } from "./constants.js";
 import { parseRef, errorMessage } from "./util.js";
 import type { PooledWS, WSPool } from "./ws-pool.js";
 
@@ -217,43 +222,131 @@ export function resolveServer(
 // Context requirements (CONTEXT_REQUIRED negotiation)
 // ---------------------------------------------------------------------------
 
+/** A security scheme paired with its addressable name (rule A). */
+interface NamedSecurityScheme {
+  scheme: AsyncAPISecurityScheme;
+  name?: string;
+}
+
+/**
+ * Reads the components.securitySchemes key a `$ref`-resolved scheme object
+ * came from, off the {@link REF_NAME_TAG} field util.ts's
+ * tagSecurityRefNames tagged onto the entry BEFORE the shared dereferencer
+ * ran (rule A). Object identity cannot recover this: the shared
+ * dereferencer (deref.ts) resolves an internal `$ref` by looking it up
+ * against the ORIGINAL document it was given, not the clone it progressively
+ * walks and returns, so a resolved scheme is never reference-equal to
+ * anything reachable from the FINAL document — tagging is what survives that
+ * gap (dereference's merge-copy path carries extra `$ref`-node keys onto the
+ * resolved object). An inline scheme object (declared directly in
+ * `security`, no `$ref`) was never tagged and gets no name — rule A: "an
+ * inline scheme object with no addressable name emits no `name`."
+ */
+function nameForScheme(scheme: AsyncAPISecurityScheme): string | undefined {
+  const tagged = (scheme as unknown as Record<string, unknown>)[REF_NAME_TAG];
+  return typeof tagged === "string" ? tagged : undefined;
+}
+
 function resolveSecuritySchemes(
   asyncOp: AsyncAPIOperation,
   server: AsyncAPIServer | undefined,
-): AsyncAPISecurityScheme[] {
+): NamedSecurityScheme[] {
   // Operation-level security overrides server-level.
   // After dereference, security items are resolved scheme objects.
   const opSecurity = asyncOp.security;
-  if (opSecurity && opSecurity.length > 0) {
-    return opSecurity.filter(isSecurityScheme);
-  }
-
-  // Fall back to the security of the server the connection targets —
-  // never to some other server's declaration.
-  return (server?.security ?? []).filter(isSecurityScheme);
+  const raw =
+    opSecurity && opSecurity.length > 0
+      ? opSecurity
+      // Fall back to the security of the server the connection targets —
+      // never to some other server's declaration.
+      : (server?.security ?? []);
+  return raw.filter(isSecurityScheme).map((scheme) => ({ scheme, name: nameForScheme(scheme) }));
 }
 
-/** Maps an AsyncAPI security scheme to a standard requirement family, or null when unknown. */
-function requirementType(scheme: AsyncAPISecurityScheme): string | null {
+/**
+ * Maps an AsyncAPI security scheme to a context requirement's type-specific
+ * fields (name/description are layered on by schemeRequirement below). Every
+ * scheme maps to SOMETHING: a recognized family, or — per the R2.c ruling —
+ * a surfaced "auth.<T>" requirement (an http scheme with an unmapped
+ * `scheme` value becomes "auth.http.<scheme>"; any other unmapped artifact
+ * `type` becomes "auth.<type>" verbatim, e.g. "auth.scramSha256",
+ * "auth.X509") so the alternative stays discoverable instead of being
+ * silently dropped.
+ */
+function mapScheme(scheme: AsyncAPISecurityScheme, baseURL: string): ContextRequirement {
   switch (scheme.type) {
     case "http": {
       const s = (scheme.scheme ?? "").toLowerCase();
-      if (s === "bearer") return "auth.bearer";
-      if (s === "basic") return "auth.basic";
-      return null;
+      if (s === "bearer") return { type: "auth.bearer" };
+      if (s === "basic") return { type: "auth.basic" };
+      return { type: s ? `auth.http.${s}` : "auth.http" };
     }
     case "httpBearer":
-      return "auth.bearer";
+      return { type: "auth.bearer" };
     case "userPassword":
-      return "auth.basic";
+      return { type: "auth.basic" };
     case "apiKey":
     case "httpApiKey":
-      return "auth.apiKey";
+      return { type: "auth.apiKey" };
     case "oauth2":
-      return "auth.oauth2";
+      return oauth2Requirement(scheme, baseURL);
     default:
-      return null;
+      return { type: `auth.${scheme.type}` };
   }
+}
+
+/**
+ * Builds an `auth.oauth2` requirement carrying the flow's authorize/token
+ * URLs, scopes, and `grantType` (rule B) under the binding-invoker
+ * contract's convention field names. Selection mirrors the OpenAPI format's
+ * oauth2Requirement EXACTLY: authorizationCode, then implicit, then whichever
+ * of password/clientCredentials declares a `tokenUrl` (password checked
+ * first) — a fixed priority, not declaration order. Relative URLs are
+ * resolved against the server base. No flow means no grantType.
+ */
+function oauth2Requirement(scheme: AsyncAPISecurityScheme, baseURL: string): ContextRequirement {
+  const req: ContextRequirement = { type: "auth.oauth2" };
+  const flows = scheme.flows;
+  const tokenOnlyFlow = [flows?.password, flows?.clientCredentials].find(
+    (f): f is AsyncAPIOAuthFlow => !!f && typeof f.tokenUrl === "string",
+  );
+  const flow = flows?.authorizationCode ?? flows?.implicit ?? tokenOnlyFlow;
+  if (flow?.authorizationUrl) req.authorizeUrl = absolutize(flow.authorizationUrl, baseURL);
+  if (flow?.tokenUrl) req.tokenUrl = absolutize(flow.tokenUrl, baseURL);
+  if (flow?.scopes && Object.keys(flow.scopes).length > 0) {
+    req.scopes = Object.keys(flow.scopes);
+  }
+  if (flow) req.grantType = grantTypeFor(flows, flow);
+  return req;
+}
+
+/** Names the OAuth2 grant type for the flow oauth2Requirement selected, by identity. */
+function grantTypeFor(flows: AsyncAPIOAuthFlows | undefined, flow: AsyncAPIOAuthFlow): string {
+  if (flow === flows?.authorizationCode) return "authorization_code";
+  if (flow === flows?.implicit) return "implicit";
+  if (flow === flows?.password) return "password";
+  return "client_credentials";
+}
+
+/** Resolves a possibly-relative URL against the server base; passes absolute URLs through. */
+function absolutize(url: string, baseURL: string): string {
+  try {
+    return new URL(url, baseURL).toString();
+  } catch {
+    return url;
+  }
+}
+
+/** Wraps mapScheme with the requirement's name (rule A) and description. */
+function schemeRequirement(
+  scheme: AsyncAPISecurityScheme,
+  baseURL: string,
+  name: string | undefined,
+): ContextRequirement {
+  const req = mapScheme(scheme, baseURL);
+  if (name) req.name = name;
+  if (scheme.description) req.description = scheme.description;
+  return req;
 }
 
 /**
@@ -269,15 +362,10 @@ export function requiredContext(
   serverURL: string,
   ctx?: Record<string, unknown>,
 ): ContextRequiredDetails | null {
-  const schemes = resolveSecuritySchemes(asyncOp, server);
-  const alternatives: ContextAlternative[] = [];
-  for (const scheme of schemes) {
-    const type = requirementType(scheme);
-    if (!type) continue; // unknown scheme family: not checkable, not enforced
-    const requirement: ContextAlternative["requirements"][number] = { type };
-    if (scheme.description) requirement.description = scheme.description;
-    alternatives.push({ requirements: [requirement] });
-  }
+  const named = resolveSecuritySchemes(asyncOp, server);
+  const alternatives: ContextAlternative[] = named.map(({ scheme, name }) => ({
+    requirements: [schemeRequirement(scheme, serverURL, name)],
+  }));
   if (alternatives.length === 0) return null;
 
   const details: ContextRequiredDetails = {
@@ -298,18 +386,22 @@ function applyCredentialsViaSchemes(
   server: AsyncAPIServer | undefined,
   ctx: Record<string, unknown>,
 ): { applied: boolean; queryParams?: Record<string, string> } {
-  const schemes = resolveSecuritySchemes(asyncOp, server);
-  if (!schemes.length) return { applied: false };
+  const named = resolveSecuritySchemes(asyncOp, server);
+  if (!named.length) return { applied: false };
 
   let applied = false;
   let queryParams: Record<string, string> | undefined;
 
-  for (const scheme of schemes) {
+  for (const { scheme, name: schemeName } of named) {
     const schemeType = scheme.type;
     switch (schemeType) {
       case "apiKey":
       case "httpApiKey": {
-        const val = contextApiKey(ctx);
+        // Rule D: the requirement's addressable name (schemeName, the
+        // components.securitySchemes key) resolves the credential — distinct
+        // from scheme.name below, which is the WIRE placement name (header/
+        // query/cookie), not the lookup key.
+        const val = contextApiKeyFor(ctx, schemeName);
         if (!val) continue;
         const loc = scheme.in;
         const name = scheme.name;
@@ -766,7 +858,7 @@ function declaresBearerScheme(
   asyncOp: AsyncAPIOperation,
   server: AsyncAPIServer | undefined,
 ): boolean {
-  return resolveSecuritySchemes(asyncOp, server).some((s) => {
+  return resolveSecuritySchemes(asyncOp, server).some(({ scheme: s }) => {
     if (s.type === "httpBearer" || s.type === "oauth2") return true;
     return s.type === "http" && (s.scheme ?? "").toLowerCase() === "bearer";
   });

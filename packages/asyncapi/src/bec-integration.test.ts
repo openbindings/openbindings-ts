@@ -177,7 +177,9 @@ describe("AsyncAPI binding invoker (real HTTP)", () => {
       code: CONTEXT_REQUIRED,
       details: {
         target: `http://127.0.0.1:${port}`,
-        alternatives: [{ requirements: [{ type: "auth.bearer" }] }],
+        // R2.a ruling: name is the components.securitySchemes key the
+        // operation's $ref resolves through.
+        alternatives: [{ requirements: [{ type: "auth.bearer", name: "bearer" }] }],
       },
     });
     expect(requestCount).toBe(before); // no request was dispatched
@@ -279,7 +281,7 @@ describe("AsyncAPI binding invoker (real HTTP)", () => {
 
       expect(details).toMatchObject({
         target: `http://127.0.0.1:${port}`,
-        alternatives: [{ requirements: [{ type: "auth.bearer" }] }],
+        alternatives: [{ requirements: [{ type: "auth.bearer", name: "bearer" }] }],
       });
     });
 
@@ -336,6 +338,11 @@ describe("AsyncAPI binding invoker (real HTTP)", () => {
           { requirements: [{ type: "auth.basic" }] },
         ],
       });
+      // R2.a ruling: these schemes are declared INLINE in `security` (no
+      // components.securitySchemes, no $ref) — no addressable name exists,
+      // so the requirements carry no `name`.
+      expect(details?.alternatives[0].requirements[0]).not.toHaveProperty("name");
+      expect(details?.alternatives[1].requirements[0]).not.toHaveProperty("name");
 
       // Satisfying any one alternative suffices.
       const withKey = await invoker.prepareBinding({

@@ -51,4 +51,52 @@ describe("scopeContext", () => {
     got["injected"] = "x";
     expect("injected" in stored).toBe(false);
   });
+
+  // R2.e ruling: apiKeys passes through scoped to the NAMES the selected
+  // alternative's apiKey requirements carry, never the whole map — a store
+  // holding entries for two names and a challenge naming only one must leak
+  // only that one entry.
+  it("admits only the named apiKeys entries the selected alternative requires", () => {
+    const stored = {
+      apiKeys: { headerKey: "k1", queryKey: "k2", unrelated: "k3" },
+      headers: { Accept: "application/json" },
+    };
+    const details: ContextRequiredDetails = {
+      target: "https://api.example.com",
+      alternatives: [{ requirements: [{ type: "auth.apiKey", name: "headerKey" }] }],
+    };
+    expect(scopeContext(stored, details)).toEqual({
+      apiKeys: { headerKey: "k1" },
+      headers: { Accept: "application/json" },
+    });
+  });
+
+  it("admits every named entry an AND of apiKey requirements needs, and no other", () => {
+    const stored = {
+      apiKeys: { headerKey: "k1", queryKey: "k2", unrelated: "k3" },
+    };
+    const details: ContextRequiredDetails = {
+      target: "https://api.example.com",
+      alternatives: [
+        {
+          requirements: [
+            { type: "auth.apiKey", name: "headerKey" },
+            { type: "auth.apiKey", name: "queryKey" },
+          ],
+        },
+      ],
+    };
+    expect(scopeContext(stored, details)).toEqual({
+      apiKeys: { headerKey: "k1", queryKey: "k2" },
+    });
+  });
+
+  it("falls back to the flat apiKey when the requirement carries no name", () => {
+    const stored = { apiKeys: { headerKey: "k1" }, apiKey: "flat" };
+    const details: ContextRequiredDetails = {
+      target: "x",
+      alternatives: [{ requirements: [{ type: "auth.apiKey" }] }],
+    };
+    expect(scopeContext(stored, details)).toEqual({ apiKey: "flat" });
+  });
 });

@@ -2,6 +2,7 @@ import yaml from "js-yaml";
 import { dereference } from "@openbindings/sdk";
 
 import type { AsyncAPIDocument } from "./asyncapi-types.js";
+import { REF_NAME_TAG } from "./constants.js";
 
 const NON_KEY_CHARS = /[^a-zA-Z0-9._-]/g;
 
@@ -43,6 +44,57 @@ function applyChannelAddressFallback(raw: unknown): void {
   }
 }
 
+const SECURITY_SCHEME_REF_PREFIX = "#/components/securitySchemes/";
+
+/**
+ * Tags each internal `$ref`-only entry of one `security` list with the
+ * components.securitySchemes key it points to (rule A's `name`), under
+ * {@link REF_NAME_TAG} — a field the shared dereferencer's merge-copy path
+ * carries onto the resolved scheme object (extra keys on a `$ref` node are
+ * copied onto the target when the target doesn't already have them). Left
+ * untouched: an inline scheme (no `$ref` — no addressable name to tag), a
+ * `$ref` elsewhere in the document (channel/message $refs are unaffected —
+ * only entries of a `security` array are visited), and an external or
+ * non-securitySchemes-local `$ref` (no LOCAL components.securitySchemes key
+ * exists for it).
+ */
+function tagSecurityRefNames(list: unknown): void {
+  if (!Array.isArray(list)) return;
+  for (const entry of list) {
+    if (entry == null || typeof entry !== "object") continue;
+    const e = entry as Record<string, unknown>;
+    if (typeof e.$ref !== "string" || !e.$ref.startsWith(SECURITY_SCHEME_REF_PREFIX)) continue;
+    e[REF_NAME_TAG] = e.$ref.slice(SECURITY_SCHEME_REF_PREFIX.length);
+  }
+}
+
+/**
+ * Applies {@link tagSecurityRefNames} to every `security` list in the raw
+ * (pre-dereference) document: each operation's and each server's. Mirrors
+ * applyChannelAddressFallback's shape — a targeted pass over the RAW
+ * document before the generic dereferencer runs.
+ */
+function tagAllSecurityRefNames(raw: unknown): void {
+  if (raw == null || typeof raw !== "object") return;
+  const doc = raw as Record<string, unknown>;
+  const operations = doc.operations;
+  if (operations != null && typeof operations === "object") {
+    for (const op of Object.values(operations as Record<string, unknown>)) {
+      if (op != null && typeof op === "object") {
+        tagSecurityRefNames((op as Record<string, unknown>).security);
+      }
+    }
+  }
+  const servers = doc.servers;
+  if (servers != null && typeof servers === "object") {
+    for (const server of Object.values(servers as Record<string, unknown>)) {
+      if (server != null && typeof server === "object") {
+        tagSecurityRefNames((server as Record<string, unknown>).security);
+      }
+    }
+  }
+}
+
 /** Fetches (if needed) and parses an AsyncAPI document from a location URL or inline content. */
 export async function parseAsyncAPIDocument(
   location?: string,
@@ -71,6 +123,7 @@ export async function parseAsyncAPIDocument(
   }
 
   applyChannelAddressFallback(raw);
+  tagAllSecurityRefNames(raw);
 
   // Resolve all $ref pointers. External $refs fetch through the injected
   // fetch (callers that must stay side-effect-free inject a rejecting one).

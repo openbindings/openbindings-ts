@@ -8,6 +8,7 @@ import {
   decodeThroughHooks,
   contextBearerToken,
   contextApiKey,
+  contextApiKeyFor,
   contextBasicAuth,
   contextString,
   contextHeaders,
@@ -40,6 +41,7 @@ import type {
   OpenAPIParameter,
   OpenAPISecurityScheme,
   OpenAPIOAuthFlow,
+  OpenAPIOAuthFlows,
 } from "./types.js";
 import { errorMessage, mergeParameters, parseRef } from "./util.js";
 import { isSSEContentType, streamSSE } from "./sse.js";
@@ -462,16 +464,25 @@ function securityAlternatives(
     let expressible = true;
     for (const name of names.sort()) {
       const scheme = securitySchemes?.[name];
-      const requirement = scheme ? schemeRequirement(scheme, baseURL) : null;
-      if (!requirement) {
+      if (!scheme) {
+        // The security requirement names a scheme that components.securitySchemes
+        // never declares: an unresolvable reference, not checkable, not
+        // enforced — never degraded into a weaker requirement. This is
+        // distinct from a resolved scheme with an unrecognized type (R2.c
+        // ruling), which schemeRequirement always surfaces below.
         expressible = false;
         break;
       }
-      reqs.push(requirement);
+      reqs.push(schemeRequirement(scheme, baseURL, name));
     }
-    // A requirement set containing a scheme we cannot express cannot be
-    // satisfied through context negotiation; skip the whole alternative
-    // (it is an AND).
+    // A requirement set containing an unresolvable scheme reference cannot
+    // be expressed through context negotiation at all; skip the whole
+    // alternative (it is an AND). A scheme that resolves but maps to no
+    // known family is NOT skipped — schemeRequirement surfaces it as a typed
+    // "auth.<T>" requirement instead (R2.c ruling), so the alternative stays
+    // discoverable even though the built-in satisfaction check can never
+    // select it (contextSatisfies treats an unrecognized type as
+    // unsatisfiable).
     if (!expressible || reqs.length === 0) continue;
     alternatives.push({ requirements: reqs });
   }
@@ -479,32 +490,48 @@ function securityAlternatives(
 }
 
 /**
- * Maps an OpenAPI security scheme to a standard context requirement, carrying
- * the family-specific fields a resolver needs to act without out-of-band
- * knowledge (notably oauth2 flow endpoints). Returns null for schemes that
- * cannot be expressed as a known requirement family.
+ * Maps an OpenAPI security scheme to a context requirement, carrying the
+ * family-specific fields a resolver needs to act without out-of-band
+ * knowledge (notably oauth2 flow endpoints), the requirement's `name` (the
+ * securitySchemes key — rule A), and its `description` when the artifact
+ * declares one. Every scheme maps to SOMETHING: a recognized family, or —
+ * per the R2.c ruling — a surfaced `auth.<T>` requirement for a scheme this
+ * invoker has no resolver for, so the alternative stays discoverable (a
+ * runtime with a resolver for that family could still satisfy it) instead of
+ * being silently dropped. A document whose every alternative is unmappable
+ * this way now produces a pre-dispatch CONTEXT_REQUIRED challenge instead of
+ * dispatching unauthenticated into a blind 401.
  */
 function schemeRequirement(
   scheme: OpenAPISecurityScheme,
   baseURL: string,
-): ContextRequirement | null {
+  name: string,
+): ContextRequirement {
+  const req = mapScheme(scheme, baseURL);
+  req.name = name;
+  if (scheme.description) req.description = scheme.description;
+  return req;
+}
+
+/** The type-specific mapping schemeRequirement wraps with name/description. */
+function mapScheme(scheme: OpenAPISecurityScheme, baseURL: string): ContextRequirement {
   switch (scheme.type) {
-    case "http":
-      switch ((scheme.scheme ?? "").toLowerCase()) {
-        case "bearer":
-          return { type: "auth.bearer" };
-        case "basic":
-          return { type: "auth.basic" };
-        default:
-          return null;
-      }
+    case "http": {
+      const httpScheme = (scheme.scheme ?? "").toLowerCase();
+      if (httpScheme === "bearer") return { type: "auth.bearer" };
+      if (httpScheme === "basic") return { type: "auth.basic" };
+      // An http scheme this invoker cannot itself apply (e.g. digest): surface
+      // it typed by the artifact's own scheme name (R2.c ruling), never drop it.
+      return { type: httpScheme ? `auth.http.${httpScheme}` : "auth.http" };
+    }
     case "apiKey":
       return { type: "auth.apiKey" };
     case "oauth2":
       return oauth2Requirement(scheme, baseURL);
     case "openIdConnect": {
       // OpenID Connect resolves to an OAuth2 access token. The discovery URL
-      // lets a resolver fetch the authorize/token endpoints.
+      // lets a resolver fetch the authorize/token endpoints. No flows are
+      // declared on an openIdConnect scheme, so no grantType is selected.
       const req: ContextRequirement = { type: "auth.oauth2" };
       if (scheme.openIdConnectUrl) {
         req.openIdConnectUrl = absolutize(scheme.openIdConnectUrl, baseURL);
@@ -512,14 +539,17 @@ function schemeRequirement(
       return req;
     }
     default:
-      return null;
+      // Any other artifact type (e.g. mutualTLS): surface it verbatim as
+      // "auth.<type>" (R2.c ruling) rather than dropping the alternative.
+      return { type: `auth.${scheme.type}` };
   }
 }
 
 /**
  * Builds an `auth.oauth2` requirement carrying the flow's authorize/token URLs
  * and scopes under the role's convention field names (`authorizeUrl`,
- * `tokenUrl`, `scopes`). Prefers the authorization-code flow — the only
+ * `tokenUrl`, `scopes`), plus `grantType` naming the OAuth2 grant type of the
+ * SELECTED flow (rule B). Prefers the authorization-code flow — the only
  * interactive, PKCE-capable flow — then implicit, then password, then
  * clientCredentials: a fixed priority (mirroring the Go SDK's
  * oauth2Requirement exactly), not object/declaration order, so the same
@@ -528,7 +558,9 @@ function schemeRequirement(
  * password and clientCredentials — which define only `tokenUrl` — are
  * selected; keying on `authorizationUrl` skipped them, yielding a bare
  * `auth.oauth2` requirement with no `tokenUrl`/`scopes`. Relative URLs are
- * resolved against the server base.
+ * resolved against the server base. No flow means no grantType: a bare
+ * `auth.oauth2` requirement (e.g. an openIdConnect-derived one) never
+ * fabricates a grant type it did not select.
  */
 function oauth2Requirement(
   scheme: OpenAPISecurityScheme,
@@ -545,7 +577,21 @@ function oauth2Requirement(
   if (flow?.scopes && Object.keys(flow.scopes).length > 0) {
     req.scopes = Object.keys(flow.scopes);
   }
+  if (flow) req.grantType = grantTypeFor(flows, flow);
   return req;
+}
+
+/**
+ * Names the OAuth2 grant type for the flow `oauth2Requirement` selected, per
+ * the SAME fixed priority (authorizationCode > implicit > password >
+ * clientCredentials). Identity comparison against the flows object recovers
+ * which flow was picked without re-deriving the priority a second time.
+ */
+function grantTypeFor(flows: OpenAPIOAuthFlows | undefined, flow: OpenAPIOAuthFlow): string {
+  if (flow === flows?.authorizationCode) return "authorization_code";
+  if (flow === flows?.implicit) return "implicit";
+  if (flow === flows?.password) return "password";
+  return "client_credentials";
 }
 
 /** Resolves a possibly-relative URL against the server base; passes absolute URLs through. */
@@ -727,10 +773,16 @@ function applyContext(
   return queryParams;
 }
 
+/** A securityScheme paired with its addressable name (the securitySchemes key). */
+interface NamedSecurityScheme {
+  scheme: OpenAPISecurityScheme;
+  name: string;
+}
+
 function resolveSecuritySchemes(
   doc: OpenAPIDocument,
   op: OpenAPIOperation,
-): OpenAPISecurityScheme[] {
+): NamedSecurityScheme[] {
   const opSec = op.security as Array<Record<string, unknown>> | undefined;
   const docSec = (doc as Record<string, unknown>)["security"] as Array<Record<string, unknown>> | undefined;
   const requirements = opSec ?? docSec;
@@ -740,7 +792,7 @@ function resolveSecuritySchemes(
   const securitySchemes = components?.["securitySchemes"] as Record<string, OpenAPISecurityScheme> | undefined;
   if (!securitySchemes) return [];
 
-  const result: OpenAPISecurityScheme[] = [];
+  const result: NamedSecurityScheme[] = [];
   const seen = new Set<string>();
 
   for (const req of requirements) {
@@ -748,7 +800,7 @@ function resolveSecuritySchemes(
       if (seen.has(schemeName)) continue;
       seen.add(schemeName);
       const scheme = securitySchemes[schemeName];
-      if (scheme) result.push(scheme);
+      if (scheme) result.push({ scheme, name: schemeName });
     }
   }
 
@@ -761,16 +813,21 @@ function applyCredentialsViaSchemes(
   op: OpenAPIOperation,
   ctx: Record<string, unknown>,
 ): { applied: boolean; queryParams?: Record<string, string> } {
-  const schemes = resolveSecuritySchemes(doc, op);
-  if (!schemes.length) return { applied: false };
+  const named = resolveSecuritySchemes(doc, op);
+  if (!named.length) return { applied: false };
 
   let applied = false;
   let queryParams: Record<string, string> | undefined;
 
-  for (const scheme of schemes) {
+  for (const { scheme, name: schemeName } of named) {
     switch (scheme.type) {
       case "apiKey": {
-        const val = contextApiKey(ctx);
+        // Rule D: the requirement's addressable name (the securitySchemes
+        // key, e.g. "headerKey") resolves the credential — distinct from
+        // scheme.name (e.g. "X-API-Key"), which is the WIRE placement name
+        // below, not the lookup key. Two ANDed apiKey schemes with
+        // different names are otherwise indistinguishable.
+        const val = contextApiKeyFor(ctx, schemeName);
         if (!val) continue;
         switch (scheme.in) {
           case "header":

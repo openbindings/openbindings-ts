@@ -69,6 +69,16 @@ export type Metadata = Record<string, string[]>;
 export interface ContextRequirement {
   type: string;
   /**
+   * The scheme name as the source artifact declares it (e.g. an OpenAPI
+   * `securitySchemes` key, or the AsyncAPI `components.securitySchemes` key a
+   * `$ref` resolves through). Distinguishes two requirements of the same
+   * `type` within one alternative — two ANDed API keys are otherwise
+   * indistinguishable — and keys scheme-scoped credential lookup (see
+   * `apiKeys` on {@link ContextStore}/`BindingContext`). Absent when the
+   * artifact declares the scheme inline with no addressable name.
+   */
+  name?: string;
+  /**
    * Whether resolved context MAY be cached under the target-derived key.
    * Defaults to true; `durable: false` context MUST be re-satisfied per call.
    */

@@ -9,6 +9,7 @@ import {
   normalizeEndpoint,
   contextBearerToken,
   contextApiKey,
+  contextApiKeyFor,
   contextBasicAuth,
   contextString,
   contextSatisfies,
@@ -168,6 +169,38 @@ describe("well-known context helpers", () => {
 });
 
 // ---------------------------------------------------------------------------
+// contextApiKeyFor (R2.d ruling: named-entry-first, single-apiKey-fallback)
+// ---------------------------------------------------------------------------
+
+describe("contextApiKeyFor", () => {
+  it("resolves the named entry from apiKeys when present", () => {
+    const ctx = { apiKeys: { headerKey: "k1", queryKey: "k2" }, apiKey: "fallback" };
+    expect(contextApiKeyFor(ctx, "headerKey")).toBe("k1");
+    expect(contextApiKeyFor(ctx, "queryKey")).toBe("k2");
+  });
+
+  it("falls back to the single apiKey when the name is absent from apiKeys", () => {
+    const ctx = { apiKeys: { headerKey: "k1" }, apiKey: "fallback" };
+    expect(contextApiKeyFor(ctx, "otherKey")).toBe("fallback");
+  });
+
+  it("falls back to the single apiKey when no name is given", () => {
+    const ctx = { apiKeys: { headerKey: "k1" }, apiKey: "fallback" };
+    expect(contextApiKeyFor(ctx)).toBe("fallback");
+  });
+
+  it("falls back to the single apiKey when apiKeys is absent entirely", () => {
+    expect(contextApiKeyFor({ apiKey: "fallback" }, "headerKey")).toBe("fallback");
+  });
+
+  it("returns empty when neither apiKeys nor apiKey resolves", () => {
+    expect(contextApiKeyFor({}, "headerKey")).toBe("");
+    expect(contextApiKeyFor(null, "headerKey")).toBe("");
+    expect(contextApiKeyFor(undefined)).toBe("");
+  });
+});
+
+// ---------------------------------------------------------------------------
 // contextSatisfies
 // ---------------------------------------------------------------------------
 
@@ -215,6 +248,49 @@ describe("contextSatisfies", () => {
         alternatives: [{ requirements: [{ type: "auth.oauth2" }] }],
       }),
     ).toBe(true);
+  });
+
+  // R2.d ruling: two ANDed auth.apiKey requirements are distinguished by
+  // `name`, keying into the well-known `apiKeys` map rather than colliding
+  // on the single `apiKey` field.
+  it("satisfies two named auth.apiKey requirements via apiKeys, not the flat apiKey field", () => {
+    const details: ContextRequiredDetails = {
+      target: "k",
+      alternatives: [
+        {
+          requirements: [
+            { type: "auth.apiKey", name: "headerKey" },
+            { type: "auth.apiKey", name: "queryKey" },
+          ],
+        },
+      ],
+    };
+    expect(contextSatisfies({ apiKeys: { headerKey: "k1", queryKey: "k2" } }, details)).toBe(true);
+    // Only one of the two named keys present: the AND is not satisfied.
+    expect(contextSatisfies({ apiKeys: { headerKey: "k1" } }, details)).toBe(false);
+    // No apiKeys map and no flat apiKey: unsatisfied.
+    expect(contextSatisfies({}, details)).toBe(false);
+  });
+
+  // R2.c ruling: an unrecognized requirement type is unsatisfiable by the
+  // built-in check — no resolver at this layer, no invented satisfaction
+  // convention — so an alternative carrying one is never selectable here,
+  // even though the invoker surfaces it (so the alternative stays
+  // discoverable to a runtime that DOES have a resolver for it).
+  it("never satisfies an unrecognized (surfaced-but-unmapped) requirement type", () => {
+    const details: ContextRequiredDetails = {
+      target: "k",
+      alternatives: [{ requirements: [{ type: "auth.http.digest", name: "digestAuth" }] }],
+    };
+    expect(contextSatisfies({}, details)).toBe(false);
+    // Even a context that happens to carry every other well-known
+    // credential field cannot satisfy a family with no resolver.
+    expect(
+      contextSatisfies(
+        { bearerToken: "t", apiKey: "k", basic: { username: "u", password: "p" }, accessToken: "a" },
+        details,
+      ),
+    ).toBe(false);
   });
 });
 

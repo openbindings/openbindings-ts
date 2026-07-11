@@ -1,10 +1,46 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
+import { CONTEXT_REQUIRED, single } from "@openbindings/sdk";
 import { AsyncAPIInvoker, AsyncAPISynthesizer } from "./invoker.js";
 import { FORMAT_TOKEN, DEFAULT_SOURCE_NAME } from "./constants.js";
 
 afterEach(() => {
   vi.unstubAllGlobals();
 });
+
+// ---------------------------------------------------------------------------
+// Fetch mock (mirrors packages/openapi/src/invoker.test.ts's mockFetch)
+// ---------------------------------------------------------------------------
+
+interface CapturedRequest {
+  url: string;
+  method: string;
+  headers: Headers;
+  body?: BodyInit | null;
+}
+
+function mockFetch(
+  respond: (req: CapturedRequest) => Response | Promise<Response>,
+): { fetch: typeof globalThis.fetch; requests: CapturedRequest[] } {
+  const requests: CapturedRequest[] = [];
+  const fn = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    const req: CapturedRequest = {
+      url: input instanceof Request ? input.url : String(input),
+      method: init?.method ?? "GET",
+      headers: new Headers(init?.headers),
+      body: init?.body,
+    };
+    requests.push(req);
+    return respond(req);
+  };
+  return { fetch: fn as typeof globalThis.fetch, requests };
+}
+
+function jsonResponse(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "Content-Type": "application/json" },
+  });
+}
 
 // ---------------------------------------------------------------------------
 // prepareBinding is side-effect-free
@@ -152,5 +188,265 @@ describe("AsyncAPISynthesizer content-fed synthesis", () => {
     const src = iface.sources?.[DEFAULT_SOURCE_NAME];
     expect(src?.location).toBe("https://example.com/spec.json");
     expect(src?.content).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// R2.b ruling: oauth2 requirements carry authorizeUrl/tokenUrl/scopes and
+// grantType naming the SELECTED flow, per the SAME fixed priority as the
+// openapi format (authorizationCode > implicit > password > clientCredentials).
+// ---------------------------------------------------------------------------
+
+/** Builds a one-operation AsyncAPI 3.0 spec with a single oauth2 scheme, addressed via $ref (so `name` resolves too). */
+function oauth2Spec(flows: Record<string, unknown>) {
+  return {
+    asyncapi: "3.0.0",
+    info: { title: "OAuth", version: "1.0.0" },
+    servers: { prod: { host: "api.example.com", protocol: "https" } },
+    channels: { pub: { address: "/pub", messages: { Msg: { payload: { type: "object" } } } } },
+    operations: {
+      publish: {
+        action: "send" as const,
+        channel: { $ref: "#/channels/pub" },
+        security: [{ $ref: "#/components/securitySchemes/oauth" }],
+      },
+    },
+    components: { securitySchemes: { oauth: { type: "oauth2", flows } } },
+  };
+}
+
+describe("context requirements — oauth2 flows (R2.b ruling)", () => {
+  it("carries tokenUrl/scopes and grantType client_credentials for a token-only flow", async () => {
+    const spec = oauth2Spec({
+      clientCredentials: {
+        tokenUrl: "https://auth.example.com/token",
+        scopes: { read: "Read" },
+      },
+    });
+    const details = await new AsyncAPIInvoker().prepareBinding({
+      source: { format: FORMAT_TOKEN, content: spec },
+      ref: "#/operations/publish",
+    });
+    expect(details).toMatchObject({
+      target: "https://api.example.com",
+      alternatives: [
+        {
+          requirements: [
+            {
+              type: "auth.oauth2",
+              name: "oauth",
+              tokenUrl: "https://auth.example.com/token",
+              scopes: ["read"],
+              grantType: "client_credentials",
+            },
+          ],
+        },
+      ],
+    });
+  });
+
+  it("prefers password over clientCredentials by fixed priority, not declaration order", async () => {
+    const spec = oauth2Spec({
+      clientCredentials: { tokenUrl: "https://auth.example.com/cc/token" },
+      password: { tokenUrl: "https://auth.example.com/pw/token" },
+    });
+    const details = await new AsyncAPIInvoker().prepareBinding({
+      source: { format: FORMAT_TOKEN, content: spec },
+      ref: "#/operations/publish",
+    });
+    expect(details).toMatchObject({
+      alternatives: [
+        {
+          requirements: [
+            { type: "auth.oauth2", tokenUrl: "https://auth.example.com/pw/token", grantType: "password" },
+          ],
+        },
+      ],
+    });
+  });
+
+  it("prefers authorizationCode over every other flow when multiple are declared", async () => {
+    const spec = oauth2Spec({
+      clientCredentials: { tokenUrl: "https://auth.example.com/cc/token" },
+      password: { tokenUrl: "https://auth.example.com/pw/token" },
+      implicit: { authorizationUrl: "https://auth.example.com/implicit/authorize" },
+      authorizationCode: {
+        authorizationUrl: "https://auth.example.com/authorize",
+        tokenUrl: "https://auth.example.com/authcode/token",
+      },
+    });
+    const details = await new AsyncAPIInvoker().prepareBinding({
+      source: { format: FORMAT_TOKEN, content: spec },
+      ref: "#/operations/publish",
+    });
+    expect(details).toMatchObject({
+      alternatives: [
+        {
+          requirements: [
+            {
+              type: "auth.oauth2",
+              authorizeUrl: "https://auth.example.com/authorize",
+              tokenUrl: "https://auth.example.com/authcode/token",
+              grantType: "authorization_code",
+            },
+          ],
+        },
+      ],
+    });
+  });
+
+  it("carries no grantType when the scheme declares no flows", async () => {
+    const spec = oauth2Spec({});
+    const details = await new AsyncAPIInvoker().prepareBinding({
+      source: { format: FORMAT_TOKEN, content: spec },
+      ref: "#/operations/publish",
+    });
+    const req = (details as { alternatives: Array<{ requirements: Array<Record<string, unknown>> }> })
+      .alternatives[0].requirements[0];
+    expect(req).not.toHaveProperty("grantType");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// R2.c ruling: unmapped schemes are SURFACED as typed requirements instead
+// of silently dropped, so the alternative stays discoverable and a document
+// whose every alternative is unmappable still produces a pre-dispatch
+// CONTEXT_REQUIRED challenge instead of dispatching unauthenticated.
+// ---------------------------------------------------------------------------
+
+describe("context requirements — unmapped schemes surfaced (R2.c ruling)", () => {
+  it("surfaces an unmapped http scheme as auth.http.<scheme>, named via $ref", async () => {
+    const spec = {
+      asyncapi: "3.0.0",
+      info: { title: "Digest", version: "1.0.0" },
+      servers: { prod: { host: "api.example.com", protocol: "https" } },
+      channels: { pub: { address: "/pub", messages: { Msg: { payload: { type: "object" } } } } },
+      operations: {
+        publish: {
+          action: "send" as const,
+          channel: { $ref: "#/channels/pub" },
+          security: [{ $ref: "#/components/securitySchemes/digestAuth" }],
+        },
+      },
+      components: { securitySchemes: { digestAuth: { type: "http", scheme: "digest" } } },
+    };
+    const details = await new AsyncAPIInvoker().prepareBinding({
+      source: { format: FORMAT_TOKEN, content: spec },
+      ref: "#/operations/publish",
+    });
+    expect(details).toMatchObject({
+      alternatives: [{ requirements: [{ type: "auth.http.digest", name: "digestAuth" }] }],
+    });
+  });
+
+  it("surfaces unmapped scheme types verbatim as auth.<type> (scramSha256, X509)", async () => {
+    const spec = {
+      asyncapi: "3.0.0",
+      info: { title: "Multi", version: "1.0.0" },
+      servers: { prod: { host: "api.example.com", protocol: "https" } },
+      channels: { pub: { address: "/pub", messages: { Msg: { payload: { type: "object" } } } } },
+      operations: {
+        publish: {
+          action: "send" as const,
+          channel: { $ref: "#/channels/pub" },
+          security: [{ type: "scramSha256" }, { type: "X509" }],
+        },
+      },
+    };
+    const details = await new AsyncAPIInvoker().prepareBinding({
+      source: { format: FORMAT_TOKEN, content: spec },
+      ref: "#/operations/publish",
+    });
+    expect(details).toMatchObject({
+      alternatives: [
+        { requirements: [{ type: "auth.scramSha256" }] },
+        { requirements: [{ type: "auth.X509" }] },
+      ],
+    });
+    // Both declared inline (no $ref): no addressable name.
+    const alts = (details as { alternatives: Array<{ requirements: Array<Record<string, unknown>> }> })
+      .alternatives;
+    expect(alts[0].requirements[0]).not.toHaveProperty("name");
+    expect(alts[1].requirements[0]).not.toHaveProperty("name");
+  });
+
+  it("a document whose EVERY alternative is unmappable challenges CONTEXT_REQUIRED before dispatch, instead of a blind 401", async () => {
+    const spec = {
+      asyncapi: "3.0.0",
+      info: { title: "AllUnmapped", version: "1.0.0" },
+      servers: { prod: { host: "api.example.com", protocol: "https" } },
+      channels: { pub: { address: "/pub", messages: { Msg: { payload: { type: "object" } } } } },
+      operations: {
+        publish: {
+          action: "send" as const,
+          channel: { $ref: "#/channels/pub" },
+          security: [{ type: "http", scheme: "digest" }, { type: "X509" }],
+        },
+      },
+    };
+    const { fetch, requests } = mockFetch(() => jsonResponse({}));
+    const call = new AsyncAPIInvoker().invokeBinding({
+      source: { format: FORMAT_TOKEN, content: spec },
+      ref: "#/operations/publish",
+      fetch,
+    });
+    await call.write({});
+    await expect(call.closed).rejects.toMatchObject({
+      code: CONTEXT_REQUIRED,
+      details: {
+        alternatives: [
+          { requirements: [{ type: "auth.http.digest" }] },
+          { requirements: [{ type: "auth.X509" }] },
+        ],
+      },
+    });
+    // Pre-dispatch: previously these unmapped schemes were dropped entirely
+    // (alternatives.length === 0), so requiredContext returned null and the
+    // publish WOULD have dispatched here with no credentials at all.
+    expect(requests).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// R2.d ruling: apiKeys keyed lookup in credential application — two apiKey
+// schemes with different addressable names, placed in different wire
+// locations, resolve to distinct keys via the apiKeys map.
+// ---------------------------------------------------------------------------
+
+describe("credential application — apiKeys keyed lookup (R2.d ruling)", () => {
+  it("distinguishes two apiKey schemes by name via the apiKeys map, placing each in its own wire location", async () => {
+    const spec = {
+      asyncapi: "3.0.0",
+      info: { title: "TwoKeys", version: "1.0.0" },
+      servers: { prod: { host: "api.example.com", protocol: "https" } },
+      channels: { pub: { address: "/pub", messages: { Msg: { payload: { type: "object" } } } } },
+      operations: {
+        publish: {
+          action: "send" as const,
+          channel: { $ref: "#/channels/pub" },
+          security: [
+            { $ref: "#/components/securitySchemes/headerKey" },
+            { $ref: "#/components/securitySchemes/queryKey" },
+          ],
+        },
+      },
+      components: {
+        securitySchemes: {
+          headerKey: { type: "apiKey", in: "header", name: "X-Header-Key" },
+          queryKey: { type: "apiKey", in: "query", name: "api_key" },
+        },
+      },
+    };
+    const { fetch, requests } = mockFetch(() => jsonResponse({}));
+    const call = new AsyncAPIInvoker().invokeBinding({
+      source: { format: FORMAT_TOKEN, content: spec },
+      ref: "#/operations/publish",
+      context: { apiKeys: { headerKey: "hk-1", queryKey: "qk-1" } },
+      fetch,
+    });
+    await call.write({});
+    await single(call.outputs);
+    expect(requests[0].headers.get("X-Header-Key")).toBe("hk-1");
+    expect(requests[0].url).toBe("https://api.example.com/pub?api_key=qk-1");
   });
 });
