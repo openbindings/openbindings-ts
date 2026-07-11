@@ -7,6 +7,7 @@
  * shapes here just hold mutable state with no lock coordination.
  */
 import { Validator } from "@cfworker/json-schema";
+import { stripFormatAssertions } from "@openbindings/sdk";
 import type { Node } from "./types.js";
 
 /**
@@ -246,7 +247,10 @@ export class SchemaCache {
       if (typeof schema !== "object" || schema === null || Array.isArray(schema)) {
         throw new Error("embedded schema must be a JSON Schema object");
       }
-      v = new Validator(schema as object, "2020-12");
+      // format is an annotation at embedded-schema evaluation (Embedded
+      // schemas; aligned with core §6.2) — the backend asserts known
+      // formats unconditionally, so the compiled view drops the keyword.
+      v = new Validator(stripFormatAssertions(schema) as object, "2020-12");
       this.compiled.set(key, v);
     }
     try {

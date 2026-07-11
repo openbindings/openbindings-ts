@@ -173,8 +173,11 @@ export function compileExampleSchema(
  * keyword-shape tables, so a property NAMED "format" (a key under
  * `properties`, `$defs`, ...) is untouched. Non-schema members are shared
  * by reference: the copy never mutates its input.
+ *
+ * Exported for validators sharing the same backend and the same rule
+ * (the operation-graph engine's embedded-schema evaluation).
  */
-function stripFormatAssertions(node: unknown): unknown {
+export function stripFormatAssertions(node: unknown): unknown {
   if (typeof node !== "object" || node === null || Array.isArray(node)) {
     return node;
   }
