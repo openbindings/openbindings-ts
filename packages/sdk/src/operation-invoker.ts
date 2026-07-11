@@ -39,7 +39,7 @@ import {
   ERR_VALIDATION_FAILED,
 } from "./errcodes.js";
 import { matchesRange, parseRange } from "./format-token.js";
-import { buildSchemaDefs, compileExampleSchema, safeValidate } from "./schema-validation.js";
+import { buildSchemaDefs, compileExampleSchema, safeValidate , type CompiledSchema } from "./schema-validation.js";
 import {
   type FieldRouter,
   type InvokeHooks,
@@ -50,7 +50,6 @@ import {
   floorStamped,
   newInvokeHooks,
 } from "./hooks.js";
-import type { Validator } from "@cfworker/json-schema";
 
 /**
  * Maximum CONTEXT_REQUIRED resolve-and-retry rounds per invocation. A
@@ -386,7 +385,7 @@ export class OperationInvoker {
     }
 
     // OBI-T-08: compile the output schema once per invocation.
-    let outputValidator: Validator | undefined;
+    let outputValidator: CompiledSchema | undefined;
     if (op.output != null) {
       try {
         outputValidator = compileExampleSchema(op.output, buildSchemaDefs(iface.schemas));
@@ -698,7 +697,7 @@ function makeInputValidator(
   operationName: string,
 ): ((input: unknown) => InvocationError | null) | undefined {
   if (op.input == null) return undefined;
-  let validator: Validator | undefined;
+  let validator: CompiledSchema | undefined;
   let compileError: InvocationError | undefined;
   let compiled = false;
   return (input: unknown): InvocationError | null => {

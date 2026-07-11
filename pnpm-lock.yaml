@@ -95,9 +95,6 @@ importers:
 
   packages/operationgraph:
     dependencies:
-      '@cfworker/json-schema':
-        specifier: ^4.1.1
-        version: 4.1.1
       '@openbindings/sdk':
         specifier: workspace:*
         version: link:../sdk
@@ -111,12 +108,12 @@ importers:
 
   packages/sdk:
     dependencies:
-      '@cfworker/json-schema':
-        specifier: ^4.1.1
-        version: 4.1.1
       canonicalize:
         specifier: ^2.1.0
         version: 2.1.0
+      json-schema-library:
+        specifier: ^11.6.1
+        version: 11.6.1
 
   packages/workers-rpc:
     dependencies:
@@ -303,6 +300,12 @@ packages:
     engines: {node: '>=18.14.1'}
     peerDependencies:
       hono: ^4
+
+  '@hyperjump/json-schema-formats@1.0.2':
+    resolution: {integrity: sha512-LwV7YMBst77SCvZJS/Fq5od/2dWvefU+a7RF9/MOo9mVXEcA7PJ0Ax6zgoL2x69f6PmEfFXTp3l1vGdtyziW6w==}
+
+  '@hyperjump/uri@1.3.4':
+    resolution: {integrity: sha512-aUVWwu2GtC/cU4DwdTM+b+5jjboM6wft6vNg1+7pUTk/nNRNaBYcYhaEnCir9eRLBbkcGPkiEO7XRUlcDkxj4Q==}
 
   '@jridgewell/gen-mapping@0.3.13':
     resolution: {integrity: sha512-2kkt/7niJ6MgEPxF0bYdQ6etZaA+fQvDcLKckhy1yIQOzaoKjBBjSj63/aLVjYE3qhRt5dvM+uUyfCg6UKCBbA==}
@@ -553,6 +556,9 @@ packages:
     cpu: [x64]
     os: [win32]
 
+  '@sagold/json-pointer@7.2.1':
+    resolution: {integrity: sha512-8EX4r5Royl5M3qNPTh5W5njdOtRqbWgQfVv26DbzjGj2/55b60EqvbiqUIglzw7fADfY/Io6jDJxGNJHmC+g8g==}
+
   '@standard-schema/spec@1.1.0':
     resolution: {integrity: sha512-l2aFy5jALhniG5HgqrD6jXLi/rUWrKvqN/qJx6yoJsgKhblVd+iqqU4RCXavm/jPityDo5TCvKMnpjKnOriy0w==}
 
@@ -792,6 +798,9 @@ packages:
     resolution: {integrity: sha512-hIS4idWWai69NezIdRt2xFVofaF4j+6INOpJlVOLDO8zXGpUVEVzIYk12UUi2JzjEzWL3IOAxcTubgz9Po0yXw==}
     engines: {node: '>= 18'}
 
+  fast-copy@4.0.4:
+    resolution: {integrity: sha512-eVAiWVNPSEGIzDl5yPuLrx8fNMogScXvD9xp1Kzd41FjRIz2I3sSIcxsFeM5EzFfHAfobdvs8ZySffUopljvIA==}
+
   fast-deep-equal@3.1.3:
     resolution: {integrity: sha512-f3qQ9oQy9j2AhBe/H9VC91wLmKBCCU/gDOnKNAYG5hswO7BLKj09Hc5HYNz9cGI++xlpDCIgDaitVs03ATR84Q==}
 
@@ -865,6 +874,9 @@ packages:
     resolution: {integrity: sha512-im9DjEDQ55s9fL4EYzOAv0yMqmMBSZp6G0VvFyTMPKWxiSBHUj9NW/qqLmXUwXrrM7AvqSlTCfvqRb0cM8yYqw==}
     engines: {node: '>=0.10.0'}
 
+  idn-hostname@15.1.10:
+    resolution: {integrity: sha512-/mSXWRhVasTJ7Z4z18523rTA6CmStYN29yDt+oXi9fe1/M0SO2Un1BgUr3v28aAZG5hWicyUtIamC/juXt3nZQ==}
+
   inherits@2.0.4:
     resolution: {integrity: sha512-k/vGaX4/Yla3WzyMCvTQOXYeIHvqOKtnqBduzTHpzpQZzAskKMhZ2K+EnBiSM9zGSoIFeMpXKxa4dYeZIQqewQ==}
 
@@ -892,6 +904,9 @@ packages:
   js-yaml@4.3.0:
     resolution: {integrity: sha512-1td788aAnnZ5qs7V2QIRl1owjtYpbKt749Y3xauqQgwIIGF/xXWz1wMTEBx5O3LK3lXLVuqXPdPxj2BoFHaW9Q==}
     hasBin: true
+
+  json-schema-library@11.6.1:
+    resolution: {integrity: sha512-WAdI8/IdFtgfd9RzjV5lsd82RNXoWb0TR52Z+eQW6xeHGXtLJihvbdCvUVLMaQVO6DnwGj1WyGnaey/w6SmdxA==}
 
   json-schema-traverse@1.0.0:
     resolution: {integrity: sha512-NM8/P9n3XjXhIZn1lLhkFaACTOURQXjWhV4BA/RnOv8xvgqtqpAX9IO4mRQxSx1Rlo4tqzeqb0sOlruaOy3dug==}
@@ -1105,6 +1120,10 @@ packages:
     resolution: {integrity: sha512-llQsMLSUDUPT44jdrU/O37qlnifitDP+ZwrmmZcoSKyLKvtZxpyV0n2/bD/N4tBAAZ/gJEdZU7KMraoK1+XYAg==}
     engines: {node: '>= 0.10'}
 
+  punycode@2.3.1:
+    resolution: {integrity: sha512-vYt7UD1U9Wg6138shLtLOvdAu+8DsC/ilFtEVHcH+wydcSpNE20AfSOduf6MkRFahL5FY7X1oU7nKVZFtfq8Fg==}
+    engines: {node: '>=6'}
+
   qs@6.15.3:
     resolution: {integrity: sha512-O9gl3zCl5h5blw1KGUzQKhA5oUXSl8rwUIM5o0S3nCXMliSvy5Dzx7/DJcI+SwgICv+IneSZwhBh1oSyEHA71A==}
     engines: {node: '>=0.6'}
@@ -1296,6 +1315,12 @@ packages:
     resolution: {integrity: sha512-pjy2bYhSsufwWlKwPc+l3cN7+wuJlK6uz0YdJEOlQDbl6jo/YlPi4mb8agUkVC8BF7V8NuzeyPNqRksA3hztKQ==}
     engines: {node: '>= 0.8'}
 
+  uri-js@4.4.1:
+    resolution: {integrity: sha512-7rKUyy33Q1yc98pQ1DAmLtwX109F7TIfWlW1Ydo8Wl1ii1SeHieeh0HHfPeL2fMXK6z0s8ecKs9frCuLJvndBg==}
+
+  valid-url@1.0.9:
+    resolution: {integrity: sha512-QQDsV8OnSf5Uc30CKSwG9lnhMPe6exHtTXLRYX8uMwKENy640pU+2BgBL0LRbDh/eYRahNCS7aewCx0wf3NYVA==}
+
   vary@1.1.2:
     resolution: {integrity: sha512-BNGbWLfd0eUPabhkXUVm0j8uuvREyTh5ovRa/dyow/BqAbZJyC+5fU+IzQOzmAKzYqYRAISoRhdQr3eIZ/PXqg==}
     engines: {node: '>= 0.8'}
@@ -1407,7 +1432,8 @@ packages:
 
 snapshots:
 
-  '@cfworker/json-schema@4.1.1': {}
+  '@cfworker/json-schema@4.1.1':
+    optional: true
 
   '@emnapi/core@1.11.1':
     dependencies:
@@ -1506,6 +1532,13 @@ snapshots:
   '@hono/node-server@1.19.13(hono@4.12.28)':
     dependencies:
       hono: 4.12.28
+
+  '@hyperjump/json-schema-formats@1.0.2':
+    dependencies:
+      '@hyperjump/uri': 1.3.4
+      idn-hostname: 15.1.10
+
+  '@hyperjump/uri@1.3.4': {}
 
   '@jridgewell/gen-mapping@0.3.13':
     dependencies:
@@ -1679,6 +1712,8 @@ snapshots:
 
   '@rollup/rollup-win32-x64-msvc@4.60.1':
     optional: true
+
+  '@sagold/json-pointer@7.2.1': {}
 
   '@standard-schema/spec@1.1.0': {}
 
@@ -1948,6 +1983,8 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
+  fast-copy@4.0.4: {}
+
   fast-deep-equal@3.1.3: {}
 
   fast-uri@3.1.3: {}
@@ -2030,6 +2067,10 @@ snapshots:
     dependencies:
       safer-buffer: 2.1.2
 
+  idn-hostname@15.1.10:
+    dependencies:
+      punycode: 2.3.1
+
   inherits@2.0.4: {}
 
   ip-address@10.2.0: {}
@@ -2047,6 +2088,15 @@ snapshots:
   js-yaml@4.3.0:
     dependencies:
       argparse: 2.0.1
+
+  json-schema-library@11.6.1:
+    dependencies:
+      '@hyperjump/json-schema-formats': 1.0.2
+      '@sagold/json-pointer': 7.2.1
+      fast-copy: 4.0.4
+      fast-deep-equal: 3.1.3
+      uri-js: 4.4.1
+      valid-url: 1.0.9
 
   json-schema-traverse@1.0.0: {}
 
@@ -2199,6 +2249,8 @@ snapshots:
     dependencies:
       forwarded: 0.2.0
       ipaddr.js: 1.9.1
+
+  punycode@2.3.1: {}
 
   qs@6.15.3:
     dependencies:
@@ -2452,6 +2504,12 @@ snapshots:
   undici-types@6.21.0: {}
 
   unpipe@1.0.0: {}
+
+  uri-js@4.4.1:
+    dependencies:
+      punycode: 2.3.1
+
+  valid-url@1.0.9: {}
 
   vary@1.1.2: {}
 

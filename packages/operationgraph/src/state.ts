@@ -6,8 +6,7 @@
  * Each engine processes events serially within its own async loop, so the
  * shapes here just hold mutable state with no lock coordination.
  */
-import { Validator } from "@cfworker/json-schema";
-import { stripFormatAssertions } from "@openbindings/sdk";
+import { compileEmbeddedSchema, type CompiledSchema } from "@openbindings/sdk";
 import type { Node } from "./types.js";
 
 /**
@@ -237,7 +236,7 @@ export class CombineState {
  * representation of the schema. Filter and buffer nodes share this cache.
  */
 export class SchemaCache {
-  private readonly compiled = new Map<string, Validator>();
+  private readonly compiled = new Map<string, CompiledSchema>();
 
   /** Validates `data` against `schema`, compiling and caching on first use. */
   match(schema: unknown, data: unknown): boolean {
@@ -248,9 +247,10 @@ export class SchemaCache {
         throw new Error("embedded schema must be a JSON Schema object");
       }
       // format is an annotation at embedded-schema evaluation (Embedded
-      // schemas; aligned with core §6.2) — the backend asserts known
-      // formats unconditionally, so the compiled view drops the keyword.
-      v = new Validator(stripFormatAssertions(schema) as object, "2020-12");
+      // schemas; aligned with core §6.2) — compileEmbeddedSchema's
+      // boundary draft is annotation-only natively. Embedded schemas are
+      // self-contained by OG-V-18, so no compound/defs handling applies.
+      v = compileEmbeddedSchema(schema);
       this.compiled.set(key, v);
     }
     try {

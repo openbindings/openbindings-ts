@@ -40,7 +40,6 @@
     "node": ">=18"
   },
   "dependencies": {
-    "@cfworker/json-schema": "^4.1.1",
     "@openbindings/sdk": "workspace:*"
   },
   "devDependencies": {

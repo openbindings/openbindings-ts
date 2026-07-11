@@ -41,7 +41,7 @@
     "node": ">=18"
   },
   "dependencies": {
-    "@cfworker/json-schema": "^4.1.1",
-    "canonicalize": "^2.1.0"
+    "canonicalize": "^2.1.0",
+    "json-schema-library": "^11.6.1"
   }
 }
