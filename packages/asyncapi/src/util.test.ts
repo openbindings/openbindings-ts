@@ -102,4 +102,21 @@ describe("parseAsyncAPIDocument", () => {
   it("throws when neither location nor content is provided", async () => {
     await expect(parseAsyncAPIDocument()).rejects.toThrow("source must have location or content");
   });
+
+  // Per spec/formats/asyncapi.md: "AsyncAPI 2.x documents are out of the
+  // supported range and refused loudly at load." Mirrors the Go SDK's
+  // loadDocument, which requires a "3." prefix.
+  it("refuses a 2.x document loudly instead of silently misparsing it", async () => {
+    const doc2x = JSON.stringify({
+      asyncapi: "2.6.0",
+      info: { title: "Legacy", version: "1.0.0" },
+      channels: { messages: { subscribe: { message: { payload: { type: "object" } } } } },
+    });
+    await expect(parseAsyncAPIDocument(undefined, doc2x)).rejects.toThrow(/3\.x/);
+  });
+
+  it("accepts any 3.x patch/minor version", async () => {
+    const doc = await parseAsyncAPIDocument(undefined, validDoc.replace("3.0.0", "3.1.2"));
+    expect(doc.asyncapi).toBe("3.1.2");
+  });
 });

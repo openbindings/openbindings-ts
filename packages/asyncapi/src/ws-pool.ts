@@ -55,6 +55,16 @@ export interface PooledWS {
 export interface AcquireOptions {
   /** Custom URL builder (e.g. to add query-param credentials). */
   buildURL?: (base: string, addr: string) => string;
+  /**
+   * Fingerprint of the credential identity a dial would use (e.g. from
+   * {@link credentialFingerprint} in invoke.ts). Included in the pool key
+   * alongside server/address: two acquires with different credential
+   * fingerprints MUST NOT share a connection (cross-tenant credential
+   * leak — the same property the Go SDK's `wsPoolKey` enforces via its
+   * SHA-256 credential digest). Omitted or empty means "no credentials",
+   * which still partitions correctly (two anonymous callers share).
+   */
+  credentialKey?: string;
   /** Aborts a dial in flight; the acquire rejects with the signal's reason. */
   signal?: AbortSignal;
 }
@@ -89,10 +99,10 @@ export class WSPool {
     address: string,
     options: AcquireOptions = {},
   ): Promise<PooledWS> {
-    const { buildURL, signal } = options;
+    const { buildURL, credentialKey, signal } = options;
     if (signal?.aborted) throw abortError(signal);
 
-    const key = `${serverURL}|${address}`;
+    const key = poolKey(serverURL, address, credentialKey);
 
     // Fast path: reuse existing connection (already ready by construction).
     const existing = this.conns.get(key);
@@ -257,8 +267,8 @@ export class WSPool {
   }
 
   /** @internal Test/diagnostic hook: the current ref count for a pooled key. */
-  refCount(serverURL: string, address: string): number {
-    return this.conns.get(`${serverURL}|${address}`)?.refCount ?? 0;
+  refCount(serverURL: string, address: string, credentialKey?: string): number {
+    return this.conns.get(poolKey(serverURL, address, credentialKey))?.refCount ?? 0;
   }
 
   /** Close all pooled connections. */
@@ -273,6 +283,22 @@ export class WSPool {
     }
     this.conns.clear();
   }
+}
+
+// ---------------------------------------------------------------------------
+// Pool key
+// ---------------------------------------------------------------------------
+
+/**
+ * Builds the pool key from server URL, channel address, and credential
+ * fingerprint. The credential component is load-bearing: two acquires that
+ * differ only in credentials must land in different partitions, or a
+ * pooled connection authenticated for one caller could be handed to
+ * another (cross-tenant credential leak). An absent/empty fingerprint
+ * still partitions consistently — "no credentials" is its own bucket.
+ */
+function poolKey(serverURL: string, address: string, credentialKey?: string): string {
+  return `${serverURL}|${address}|${credentialKey ?? ""}`;
 }
 
 // ---------------------------------------------------------------------------

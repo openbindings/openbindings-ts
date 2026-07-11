@@ -20,6 +20,29 @@ export function uniqueKey(key: string, used: Set<string>): string {
   }
 }
 
+/**
+ * Channel-address fallback: a channel without a declared `address` is
+ * assumed addressable by its own channel name — the 2.x-lineage habit
+ * documented as an [assumption] in spec/formats/asyncapi.md, and what the
+ * Go SDK's runBinding already does (its address defaults to the channel
+ * name extracted from the operation's `$ref`). Applied on the RAW
+ * (pre-dereference) document, keyed by the top-level `channels` map, so
+ * every channel — however an operation reaches it — carries a concrete
+ * address by the time dereferencing merges `$ref` targets in.
+ */
+function applyChannelAddressFallback(raw: unknown): void {
+  if (raw == null || typeof raw !== "object") return;
+  const channels = (raw as Record<string, unknown>).channels;
+  if (channels == null || typeof channels !== "object") return;
+  for (const [name, channel] of Object.entries(channels as Record<string, unknown>)) {
+    if (channel == null || typeof channel !== "object") continue;
+    const ch = channel as Record<string, unknown>;
+    if (typeof ch.address !== "string" || ch.address === "") {
+      ch.address = name;
+    }
+  }
+}
+
 /** Fetches (if needed) and parses an AsyncAPI document from a location URL or inline content. */
 export async function parseAsyncAPIDocument(
   location?: string,
@@ -47,6 +70,8 @@ export async function parseAsyncAPIDocument(
     throw new Error("source must have location or content");
   }
 
+  applyChannelAddressFallback(raw);
+
   // Resolve all $ref pointers. External $refs fetch through the injected
   // fetch (callers that must stay side-effect-free inject a rejecting one).
   const resolved = (await dereference(raw as Record<string, unknown>, {
@@ -58,6 +83,12 @@ export async function parseAsyncAPIDocument(
 
   if (!resolved.asyncapi) {
     throw new Error("not a valid AsyncAPI document (missing 'asyncapi' field)");
+  }
+  // Per spec/formats/asyncapi.md: AsyncAPI 2.x documents are out of the
+  // supported range and refused loudly at load, mirroring the Go SDK's
+  // loadDocument (which requires a "3." prefix).
+  if (!resolved.asyncapi.startsWith("3.")) {
+    throw new Error(`unsupported AsyncAPI version "${resolved.asyncapi}" (expected 3.x)`);
   }
 
   return resolved;

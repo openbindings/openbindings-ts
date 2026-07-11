@@ -20,11 +20,20 @@ import {
   ERR_SOURCE_LOAD_FAILED,
 } from "@openbindings/sdk";
 import type { AsyncAPIDocument } from "./asyncapi-types.js";
-import { FORMAT_TOKEN } from "./constants.js";
+import { FORMAT_TOKEN, DEFAULT_SOURCE_NAME } from "./constants.js";
 import { runBinding, requiredContext, resolveServer } from "./invoke.js";
 import { convertToInterface } from "./synthesize.js";
-import { parseAsyncAPIDocument, parseRef, errorMessage } from "./util.js";
+import { parseAsyncAPIDocument, parseRef, errorMessage, sanitizeKey, uniqueKey } from "./util.js";
 import { WSPool } from "./ws-pool.js";
+
+/**
+ * Serializes source content for embedding into a synthesized OBI source
+ * entry: a string passes through verbatim, anything else is JSON-encoded.
+ * Mirrors the Go SDK's ContentToBytes (helpers.go).
+ */
+function contentToString(content: unknown): string {
+  return typeof content === "string" ? content : JSON.stringify(content);
+}
 
 // ---------------------------------------------------------------------------
 // Shared doc-cache helper
@@ -185,6 +194,18 @@ export class AsyncAPISynthesizer implements InterfaceSynthesizer, SourceInspecto
     if (input.name) iface.name = input.name;
     if (input.version) iface.version = input.version;
     if (input.description) iface.description = input.description;
+    // Content-fed synthesis: the emitted source must stay invocable. A
+    // source needs location or content; with no location, dropping the
+    // provided content would emit neither (mirrors the Go SDK's
+    // SynthesizeInterface, spec/formats/asyncapi.md: "A synthesized source
+    // carries the artifact (location, or embedded content when synthesized
+    // from content) so it stays invocable as written.").
+    if (!src.location && src.content != null) {
+      const entry = iface.sources?.[DEFAULT_SOURCE_NAME];
+      if (entry) {
+        entry.content = contentToString(src.content);
+      }
+    }
     return iface;
   }
 
@@ -197,10 +218,20 @@ export class AsyncAPISynthesizer implements InterfaceSynthesizer, SourceInspecto
     const targets: SourceInspection["targets"] = [];
 
     if (doc.operations) {
+      // Suggest the same operation key convertToInterface assigns (same
+      // sorted iteration and sanitizeKey + uniqueKey de-duplication), so an
+      // inspection previews exactly what synthesis names.
+      const usedKeys = new Set<string>();
       for (const opID of Object.keys(doc.operations).sort()) {
         const asyncOp = doc.operations[opID];
         const desc = asyncOp?.description || asyncOp?.summary || undefined;
-        targets.push({ ref: `#/operations/${opID}`, operation: desc ? { description: desc } : undefined });
+        const operationKey = uniqueKey(sanitizeKey(opID), usedKeys);
+        usedKeys.add(operationKey);
+        targets.push({
+          ref: `#/operations/${opID}`,
+          operationKey,
+          operation: desc ? { description: desc } : undefined,
+        });
       }
     }
 

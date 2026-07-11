@@ -1,6 +1,11 @@
 /** AsyncAPI 3.x document root. */
 export interface AsyncAPIDocument {
   asyncapi: string;
+  /** Fallback message contentType when neither the operation's message nor
+   *  its reply declares one. The last stop in the decode lane's declared-
+   *  contentType chain (spec/formats/asyncapi.md: "operation messages, then
+   *  reply messages, then the document's defaultContentType"). */
+  defaultContentType?: string;
   info: AsyncAPIInfo;
   servers?: Record<string, AsyncAPIServer>;
   channels?: Record<string, AsyncAPIChannel>;

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { AsyncAPIInvoker } from "./invoker.js";
-import { FORMAT_TOKEN } from "./constants.js";
+import { AsyncAPIInvoker, AsyncAPISynthesizer } from "./invoker.js";
+import { FORMAT_TOKEN, DEFAULT_SOURCE_NAME } from "./constants.js";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -118,5 +118,39 @@ describe("AsyncAPIInvoker no-input convention", () => {
     expect(requests).toHaveLength(1);
     expect(requests[0].url).toBe("https://api.example.com/notify");
     expect(requests[0].body).toBe("{}");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Content-fed synthesis must embed the artifact so it stays invocable
+// ---------------------------------------------------------------------------
+
+// Per spec/formats/asyncapi.md: "A synthesized source carries the artifact
+// (location, or embedded content when synthesized from content) so it
+// stays invocable as written." Mirrors the Go SDK's
+// TestSynthesizeInterface_ContentOnlyEmbedsSource.
+describe("AsyncAPISynthesizer content-fed synthesis", () => {
+  it("embeds the provided content verbatim when the source has no location", async () => {
+    const content = '{"asyncapi":"3.0.0","info":{"title":"T","version":"1.0.0"},"operations":{}}';
+    const iface = await new AsyncAPISynthesizer().synthesizeInterface({
+      sources: [{ format: FORMAT_TOKEN, content }],
+    });
+
+    const src = iface.sources?.[DEFAULT_SOURCE_NAME];
+    expect(src).toBeDefined();
+    expect(src!.location).toBeUndefined();
+    expect(src!.content).toBe(content);
+  });
+
+  it("does not embed content when the source has a location", async () => {
+    const content = '{"asyncapi":"3.0.0","info":{"title":"T","version":"1.0.0"},"operations":{}}';
+
+    const iface = await new AsyncAPISynthesizer().synthesizeInterface({
+      sources: [{ format: FORMAT_TOKEN, location: "https://example.com/spec.json", content }],
+    });
+
+    const src = iface.sources?.[DEFAULT_SOURCE_NAME];
+    expect(src?.location).toBe("https://example.com/spec.json");
+    expect(src?.content).toBeUndefined();
   });
 });

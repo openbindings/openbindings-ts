@@ -118,12 +118,14 @@ export async function runBinding(
 
   const address = asyncOp.channel?.address ?? "";
 
+  const defaultContentType = doc.defaultContentType ?? "";
+
   switch (asyncOp.action) {
     case "receive":
       if (protocol === "ws" || protocol === "wss") {
-        await runWSReceive(wsPool, serverURL, address, asyncOp, server, args, h);
+        await runWSReceive(wsPool, serverURL, address, asyncOp, server, args, h, defaultContentType);
       } else if (protocol === "http" || protocol === "https") {
-        await runSSEReceive(serverURL, address, asyncOp, server, args, h);
+        await runSSEReceive(serverURL, address, asyncOp, server, args, h, defaultContentType);
       } else {
         h.fireError(
           new InvocationError(
@@ -137,7 +139,7 @@ export async function runBinding(
       if (protocol === "ws" || protocol === "wss") {
         await runWSSend(wsPool, serverURL, address, asyncOp, server, args, h);
       } else if (protocol === "http" || protocol === "https") {
-        await runHTTPSend(serverURL, address, asyncOp, server, args, h);
+        await runHTTPSend(serverURL, address, asyncOp, server, args, h, defaultContentType);
       } else {
         h.fireError(
           new InvocationError(
@@ -443,6 +445,7 @@ async function runSSEReceive(
   server: AsyncAPIServer | undefined,
   args: BindingInvocationArgs,
   h: Handle,
+  defaultContentType: string,
 ): Promise<void> {
   // Server -> client: the channel takes no caller input.
   void h.closeInput();
@@ -486,45 +489,58 @@ async function runSSEReceive(
   h.setHeader(headersToMetadata(resp.headers));
 
   const decoder = new TextDecoder();
+  const encoder = new TextEncoder();
   let buffer = "";
   let dataLines: string[] = [];
-  let totalBytes = 0;
+  // The size cap is PER EVENT, not cumulative: a long-lived subscription
+  // legitimately streams more than MAX_RESPONSE_BYTES in total (the same
+  // choice the Go SDK's runSSEReceive documents, and connect/streaming.go's
+  // per-envelope cap). eventBytes resets at every event boundary (blank
+  // line), mirroring the Go SDK's scanner-driven accounting exactly.
+  let eventBytes = 0;
 
   try {
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
 
-      totalBytes += value.byteLength;
-      if (totalBytes > MAX_RESPONSE_BYTES) {
-        h.fireError(
-          new InvocationError(
-            ERR_RESPONSE_ERROR,
-            `SSE stream exceeds ${MAX_RESPONSE_BYTES} byte limit`,
-          ),
-        );
-        return;
-      }
-
       buffer += decoder.decode(value, { stream: true });
       const lines = buffer.split("\n");
       buffer = lines.pop()!;
 
       for (const line of lines) {
+        eventBytes += encoder.encode(line).length + 1; // +1 for the newline
+        if (eventBytes > MAX_RESPONSE_BYTES) {
+          h.fireError(
+            new InvocationError(
+              ERR_RESPONSE_ERROR,
+              `SSE event exceeds ${MAX_RESPONSE_BYTES} byte limit`,
+            ),
+          );
+          return;
+        }
+
         if (line.startsWith("data:")) {
           dataLines.push(line.slice(5).trim());
           continue;
         }
-        if (line === "" && dataLines.length > 0) {
-          // Throws if the invocation terminated while parked: stop reading.
-          await h.emitOutput(await decodeSSEEvent(args, serverURL, asyncOp, resp, dataLines));
-          dataLines = [];
+        if (line === "") {
+          eventBytes = 0;
+          if (dataLines.length > 0) {
+            // Throws if the invocation terminated while parked: stop reading.
+            await h.emitOutput(
+              await decodeSSEEvent(args, serverURL, asyncOp, resp, dataLines, defaultContentType),
+            );
+            dataLines = [];
+          }
         }
       }
     }
 
     if (dataLines.length > 0) {
-      await h.emitOutput(await decodeSSEEvent(args, serverURL, asyncOp, resp, dataLines));
+      await h.emitOutput(
+        await decodeSSEEvent(args, serverURL, asyncOp, resp, dataLines, defaultContentType),
+      );
     }
     h.closeOutput();
   } catch (e: unknown) {
@@ -551,6 +567,7 @@ async function runHTTPSend(
   server: AsyncAPIServer | undefined,
   args: BindingInvocationArgs,
   h: Handle,
+  defaultContentType: string,
 ): Promise<void> {
   // Unary: the first input is the message payload.
   let body: string;
@@ -638,7 +655,7 @@ async function runHTTPSend(
       args.hooks,
       siteFor(args, serverURL),
       { status: resp.status, body: respText, meta: headersToMetadata(resp.headers) },
-      builtinDecodeFor(declaredContentType(asyncOp)),
+      builtinDecodeFor(declaredContentType(asyncOp, defaultContentType)),
     );
   } catch (e: unknown) {
     h.fireError(toInvocationError(e));
@@ -679,6 +696,64 @@ function buildWSURL(
     }
   }
   return url.toString();
+}
+
+// ---------------------------------------------------------------------------
+// WebSocket connection-pool credential partitioning
+// ---------------------------------------------------------------------------
+
+/** One FNV-1a (32-bit) pass over `str`, seeded, returned as an unsigned int. */
+function fnv1a(str: string, seed: number): number {
+  let hash = seed;
+  for (let i = 0; i < str.length; i++) {
+    hash ^= str.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return hash >>> 0;
+}
+
+/**
+ * Fingerprints the credential identity a WebSocket dial for this operation
+ * would use: the same header names/values and query params
+ * `applyContext`/`buildWSURL` would place on the connection, plus the
+ * first-frame bearer token (which authenticates the connection itself even
+ * when no scheme places it on the upgrade request or query — see
+ * `sendFirstFrameBearer`). A digest — not the raw material — feeds the pool
+ * key, mirroring the Go SDK's `credentialDigest`: two invocations whose
+ * fingerprints differ must never share a pooled connection (cross-tenant
+ * credential leak).
+ *
+ * Non-cryptographic by design: two 32-bit FNV-1a passes with distinct seeds
+ * give a 64-bit digest, which is plenty for a pool-key partition function
+ * (the realistic collision surface is auth material containing
+ * high-entropy tokens, not an adversary crafting collisions). This avoids a
+ * `globalThis.crypto.subtle` dependency, which is not guaranteed available
+ * without a flag on this package's minimum supported Node (18).
+ */
+function credentialFingerprint(
+  asyncOp: AsyncAPIOperation,
+  server: AsyncAPIServer | undefined,
+  ctx?: Record<string, unknown>,
+): string {
+  const headers = new Headers();
+  const queryParams = applyContext(headers, asyncOp, server, ctx);
+  const headerParts: string[] = [];
+  headers.forEach((value, name) => {
+    headerParts.push(`h:${name}=${value}`);
+  });
+  headerParts.sort();
+  const parts: string[] = [...headerParts];
+  if (queryParams) {
+    for (const key of Object.keys(queryParams).sort()) {
+      parts.push(`q:${key}=${queryParams[key]}`);
+    }
+  }
+  const bearer = contextBearerToken(ctx);
+  if (bearer) parts.push(`b:${bearer}`);
+  const material = parts.join(" ");
+  const a = fnv1a(material, 0x811c9dc5);
+  const b = fnv1a(material, 0x9e3779b9);
+  return a.toString(16).padStart(8, "0") + b.toString(16).padStart(8, "0");
 }
 
 /**
@@ -741,11 +816,13 @@ async function runWSReceive(
   server: AsyncAPIServer | undefined,
   args: BindingInvocationArgs,
   h: Handle,
+  defaultContentType: string,
 ): Promise<void> {
   let pooled: PooledWS;
   try {
     pooled = await pool.acquire(serverURL, address, {
       buildURL: (base, addr) => buildWSURL(base, addr, asyncOp, server, args.context),
+      credentialKey: credentialFingerprint(asyncOp, server, args.context),
       signal: h.signal,
     });
   } catch (e: unknown) {
@@ -790,7 +867,7 @@ async function runWSReceive(
   // status; never fabricated). Convention envelopes ({error}/{data}
   // unwrapping) are consumer knowledge: a decode hook's job, never the
   // builtin's.
-  const wsContentType = declaredContentType(asyncOp);
+  const wsContentType = declaredContentType(asyncOp, defaultContentType);
   const wsSite = siteFor(args, serverURL);
   const outputPump = async (): Promise<void> => {
     while (true) {
@@ -897,6 +974,7 @@ async function runWSSend(
   try {
     pooled = await pool.acquire(serverURL, address, {
       buildURL: (base, addr) => buildWSURL(base, addr, asyncOp, server, args.context),
+      credentialKey: credentialFingerprint(asyncOp, server, args.context),
       signal: h.signal,
     });
   } catch (e: unknown) {
@@ -918,8 +996,11 @@ async function runWSSend(
   });
 
   try {
-    sendFirstFrameBearer(pooled, asyncOp, server, args.context);
-
+    // Deliberately NO sendFirstFrameBearer here: the first-frame bearer
+    // convention is a `receive`-subscription convention only. Auth never
+    // rides `send` message bodies — mirrors the Go SDK's runWSSend, and the
+    // conventions doc (spec/formats/asyncapi.md): "auth never rides send
+    // message bodies."
     if (noInputDeclared(args)) {
       // Operation-layer no-input convention: the caller never writes nor
       // closes. Close input on entry and publish one empty-object message.
@@ -985,16 +1066,22 @@ async function readErrorBody(resp: Response): Promise<unknown> {
 /**
  * Returns the operation's declared message contentType — the SPEC'S answer
  * to the decode question, when the document gives one. Walks the
- * operation's messages, then its reply messages; "" when nothing declares.
+ * operation's messages, then its reply messages, then falls back to the
+ * document's `defaultContentType` (spec/formats/asyncapi.md: "the declared
+ * message contentType decides (operation messages, then reply messages,
+ * then the document's defaultContentType)"); "" when nothing declares.
  */
-function declaredContentType(asyncOp: AsyncAPIOperation | undefined): string {
+function declaredContentType(
+  asyncOp: AsyncAPIOperation | undefined,
+  defaultContentType: string,
+): string {
   for (const m of asyncOp?.messages ?? []) {
     if (m.contentType) return m.contentType;
   }
   for (const m of asyncOp?.reply?.messages ?? []) {
     if (m.contentType) return m.contentType;
   }
-  return "";
+  return defaultContentType;
 }
 
 /**
@@ -1028,13 +1115,19 @@ async function decodeSSEEvent(
   asyncOp: AsyncAPIOperation,
   resp: Response,
   dataLines: string[],
+  defaultContentType: string,
 ): Promise<unknown> {
   const raw: RawResult = {
     status: resp.status,
     body: dataLines.join("\n"),
     meta: headersToMetadata(resp.headers),
   };
-  return decodeThroughHooks(args.hooks, siteFor(args, serverURL), raw, builtinDecodeFor(declaredContentType(asyncOp)));
+  return decodeThroughHooks(
+    args.hooks,
+    siteFor(args, serverURL),
+    raw,
+    builtinDecodeFor(declaredContentType(asyncOp, defaultContentType)),
+  );
 }
 
 /**
