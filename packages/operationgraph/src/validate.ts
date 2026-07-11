@@ -53,6 +53,9 @@ function validateEmbeddedSchema(
   if ("$vocabulary" in s) {
     report(`${prefix}: $vocabulary is forbidden in embedded schemas (OG-V-18)`);
   }
+  if ("$ref" in s) {
+    report(`${prefix}: $ref is forbidden in embedded schemas — they are self-contained (OG-V-18)`);
+  }
   for (const [k, v] of Object.entries(s)) {
     if (EMBEDDED_MAP_KEYWORDS.has(k) && isObj(v)) {
       for (const [mk, mv] of Object.entries(v)) {
