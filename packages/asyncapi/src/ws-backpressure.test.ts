@@ -1,0 +1,257 @@
+import { WebSocketServer } from "ws";
+import { describe, it, expect } from "vitest";
+import type { Invocation } from "@openbindings/sdk";
+import { AsyncAPIInvoker } from "./invoker.js";
+import { FORMAT_TOKEN } from "./constants.js";
+import { setBackpressureBoundsForTest } from "./invoke.js";
+
+// WS slow-consumer backpressure (spec/formats/asyncapi.md, "WS slow-consumer
+// backpressure" open point, settled 2026-07-11): the receive path bounds
+// undelivered frames between the socket and the output pump at
+// MAX_BUFFERED_FRAMES frames or MAX_BUFFERED_BYTES in-flight bytes,
+// whichever trips first; overflow fails that subscription loudly rather
+// than buffering unboundedly. Mirrors the Go SDK's
+// TestWSReceiveBackpressure_* suite in formats/asyncapi/ws_backpressure_test.go.
+
+function startServer(): Promise<{ wss: WebSocketServer; port: number }> {
+  return new Promise((resolve) => {
+    const wss = new WebSocketServer({ port: 0 }, () => {
+      const addr = wss.address();
+      const port = typeof addr === "object" && addr ? addr.port : 0;
+      resolve({ wss, port });
+    });
+  });
+}
+
+function spec(port: number) {
+  return {
+    asyncapi: "3.0.0",
+    info: { title: "WS backpressure test", version: "1.0.0" },
+    servers: { test: { host: `127.0.0.1:${port}`, protocol: "ws" as const } },
+    channels: {
+      stream: { address: "/", messages: { Msg: { payload: { type: "object" } } } },
+    },
+    operations: {
+      subscribe: {
+        action: "receive" as const,
+        channel: { $ref: "#/channels/stream" },
+        messages: [{ $ref: "#/channels/stream/messages/Msg" }],
+      },
+    },
+  };
+}
+
+/** Drains an invocation's outputs to an array, capturing the terminal error
+ * instead of letting it reject out of the for-await loop — the TS mirror of
+ * the Go suite's drainOutputs test helper. */
+async function drainOutputs(call: Invocation): Promise<{ vals: unknown[]; err: unknown }> {
+  const vals: unknown[] = [];
+  try {
+    for await (const v of call.outputs) vals.push(v);
+    return { vals, err: undefined };
+  } catch (err) {
+    return { vals, err };
+  }
+}
+
+describe("WS receive backpressure", () => {
+  it("fails the subscription loudly when the frame-count bound trips", async () => {
+    const { wss, port } = await startServer();
+    const floodCount = 1024 + 200; // MAX_BUFFERED_FRAMES default + margin
+    let resolveFloodDone!: () => void;
+    const floodDone = new Promise<void>((resolve) => {
+      resolveFloodDone = resolve;
+    });
+
+    wss.on("connection", (ws) => {
+      // Wait for the client's first frame: guarantees the subscription's
+      // onMessage handler is registered (it's registered, synchronously,
+      // strictly before the input pump that could ever get a frame out to
+      // the socket) before the flood starts, so no early frame is lost to
+      // a race with subscription setup.
+      ws.once("message", () => {
+        for (let i = 0; i < floodCount; i++) {
+          ws.send(JSON.stringify({ n: i }));
+        }
+        resolveFloodDone();
+      });
+    });
+
+    const invoker = new AsyncAPIInvoker();
+    try {
+      const call = invoker.invokeBinding({
+        source: { format: FORMAT_TOKEN, content: spec(port) },
+        ref: "#/operations/subscribe",
+      });
+      await call.write({ ready: true });
+
+      // Let the flood land in the buffer before this test ever iterates
+      // outputs: the handle's own output buffer is only OUTPUT_BUFFER_CAPACITY
+      // (4) deep, so it's the runWSReceive-local `frames` buffer under test
+      // that has to absorb the rest.
+      await floodDone;
+
+      const { vals, err } = await drainOutputs(call);
+      expect(err).toBeInstanceOf(Error);
+      expect((err as { code?: string }).code).toBe("ERR_STREAM_ERROR");
+      expect((err as Error).message).toBe("backpressure overflow: more than 1024 undelivered frames");
+      // Drain-before-terminal: some already-buffered frames were delivered
+      // ahead of the terminal error, but never everything the flood sent —
+      // some frames were genuinely dropped by the overflow.
+      expect(vals.length).toBeGreaterThan(0);
+      expect(vals.length).toBeLessThan(floodCount);
+    } finally {
+      invoker.close();
+      wss.close();
+    }
+  });
+
+  it("fails the subscription loudly when the byte-budget bound trips", async () => {
+    const restoreBounds = setBackpressureBoundsForTest(1_000_000, 2048);
+    try {
+      const { wss, port } = await startServer();
+      const byteBudget = 2048;
+      // ~54 bytes of JSON per frame; 200 frames is comfortably more than
+      // byteBudget in total while each individual frame is far under it
+      // (an accumulation trip, not a single-oversized-frame trip).
+      const frameCount = 200;
+      const payload = "x".repeat(32);
+      let resolveFloodDone!: () => void;
+      const floodDone = new Promise<void>((resolve) => {
+        resolveFloodDone = resolve;
+      });
+
+      wss.on("connection", (ws) => {
+        ws.once("message", () => {
+          for (let i = 0; i < frameCount; i++) {
+            ws.send(JSON.stringify({ n: i, pad: payload }));
+          }
+          resolveFloodDone();
+        });
+      });
+
+      const invoker = new AsyncAPIInvoker();
+      try {
+        const call = invoker.invokeBinding({
+          source: { format: FORMAT_TOKEN, content: spec(port) },
+          ref: "#/operations/subscribe",
+        });
+        await call.write({ ready: true });
+        await floodDone;
+
+        const { vals, err } = await drainOutputs(call);
+        expect(err).toBeInstanceOf(Error);
+        expect((err as { code?: string }).code).toBe("ERR_STREAM_ERROR");
+        expect((err as Error).message).toBe(`backpressure overflow: more than ${byteBudget} undelivered bytes`);
+        expect(vals.length).toBeGreaterThan(0);
+      } finally {
+        invoker.close();
+        wss.close();
+      }
+    } finally {
+      restoreBounds();
+    }
+  });
+
+  it("isolates overflow to the slow subscription; a draining sibling on the same pooled socket keeps receiving", async () => {
+    const restoreBounds = setBackpressureBoundsForTest(64, 1_000_000);
+    try {
+      const { wss, port } = await startServer();
+      const total = 512;
+      let connections = 0;
+      let readyCount = 0;
+      wss.on("connection", (ws) => {
+        connections++;
+        ws.on("message", async () => {
+          // Flood only once BOTH subscriptions have signalled readiness
+          // (each writes one frame over the shared socket), paced in small
+          // chunks so the draining sibling's pump gets real turns.
+          readyCount++;
+          if (readyCount < 2) return;
+          for (let i = 0; i < total; i++) {
+            ws.send(JSON.stringify({ n: i }));
+            if (i % 8 === 7) {
+              await new Promise((resolve) => setImmediate(resolve));
+            }
+          }
+          ws.close();
+        });
+      });
+
+      const invoker = new AsyncAPIInvoker();
+      try {
+        const source = { format: FORMAT_TOKEN, content: spec(port) };
+        // Sequence the acquires so the second one provably reuses the first
+        // socket (same server|address|credential pool key).
+        const slow = invoker.invokeBinding({ source, ref: "#/operations/subscribe" });
+        await slow.write({ ready: true });
+        const fast = invoker.invokeBinding({ source, ref: "#/operations/subscribe" });
+        const fastDrain = drainOutputs(fast);
+        await fast.write({ ready: true });
+
+        const fastResult = await fastDrain;
+        // The socket was genuinely shared...
+        expect(connections).toBe(1);
+        // ...the draining sibling received the whole stream with a clean
+        // close (the slow subscription's overflow never tore the shared
+        // socket down under it)...
+        expect(fastResult.err).toBeUndefined();
+        expect(fastResult.vals).toHaveLength(total);
+        // ...and the slow subscription failed alone, with the overflow
+        // terminal after draining what it had buffered.
+        const slowResult = await drainOutputs(slow);
+        expect((slowResult.err as { code?: string })?.code).toBe("ERR_STREAM_ERROR");
+        expect((slowResult.err as Error).message).toBe("backpressure overflow: more than 64 undelivered frames");
+        expect(slowResult.vals.length).toBeGreaterThan(0);
+        expect(slowResult.vals.length).toBeLessThan(total);
+      } finally {
+        invoker.close();
+        wss.close();
+      }
+    } finally {
+      restoreBounds();
+    }
+  });
+
+  it("never trips either bound for a consumer that keeps draining", async () => {
+    const { wss, port } = await startServer();
+    // Comfortably more than MAX_BUFFERED_FRAMES over the connection's
+    // lifetime: the bound is about undelivered/in-flight frames, not a
+    // cumulative lifetime cap (mirrors sse-cap.test.ts's per-event, not
+    // cumulative, size cap). Sent in small paced chunks: Node's single
+    // event loop means an unthrottled synchronous flood can dispatch every
+    // "message" event before the consumer — sharing that same one thread —
+    // ever gets a turn to drain, which is a JS-runtime scheduling artifact,
+    // not the "normal draining" scenario under test (the Go SDK's
+    // goroutine-per-connection reader genuinely runs concurrently with its
+    // consumer, so it has no equivalent need to pace its flood). Yielding
+    // between chunks gives the consumer real interleaved opportunities to
+    // drain.
+    const total = 1024 + 512;
+    const chunkSize = 32;
+
+    wss.on("connection", async (ws) => {
+      for (let i = 0; i < total; i++) {
+        ws.send(JSON.stringify({ n: i }));
+        if (i % chunkSize === chunkSize - 1) {
+          await new Promise((resolve) => setImmediate(resolve));
+        }
+      }
+      ws.close();
+    });
+
+    const invoker = new AsyncAPIInvoker();
+    try {
+      const call = invoker.invokeBinding({
+        source: { format: FORMAT_TOKEN, content: spec(port) },
+        ref: "#/operations/subscribe",
+      });
+      const vals: unknown[] = [];
+      for await (const v of call.outputs) vals.push(v);
+      expect(vals).toHaveLength(total);
+    } finally {
+      invoker.close();
+      wss.close();
+    }
+  });
+});

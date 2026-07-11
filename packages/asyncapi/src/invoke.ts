@@ -801,12 +801,40 @@ function noInputDeclared(args: BindingInvocationArgs): boolean {
 // ---------------------------------------------------------------------------
 
 /**
- * Maximum number of undelivered frames buffered between the socket and the
- * output pump. The handle's bounded output buffer IS the backpressure
- * contract; an unbounded second buffer here would defeat it, so overflow
- * fails the stream and closes the socket instead.
+ * Backpressure bounds for the undelivered-frame buffer between the socket
+ * and the output pump: whichever bound trips first fails the stream
+ * (bounded-queue-fail-loud, per spec/formats/asyncapi.md's WS slow-consumer
+ * ruling — Redis client-output-buffer-limit, NATS slow-consumer, and MQTT
+ * max_queued_messages are the pub/sub-ecosystem precedent, and NATS pairs a
+ * count bound with a byte bound the same way). The handle's bounded output
+ * buffer IS the backpressure contract for a draining consumer; an unbounded
+ * second buffer here would defeat it for a non-draining one, so overflow
+ * fails the stream and closes the socket instead. Reference-package
+ * defaults, not spec-mandated numbers.
+ *
+ * `let`, not `const`: setBackpressureBoundsForTest lowers these for a test
+ * instead of pushing the full frame count / byte volume through a real
+ * socket. This module is never re-exported from index.ts, so the mutable
+ * bindings are intra-package only, not part of the public API.
  */
-const MAX_BUFFERED_FRAMES = 1024;
+let MAX_BUFFERED_FRAMES = 1024;
+let MAX_BUFFERED_BYTES = 64 * 1024 * 1024; // 64 MiB
+
+/**
+ * Test-only seam: lowers the WS receive backpressure bounds so overflow
+ * tests can trip them deterministically without pushing the full volume
+ * through a real socket. Returns a restore function.
+ */
+export function setBackpressureBoundsForTest(frames: number, bytes: number): () => void {
+  const prevFrames = MAX_BUFFERED_FRAMES;
+  const prevBytes = MAX_BUFFERED_BYTES;
+  MAX_BUFFERED_FRAMES = frames;
+  MAX_BUFFERED_BYTES = bytes;
+  return () => {
+    MAX_BUFFERED_FRAMES = prevFrames;
+    MAX_BUFFERED_BYTES = prevBytes;
+  };
+}
 
 async function runWSReceive(
   pool: WSPool,
@@ -832,25 +860,43 @@ async function runWSReceive(
   }
 
   const frames: string[] = [];
+  // Parallel to `frames`: the byte length of each still-buffered frame, so
+  // the running bufferedBytes total can be decremented in the output pump
+  // without re-encoding the frame just to measure it again.
+  const frameByteLengths: number[] = [];
+  let bufferedBytes = 0;
   let overflowed = false;
+  let overflowMessage = "";
   let socketClosed = false;
   let socketError: Error | undefined;
   let wake: (() => void) | undefined;
   const notify = () => wake?.();
+  const byteEncoder = new TextEncoder();
 
   const removeMsg = pooled.onMessage((data) => {
     if (overflowed) return;
+    const frameBytes = byteEncoder.encode(data).length;
     if (frames.length >= MAX_BUFFERED_FRAMES) {
-      // The consumer is not draining; stop the inflow at the socket and
-      // let the output pump fail the stream.
       overflowed = true;
-      try {
-        pooled.ws.close();
-      } catch { /* already closing */ }
+      overflowMessage = `backpressure overflow: more than ${MAX_BUFFERED_FRAMES} undelivered frames`;
+    } else if (bufferedBytes + frameBytes > MAX_BUFFERED_BYTES) {
+      overflowed = true;
+      overflowMessage = `backpressure overflow: more than ${MAX_BUFFERED_BYTES} undelivered bytes`;
+    }
+    if (overflowed) {
+      // The consumer is not draining; stop buffering for THIS subscription
+      // (the guard above drops further frames) and let the output pump fail
+      // the stream after draining what's already buffered. The socket stays
+      // open — it is shared with any sibling subscriptions (the pool is
+      // ref-counted), so a slow consumer must never tear it down under
+      // them; this listener detaches when the pump's terminal returns
+      // through the finally below. Mirrors Go's wsSubscription overflow.
       notify();
       return;
     }
     frames.push(data);
+    frameByteLengths.push(frameBytes);
+    bufferedBytes += frameBytes;
     notify();
   });
   const removeClose = pooled.onClose((err) => {
@@ -871,8 +917,15 @@ async function runWSReceive(
   const wsSite = siteFor(args, serverURL);
   const outputPump = async (): Promise<void> => {
     while (true) {
-      while (frames.length > 0 && !overflowed) {
+      // Drain-before-terminal: unconditionally, regardless of `overflowed`
+      // — a synchronous flood of incoming messages can set `overflowed`
+      // before this pump ever gets a turn, and every frame already
+      // buffered by then must still reach the consumer before the
+      // terminal error does (matches the decode-error and socket-closed
+      // paths below, and the Go SDK's wsSubscription.next).
+      while (frames.length > 0) {
         const frame = frames.shift()!;
+        bufferedBytes -= frameByteLengths.shift()!;
         let out: unknown;
         try {
           out = await decodeThroughHooks(
@@ -891,12 +944,7 @@ async function runWSReceive(
         await h.emitOutput(out);
       }
       if (overflowed) {
-        h.fireError(
-          new InvocationError(
-            ERR_STREAM_ERROR,
-            `backpressure overflow: more than ${MAX_BUFFERED_FRAMES} undelivered frames`,
-          ),
-        );
+        h.fireError(new InvocationError(ERR_STREAM_ERROR, overflowMessage));
         return;
       }
       if (h.signal.aborted) return;
