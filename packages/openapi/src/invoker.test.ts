@@ -1009,6 +1009,89 @@ describe("invokeBinding — context negotiation", () => {
     expect(r2[0].headers.get("Authorization")).toBe("Bearer at_2");
   });
 
+  it("prefers the password flow over clientCredentials by fixed priority, not declaration order", async () => {
+    // Both flows are token-only (define tokenUrl but not authorizationUrl).
+    // Declared clientCredentials-first to prove the fix: object insertion
+    // order must NOT decide the winner — the fixed priority (password
+    // before clientCredentials, mirroring the Go SDK exactly) does.
+    const spec = authSpec({
+      securitySchemes: {
+        oauth: {
+          type: "oauth2",
+          flows: {
+            clientCredentials: {
+              tokenUrl: "https://auth.example.com/client-credentials/token",
+              scopes: { cc: "ClientCredentials" },
+            },
+            password: {
+              tokenUrl: "https://auth.example.com/password/token",
+              scopes: { pw: "Password" },
+            },
+          },
+        },
+      },
+      security: [{ oauth: [] }],
+    });
+    const { fetch } = mockFetch(() => jsonResponse({}));
+    await expect(
+      new OpenAPIInvoker().invokeBinding({ source: authSource(spec), ref: REF_DATA, fetch }).closed,
+    ).rejects.toMatchObject({
+      code: CONTEXT_REQUIRED,
+      details: {
+        alternatives: [
+          {
+            requirements: [
+              {
+                type: "auth.oauth2",
+                tokenUrl: "https://auth.example.com/password/token",
+                scopes: ["pw"],
+              },
+            ],
+          },
+        ],
+      },
+    });
+  });
+
+  it("prefers authorizationCode over every other flow when multiple are declared", async () => {
+    const spec = authSpec({
+      securitySchemes: {
+        oauth: {
+          type: "oauth2",
+          flows: {
+            clientCredentials: { tokenUrl: "https://auth.example.com/client-credentials/token" },
+            password: { tokenUrl: "https://auth.example.com/password/token" },
+            implicit: { authorizationUrl: "https://auth.example.com/implicit/authorize" },
+            authorizationCode: {
+              authorizationUrl: "https://auth.example.com/authorize",
+              tokenUrl: "https://auth.example.com/authcode/token",
+            },
+          },
+        },
+      },
+      security: [{ oauth: [] }],
+    });
+    const { fetch } = mockFetch(() => jsonResponse({}));
+    await expect(
+      new OpenAPIInvoker().invokeBinding({ source: authSource(spec), ref: REF_DATA, fetch }).closed,
+    ).rejects.toMatchObject({
+      code: CONTEXT_REQUIRED,
+      details: {
+        alternatives: [
+          {
+            requirements: [
+              {
+                type: "auth.oauth2",
+                authorizeUrl: "https://auth.example.com/authorize",
+                tokenUrl: "https://auth.example.com/authcode/token",
+              },
+            ],
+          },
+        ],
+      },
+    });
+  });
+
   it("treats multiple security-requirement objects as alternatives (OR)", async () => {
     const spec = authSpec({
       securitySchemes: {

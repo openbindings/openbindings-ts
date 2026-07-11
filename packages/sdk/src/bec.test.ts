@@ -6,6 +6,7 @@
 import { describe, it, expect, vi } from "vitest";
 import {
   normalizeContextKey,
+  normalizeEndpoint,
   contextBearerToken,
   contextApiKey,
   contextBasicAuth,
@@ -66,6 +67,62 @@ describe("normalizeContextKey", () => {
     ["  https://api.example.com/path  ", "api.example.com"],
   ])("normalizes %s → %s", (input, expected) => {
     expect(normalizeContextKey(input)).toBe(expected);
+  });
+
+  // An explicit port matching the scheme's default is elided so a key
+  // written with the default port and one written without it collide — the
+  // origin is the same, so credentials stored under one must be found via
+  // the other. A non-default port, and any string with no scheme (a
+  // format-defined address like gRPC's bare "host:port"), are returned
+  // unchanged. IPv6 hosts are covered so the bracketed form isn't corrupted
+  // by the suffix-strip.
+  it.each([
+    ["https://api.example.com:443", "api.example.com"],
+    ["http://x:80", "x"],
+    ["wss://x:443", "x"],
+    ["ws://x:80", "x"],
+    ["https://x:8443", "x:8443"], // non-default port kept
+    ["10.0.0.1:443", "10.0.0.1:443"], // no scheme: unchanged
+    ["host:50051", "host:50051"], // no scheme: unchanged
+    ["https://[::1]:443", "[::1]"], // IPv6 default port elided
+    ["https://[::1]:8443", "[::1]:8443"], // IPv6 non-default port kept
+    ["https://[::1]", "[::1]"], // IPv6 no port, unaffected
+  ])("elides an explicit default port: %s → %s", (input, expected) => {
+    expect(normalizeContextKey(input)).toBe(expected);
+  });
+
+  // Pins the actual bug: a URL with an explicit default port and the same
+  // URL without one must produce the IDENTICAL key.
+  it.each([
+    ["https://api.example.com:443", "https://api.example.com"],
+    ["http://x:80", "http://x"],
+    ["wss://x:443", "wss://x"],
+    ["ws://x:80", "ws://x"],
+  ])("%s and %s are equivalent (same key)", (withPort, withoutPort) => {
+    expect(normalizeContextKey(withPort)).toBe(normalizeContextKey(withoutPort));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// normalizeEndpoint
+// ---------------------------------------------------------------------------
+
+describe("normalizeEndpoint", () => {
+  // Mirrors the normalizeContextKey default-port case through
+  // normalizeEndpoint — the actual runtime path storeContextResolver uses —
+  // since normalizeEndpoint parses the URL first and must carry the scheme
+  // through to the elision logic rather than dropping it (dropping it would
+  // silently disable elision for every URL).
+  it.each([
+    ["https://api.example.com:443/v1", "api.example.com"],
+    ["https://api.example.com/v1", "api.example.com"],
+    ["http://x:80", "x"],
+    ["wss://x:443/stream", "x"],
+    ["https://x:8443", "x:8443"],
+    ["10.0.0.1:443", "10.0.0.1:443"],
+    ["host:50051", "host:50051"],
+  ])("normalizes %s → %s", (input, expected) => {
+    expect(normalizeEndpoint(input)).toBe(expected);
   });
 });
 
@@ -184,6 +241,41 @@ describe("storeContextResolver", () => {
     await store.set("api.example.com", { unrelated: "field" });
     const resolve = storeContextResolver(store);
     await expect(resolve(BEARER_OR_APIKEY)).resolves.toBeNull();
+  });
+
+  // Integration-flavored proof: a credential stored under a target written
+  // WITHOUT the scheme's default port must be found when the challenge
+  // target is written WITH it (and vice versa), through the actual
+  // store-backed resolution path — before this fix the two forms produced
+  // different store keys and the credential was silently missed.
+  it("resolves a credential stored without the port when challenged with the explicit default port", async () => {
+    const store = new MemoryStore();
+    // A different binding source once wrote the credential keyed off a
+    // target with no explicit port.
+    await store.set(normalizeEndpoint("https://api.example.com/v1/users"), {
+      bearerToken: "stored-tok",
+    });
+    const resolve = storeContextResolver(store);
+    const details: ContextRequiredDetails = {
+      target: "https://api.example.com:443/v1/users",
+      alternatives: [{ requirements: [{ type: "auth.bearer" }] }],
+    };
+    await expect(resolve(details)).resolves.toEqual({ bearerToken: "stored-tok" });
+  });
+
+  it("resolves a credential stored with the explicit default port when challenged without it", async () => {
+    const store = new MemoryStore();
+    // The reverse: the credential was written keyed off a target that
+    // spelled out the default port explicitly.
+    await store.set(normalizeEndpoint("https://api.example.com:443/v1/users"), {
+      bearerToken: "stored-tok",
+    });
+    const resolve = storeContextResolver(store);
+    const details: ContextRequiredDetails = {
+      target: "https://api.example.com/v1/users",
+      alternatives: [{ requirements: [{ type: "auth.bearer" }] }],
+    };
+    await expect(resolve(details)).resolves.toEqual({ bearerToken: "stored-tok" });
   });
 });
 

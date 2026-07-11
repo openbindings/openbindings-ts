@@ -520,12 +520,15 @@ function schemeRequirement(
  * Builds an `auth.oauth2` requirement carrying the flow's authorize/token URLs
  * and scopes under the role's convention field names (`authorizeUrl`,
  * `tokenUrl`, `scopes`). Prefers the authorization-code flow — the only
- * interactive, PKCE-capable flow — then implicit, then any flow that declares
- * a usable endpoint. The fallback keys on `tokenUrl` (not `authorizationUrl`)
- * so token-only flows — password and clientCredentials, which define only
- * `tokenUrl` — are selected; keying on `authorizationUrl` skipped them, yielding
- * a bare `auth.oauth2` requirement with no `tokenUrl`/`scopes`. Relative URLs
- * are resolved against the server base.
+ * interactive, PKCE-capable flow — then implicit, then password, then
+ * clientCredentials: a fixed priority (mirroring the Go SDK's
+ * oauth2Requirement exactly), not object/declaration order, so the same
+ * scheme resolves to the same flow regardless of how it was authored. The
+ * token-only fallback keys on `tokenUrl` (not `authorizationUrl`) so
+ * password and clientCredentials — which define only `tokenUrl` — are
+ * selected; keying on `authorizationUrl` skipped them, yielding a bare
+ * `auth.oauth2` requirement with no `tokenUrl`/`scopes`. Relative URLs are
+ * resolved against the server base.
  */
 function oauth2Requirement(
   scheme: OpenAPISecurityScheme,
@@ -533,17 +536,10 @@ function oauth2Requirement(
 ): ContextRequirement {
   const req: ContextRequirement = { type: "auth.oauth2" };
   const flows = scheme.flows;
-  const flow =
-    flows?.authorizationCode ??
-    flows?.implicit ??
-    (flows
-      ? (Object.values(flows).find(
-          (f): f is OpenAPIOAuthFlow =>
-            !!f &&
-            typeof f === "object" &&
-            typeof (f as OpenAPIOAuthFlow).tokenUrl === "string",
-        ) as OpenAPIOAuthFlow | undefined)
-      : undefined);
+  const tokenOnlyFlow = [flows?.password, flows?.clientCredentials].find(
+    (f): f is OpenAPIOAuthFlow => !!f && typeof f.tokenUrl === "string",
+  );
+  const flow = flows?.authorizationCode ?? flows?.implicit ?? tokenOnlyFlow;
   if (flow?.authorizationUrl) req.authorizeUrl = absolutize(flow.authorizationUrl, baseURL);
   if (flow?.tokenUrl) req.tokenUrl = absolutize(flow.tokenUrl, baseURL);
   if (flow?.scopes && Object.keys(flow.scopes).length > 0) {

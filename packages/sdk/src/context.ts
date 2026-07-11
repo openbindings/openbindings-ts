@@ -178,8 +178,14 @@ export function redactContext(ctx: Record<string, unknown> | null | undefined): 
 /**
  * Normalizes a URL to a stable context store key. The key is host[:port]
  * (scheme, path, query, and fragment are stripped) so that http:// and
- * https://, and per-path variations, share credentials for the same
- * origin. Non-URL strings are returned as-is.
+ * https://, and per-path variations, share credentials for the same origin.
+ * When the input carries a scheme, an explicit port matching that scheme's
+ * default (443 for https/wss, 80 for http/ws) is elided, so a key written
+ * with the default port and one written without it collide; any other
+ * explicit port is kept as-is. Strings without a scheme (e.g. a gRPC
+ * "host:port" format-defined address) are returned as-is: with no scheme
+ * there is no known default, and eliding a port there would corrupt a
+ * format-defined address.
  */
 export function normalizeContextKey(raw: string): string {
   raw = raw.trim();
@@ -190,6 +196,7 @@ export function normalizeContextKey(raw: string): string {
   const protoIdx = raw.indexOf("://");
   if (protoIdx < 0) return raw;
 
+  const scheme = raw.slice(0, protoIdx);
   let host = raw.slice(protoIdx + 3);
 
   // Strip query, fragment, and path.
@@ -200,7 +207,28 @@ export function normalizeContextKey(raw: string): string {
   const slashIdx = host.indexOf("/");
   if (slashIdx >= 0) host = host.slice(0, slashIdx);
 
-  return host;
+  return elideDefaultPort(scheme, host);
+}
+
+/**
+ * Strips an explicit port from host when it equals the given scheme's
+ * default port (443 for https/wss, 80 for http/ws), so a context key written
+ * with the default port and one written without it resolve to the same key.
+ * Any other explicit port, and any scheme with no known default, is returned
+ * unchanged. The scheme is lowercased for the comparison only; it is never
+ * part of the returned key.
+ */
+function elideDefaultPort(scheme: string, host: string): string {
+  switch (scheme.toLowerCase()) {
+    case "https":
+    case "wss":
+      return host.endsWith(":443") ? host.slice(0, -":443".length) : host;
+    case "http":
+    case "ws":
+      return host.endsWith(":80") ? host.slice(0, -":80".length) : host;
+    default:
+      return host;
+  }
 }
 
 /**
@@ -244,13 +272,16 @@ export function buildAuthHeaders(ctx: Record<string, unknown> | null | undefined
 }
 
 /**
- * Normalizes a remote endpoint URL to a context store key. Parses the
- * URL and returns `normalizeContextKey(host)`; falls back to
- * `normalizeContextKey(url)` for non-URL strings.
+ * Normalizes a remote endpoint URL to a context store key. Parses the URL
+ * and returns `normalizeContextKey("scheme://host[:port]")` (so a port
+ * matching the scheme's default is elided, same as `normalizeContextKey`);
+ * falls back to `normalizeContextKey(url)` for non-URL strings.
  */
 export function normalizeEndpoint(url: string): string {
   try {
-    return normalizeContextKey(new URL(url).host);
+    const u = new URL(url);
+    if (!u.host) return normalizeContextKey(url);
+    return normalizeContextKey(`${u.protocol.replace(/:$/, "")}://${u.host}`);
   } catch {
     return normalizeContextKey(url);
   }
