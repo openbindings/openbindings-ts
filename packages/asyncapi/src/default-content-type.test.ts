@@ -46,7 +46,7 @@ describe("defaultContentType fallback", () => {
       },
       operations: {
         ask: {
-          action: "send" as const,
+          action: "receive" as const,
           channel: { $ref: "#/channels/reply" },
           messages: [{ $ref: "#/channels/reply/messages/Msg" }],
         },

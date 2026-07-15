@@ -40,7 +40,7 @@ describe("channel-address fallback", () => {
       // Deliberately no `address` on the channel.
       channels: { notify: {} },
       operations: {
-        notifyOp: { action: "send" as const, channel: { $ref: "#/channels/notify" } },
+        notifyOp: { action: "receive" as const, channel: { $ref: "#/channels/notify" } },
       },
     };
 

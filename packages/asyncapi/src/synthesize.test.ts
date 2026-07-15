@@ -21,12 +21,12 @@ const MINIMAL_DOC = {
   },
   operations: {
     sendMessage: {
-      action: "send",
+      action: "receive",
       channel: { $ref: "#/channels/messages" },
       messages: [{ $ref: "#/channels/messages/messages/Msg" }],
     },
     receiveEvents: {
-      action: "receive",
+      action: "send",
       channel: { $ref: "#/channels/events" },
       messages: [{ $ref: "#/channels/events/messages/Event" }],
     },
@@ -104,22 +104,22 @@ describe("convertToInterface", () => {
     expect(iface.name).toBe("Empty");
   });
 
-  it("sets input schema for send operations", async () => {
+  it("sets input schema for receive operations (invoking publishes, ASYNC-P-02)", async () => {
     const doc = await parsedDoc(MINIMAL_DOC);
     const iface = await convertToInterface(undefined, doc);
 
-    const sendOp = iface.operations["sendMessage"];
-    expect(sendOp.input).toBeDefined();
-    expect(sendOp.input!.type).toBe("object");
+    const pubOp = iface.operations["sendMessage"];
+    expect(pubOp.input).toBeDefined();
+    expect(pubOp.input!.type).toBe("object");
   });
 
-  it("sets output schema for receive operations", async () => {
+  it("sets output schema for send operations (invoking subscribes, ASYNC-P-02)", async () => {
     const doc = await parsedDoc(MINIMAL_DOC);
     const iface = await convertToInterface(undefined, doc);
 
-    const recvOp = iface.operations["receiveEvents"];
-    expect(recvOp.output).toBeDefined();
-    expect(recvOp.output!.type).toBe("object");
+    const subOp = iface.operations["receiveEvents"];
+    expect(subOp.output).toBeDefined();
+    expect(subOp.output!.type).toBe("object");
   });
 
   it("omits security metadata (credentials are runtime context, not OBI surface)", async () => {

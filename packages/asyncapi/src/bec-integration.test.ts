@@ -40,26 +40,27 @@ function makeAsyncAPISpec(port: number) {
       // Declares bearer security: missing context must challenge
       // CONTEXT_REQUIRED before any I/O.
       sendMessage: {
-        action: "send" as const,
+        action: "receive" as const,
         channel: { $ref: "#/channels/messages" },
         messages: [{ $ref: "#/channels/messages/messages/Msg" }],
+        reply: { messages: [{ $ref: "#/channels/messages/messages/Msg" }] },
         security: [{ $ref: "#/components/securitySchemes/bearer" }],
       },
       // No declared security: the server's 401 surfaces as ERR_AUTH_REQUIRED.
       sendOpenMessage: {
-        action: "send" as const,
+        action: "receive" as const,
         channel: { $ref: "#/channels/messages" },
         messages: [{ $ref: "#/channels/messages/messages/Msg" }],
       },
       receiveEvents: {
-        action: "receive" as const,
+        action: "send" as const,
         channel: { $ref: "#/channels/events" },
         messages: [{ $ref: "#/channels/events/messages/Event" }],
         security: [{ $ref: "#/components/securitySchemes/bearer" }],
       },
       // Unsecured, never-ending stream: exercises caller cancellation.
       receiveStream: {
-        action: "receive" as const,
+        action: "send" as const,
         channel: { $ref: "#/channels/stream" },
         messages: [{ $ref: "#/channels/stream/messages/Tick" }],
       },

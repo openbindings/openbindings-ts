@@ -24,7 +24,7 @@ describe("SSE receive size cap is per-event, not cumulative", () => {
       servers: { test: { host: `127.0.0.1:${port}`, protocol: "http" } },
       channels: { caps: { address: path } },
       operations: {
-        receiveCaps: { action: "receive" as const, channel: { $ref: "#/channels/caps" } },
+        receiveCaps: { action: "send" as const, channel: { $ref: "#/channels/caps" } },
       },
     };
   }

@@ -108,7 +108,7 @@ describe("AsyncAPIInvoker WebSocket pool credential isolation (real ws server)",
       },
       operations: {
         publish: {
-          action: "send" as const,
+          action: "receive" as const,
           channel: { $ref: "#/channels/stream" },
           messages: [{ $ref: "#/channels/stream/messages/Msg" }],
         },
@@ -142,11 +142,26 @@ describe("AsyncAPIInvoker WebSocket pool credential isolation (real ws server)",
       invoker.close();
     }
   });
+
+  it("fails ERR_MISSING_INPUT when input closes with zero messages (ASYNC-P-03)", async () => {
+    const invoker = new AsyncAPIInvoker();
+    try {
+      const call = invoker.invokeBinding({
+        source: { format: FORMAT_TOKEN, content: spec() },
+        ref: "#/operations/publish",
+        context: { bearerToken: "tenant-zero" },
+      });
+      await call.close();
+      await expect(call.closed).rejects.toMatchObject({ code: "ERR_MISSING_INPUT" });
+    } finally {
+      invoker.close();
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------
-// First-frame bearer: convention says receive-only. `send` publish frames
-// must never carry it (auth never rides send message bodies).
+// First-frame bearer: a subscription-cell convention only. Publish frames
+// (`receive` action) must never carry it (auth never rides publish bodies).
 // ---------------------------------------------------------------------------
 
 describe("AsyncAPIInvoker first-frame bearer convention on send", () => {
@@ -178,7 +193,7 @@ describe("AsyncAPIInvoker first-frame bearer convention on send", () => {
       },
       operations: {
         publish: {
-          action: "send" as const,
+          action: "receive" as const,
           channel: { $ref: "#/channels/stream" },
           messages: [{ $ref: "#/channels/stream/messages/Msg" }],
           security: [{ type: "http", scheme: "bearer" }],
