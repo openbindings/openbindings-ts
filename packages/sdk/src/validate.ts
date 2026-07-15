@@ -430,14 +430,31 @@ function validateLocation(errs: string[], prefix: string, raw: string): void {
     );
     return;
   }
+  // OBI-D-05's exemption: a bindingSpec-defined absolute address (a gRPC
+  // host:port, a usage exec argv vector) is well-formed per its own binding
+  // specification, which the core cannot verify. The decidable
+  // discriminator is the hierarchical URI form: a value whose scheme is
+  // followed by "//" claims RFC 3986 URI form and is held to it; a
+  // scheme-opaque non-relative value may be a bindingSpec-defined address
+  // and passes core validation (per-family verification belongs to family
+  // processors, per the partial-verification posture).
+  if (!isHierarchicalURIForm(raw)) return;
   if (!screenURIChars(errs, prefix, raw)) return;
-  if (hasURIScheme(raw)) {
-    try {
-      new URL(raw);
-    } catch {
-      errs.push(`${prefix}: "${raw}" is not a well-formed URI reference (OBI-D-05)`);
-    }
+  try {
+    new URL(raw);
+  } catch {
+    errs.push(`${prefix}: "${raw}" is not a well-formed URI reference (OBI-D-05)`);
   }
+}
+
+// isHierarchicalURIForm reports whether raw is scheme://... — the RFC 3986
+// hierarchical form whose well-formedness the core enforces at source
+// locations. Scheme-opaque values (mailto:-style, exec:argv, host:port) are
+// outside it.
+function isHierarchicalURIForm(raw: string): boolean {
+  const i = raw.indexOf(":");
+  if (i <= 0 || !hasURIScheme(raw)) return false;
+  return raw.startsWith("//", i + 1);
 }
 
 /**
