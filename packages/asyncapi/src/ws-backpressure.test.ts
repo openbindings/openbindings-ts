@@ -33,7 +33,7 @@ function spec(port: number) {
     },
     operations: {
       subscribe: {
-        action: "receive" as const,
+        action: "send" as const,
         channel: { $ref: "#/channels/stream" },
         messages: [{ $ref: "#/channels/stream/messages/Msg" }],
       },

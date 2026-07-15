@@ -1,20 +1,27 @@
 /**
  * AsyncAPI binding execution over the cardinality-agnostic invocation handle.
  *
- * One entrypoint ({@link runBinding}) drives every channel shape against the
+ * The action is read from the DESCRIBED APPLICATION's perspective — AsyncAPI
+ * 3.0's own rule — and an invocation is the counterparty (ASYNC-P-02,
+ * spec/binding-specs/asyncapi): invoking a `send` operation SUBSCRIBES to
+ * what the application sends; invoking a `receive` operation PUBLISHES what
+ * the application expects to receive. The artifact is never read as
+ * describing the invoker.
+ *
+ * One entrypoint ({@link runBinding}) drives every cell against the
  * binding-facing {@link BindingHandle}:
  *
- *   - send + http/https     unary HTTP POST: first input -> request body,
- *                           response -> single output
- *   - send + ws/wss         client-streaming publish: every input -> one
- *                           socket frame; closing input closes the call
- *   - receive + http/https  SSE subscribe: server events -> outputs
- *   - receive + ws/wss      WebSocket subscribe (bidi-capable): socket
- *                           frames -> outputs, caller inputs -> socket frames
+ *   - receive + http/https  unary publish: one input -> request body (POST),
+ *                           response -> at most one output
+ *   - receive + ws/wss      client-streaming publish: every input -> one
+ *                           socket frame; the caller closing input ends it
+ *   - send + http/https     SSE subscription: server events -> outputs
+ *   - send + ws/wss         streaming subscription (bidi-capable): socket
+ *                           frames -> outputs, caller inputs forward as frames
  *
- * All pre-dispatch failures (bad ref, missing server, missing context) are
- * raised via `fireError` BEFORE any network I/O, per the binding-author
- * contract.
+ * All pre-dispatch failures (bad ref, missing server, missing context,
+ * missing publish input) are raised via `fireError` BEFORE any network I/O,
+ * per the binding-author contract.
  */
 
 import {
@@ -125,31 +132,34 @@ export async function runBinding(
 
   const defaultContentType = doc.defaultContentType ?? "";
 
+  // The complementary perspective (ASYNC-P-02): `receive` means the
+  // described application receives, so invoking PUBLISHES; `send` means it
+  // sends, so invoking SUBSCRIBES.
   switch (asyncOp.action) {
     case "receive":
       if (protocol === "ws" || protocol === "wss") {
-        await runWSReceive(wsPool, serverURL, address, asyncOp, server, args, h, defaultContentType);
+        await runWSPublish(wsPool, serverURL, address, asyncOp, server, args, h);
       } else if (protocol === "http" || protocol === "https") {
-        await runSSEReceive(serverURL, address, asyncOp, server, args, h, defaultContentType);
+        await runUnaryPublish(serverURL, address, asyncOp, server, args, h, defaultContentType);
       } else {
         h.fireError(
           new InvocationError(
             ERR_SOURCE_CONFIG_ERROR,
-            `receive not supported for protocol "${protocol}" (supported: http, https, ws, wss)`,
+            `receive (publish) not supported for protocol "${protocol}" (supported: http, https, ws, wss)`,
           ),
         );
       }
       return;
     case "send":
       if (protocol === "ws" || protocol === "wss") {
-        await runWSSend(wsPool, serverURL, address, asyncOp, server, args, h);
+        await runWSSubscribe(wsPool, serverURL, address, asyncOp, server, args, h, defaultContentType);
       } else if (protocol === "http" || protocol === "https") {
-        await runHTTPSend(serverURL, address, asyncOp, server, args, h, defaultContentType);
+        await runSSESubscribe(serverURL, address, asyncOp, server, args, h, defaultContentType);
       } else {
         h.fireError(
           new InvocationError(
             ERR_SOURCE_CONFIG_ERROR,
-            `send not supported for protocol "${protocol}" (supported: http, https, ws, wss)`,
+            `send (subscribe) not supported for protocol "${protocol}" (supported: http, https, ws, wss)`,
           ),
         );
       }
@@ -247,20 +257,44 @@ function nameForScheme(scheme: AsyncAPISecurityScheme): string | undefined {
   return typeof tagged === "string" ? tagged : undefined;
 }
 
+/** One declared security list, as resolved named schemes (after dereference,
+ * security items are resolved scheme objects). */
+function schemeList(raw: AsyncAPIOperation["security"]): NamedSecurityScheme[] {
+  return (raw ?? []).filter(isSecurityScheme).map((scheme) => ({ scheme, name: nameForScheme(scheme) }));
+}
+
+/** The security list of the server the connection targets — never some
+ * other server's declaration. */
+function serverSecuritySchemes(server: AsyncAPIServer | undefined): NamedSecurityScheme[] {
+  return schemeList(server?.security);
+}
+
+/** The operation's own security list. It never displaces the server's: the
+ * two lists are conjunctive (ASYNC-P-07) — the server's security applies,
+ * and the operation's applies in addition. */
+function operationSecuritySchemes(asyncOp: AsyncAPIOperation): NamedSecurityScheme[] {
+  return schemeList(asyncOp.security);
+}
+
+/**
+ * The security schemes applicable to an operation, flattened for credential
+ * placement: the targeted server's list then the operation's list, in
+ * declaration order — both apply, the conjunctive reading (ASYNC-P-07) —
+ * with a scheme declared on both levels placed once.
+ */
 function resolveSecuritySchemes(
   asyncOp: AsyncAPIOperation,
   server: AsyncAPIServer | undefined,
 ): NamedSecurityScheme[] {
-  // Operation-level security overrides server-level.
-  // After dereference, security items are resolved scheme objects.
-  const opSecurity = asyncOp.security;
-  const raw =
-    opSecurity && opSecurity.length > 0
-      ? opSecurity
-      // Fall back to the security of the server the connection targets —
-      // never to some other server's declaration.
-      : (server?.security ?? []);
-  return raw.filter(isSecurityScheme).map((scheme) => ({ scheme, name: nameForScheme(scheme) }));
+  const result: NamedSecurityScheme[] = [];
+  const seen = new Set<string>();
+  for (const named of [...serverSecuritySchemes(server), ...operationSecuritySchemes(asyncOp)]) {
+    const key = `${named.scheme.type}\x00${named.scheme.scheme ?? ""}\x00${named.name ?? ""}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(named);
+  }
+  return result;
 }
 
 /**
@@ -352,9 +386,15 @@ function schemeRequirement(
 /**
  * Computes the context the binding requires for this operation, or null when
  * the provided context already satisfies it (or the doc declares nothing
- * checkable). `server` is the server the connection logic picked — its
- * security (not some other server's) backs the operation-level fallback.
- * Side-effect-free; shared by runBinding and prepareBinding.
+ * checkable). The declaration semantics are AsyncAPI 3.0's, incorporated,
+ * and they are CONJUNCTIVE (ASYNC-P-07): the targeted server's `security`
+ * applies (`server` is the server the connection logic picked — never some
+ * other server's declaration), and the operation's `security`, when
+ * declared, applies IN ADDITION. Within each declared list one entry
+ * suffices, so the challenge is the cross product: each alternative pairs
+ * one server entry with one operation entry (or is a single entry when only
+ * one list is declared). Side-effect-free; shared by runBinding and
+ * prepareBinding.
  */
 export function requiredContext(
   asyncOp: AsyncAPIOperation,
@@ -362,10 +402,29 @@ export function requiredContext(
   serverURL: string,
   ctx?: Record<string, unknown>,
 ): ContextRequiredDetails | null {
-  const named = resolveSecuritySchemes(asyncOp, server);
-  const alternatives: ContextAlternative[] = named.map(({ scheme, name }) => ({
-    requirements: [schemeRequirement(scheme, serverURL, name)],
-  }));
+  const serverReqs = serverSecuritySchemes(server).map(({ scheme, name }) =>
+    schemeRequirement(scheme, serverURL, name),
+  );
+  const opReqs = operationSecuritySchemes(asyncOp).map(({ scheme, name }) =>
+    schemeRequirement(scheme, serverURL, name),
+  );
+
+  const alternatives: ContextAlternative[] = [];
+  if (serverReqs.length > 0 && opReqs.length > 0) {
+    for (const s of serverReqs) {
+      for (const o of opReqs) {
+        // The same scheme declared on both levels is one requirement, not a
+        // duplicated conjunct.
+        const requirements =
+          o.type === s.type && o.name === s.name ? [s] : [s, o];
+        alternatives.push({ requirements });
+      }
+    }
+  } else {
+    for (const r of [...serverReqs, ...opReqs]) {
+      alternatives.push({ requirements: [r] });
+    }
+  }
   if (alternatives.length === 0) return null;
 
   const details: ContextRequiredDetails = {
@@ -527,10 +586,10 @@ function applyContext(
 }
 
 // ---------------------------------------------------------------------------
-// Receive over HTTP: SSE subscribe
+// Subscribe over HTTP (`send` action): SSE
 // ---------------------------------------------------------------------------
 
-async function runSSEReceive(
+async function runSSESubscribe(
   serverURL: string,
   address: string,
   asyncOp: AsyncAPIOperation,
@@ -539,7 +598,9 @@ async function runSSEReceive(
   h: Handle,
   defaultContentType: string,
 ): Promise<void> {
-  // Server -> client: the channel takes no caller input.
+  // The described application sends; we subscribe. An SSE subscription
+  // takes no input: input closes on entry, and a late write rejects
+  // non-terminally at the handle (the refusal surface for supplied input).
   void h.closeInput();
 
   let url = `${serverURL}/${address.replace(/^\/+/, "")}`;
@@ -586,7 +647,7 @@ async function runSSEReceive(
   let dataLines: string[] = [];
   // The size cap is PER EVENT, not cumulative: a long-lived subscription
   // legitimately streams more than MAX_RESPONSE_BYTES in total (the same
-  // choice the Go SDK's runSSEReceive documents, and connect/streaming.go's
+  // choice the Go SDK's runSSESubscribe documents, and connect/streaming.go's
   // per-envelope cap). eventBytes resets at every event boundary (blank
   // line), mirroring the Go SDK's scanner-driven accounting exactly.
   let eventBytes = 0;
@@ -649,10 +710,10 @@ async function runSSEReceive(
 }
 
 // ---------------------------------------------------------------------------
-// Send over HTTP: unary POST
+// Publish over HTTP (`receive` action): unary POST
 // ---------------------------------------------------------------------------
 
-async function runHTTPSend(
+async function runUnaryPublish(
   serverURL: string,
   address: string,
   asyncOp: AsyncAPIOperation,
@@ -661,24 +722,30 @@ async function runHTTPSend(
   h: Handle,
   defaultContentType: string,
 ): Promise<void> {
-  // Unary: the first input is the message payload.
-  let body: string;
+  // Unary: the one input IS the message payload (ASYNC-P-03). A publish
+  // invocation requires an input value — this family defines no empty
+  // message, so absence is a pre-dispatch refusal, never an empty-object
+  // substitute. An operation-layer call for an operation declaring no input
+  // is refused up front: callers of no-input operations never write, so
+  // reading would park.
   if (noInputDeclared(args)) {
-    // Operation-layer no-input convention: the caller never writes nor
-    // closes. Close input on entry and send one empty-object message.
-    void h.closeInput();
-    body = "{}";
-  } else {
-    const first = await readFirstInput(h);
-    if (!first.ok) {
-      h.fireError(
-        new InvocationError(ERR_MISSING_INPUT, "send operation requires an input message"),
-      );
-      return;
-    }
-    void h.closeInput();
-    body = first.value != null ? JSON.stringify(first.value) : "{}";
+    h.fireError(
+      new InvocationError(
+        ERR_MISSING_INPUT,
+        "publish invocation requires an input message (the input is the message; the operation declares no input)",
+      ),
+    );
+    return;
   }
+  const first = await readFirstInput(h);
+  if (!first.ok) {
+    h.fireError(
+      new InvocationError(ERR_MISSING_INPUT, "publish invocation requires an input message"),
+    );
+    return;
+  }
+  void h.closeInput();
+  const body = JSON.stringify(first.value ?? null);
 
   let url = `${serverURL}/${address.replace(/^\/+/, "")}`;
 
@@ -747,7 +814,7 @@ async function runHTTPSend(
       args.hooks,
       siteFor(args, serverURL),
       { status: resp.status, body: respText, meta: headersToMetadata(resp.headers) },
-      builtinDecodeFor(declaredContentType(asyncOp, defaultContentType)),
+      builtinDecodeFor(replyContentType(asyncOp, defaultContentType)),
     );
   } catch (e: unknown) {
     h.fireError(toInvocationError(e));
@@ -889,7 +956,7 @@ function noInputDeclared(args: BindingInvocationArgs): boolean {
 }
 
 // ---------------------------------------------------------------------------
-// Receive over WebSocket: subscribe (bidi-capable) on a pooled socket
+// Subscribe over WebSocket (`send` action): bidi-capable, on a pooled socket
 // ---------------------------------------------------------------------------
 
 /**
@@ -928,7 +995,7 @@ export function setBackpressureBoundsForTest(frames: number, bytes: number): () 
   };
 }
 
-async function runWSReceive(
+async function runWSSubscribe(
   pool: WSPool,
   serverURL: string,
   address: string,
@@ -1005,7 +1072,7 @@ async function runWSReceive(
   // status; never fabricated). Convention envelopes ({error}/{data}
   // unwrapping) are consumer knowledge: a decode hook's job, never the
   // builtin's.
-  const wsContentType = declaredContentType(asyncOp, defaultContentType);
+  const wsContentType = messageContentType(asyncOp, defaultContentType);
   const wsSite = siteFor(args, serverURL);
   const outputPump = async (): Promise<void> => {
     while (true) {
@@ -1055,8 +1122,9 @@ async function runWSReceive(
     }
   };
 
-  // Inputs -> socket. Lets callers push subscription/control frames; closing
-  // input does NOT end the subscription (outputs keep flowing).
+  // Inputs -> socket: the duplex lane — caller-supplied input values forward
+  // as frames, and closing input does NOT end the subscription (outputs keep
+  // flowing).
   const inputPump = async (): Promise<void> => {
     try {
       for await (const msg of h.inputs()) {
@@ -1070,7 +1138,7 @@ async function runWSReceive(
   try {
     // sendFirstFrameBearer may throw on a dead socket (pooled.send throws
     // when the socket is not open), before either pump owns the terminal.
-    // Catch it here — mirroring runWSSend — so the terminal is a meaningful
+    // Catch it here — mirroring runWSPublish — so the terminal is a meaningful
     // ERR_STREAM_ERROR, not the invoker's generic ERR_RUNTIME fallback.
     sendFirstFrameBearer(pooled, asyncOp, server, args.context);
     await Promise.all([
@@ -1098,10 +1166,10 @@ async function runWSReceive(
 }
 
 // ---------------------------------------------------------------------------
-// Send over WebSocket: client-streaming publish on a pooled socket
+// Publish over WebSocket (`receive` action): client-streaming, pooled socket
 // ---------------------------------------------------------------------------
 
-async function runWSSend(
+async function runWSPublish(
   pool: WSPool,
   serverURL: string,
   address: string,
@@ -1110,6 +1178,20 @@ async function runWSSend(
   args: BindingInvocationArgs,
   h: Handle,
 ): Promise<void> {
+  // A publish invocation requires input — the input IS the message
+  // (ASYNC-P-03); this family defines no empty message. An operation-layer
+  // call for an operation declaring no input is refused before dispatch
+  // (callers of no-input operations never write, so reading would park).
+  if (noInputDeclared(args)) {
+    h.fireError(
+      new InvocationError(
+        ERR_MISSING_INPUT,
+        "publish invocation requires an input message (the input is the message; the operation declares no input)",
+      ),
+    );
+    return;
+  }
+
   let pooled: PooledWS;
   try {
     pooled = await pool.acquire(serverURL, address, {
@@ -1137,22 +1219,27 @@ async function runWSSend(
 
   try {
     // Deliberately NO sendFirstFrameBearer here: the first-frame bearer
-    // convention is a `receive`-subscription convention only. Auth never
-    // rides `send` message bodies — mirrors the Go SDK's runWSSend, and the
-    // conventions doc (spec/formats/asyncapi.md): "auth never rides send
-    // message bodies."
-    if (noInputDeclared(args)) {
-      // Operation-layer no-input convention: the caller never writes nor
-      // closes. Close input on entry and publish one empty-object message.
-      void h.closeInput();
-      pooled.send(JSON.stringify({}));
-    } else {
-      // Every input is one frame; the loop ends cleanly when the caller
-      // closes input, and throws if the invocation terminates. `send`
-      // throws on a dead socket, so no frame is ever silently dropped.
-      for await (const msg of h.inputs()) {
-        pooled.send(JSON.stringify(msg));
-      }
+    // convention belongs to the subscription cell only. Auth never rides a
+    // publish's message frames — mirrors the Go SDK's runWSPublish.
+    //
+    // Every input is one frame; the loop ends cleanly when the caller
+    // closes input, and throws if the invocation terminates. `send` throws
+    // on a dead socket, so no frame is ever silently dropped. Closing with
+    // zero messages sent is the streaming face of the presence rule
+    // (ASYNC-P-03): nothing was published, so the invocation fails loudly.
+    let sent = 0;
+    for await (const msg of h.inputs()) {
+      pooled.send(JSON.stringify(msg));
+      sent++;
+    }
+    if (sent === 0) {
+      h.fireError(
+        new InvocationError(
+          ERR_MISSING_INPUT,
+          "publish invocation requires an input message (input closed with no messages sent)",
+        ),
+      );
+      return;
     }
     h.closeOutput();
   } catch (e: unknown) {
@@ -1204,20 +1291,33 @@ async function readErrorBody(resp: Response): Promise<unknown> {
 // ---------------------------------------------------------------------------
 
 /**
- * Returns the operation's declared message contentType — the SPEC'S answer
- * to the decode question, when the document gives one. Walks the
- * operation's messages, then its reply messages, then falls back to the
- * document's `defaultContentType` (spec/formats/asyncapi.md: "the declared
- * message contentType decides (operation messages, then reply messages,
- * then the document's defaultContentType)"); "" when nothing declares.
+ * Returns the effective content type of the operation's own messages — the
+ * declarations governing a subscription's outputs and a publish's input
+ * encoding (direction-correct decode, ASYNC-P-05) — falling back to the
+ * document's `defaultContentType`, else "" (the text lane). The SPEC'S
+ * answer; never payload bytes.
  */
-function declaredContentType(
+function messageContentType(
   asyncOp: AsyncAPIOperation | undefined,
   defaultContentType: string,
 ): string {
   for (const m of asyncOp?.messages ?? []) {
     if (m.contentType) return m.contentType;
   }
+  return defaultContentType;
+}
+
+/**
+ * Returns the effective content type of the operation's REPLY-side messages
+ * — the declarations governing a publish invocation's output: the response
+ * decodes by the reply side (direction-correct decode, ASYNC-P-05) —
+ * falling back to the document's `defaultContentType`, else "" (the text
+ * lane).
+ */
+function replyContentType(
+  asyncOp: AsyncAPIOperation | undefined,
+  defaultContentType: string,
+): string {
   for (const m of asyncOp?.reply?.messages ?? []) {
     if (m.contentType) return m.contentType;
   }
@@ -1266,7 +1366,7 @@ async function decodeSSEEvent(
     args.hooks,
     siteFor(args, serverURL),
     raw,
-    builtinDecodeFor(declaredContentType(asyncOp, defaultContentType)),
+    builtinDecodeFor(messageContentType(asyncOp, defaultContentType)),
   );
 }
 

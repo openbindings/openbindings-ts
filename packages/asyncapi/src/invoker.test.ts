@@ -119,11 +119,11 @@ describe("AsyncAPIInvoker.prepareBinding", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Operation-layer no-input convention (send path)
+// Publish presence rule (ASYNC-P-03): the input IS the message
 // ---------------------------------------------------------------------------
 
-describe("AsyncAPIInvoker no-input convention", () => {
-  it("publishes one empty-object message when binding is set and inputSchema is absent", async () => {
+describe("AsyncAPIInvoker no-input publish refusal", () => {
+  it("refuses ERR_MISSING_INPUT pre-dispatch when binding is set and inputSchema is absent", async () => {
     const requests: Array<{ url: string; body: unknown }> = [];
     const fetchFn = (async (input: RequestInfo | URL, init?: RequestInit) => {
       requests.push({ url: String(input), body: init?.body });
@@ -136,13 +136,14 @@ describe("AsyncAPIInvoker no-input convention", () => {
       servers: { prod: { host: "api.example.com", protocol: "https" } },
       channels: { n: { address: "/notify", messages: { M: { payload: { type: "object" } } } } },
       operations: {
-        notify: { action: "send" as const, channel: { $ref: "#/channels/n" } },
+        notify: { action: "receive" as const, channel: { $ref: "#/channels/n" } },
       },
     };
 
     // binding present + inputSchema absent: the operation declares NO input,
-    // so the caller never writes nor closes — the call must not park on a
-    // read nor fail ERR_MISSING_INPUT.
+    // but a publish invocation requires one — the input IS the message and
+    // this family defines no empty message (ASYNC-P-03). The refusal fires
+    // before any dispatch, and never parks on a read.
     const call = new AsyncAPIInvoker().invokeBinding({
       source: { format: FORMAT_TOKEN, content: spec },
       ref: "#/operations/notify",
@@ -150,10 +151,8 @@ describe("AsyncAPIInvoker no-input convention", () => {
       fetch: fetchFn,
     });
 
-    await expect(call.closed).resolves.toBeUndefined();
-    expect(requests).toHaveLength(1);
-    expect(requests[0].url).toBe("https://api.example.com/notify");
-    expect(requests[0].body).toBe("{}");
+    await expect(call.closed).rejects.toMatchObject({ code: "ERR_MISSING_INPUT" });
+    expect(requests).toHaveLength(0);
   });
 });
 
@@ -378,7 +377,7 @@ describe("context requirements — unmapped schemes surfaced (R2.c ruling)", () 
       channels: { pub: { address: "/pub", messages: { Msg: { payload: { type: "object" } } } } },
       operations: {
         publish: {
-          action: "send" as const,
+          action: "receive" as const,
           channel: { $ref: "#/channels/pub" },
           security: [{ type: "http", scheme: "digest" }, { type: "X509" }],
         },
@@ -408,6 +407,87 @@ describe("context requirements — unmapped schemes surfaced (R2.c ruling)", () 
 });
 
 // ---------------------------------------------------------------------------
+// ASYNC-P-07: server and operation security are CONJUNCTIVE — the targeted
+// server's list applies, and the operation's, when declared, applies in
+// addition; within each list one entry suffices (cross-product alternatives).
+// ---------------------------------------------------------------------------
+
+describe("context requirements — conjunctive server + operation security (ASYNC-P-07)", () => {
+  function conjunctiveSpec(opSecurity: unknown[]) {
+    return {
+      asyncapi: "3.0.0",
+      info: { title: "Conjunctive", version: "1.0.0" },
+      servers: {
+        prod: {
+          host: "api.example.com",
+          protocol: "https",
+          security: [{ $ref: "#/components/securitySchemes/bearer" }],
+        },
+      },
+      channels: { pub: { address: "/pub", messages: { Msg: { payload: { type: "object" } } } } },
+      operations: {
+        publish: {
+          action: "receive" as const,
+          channel: { $ref: "#/channels/pub" },
+          security: opSecurity,
+        },
+      },
+      components: {
+        securitySchemes: {
+          bearer: { type: "http", scheme: "bearer" },
+          key: { type: "httpApiKey", in: "query", name: "k" },
+        },
+      },
+    };
+  }
+
+  it("pairs the server entry with the operation entry in one conjunctive alternative", async () => {
+    const details = await new AsyncAPIInvoker().prepareBinding({
+      source: { format: FORMAT_TOKEN, content: conjunctiveSpec([{ $ref: "#/components/securitySchemes/key" }]) },
+      ref: "#/operations/publish",
+    });
+    expect(details?.alternatives).toHaveLength(1);
+    expect(details).toMatchObject({
+      alternatives: [{ requirements: [{ type: "auth.bearer" }, { type: "auth.apiKey", name: "key" }] }],
+    });
+  });
+
+  it("neither credential alone satisfies; both together do", async () => {
+    const spec = conjunctiveSpec([{ $ref: "#/components/securitySchemes/key" }]);
+    const bearerOnly = await new AsyncAPIInvoker().prepareBinding({
+      source: { format: FORMAT_TOKEN, content: spec },
+      ref: "#/operations/publish",
+      context: { bearerToken: "t" },
+    });
+    expect(bearerOnly).not.toBeNull();
+
+    const keyOnly = await new AsyncAPIInvoker().prepareBinding({
+      source: { format: FORMAT_TOKEN, content: spec },
+      ref: "#/operations/publish",
+      context: { apiKeys: { key: "k-1" } },
+    });
+    expect(keyOnly).not.toBeNull();
+
+    const both = await new AsyncAPIInvoker().prepareBinding({
+      source: { format: FORMAT_TOKEN, content: spec },
+      ref: "#/operations/publish",
+      context: { bearerToken: "t", apiKeys: { key: "k-1" } },
+    });
+    expect(both).toBeNull();
+  });
+
+  it("a scheme declared on both levels is one requirement, not a duplicated conjunct", async () => {
+    const details = await new AsyncAPIInvoker().prepareBinding({
+      source: { format: FORMAT_TOKEN, content: conjunctiveSpec([{ $ref: "#/components/securitySchemes/bearer" }]) },
+      ref: "#/operations/publish",
+    });
+    expect(details?.alternatives).toHaveLength(1);
+    expect(details?.alternatives[0].requirements).toHaveLength(1);
+    expect(details?.alternatives[0].requirements[0]).toMatchObject({ type: "auth.bearer" });
+  });
+});
+
+// ---------------------------------------------------------------------------
 // R2.d ruling: apiKeys keyed lookup in credential application — two apiKey
 // schemes with different addressable names, placed in different wire
 // locations, resolve to distinct keys via the apiKeys map.
@@ -422,7 +502,7 @@ describe("credential application — apiKeys keyed lookup (R2.d ruling)", () => 
       channels: { pub: { address: "/pub", messages: { Msg: { payload: { type: "object" } } } } },
       operations: {
         publish: {
-          action: "send" as const,
+          action: "receive" as const,
           channel: { $ref: "#/channels/pub" },
           security: [
             { $ref: "#/components/securitySchemes/headerKey" },

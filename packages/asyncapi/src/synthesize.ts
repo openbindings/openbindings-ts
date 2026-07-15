@@ -51,16 +51,24 @@ export async function convertToInterface(
       obiOp.tags = tags.map((t) => t.name);
     }
 
+    // Schema direction follows the complementary perspective (ASYNC-P-02):
+    // the artifact describes the application, the invocation is the
+    // counterparty.
     const action = asyncOp.action;
     switch (action) {
-      case "receive":
+      case "send":
         {
+          // The application sends; invoking subscribes — the operation's
+          // messages are the invoker's OUTPUT.
           const payload = resolveOperationPayload(asyncOp);
           if (payload) obiOp.output = payload;
         }
         break;
-      case "send":
+      case "receive":
         {
+          // The application receives; invoking publishes — the operation's
+          // messages are the invoker's INPUT, and a declared reply is what
+          // the publish's response decodes to.
           const inputPayload = resolveOperationPayload(asyncOp);
           if (inputPayload) obiOp.input = inputPayload;
           const reply = asyncOp.reply;
