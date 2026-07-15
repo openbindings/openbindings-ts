@@ -56,6 +56,7 @@ export {
   contextHeaders,
   contextCookies,
   contextEnvironment,
+  contextConfiguration,
   contextMetadata,
   redactContext,
   normalizeContextKey,

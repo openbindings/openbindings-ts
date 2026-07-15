@@ -102,6 +102,21 @@ export function contextEnvironment(ctx: Record<string, unknown> | null | undefin
   return extractStringMap(ctx, "environment");
 }
 
+/**
+ * Returns the well-known `configuration` field from context: per-invocation
+ * configuration-point values, keyed by point name — the operation-invoker
+ * contract's `selection` point, and the named points each binding
+ * specification defines for its family (decode, classify, route, solicit,
+ * server, address, target, transport). The values' meanings belong to
+ * whichever specification defines the point; this helper only provides the
+ * carriage. Empty object if absent or not an object.
+ */
+export function contextConfiguration(ctx: Record<string, unknown> | null | undefined): Record<string, unknown> {
+  if (!ctx) return {};
+  const raw = ctx["configuration"];
+  return raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
+}
+
 /** Returns the well-known `metadata` field from context, or an empty object if absent. */
 export function contextMetadata(ctx: Record<string, unknown> | null | undefined): Record<string, unknown> {
   if (!ctx) return {};

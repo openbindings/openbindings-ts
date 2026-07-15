@@ -762,7 +762,7 @@ describe("metadata pass-through", () => {
 });
 
 // ---------------------------------------------------------------------------
-// defaultBindingSelector (OBI-T-09)
+// defaultBindingSelector (the operation-invoker contract's default policy)
 // ---------------------------------------------------------------------------
 
 describe("defaultBindingSelector", () => {
@@ -790,17 +790,31 @@ describe("defaultBindingSelector", () => {
     expect(defaultBindingSelector(iface, "op").key).toBe("op.fresh");
   });
 
-  it("higher preference wins within a tier; binding preference overrides source preference", () => {
+  it("a declared preference outranks every undeclared candidate (a declared negative included); nothing is inherited from sources", () => {
     const iface: OBInterface = {
       openbindings: "0.2.0",
       operations: { op: {} },
       sources: {
-        cheap: { format: "f@1", location: "x", preference: 1 },
-        costly: { format: "f@1", location: "y", preference: 5 },
+        plain: { format: "f@1", location: "x" },
+        // Source-level preference is retired core vocabulary and must be inert.
+        boosted: { format: "f@1", location: "y", preference: 100 },
       },
       bindings: {
-        "op.a": { operation: "op", source: "cheap", preference: 10 }, // overrides source 1
-        "op.b": { operation: "op", source: "costly" }, // inherits 5
+        "op.declared": { operation: "op", source: "plain", preference: -5 },
+        "op.undeclared": { operation: "op", source: "boosted" },
+      },
+    };
+    expect(defaultBindingSelector(iface, "op").key).toBe("op.declared");
+  });
+
+  it("lexicographic binding key breaks remaining ties", () => {
+    const iface: OBInterface = {
+      openbindings: "0.2.0",
+      operations: { op: {} },
+      sources: { s: { format: "f@1", location: "x" } },
+      bindings: {
+        "op.b": { operation: "op", source: "s" },
+        "op.a": { operation: "op", source: "s" },
       },
     };
     expect(defaultBindingSelector(iface, "op").key).toBe("op.a");
@@ -821,6 +835,43 @@ describe("defaultBindingSelector", () => {
     };
     const { key } = defaultBindingSelector(iface, "op", new Set(["mock@1.0"]));
     expect(key).toBe("op.plain");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The consumer override: context.configuration.selection
+// ---------------------------------------------------------------------------
+
+describe("selection override (context.configuration.selection)", () => {
+  it("the first invocable listed key displaces the default policy", async () => {
+    const op = makeInvoker();
+    // Default policy would pick getUser.main (declared 99 over declared 1);
+    // the override routes to getUser.bad, whose wrong-shaped output proves
+    // which binding ran.
+    const call = op.invoke(testInterface(), operationSignature("getUser"), {
+      context: { configuration: { selection: ["getUser.bad"] } },
+    });
+    await call.write({ id: "u1" });
+    await expect(collect(call.outputs)).rejects.toMatchObject({ code: ERR_VALIDATION_FAILED });
+  });
+
+  it("skips undefined and wrong-operation keys; the default policy applies when none is invocable", async () => {
+    const op = makeInvoker();
+    const call = op.invoke(testInterface(), operationSignature("getUser"), {
+      context: { configuration: { selection: ["nope", "ping.main"] } },
+    });
+    await call.write({ id: "u1" });
+    await expect(single(call.outputs)).resolves.toEqual({ id: "u1", name: "Ada" });
+  });
+
+  it("an explicit bindingKey bypasses the override entirely", async () => {
+    const op = makeInvoker();
+    const call = op.invoke(testInterface(), operationSignature("getUser"), {
+      bindingKey: "getUser.main",
+      context: { configuration: { selection: ["getUser.bad"] } },
+    });
+    await call.write({ id: "u1" });
+    await expect(single(call.outputs)).resolves.toEqual({ id: "u1", name: "Ada" });
   });
 });
 
