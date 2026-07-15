@@ -224,7 +224,7 @@ async function runTool(
   inv: BindingHandle<unknown, unknown>,
   setHeaderOnce: () => void,
   site: InvokeSite,
-  hooks: InvokeHooks | undefined,
+  hooks: InvokeHooks | null | undefined,
 ): Promise<void> {
   // Progress callbacks are synchronous; chain the emits so they stay
   // ordered and observe emitOutput's backpressure without a side buffer.
@@ -277,7 +277,7 @@ async function runTool(
     output = await decodeThroughHooks(
       hooks,
       site,
-      { body: result.content[0].text },
+      { status: null, body: result.content[0].text, meta: {} },
       builtinTextDecode,
     );
     decodeStamp = decodeStampFor(hooks, "text");
@@ -301,7 +301,7 @@ function builtinTextDecode(_site: InvokeSite, raw: RawResult): unknown {
 }
 
 /** Names the decode lane for the x-ob-decode stamp ("hook" when a hook decided). */
-function decodeStampFor(hooks: InvokeHooks | undefined, builtin: string): string {
+function decodeStampFor(hooks: InvokeHooks | null | undefined, builtin: string): string {
   return hooks?.decodeDecidedBy?.() === "hook" ? "hook" : builtin;
 }
 
@@ -312,7 +312,7 @@ async function runResource(
   inv: BindingHandle<unknown, unknown>,
   setHeaderOnce: () => void,
   site: InvokeSite,
-  hooks: InvokeHooks | undefined,
+  hooks: InvokeHooks | null | undefined,
 ): Promise<void> {
   const result = await client.readResource({ uri }, { signal: inv.signal });
 
@@ -330,7 +330,7 @@ async function runResource(
     const text = "text" in c ? (c as { text: string }).text : undefined;
     if (text) {
       const mimeType = ("mimeType" in c ? (c as { mimeType?: string }).mimeType : undefined) ?? "";
-      output = await decodeThroughHooks(hooks, site, { body: text }, builtinMimeDecode(mimeType));
+      output = await decodeThroughHooks(hooks, site, { status: null, body: text, meta: {} }, builtinMimeDecode(mimeType));
       decodeStamp = decodeStampFor(hooks, "declared/mime-type");
     } else {
       output = c;
