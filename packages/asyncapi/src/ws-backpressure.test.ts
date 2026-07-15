@@ -54,7 +54,9 @@ async function drainOutputs(call: Invocation): Promise<{ vals: unknown[]; err: u
   }
 }
 
-describe("WS receive backpressure", () => {
+// Real-socket flood tests: generous timeout — CI runners flood/drain far
+// slower than local hardware, and vitest's 5s default flakes there.
+describe("WS receive backpressure", { timeout: 30_000 }, () => {
   it("fails the subscription loudly when the frame-count bound trips", async () => {
     const { wss, port } = await startServer();
     const floodCount = 1024 + 200; // MAX_BUFFERED_FRAMES default + margin
