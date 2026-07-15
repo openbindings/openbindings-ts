@@ -2,7 +2,7 @@ import { WebSocketServer } from "ws";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { WSPool } from "./ws-pool.js";
 import { AsyncAPIInvoker } from "./invoker.js";
-import { FORMAT_TOKEN } from "./constants.js";
+import { BINDING_SPEC } from "./constants.js";
 
 // ---------------------------------------------------------------------------
 // Shared real WebSocket server fixture
@@ -118,7 +118,7 @@ describe("AsyncAPIInvoker WebSocket pool credential isolation (real ws server)",
 
   async function publish(invoker: AsyncAPIInvoker, bearerToken: string, seq: number) {
     const call = invoker.invokeBinding({
-      source: { format: FORMAT_TOKEN, content: spec() },
+      source: { bindingSpec: BINDING_SPEC, content: spec() },
       ref: "#/operations/publish",
       context: { bearerToken },
     });
@@ -147,7 +147,7 @@ describe("AsyncAPIInvoker WebSocket pool credential isolation (real ws server)",
     const invoker = new AsyncAPIInvoker();
     try {
       const call = invoker.invokeBinding({
-        source: { format: FORMAT_TOKEN, content: spec() },
+        source: { bindingSpec: BINDING_SPEC, content: spec() },
         ref: "#/operations/publish",
         context: { bearerToken: "tenant-zero" },
       });
@@ -204,7 +204,7 @@ describe("AsyncAPIInvoker first-frame bearer convention on send", () => {
     const invoker = new AsyncAPIInvoker();
     try {
       const call = invoker.invokeBinding({
-        source: { format: FORMAT_TOKEN, content: spec },
+        source: { bindingSpec: BINDING_SPEC, content: spec },
         ref: "#/operations/publish",
         context: { bearerToken: "tok" },
       });

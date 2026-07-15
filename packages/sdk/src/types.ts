@@ -33,14 +33,16 @@ export interface Operation {
   [key: string]: unknown;
 }
 
-/** Describes a binding source, identifying the format and where to find the API definition. */
+/** Describes a binding source: its governing binding specification and where to find the artifact. */
 export interface Source {
-  format: string;
+  /**
+   * The binding-specification identifier governing this source — exact and
+   * opaque (core §6: never dereferenced, never range-matched).
+   */
+  bindingSpec: string;
   location?: string;
   content?: unknown;
   description?: string;
-  /** Default preference for bindings referencing this source. Binding-level preference overrides. Higher wins; absent is treated as 0. */
-  preference?: number;
   [key: string]: unknown;
 }
 

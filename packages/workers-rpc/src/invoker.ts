@@ -1,7 +1,7 @@
 import type {
   BindingInvocationArgs,
   BindingInvoker,
-  FormatInfo,
+  BindingSpecInfo,
   Invocation,
 } from "@openbindings/sdk";
 import {
@@ -12,7 +12,7 @@ import {
   InvocationError,
   InvocationImpl,
 } from "@openbindings/sdk";
-import { FORMAT_TOKEN } from "./constants.js";
+import { BINDING_SPEC } from "./constants.js";
 
 /**
  * The shape of a Cloudflare service binding when the target Worker exposes
@@ -71,8 +71,8 @@ export interface WorkersRpcInvokerOptions {
  *
  * The `location` of a workers-rpc source is symbolic — there's no real
  * network dispatch, so the URL scheme `workers-rpc://` is a convention.
- * What matters for dispatch is the format token (`workers-rpc@^1.0.0`)
- * matching the invoker's `formats()` declaration.
+ * What matters for dispatch is the identifier (`workers-rpc@^1.0.0`)
+ * matching the invoker's `bindingSpecs()` declaration exactly.
  *
  * Trust model: Workers RPC bindings are a Cloudflare-runtime feature.
  * Only sibling Workers that have the binding declared in their wrangler.toml
@@ -100,9 +100,9 @@ export class WorkersRpcInvoker implements BindingInvoker {
     this.binding = options.binding;
   }
 
-  /** Returns the format tokens this invoker supports. */
-  formats(): FormatInfo[] {
-    return [{ token: FORMAT_TOKEN, description: "Cloudflare Workers RPC bindings" }];
+  /** Returns the binding specifications this invoker supports, by exact identifier. */
+  bindingSpecs(): BindingSpecInfo[] {
+    return [{ bindingSpec: BINDING_SPEC, description: "Cloudflare Workers RPC bindings" }];
   }
 
   /**

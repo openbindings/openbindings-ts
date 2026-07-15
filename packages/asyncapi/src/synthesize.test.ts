@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { convertToInterface } from "./synthesize.js";
+import { BINDING_SPEC } from "./constants.js";
 import { parseAsyncAPIDocument } from "./util.js";
 
 const MINIMAL_DOC = {
@@ -71,13 +72,13 @@ describe("convertToInterface", () => {
     expect(recvBinding.ref).toBe("#/operations/receiveEvents");
   });
 
-  it("creates source entry with asyncapi@<version> format", async () => {
+  it("creates source entry stamped with the exact binding-specification identifier", async () => {
     const doc = await parsedDoc(MINIMAL_DOC);
     const iface = await convertToInterface(undefined, doc);
 
     const source = iface.sources?.["asyncapi"];
     expect(source).toBeDefined();
-    expect(source!.format).toMatch(/^asyncapi@/);
+    expect(source!.bindingSpec).toBe(BINDING_SPEC);
   });
 
   it("sets source location only when provided", async () => {

@@ -10,8 +10,8 @@
  * The invoker implements the standard `BindingInvoker` interface from
  * `@openbindings/sdk` and slots into any OB codegen typed invoker. The
  * typed invoker is generated from an OBI document whose source declares
- * `format: "workers-rpc@^1.0.0"` and whose binding entries' `ref` field
- * is the method name on the WorkerEntrypoint class.
+ * `bindingSpec: "workers-rpc@^1.0.0"` and whose binding entries' `ref`
+ * field is the method name on the WorkerEntrypoint class.
  *
  * Example OBI source declaration:
  *
@@ -19,7 +19,7 @@
  * {
  *   "sources": {
  *     "myService": {
- *       "format": "workers-rpc@^1.0.0",
+ *       "bindingSpec": "workers-rpc@^1.0.0",
  *       "location": "workers-rpc://my-service"
  *     }
  *   },
@@ -36,4 +36,4 @@
 
 export { WorkersRpcInvoker } from "./invoker.js";
 export type { WorkersRpcBinding, WorkersRpcInvokerOptions } from "./invoker.js";
-export { FORMAT_TOKEN, DEFAULT_SOURCE_NAME } from "./constants.js";
+export { BINDING_SPEC, DEFAULT_SOURCE_NAME } from "./constants.js";

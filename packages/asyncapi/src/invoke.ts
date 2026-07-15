@@ -1382,7 +1382,7 @@ function siteFor(args: BindingInvocationArgs, serverURL: string): InvokeSite {
         operation: args.binding?.operation ?? "",
         invokedAs: args.binding?.operation ?? "",
         bindingKey: "",
-        format: args.source.format,
+        bindingSpec: args.source.bindingSpec,
         ref: args.ref,
         target: "",
       };

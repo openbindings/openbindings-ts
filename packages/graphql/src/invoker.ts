@@ -11,7 +11,7 @@ import {
   type BindingInvocationArgs,
   type BindingInvoker,
   type SynthesizeInput,
-  type FormatInfo,
+  type BindingSpecInfo,
   type InterfaceSynthesizer,
   type Invocation,
   type OBInterface,
@@ -19,7 +19,7 @@ import {
   type SourceInspection,
   type SourceInspector,
 } from "@openbindings/sdk";
-import { FORMAT_TOKEN } from "./constants.js";
+import { BINDING_SPEC } from "./constants.js";
 import {
   buildQueryFromIntrospection,
   inputToVariablesPassthrough,
@@ -61,8 +61,8 @@ async function readFirst<T>(it: AsyncIterable<T>): Promise<T | undefined> {
 export class GraphQLInvoker implements BindingInvoker {
   private readonly schemaCache = new Map<string, IntrospectionSchema>();
 
-  formats(): FormatInfo[] {
-    return [{ token: FORMAT_TOKEN, description: "GraphQL APIs" }];
+  bindingSpecs(): BindingSpecInfo[] {
+    return [{ bindingSpec: BINDING_SPEC, description: "GraphQL APIs" }];
   }
 
   invokeBinding<I = unknown, O = unknown>(args: BindingInvocationArgs): Invocation<I, O> {
@@ -225,8 +225,8 @@ function introspectionCacheKey(endpoint: string): string {
 
 /** Synthesizes OBInterface definitions by introspecting GraphQL endpoints. */
 export class GraphQLSynthesizer implements InterfaceSynthesizer, SourceInspector {
-  formats(): FormatInfo[] {
-    return [{ token: FORMAT_TOKEN, description: "GraphQL APIs" }];
+  bindingSpecs(): BindingSpecInfo[] {
+    return [{ bindingSpec: BINDING_SPEC, description: "GraphQL APIs" }];
   }
 
   async synthesizeInterface(

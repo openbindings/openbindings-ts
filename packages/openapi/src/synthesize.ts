@@ -1,5 +1,5 @@
 import type { OBInterface, Operation, BindingEntry, JSONSchema, Source, SynthesizerWarning } from "@openbindings/sdk";
-import { MAX_TESTED_VERSION, detectFormatVersion } from "@openbindings/sdk";
+import { MAX_TESTED_VERSION } from "@openbindings/sdk";
 import type {
   OpenAPIDocument,
   OpenAPIMediaType,
@@ -8,7 +8,7 @@ import type {
   OpenAPIRequestBody,
   OpenAPIResponse,
 } from "./types.js";
-import { DEFAULT_SOURCE_NAME } from "./constants.js";
+import { BINDING_SPEC, DEFAULT_SOURCE_NAME } from "./constants.js";
 import { translateSchemaDialect } from "./translate.js";
 import {
   buildJsonPointerRef,
@@ -29,10 +29,12 @@ export async function convertToInterface(
   // external, matching Go's kin-openapi loader), so extracted schemas are
   // already inlined here.
   const doc = await loadOpenAPIDocument(location, content, options);
-  const formatVersion = detectFormatVersion(doc.openapi ?? "3.0");
+  // The schema-dialect translation keys off the artifact's own declared
+  // version (3.0 vs 3.1); the identifier stays exact and version-free.
+  const formatVersion = majorMinor(doc.openapi ?? "3.0");
 
   const sourceEntry: Source = {
-    format: `openapi@${formatVersion}`,
+    bindingSpec: BINDING_SPEC,
   };
   if (location) sourceEntry.location = location;
 
@@ -239,4 +241,15 @@ function preferJsonMediaType(content: Record<string, OpenAPIMediaType>): OpenAPI
 
 function sortedEntries(obj: Record<string, unknown>): [string, unknown][] {
   return Object.entries(obj).sort(([a], [b]) => a.localeCompare(b));
+}
+
+/**
+ * Reduces an artifact version string to its major.minor form
+ * ("3.1.0" → "3.1") for dialect decisions. Mirrors the Go SDK's majorMinor
+ * (formats/openapi/synthesize.go).
+ */
+function majorMinor(version: string): string {
+  const parts = version.split(".");
+  if (parts.length >= 2) return `${parts[0]}.${parts[1]}`;
+  return version;
 }

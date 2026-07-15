@@ -3,7 +3,7 @@ import type { InvokeHooks, InvokeSite, OutputDecoder, ResultClassifier, FieldRou
 
 /** Identifies the binding source for invocation. */
 export interface InvocationSource {
-  format: string;
+  bindingSpec: string;
   location?: string;
   content?: unknown;
 }
@@ -77,7 +77,7 @@ export interface InvokeOptions {
 
 /** Describes a binding source for interface synthesis. */
 export interface SynthesizeSource {
-  format: string;
+  bindingSpec: string;
   name?: string;
   location?: string;
   content?: unknown;
@@ -116,9 +116,9 @@ export interface SynthesizerWarning {
   path?: string;
 }
 
-/** Describes a binding format supported by an invoker. */
-export interface FormatInfo {
-  token: string;
+/** Describes a binding specification supported by an invoker, by exact identifier. */
+export interface BindingSpecInfo {
+  bindingSpec: string;
   description?: string;
 }
 

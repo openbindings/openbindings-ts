@@ -1,7 +1,7 @@
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from "node:http";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { AsyncAPIInvoker } from "./invoker.js";
-import { FORMAT_TOKEN } from "./constants.js";
+import { BINDING_SPEC } from "./constants.js";
 
 // Regression coverage for the [assumption] documented in
 // spec/formats/asyncapi.md: "A channel without an `address` is assumed
@@ -46,7 +46,7 @@ describe("channel-address fallback", () => {
 
     const invoker = new AsyncAPIInvoker();
     const call = invoker.invokeBinding({
-      source: { format: FORMAT_TOKEN, content: spec },
+      source: { bindingSpec: BINDING_SPEC, content: spec },
       ref: "#/operations/notifyOp",
     });
     await call.write({});

@@ -1,6 +1,6 @@
 import { InvocationError, type Metadata } from "./invocation.js";
 import { ERR_EXECUTION_FAILED, ERR_RESPONSE_ERROR, ERR_RUNTIME } from "./errcodes.js";
-import { formatName } from "./helpers.js";
+import { familyName } from "./helpers.js";
 import type { JSONSchema } from "./types.js";
 
 // The consumer hook surface: specification + configuration = complete
@@ -13,15 +13,15 @@ import type { JSONSchema } from "./types.js";
 // questions identically.
 //
 // Generic SHAPE, protocol-specific HANDLING: one set of signatures serves
-// every format; the callback body switches on the site (formatName,
+// every format; the callback body switches on the site (siteFamilyName,
 // operation, target). Hooks are process-local — they never ride documents,
 // context, or the wire; each hop of a multi-hop composition configures
 // itself.
 
 /**
  * Identifies where a hook is being consulted: which operation, through
- * which binding, against which source format and target. Hook tables key
- * on its string fields.
+ * which binding, against which source's governing binding specification
+ * and target. Hook tables key on its string fields.
  *
  * `operation` is the RESOLVED CANONICAL operation key (post-OBI-T-12), so
  * tables keyed on it always fire regardless of the alias the caller used;
@@ -32,14 +32,19 @@ export interface InvokeSite {
   operation: string;
   invokedAs: string;
   bindingKey: string;
-  format: string;
+  bindingSpec: string;
   ref: string;
   target: string;
 }
 
-/** Bare format name of a site's source token ("openapi@3.1" → "openapi"). */
-export function siteFormatName(site: InvokeSite): string {
-  return formatName(site.format);
+/**
+ * Bare family name of a site's binding specification
+ * ("openbindings.openapi@1" → "openapi"; a pre-promotion draft token like
+ * "graphql" passes through), so hook bodies never string-match
+ * identifiers. Mirrors the Go SDK's InvokeSite.FamilyName.
+ */
+export function siteFamilyName(site: InvokeSite): string {
+  return familyName(site.bindingSpec);
 }
 
 /**
@@ -120,7 +125,7 @@ export interface PlanAxis {
 export interface InvocationPlan {
   operation: string;
   bindingKey: string;
-  format: string;
+  bindingSpec: string;
   ref?: string;
   target?: string;
   route?: Record<string, PlanAxis>;
@@ -337,7 +342,7 @@ async function runBuiltinDecode(
   if (!builtin) {
     throw new InvocationError(
       ERR_RUNTIME,
-      `openbindings: no decoder for format "${site.format}" (axis not consulted per its matrix row) and every hook declined`,
+      `openbindings: no decoder for format "${site.bindingSpec}" (axis not consulted per its matrix row) and every hook declined`,
     );
   }
   const v = await builtin(site, raw);
@@ -358,7 +363,7 @@ async function runBuiltinClassify(
   if (!builtin) {
     throw new InvocationError(
       ERR_RUNTIME,
-      `openbindings: no classifier for format "${site.format}" (axis not consulted per its matrix row) and every hook declined`,
+      `openbindings: no classifier for format "${site.bindingSpec}" (axis not consulted per its matrix row) and every hook declined`,
     );
   }
   const v = await builtin(site, raw);

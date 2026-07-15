@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://openbindings.com/schema/openbindings-0.2.0.json",
   "title": "OpenBindings Interface Document (v0.2.0)",
-  "description": "Canonical JSON Schema for the OpenBindings interface document.",
+  "description": "Derived JSON Schema for the OpenBindings interface document. Expresses the structural portion of the specification; where prose and schema conflict, the prose governs (see openbindings.md §10).",
   "type": "object",
   "required": [
     "openbindings",
@@ -12,15 +12,16 @@
     "openbindings": {
       "type": "string",
       "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$",
-      "description": "OpenBindings document format version. Semantic Versioning 2.0.0 (e.g., 0.2.0). Pattern validates SemVer syntax only: passing it does not mean a given tool accepts the version. Version refusal (higher major, and pre-1.0 higher minor) and prerelease opt-in are runtime tool behavior per OBI-T-04 and §11.1, keyed to the tool's supported range, and are not expressible in this schema."
+      "description": "OpenBindings specification version the document declares. Semantic Versioning 2.0.0 syntax (e.g., 0.2.0). Pattern validates syntax only: whether a processor supports the declared version is explicit implementation support per OBI-T-04 and §8.1, and is not expressible in this schema."
     },
     "name": {
       "type": "string",
-      "description": "Human-friendly interface name."
+      "description": "Human-friendly interface name. Not an identifier."
     },
     "version": {
       "type": "string",
-      "description": "Author-chosen label for the interface contract version. Not an identifier; does not participate in compatibility checking."
+      "minLength": 1,
+      "description": "Interface-version label: non-empty, author-controlled, opaque to the specification. No ordering, compatibility, or identity semantics."
     },
     "description": {
       "type": "string",
@@ -30,7 +31,7 @@
       "type": "object",
       "description": "Named JSON Schemas referenced by operations.",
       "propertyNames": {
-        "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$"
+        "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.-]*$"
       },
       "additionalProperties": {
         "$ref": "#/$defs/JSONSchema"
@@ -40,7 +41,7 @@
       "type": "object",
       "description": "Operation registry keyed by operation name.",
       "propertyNames": {
-        "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$"
+        "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.-]*$"
       },
       "additionalProperties": {
         "$ref": "#/$defs/Operation"
@@ -48,9 +49,9 @@
     },
     "sources": {
       "type": "object",
-      "description": "Map of sources: references to binding artifacts (e.g., an OpenAPI document, AsyncAPI document, or proto file), each identified by a format token and a location or embedded content.",
+      "description": "Map of sources: each names its governing binding specification (bindingSpec) and carries a location, embedded content, or both.",
       "propertyNames": {
-        "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$"
+        "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.-]*$"
       },
       "additionalProperties": {
         "$ref": "#/$defs/Source"
@@ -58,9 +59,9 @@
     },
     "bindings": {
       "type": "object",
-      "description": "Binding entries keyed by binding name, mapping operations to binding sources.",
+      "description": "Binding entries keyed by binding name, each an author-declared realization connecting an operation to a source.",
       "propertyNames": {
-        "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$"
+        "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.-]*$"
       },
       "additionalProperties": {
         "$ref": "#/$defs/BindingEntry"
@@ -68,9 +69,9 @@
     },
     "transforms": {
       "type": "object",
-      "description": "Named transforms. Each value is a JSONata expression string.",
+      "description": "Named transforms. Each value is a JSONata expression string (JSONata 2.1 per §5.5).",
       "propertyNames": {
-        "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$"
+        "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.-]*$"
       },
       "additionalProperties": {
         "type": "string"
@@ -80,15 +81,22 @@
   "additionalProperties": true,
   "$defs": {
     "JSONSchema": {
-      "type": "object",
-      "description": "JSON Schema 2020-12 object. Top-level constraints from §6.2 are enforced here (`$schema` value pinned, `$vocabulary` forbidden); recursive enforcement of nested subschemas is a tool concern.",
-      "properties": {
-        "$schema": {
-          "const": "https://json-schema.org/draft/2020-12/schema"
+      "description": "JSON Schema 2020-12 schema: object or boolean form. Top-level constraints from §5.2 are enforced on the object form here ($schema value pinned, $vocabulary forbidden); recursive enforcement (OBI-D-06/07) and meta-schema well-formedness (OBI-D-17) are prose rules beyond this schema.",
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "$schema": {
+              "const": "https://json-schema.org/draft/2020-12/schema"
+            },
+            "$vocabulary": false
+          },
+          "additionalProperties": true
         },
-        "$vocabulary": false
-      },
-      "additionalProperties": true
+        {
+          "type": "boolean"
+        }
+      ]
     },
     "Operation": {
       "type": "object",
@@ -99,7 +107,7 @@
         },
         "deprecated": {
           "type": "boolean",
-          "description": "Whether the operation is deprecated."
+          "description": "Whether the operation is deprecated (migration hint)."
         },
         "tags": {
           "type": "array",
@@ -110,36 +118,30 @@
         },
         "aliases": {
           "type": "array",
-          "description": "Additional names for this operation, equal in standing to its key. The key plus aliases form one flat, document-unique namespace; every name resolves to this operation.",
+          "description": "Additional names for this operation, equal in standing to its key. The key plus aliases form one flat, document-unique namespace; every name resolves to this operation. A shared contract's qualified name here claims correspondence with that contract's operation.",
           "uniqueItems": true,
           "items": {
             "type": "string",
-            "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$"
+            "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.-]*$"
           }
         },
         "idempotent": {
           "type": "boolean",
-          "description": "Whether the operation is idempotent (safe to retry)."
+          "description": "Author-attested effect claim: true asserts repetition with equivalent input under the same relevant context adds no intended operation-level effects; false asserts some repetition can; absent claims nothing. Not a retry-safety or cacheability authorization (§5.1)."
         },
         "input": {
-          "oneOf": [
-            { "$ref": "#/$defs/JSONSchema" },
-            { "type": "null" }
-          ],
-          "description": "Input schema. Null or absent means unspecified."
+          "$ref": "#/$defs/JSONSchema",
+          "description": "Contract on each caller-facing input value. Omit to leave unspecified; literal null is not valid at this position."
         },
         "output": {
-          "oneOf": [
-            { "$ref": "#/$defs/JSONSchema" },
-            { "type": "null" }
-          ],
-          "description": "Output schema. Null or absent means unspecified."
+          "$ref": "#/$defs/JSONSchema",
+          "description": "Contract on each successful caller-facing output value. Omit to leave unspecified; literal null is not valid at this position."
         },
         "examples": {
           "type": "object",
           "description": "Named examples for this operation.",
           "propertyNames": {
-            "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$"
+            "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.-]*$"
           },
           "additionalProperties": {
             "$ref": "#/$defs/OperationExample"
@@ -150,17 +152,17 @@
     },
     "OperationExample": {
       "type": "object",
-      "description": "An example input/output pair for an operation.",
+      "description": "An example input/output pair for an operation. Positive contract claims: provided values must validate against the corresponding specified schemas where the governing schema graph is document-internal (OBI-D-11). Member presence is distinct from value: an explicitly null member is a provided JSON null value.",
       "properties": {
         "description": {
           "type": "string",
           "description": "Human-readable description of this example."
         },
         "input": {
-          "description": "Example input value (must validate against input schema)."
+          "description": "Example input value."
         },
         "output": {
-          "description": "Example output value (must validate against output schema)."
+          "description": "Example output value."
         }
       },
       "additionalProperties": true
@@ -168,37 +170,29 @@
     "Source": {
       "type": "object",
       "required": [
-        "format"
+        "bindingSpec"
       ],
       "anyOf": [
         { "required": ["location"] },
         { "required": ["content"] }
       ],
       "properties": {
-        "format": {
+        "bindingSpec": {
           "type": "string",
           "minLength": 1,
-          "description": "Binding format token (e.g., openapi@3.1)."
+          "description": "Binding specification identifier: exact, opaque, non-empty string denoting the binding specification governing this source and its bindings (e.g., openbindings.openapi@1). Never implicitly dereferenced; no version algebra."
         },
         "location": {
           "type": "string",
           "minLength": 1,
-          "description": "Absolute URI or format-defined absolute address: the binding artifact, or — per the format's conventions — the live service it describes."
+          "description": "Binding-specification-defined absolute address associated with the source: an absolute URI or another absolute form the binding specification defines. Never a relative reference."
         },
         "content": {
-          "oneOf": [
-            { "type": "object" },
-            { "type": "string", "minLength": 1 }
-          ],
-          "description": "Binding artifact content, embedded directly. Object for JSON-based formats, string for text formats (e.g. KDL, protobuf). content always carries the artifact; a source carrying both location and content is interpreted per the binding format's conventions (OBI-T-15)."
+          "description": "Embedded source-artifact representation as any JSON value; the binding specification defines accepted values and their meaning. Member presence is distinct from value: content carrying JSON null is a present member for the location-or-content requirement."
         },
         "description": {
           "type": "string",
-          "description": "Human-readable description of this binding source."
-        },
-        "preference": {
-          "type": "number",
-          "description": "Default preference for all bindings referencing this source. Higher values are more preferred; absent is treated as 0. Binding-level preference overrides this value."
+          "description": "Human-readable description of this source."
         }
       },
       "additionalProperties": true
@@ -212,21 +206,23 @@
       "properties": {
         "operation": {
           "type": "string",
-          "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$",
+          "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.-]*$",
           "description": "Operation key referenced by this binding."
         },
         "source": {
           "type": "string",
-          "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$",
-          "description": "Binding source key from sources."
+          "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.-]*$",
+          "description": "Source key from sources."
         },
         "ref": {
           "type": "string",
-          "description": "Pointer into the binding artifact."
+          "description": "Selector into the source's artifact identifying the specific target. Syntax and meaning are the governing binding specification's concern."
         },
         "preference": {
-          "type": "number",
-          "description": "Relative binding preference (higher is more preferred; absent is treated as 0)."
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991,
+          "description": "Author preference signal among bindings of the same operation: higher is more preferred; equal values express no ordering; omission states no preference and is not equivalent to any numeric value. The specification defines no selection algorithm."
         },
         "description": {
           "type": "string",
@@ -234,15 +230,15 @@
         },
         "deprecated": {
           "type": "boolean",
-          "description": "If true, this binding is deprecated and an alternative should be preferred."
+          "description": "Author recommends migration away from this binding. A deprecated binding remains discoverable and actionable; no ordering relationship with preference is mandated."
         },
         "inputTransform": {
           "$ref": "#/$defs/TransformOrRef",
-          "description": "Transform from operation input schema to binding input structure."
+          "description": "Per-value transform from a caller-facing operation input value toward the source's expected input representation."
         },
         "outputTransform": {
           "$ref": "#/$defs/TransformOrRef",
-          "description": "Transform from binding output structure to operation output schema."
+          "description": "Per-value transform from a source output value toward the operation's output contract."
         }
       },
       "additionalProperties": true
@@ -259,8 +255,8 @@
           "properties": {
             "$ref": {
               "type": "string",
-              "pattern": "^#/transforms/[A-Za-z_][A-Za-z0-9_.-]*$",
-              "description": "JSON Pointer reference to a named transform (e.g., '#/transforms/myTransform')."
+              "pattern": "^#/transforms/[A-Za-z0-9_][A-Za-z0-9_.-]*$",
+              "description": "Same-document JSON Pointer reference in literal form to a named transform (e.g., '#/transforms/myTransform')."
             }
           },
           "additionalProperties": true

@@ -16,7 +16,7 @@ import { MCPInvoker, MCPSynthesizer } from "./invoker.js";
 // ---------------------------------------------------------------------------
 
 const ENDPOINT = "https://mcp.example.com/mcp";
-const source = { format: "mcp@2025-11-25", location: ENDPOINT };
+const source = { bindingSpec: "openbindings.mcp@1", location: ENDPOINT };
 
 interface RpcRequest {
   jsonrpc: string;
@@ -424,7 +424,7 @@ describe("MCPInvoker failures", () => {
     // syntactically valid non-http URL like ftp://).
     const { fn, fetches } = mcpServer(() => textResult("ok"));
     const call = new MCPInvoker().invokeBinding({
-      source: { format: "mcp@2025-11-25", location: "ftp://mcp.example.com" },
+      source: { bindingSpec: "openbindings.mcp@1", location: "ftp://mcp.example.com" },
       ref: "resources/file:///x",
       fetch: fn,
     });
@@ -436,7 +436,7 @@ describe("MCPInvoker failures", () => {
   it("fails a missing endpoint pre-dispatch with ERR_SOURCE_CONFIG_ERROR", async () => {
     const { fn, fetches } = mcpServer(() => textResult("ok"));
     const call = new MCPInvoker().invokeBinding({
-      source: { format: "mcp@2025-11-25" }, ref: "resources/file:///x", fetch: fn,
+      source: { bindingSpec: "openbindings.mcp@1" }, ref: "resources/file:///x", fetch: fn,
     });
 
     await expect(call.closed).rejects.toMatchObject({ code: ERR_SOURCE_CONFIG_ERROR });
@@ -529,12 +529,12 @@ describe("MCPSynthesizer", () => {
     // pushed {ref, operation} only -- operationKey was never set.
     const { fn: synthFetch } = discoveryServer();
     const iface = await new MCPSynthesizer({ fetch: synthFetch }).synthesizeInterface({
-      sources: [{ format: "mcp@2025-11-25", location: ENDPOINT }],
+      sources: [{ bindingSpec: "openbindings.mcp@1", location: ENDPOINT }],
     });
 
     const { fn: inspectFetch } = discoveryServer();
     const inspection = await new MCPSynthesizer({ fetch: inspectFetch }).inspectSource({
-      format: "mcp@2025-11-25",
+      bindingSpec: "openbindings.mcp@1",
       location: ENDPOINT,
     });
 
@@ -558,12 +558,12 @@ describe("MCPSynthesizer", () => {
     const synthesizer = new MCPSynthesizer({ fetch: fn });
 
     await synthesizer.synthesizeInterface({
-      sources: [{ format: "mcp@2025-11-25", location: ENDPOINT }],
+      sources: [{ bindingSpec: "openbindings.mcp@1", location: ENDPOINT }],
     });
     expect(fetches()).toBeGreaterThan(0);
 
     const before = fetches();
-    await synthesizer.inspectSource({ format: "mcp@2025-11-25", location: ENDPOINT });
+    await synthesizer.inspectSource({ bindingSpec: "openbindings.mcp@1", location: ENDPOINT });
     expect(fetches()).toBeGreaterThan(before);
   });
 });

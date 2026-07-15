@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { CONTEXT_REQUIRED, single } from "@openbindings/sdk";
 import { AsyncAPIInvoker, AsyncAPISynthesizer } from "./invoker.js";
-import { FORMAT_TOKEN, DEFAULT_SOURCE_NAME } from "./constants.js";
+import { BINDING_SPEC, DEFAULT_SOURCE_NAME } from "./constants.js";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -75,7 +75,7 @@ describe("AsyncAPIInvoker.prepareBinding", () => {
     };
 
     const details = await new AsyncAPIInvoker().prepareBinding({
-      source: { format: FORMAT_TOKEN, content: spec },
+      source: { bindingSpec: BINDING_SPEC, content: spec },
       ref: "#/operations/pub",
     });
 
@@ -106,7 +106,7 @@ describe("AsyncAPIInvoker.prepareBinding", () => {
     };
 
     const details = await new AsyncAPIInvoker().prepareBinding({
-      source: { format: FORMAT_TOKEN, content: spec },
+      source: { bindingSpec: BINDING_SPEC, content: spec },
       ref: "#/operations/pub",
     });
 
@@ -145,7 +145,7 @@ describe("AsyncAPIInvoker no-input publish refusal", () => {
     // this family defines no empty message (ASYNC-P-03). The refusal fires
     // before any dispatch, and never parks on a read.
     const call = new AsyncAPIInvoker().invokeBinding({
-      source: { format: FORMAT_TOKEN, content: spec },
+      source: { bindingSpec: BINDING_SPEC, content: spec },
       ref: "#/operations/notify",
       binding: { operation: "notify", source: "api", ref: "#/operations/notify" },
       fetch: fetchFn,
@@ -168,7 +168,7 @@ describe("AsyncAPISynthesizer content-fed synthesis", () => {
   it("embeds the provided content verbatim when the source has no location", async () => {
     const content = '{"asyncapi":"3.0.0","info":{"title":"T","version":"1.0.0"},"operations":{}}';
     const iface = await new AsyncAPISynthesizer().synthesizeInterface({
-      sources: [{ format: FORMAT_TOKEN, content }],
+      sources: [{ bindingSpec: BINDING_SPEC, content }],
     });
 
     const src = iface.sources?.[DEFAULT_SOURCE_NAME];
@@ -181,7 +181,7 @@ describe("AsyncAPISynthesizer content-fed synthesis", () => {
     const content = '{"asyncapi":"3.0.0","info":{"title":"T","version":"1.0.0"},"operations":{}}';
 
     const iface = await new AsyncAPISynthesizer().synthesizeInterface({
-      sources: [{ format: FORMAT_TOKEN, location: "https://example.com/spec.json", content }],
+      sources: [{ bindingSpec: BINDING_SPEC, location: "https://example.com/spec.json", content }],
     });
 
     const src = iface.sources?.[DEFAULT_SOURCE_NAME];
@@ -223,7 +223,7 @@ describe("context requirements — oauth2 flows (R2.b ruling)", () => {
       },
     });
     const details = await new AsyncAPIInvoker().prepareBinding({
-      source: { format: FORMAT_TOKEN, content: spec },
+      source: { bindingSpec: BINDING_SPEC, content: spec },
       ref: "#/operations/publish",
     });
     expect(details).toMatchObject({
@@ -250,7 +250,7 @@ describe("context requirements — oauth2 flows (R2.b ruling)", () => {
       password: { tokenUrl: "https://auth.example.com/pw/token" },
     });
     const details = await new AsyncAPIInvoker().prepareBinding({
-      source: { format: FORMAT_TOKEN, content: spec },
+      source: { bindingSpec: BINDING_SPEC, content: spec },
       ref: "#/operations/publish",
     });
     expect(details).toMatchObject({
@@ -275,7 +275,7 @@ describe("context requirements — oauth2 flows (R2.b ruling)", () => {
       },
     });
     const details = await new AsyncAPIInvoker().prepareBinding({
-      source: { format: FORMAT_TOKEN, content: spec },
+      source: { bindingSpec: BINDING_SPEC, content: spec },
       ref: "#/operations/publish",
     });
     expect(details).toMatchObject({
@@ -297,7 +297,7 @@ describe("context requirements — oauth2 flows (R2.b ruling)", () => {
   it("carries no grantType when the scheme declares no flows", async () => {
     const spec = oauth2Spec({});
     const details = await new AsyncAPIInvoker().prepareBinding({
-      source: { format: FORMAT_TOKEN, content: spec },
+      source: { bindingSpec: BINDING_SPEC, content: spec },
       ref: "#/operations/publish",
     });
     const req = (details as { alternatives: Array<{ requirements: Array<Record<string, unknown>> }> })
@@ -330,7 +330,7 @@ describe("context requirements — unmapped schemes surfaced (R2.c ruling)", () 
       components: { securitySchemes: { digestAuth: { type: "http", scheme: "digest" } } },
     };
     const details = await new AsyncAPIInvoker().prepareBinding({
-      source: { format: FORMAT_TOKEN, content: spec },
+      source: { bindingSpec: BINDING_SPEC, content: spec },
       ref: "#/operations/publish",
     });
     expect(details).toMatchObject({
@@ -353,7 +353,7 @@ describe("context requirements — unmapped schemes surfaced (R2.c ruling)", () 
       },
     };
     const details = await new AsyncAPIInvoker().prepareBinding({
-      source: { format: FORMAT_TOKEN, content: spec },
+      source: { bindingSpec: BINDING_SPEC, content: spec },
       ref: "#/operations/publish",
     });
     expect(details).toMatchObject({
@@ -385,7 +385,7 @@ describe("context requirements — unmapped schemes surfaced (R2.c ruling)", () 
     };
     const { fetch, requests } = mockFetch(() => jsonResponse({}));
     const call = new AsyncAPIInvoker().invokeBinding({
-      source: { format: FORMAT_TOKEN, content: spec },
+      source: { bindingSpec: BINDING_SPEC, content: spec },
       ref: "#/operations/publish",
       fetch,
     });
@@ -443,7 +443,7 @@ describe("context requirements — conjunctive server + operation security (ASYN
 
   it("pairs the server entry with the operation entry in one conjunctive alternative", async () => {
     const details = await new AsyncAPIInvoker().prepareBinding({
-      source: { format: FORMAT_TOKEN, content: conjunctiveSpec([{ $ref: "#/components/securitySchemes/key" }]) },
+      source: { bindingSpec: BINDING_SPEC, content: conjunctiveSpec([{ $ref: "#/components/securitySchemes/key" }]) },
       ref: "#/operations/publish",
     });
     expect(details?.alternatives).toHaveLength(1);
@@ -455,21 +455,21 @@ describe("context requirements — conjunctive server + operation security (ASYN
   it("neither credential alone satisfies; both together do", async () => {
     const spec = conjunctiveSpec([{ $ref: "#/components/securitySchemes/key" }]);
     const bearerOnly = await new AsyncAPIInvoker().prepareBinding({
-      source: { format: FORMAT_TOKEN, content: spec },
+      source: { bindingSpec: BINDING_SPEC, content: spec },
       ref: "#/operations/publish",
       context: { bearerToken: "t" },
     });
     expect(bearerOnly).not.toBeNull();
 
     const keyOnly = await new AsyncAPIInvoker().prepareBinding({
-      source: { format: FORMAT_TOKEN, content: spec },
+      source: { bindingSpec: BINDING_SPEC, content: spec },
       ref: "#/operations/publish",
       context: { apiKeys: { key: "k-1" } },
     });
     expect(keyOnly).not.toBeNull();
 
     const both = await new AsyncAPIInvoker().prepareBinding({
-      source: { format: FORMAT_TOKEN, content: spec },
+      source: { bindingSpec: BINDING_SPEC, content: spec },
       ref: "#/operations/publish",
       context: { bearerToken: "t", apiKeys: { key: "k-1" } },
     });
@@ -478,7 +478,7 @@ describe("context requirements — conjunctive server + operation security (ASYN
 
   it("a scheme declared on both levels is one requirement, not a duplicated conjunct", async () => {
     const details = await new AsyncAPIInvoker().prepareBinding({
-      source: { format: FORMAT_TOKEN, content: conjunctiveSpec([{ $ref: "#/components/securitySchemes/bearer" }]) },
+      source: { bindingSpec: BINDING_SPEC, content: conjunctiveSpec([{ $ref: "#/components/securitySchemes/bearer" }]) },
       ref: "#/operations/publish",
     });
     expect(details?.alternatives).toHaveLength(1);
@@ -519,7 +519,7 @@ describe("credential application — apiKeys keyed lookup (R2.d ruling)", () => 
     };
     const { fetch, requests } = mockFetch(() => jsonResponse({}));
     const call = new AsyncAPIInvoker().invokeBinding({
-      source: { format: FORMAT_TOKEN, content: spec },
+      source: { bindingSpec: BINDING_SPEC, content: spec },
       ref: "#/operations/publish",
       context: { apiKeys: { headerKey: "hk-1", queryKey: "qk-1" } },
       fetch,

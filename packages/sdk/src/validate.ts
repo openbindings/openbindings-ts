@@ -26,7 +26,7 @@ const KNOWN_OPERATION_FIELDS = new Set([
   "idempotent", "input", "output", "examples",
 ]);
 
-const KNOWN_SOURCE_FIELDS = new Set(["format", "location", "content", "description", "preference"]);
+const KNOWN_SOURCE_FIELDS = new Set(["bindingSpec", "location", "content", "description"]);
 const KNOWN_BINDING_FIELDS = new Set([
   "operation", "source", "ref", "preference", "description", "deprecated",
   "inputTransform", "outputTransform",
@@ -185,18 +185,18 @@ export function validateInterface(
     // OBI-D-03: source keys must match the identifier pattern.
     validateIdent(errs, "sources key", k);
     const src = iface.sources![k];
-    // The spec (§6.4) requires format to be a non-empty string but
-    // deliberately does not constrain its syntax; rejecting unrecognized
-    // format spellings at document level would violate OBI-T-01.
-    const fmtVal = (src.format ?? "").trim();
-    if (!fmtVal) {
-      errs.push(`sources["${k}"].format: required`);
+    // The spec requires bindingSpec to be a non-empty string but
+    // deliberately does not constrain its syntax; identifiers are exact and
+    // opaque (core §6), and rejecting unrecognized spellings at document
+    // level would violate OBI-T-01.
+    if (!(src.bindingSpec ?? "").trim()) {
+      errs.push(`sources["${k}"].bindingSpec: required`);
     }
     const hasLoc = !!(src.location ?? "").trim();
     const hasCnt = src.content != null;
     if (!hasLoc && !hasCnt) errs.push(`sources["${k}"]: must have location or content`);
     // OBI-D-05: sources[*].location must be a well-formed, absolute reference
-    // (absolute URI or a format-defined absolute address; never relative).
+    // (absolute URI or a bindingSpec-defined absolute address; never relative).
     if (hasLoc) {
       validateLocation(errs, `sources["${k}"].location`, src.location!);
     }

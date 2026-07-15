@@ -45,7 +45,7 @@ const BEARER_DETAILS: ContextRequiredDetails = {
 };
 
 interface MockOpts {
-  token?: string;
+  bindingSpec?: string;
   /** getUser challenges CONTEXT_REQUIRED when context lacks bearerToken (after reading its input). */
   requireBearer?: boolean;
   /** getUser challenges unconditionally, even with context (tests the retry cap). */
@@ -74,8 +74,8 @@ class MockBindingInvoker implements BindingInvoker {
     }
   }
 
-  formats() {
-    return [{ token: this.opts.token ?? "mock@1.0" }];
+  bindingSpecs() {
+    return [{ bindingSpec: this.opts.bindingSpec ?? "mock@1.0" }];
   }
 
   invokeBinding<I, O>(args: BindingInvocationArgs): Invocation<I, O> {
@@ -287,7 +287,7 @@ function testInterface(): OBInterface {
       uploadAuth: {},
     },
     sources: {
-      mock: { format: "mock@1.0", location: "mem://mock" },
+      mock: { bindingSpec: "mock@1.0", location: "mem://mock" },
     },
     bindings: {
       "ping.main": { operation: "ping", source: "mock", ref: "ping" },
@@ -355,14 +355,14 @@ describe("OperationInvoker wiring", () => {
       .toThrow(BindingNotFoundError);
   });
 
-  it("names the missing format in BindingNotFoundError when a binding's format has no registered invoker", () => {
-    // The operation HAS a binding, but its source format has no registered
+  it("names the missing binding spec in BindingNotFoundError when a binding's spec has no registered invoker", () => {
+    // The operation HAS a binding, but its governing binding spec has no registered
     // invoker. The error must send the reader to their OperationInvoker
     // construction, not to auditing the OBI.
     const iface: OBInterface = {
       openbindings: "0.2.0",
       operations: { doThing: {} },
-      sources: { svc: { format: "grpc@1.0" } },
+      sources: { svc: { bindingSpec: "grpc@1.0" } },
       bindings: { "doThing.svc": { operation: "doThing", source: "svc", ref: "x" } },
     };
     let msg = "";
@@ -373,8 +373,8 @@ describe("OperationInvoker wiring", () => {
       expect(e).toBeInstanceOf(BindingNotFoundError);
       msg = (e as Error).message;
     }
-    expect(msg).toContain('"doThing.svc" requires format grpc@1.0');
-    expect(msg).toContain("registered invoker formats: [openapi@3.1.0]");
+    expect(msg).toContain('"doThing.svc" requires binding spec grpc@1.0');
+    expect(msg).toContain("registered binding specs: [openapi@3.1.0]");
     expect(msg).toContain("OperationInvoker constructor");
   });
 
@@ -386,26 +386,26 @@ describe("OperationInvoker wiring", () => {
       .toThrow(UnknownSourceError);
   });
 
-  it("invokeBinding passthrough throws NoInvokerError for an unknown format", () => {
+  it("invokeBinding passthrough throws NoInvokerError for an unknown binding spec", () => {
     const op = makeInvoker();
     expect(() =>
-      op.invokeBinding({ source: { format: "unknown@1.0" }, ref: "x" }),
+      op.invokeBinding({ source: { bindingSpec: "unknown@1.0" }, ref: "x" }),
     ).toThrow(NoInvokerError);
   });
 
   it("surfaces a missing invoker as terminal ERR_BINDING_NOT_FOUND on the handle", async () => {
     const iface = testInterface();
-    iface.sources!["mock"]!.format = "absent@1.0";
-    // The default selector skips unavailable formats and throws; pin the
+    iface.sources!["mock"]!.bindingSpec = "absent@1.0";
+    // The default selector skips unavailable binding specs and throws; pin the
     // binding to force the wiring error onto the handle path.
     const op = makeInvoker();
     const call = op.invoke(iface, operationSignature("ping"), { bindingKey: "ping.main" });
     await expect(call.closed).rejects.toMatchObject({ code: ERR_BINDING_NOT_FOUND });
   });
 
-  it("routes by format token across multiple invokers", async () => {
-    const a = new MockBindingInvoker({ token: "mock@1.0" });
-    const b = new MockBindingInvoker({ token: "other@2.0" });
+  it("routes by exact binding-spec identifier across multiple invokers", async () => {
+    const a = new MockBindingInvoker({ bindingSpec: "mock@1.0" });
+    const b = new MockBindingInvoker({ bindingSpec: "other@2.0" });
     const op = new OperationInvoker([a, b], { transformEvaluator: evaluator });
     const call = op.invoke(testInterface(), operationSignature("ping"));
     await call.closed;
@@ -821,7 +821,7 @@ describe("defaultBindingSelector", () => {
     const iface: OBInterface = {
       openbindings: "0.2.0",
       operations: { op: {} },
-      sources: { s: { format: "openapi@3.1", location: "x" } },
+      sources: { s: { bindingSpec: "openapi@3.1", location: "x" } },
       bindings: {
         "op.deprecated": { operation: "op", source: "s", deprecated: true, preference: 10 },
         "op.fresh": { operation: "op", source: "s", preference: 1 },
@@ -835,9 +835,9 @@ describe("defaultBindingSelector", () => {
       openbindings: "0.2.0",
       operations: { op: {} },
       sources: {
-        plain: { format: "f@1", location: "x" },
+        plain: { bindingSpec: "f@1", location: "x" },
         // Source-level preference is retired core vocabulary and must be inert.
-        boosted: { format: "f@1", location: "y", preference: 100 },
+        boosted: { bindingSpec: "f@1", location: "y", preference: 100 },
       },
       bindings: {
         "op.declared": { operation: "op", source: "plain", preference: -5 },
@@ -851,7 +851,7 @@ describe("defaultBindingSelector", () => {
     const iface: OBInterface = {
       openbindings: "0.2.0",
       operations: { op: {} },
-      sources: { s: { format: "f@1", location: "x" } },
+      sources: { s: { bindingSpec: "f@1", location: "x" } },
       bindings: {
         "op.b": { operation: "op", source: "s" },
         "op.a": { operation: "op", source: "s" },
@@ -860,13 +860,13 @@ describe("defaultBindingSelector", () => {
     expect(defaultBindingSelector(iface, "op").key).toBe("op.a");
   });
 
-  it("skips bindings whose source format no registered invoker can handle", () => {
+  it("skips bindings whose binding spec no registered invoker can handle", () => {
     const iface: OBInterface = {
       openbindings: "0.2.0",
       operations: { op: {} },
       sources: {
-        supported: { format: "mock@1.0", location: "x" },
-        unsupported: { format: "exotic@9.9", location: "y" },
+        supported: { bindingSpec: "mock@1.0", location: "x" },
+        unsupported: { bindingSpec: "exotic@9.9", location: "y" },
       },
       bindings: {
         "op.exotic": { operation: "op", source: "unsupported", preference: 10 },

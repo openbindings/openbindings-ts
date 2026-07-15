@@ -13,7 +13,7 @@ function minimalInterface(): OBInterface {
       },
     },
     sources: {
-      main: { format: "openapi@3.1", location: "https://example.com/api.json" },
+      main: { bindingSpec: "openbindings.openapi@1", location: "https://example.com/api.json" },
     },
     bindings: {
       "getUser.main": {
@@ -56,7 +56,7 @@ describe("validateInterface", () => {
     "https://api.example.com/openapi.json",
   ])("accepts format-defined absolute address %s as a source location (OBI-D-05)", (addr) => {
     const iface = minimalInterface();
-    iface.sources!.main = { format: "grpc@1.0", location: addr };
+    iface.sources!.main = { bindingSpec: "openbindings.grpc@1", location: addr };
     delete iface.bindings;
     expect(() => validateInterface(iface)).not.toThrow();
   });
@@ -313,14 +313,15 @@ describe("validateInterface", () => {
     expect(() => validateInterface(iface)).toThrow(/OBI-D-10/);
   });
 
-  it("accepts any non-empty sources[*].format string at document level (OBI-T-01)", () => {
-    // Spec §6.4 deliberately does not constrain the format value beyond
-    // being a string; rejecting unrecognized spellings would make the
-    // document fail solely due to an unsupported binding format.
+  it("accepts any non-empty sources[*].bindingSpec string at document level (OBI-T-01)", () => {
+    // The spec deliberately does not constrain the bindingSpec value beyond
+    // being a non-empty string (identifiers are exact and opaque, core §6);
+    // rejecting unrecognized spellings would make the document fail solely
+    // due to an unsupported binding specification.
     const iface = minimalInterface();
-    iface.sources!.main.format = "workers_rpc@1.0";
+    iface.sources!.main.bindingSpec = "workers_rpc@1.0";
     expect(() => validateInterface(iface)).not.toThrow();
-    iface.sources!.main.format = "vnd custom";
+    iface.sources!.main.bindingSpec = "vnd custom";
     expect(() => validateInterface(iface)).not.toThrow();
   });
 
@@ -367,7 +368,7 @@ describe("validateInterface example validation (OBI-D-11)", () => {
       openbindings: "0.2.0",
       operations: { createUser: op as any },
       sources: {
-        main: { format: "openapi@3.1", location: "https://example.com/api.json" },
+        main: { bindingSpec: "openbindings.openapi@1", location: "https://example.com/api.json" },
       },
       bindings: {
         "createUser.main": { operation: "createUser", source: "main", ref: "#/paths/~1users/post" },
@@ -425,7 +426,7 @@ describe("validateInterface example validation (OBI-D-11)", () => {
         },
       },
       sources: {
-        main: { format: "openapi@3.1", location: "https://example.com/api.json" },
+        main: { bindingSpec: "openbindings.openapi@1", location: "https://example.com/api.json" },
       },
       bindings: {
         "noExamples.main": { operation: "noExamples", source: "main", ref: "#/paths/~1foo/get" },

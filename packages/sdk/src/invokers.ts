@@ -2,14 +2,14 @@ import type { OBInterface, BindingEntry, Source } from "./types.js";
 import type {
   BindingInvocationArgs,
   SynthesizeInput,
-  FormatInfo,
+  BindingSpecInfo,
   SourceInspection,
 } from "./invoker-types.js";
 import type { ContextRequiredDetails, Invocation } from "./invocation.js";
 
 /**
- * Invokes bindings against format-specific sources.
- * Implementations handle a specific binding format (e.g., OpenAPI, gRPC, MCP).
+ * Invokes bindings whose sources are governed by specific binding
+ * specifications (e.g., openbindings.openapi@1, openbindings.mcp@1).
  *
  * `invokeBinding` returns the {@link Invocation} handle synchronously and
  * creation is inert: no I/O happens during construction. The binding's work
@@ -17,7 +17,7 @@ import type { ContextRequiredDetails, Invocation } from "./invocation.js";
  * other pre-dispatch failure) before any observable side effect.
  */
 export interface BindingInvoker {
-  formats(): FormatInfo[];
+  bindingSpecs(): BindingSpecInfo[];
   invokeBinding<I = unknown, O = unknown>(args: BindingInvocationArgs): Invocation<I, O>;
   /**
    * Optional side-effect-free preflight: reports the context the binding
@@ -31,13 +31,14 @@ export interface BindingInvoker {
 }
 
 /**
- * Synthesizes OpenBindings interfaces from format-specific sources.
+ * Synthesizes OpenBindings interfaces from sources governed by its
+ * supported binding specifications.
  * Independent of {@link BindingInvoker} -- an implementation may provide one, the other, or both.
  * Synthesizers load sources fresh on every call; parsed-artifact caching belongs
  * to invokers (authoring wants freshness).
  */
 export interface InterfaceSynthesizer {
-  formats(): FormatInfo[];
+  bindingSpecs(): BindingSpecInfo[];
   synthesizeInterface(
     input: SynthesizeInput,
     options?: { signal?: AbortSignal },
@@ -49,7 +50,7 @@ export interface InterfaceSynthesizer {
  * can frame as OpenBindings operations.
  */
 export interface SourceInspector {
-  formats(): FormatInfo[];
+  bindingSpecs(): BindingSpecInfo[];
   inspectSource(
     source: Source,
     options?: { signal?: AbortSignal },

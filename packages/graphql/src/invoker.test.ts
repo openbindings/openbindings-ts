@@ -65,7 +65,7 @@ const testSchema: IntrospectionSchema = {
   ],
 };
 
-const source = { format: "graphql", location: ENDPOINT, content: testSchema };
+const source = { bindingSpec: "graphql", location: ENDPOINT, content: testSchema };
 
 interface CapturedRequest {
   url: string;
@@ -173,7 +173,7 @@ describe("GraphQLInvoker unary", () => {
   it("uses a prebuilt _query const and skips schema loading", async () => {
     const { fn, calls } = mockFetch(() => jsonResponse({ data: { users: [{ id: "1" }] } }));
     const call = new GraphQLInvoker().invokeBinding({
-      source: { format: "graphql", location: ENDPOINT }, // no inline content
+      source: { bindingSpec: "graphql", location: ENDPOINT }, // no inline content
       ref: "Query/users",
       inputSchema: {
         type: "object",
@@ -197,7 +197,7 @@ describe("GraphQLInvoker unary", () => {
   it("dispatches a prebuilt _query with no variable properties without input", async () => {
     const { fn, calls } = mockFetch(() => jsonResponse({ data: { users: [] } }));
     const call = new GraphQLInvoker().invokeBinding({
-      source: { format: "graphql", location: ENDPOINT },
+      source: { bindingSpec: "graphql", location: ENDPOINT },
       ref: "Query/users",
       inputSchema: {
         type: "object",
@@ -217,7 +217,7 @@ describe("GraphQLInvoker unary", () => {
         : jsonResponse({ data: { ping: "pong" } }),
     );
     const invoker = new GraphQLInvoker();
-    const src = { format: "graphql", location: ENDPOINT };
+    const src = { bindingSpec: "graphql", location: ENDPOINT };
 
     await expect(single(invoker.invokeBinding({ source: src, ref: "Query/ping", fetch: fn }).outputs)).resolves.toBe("pong");
     await expect(single(invoker.invokeBinding({ source: src, ref: "Query/ping", fetch: fn }).outputs)).resolves.toBe("pong");
@@ -234,8 +234,8 @@ describe("GraphQLInvoker unary", () => {
         : jsonResponse({ data: { ping: "pong" } }),
     );
     const invoker = new GraphQLInvoker();
-    const srcA = { format: "graphql", location: "https://api.example.com/graphql" };
-    const srcB = { format: "graphql", location: "https://api.example.com/tenant-b/graphql" };
+    const srcA = { bindingSpec: "graphql", location: "https://api.example.com/graphql" };
+    const srcB = { bindingSpec: "graphql", location: "https://api.example.com/tenant-b/graphql" };
 
     await expect(single(invoker.invokeBinding({ source: srcA, ref: "Query/ping", fetch: fn }).outputs)).resolves.toBe("pong");
     await expect(single(invoker.invokeBinding({ source: srcB, ref: "Query/ping", fetch: fn }).outputs)).resolves.toBe("pong");
@@ -253,8 +253,8 @@ describe("GraphQLInvoker unary", () => {
         : jsonResponse({ data: { ping: "pong" } }),
     );
     const invoker = new GraphQLInvoker();
-    const bare = { format: "graphql", location: "https://api.example.com/graphql" };
-    const trailingSlash = { format: "graphql", location: "https://api.example.com/graphql/" };
+    const bare = { bindingSpec: "graphql", location: "https://api.example.com/graphql" };
+    const trailingSlash = { bindingSpec: "graphql", location: "https://api.example.com/graphql/" };
 
     await expect(single(invoker.invokeBinding({ source: bare, ref: "Query/ping", fetch: fn }).outputs)).resolves.toBe("pong");
     await expect(single(invoker.invokeBinding({ source: trailingSlash, ref: "Query/ping", fetch: fn }).outputs)).resolves.toBe("pong");
@@ -331,7 +331,7 @@ describe("GraphQLInvoker unary", () => {
   it("fails a missing endpoint pre-dispatch with ERR_SOURCE_LOAD_FAILED", async () => {
     const { fn, calls } = mockFetch(() => jsonResponse({ data: {} }));
     const call = new GraphQLInvoker().invokeBinding({
-      source: { format: "graphql" }, ref: "Query/ping", fetch: fn,
+      source: { bindingSpec: "graphql" }, ref: "Query/ping", fetch: fn,
     });
 
     await expect(call.closed).rejects.toMatchObject({ code: ERR_SOURCE_LOAD_FAILED });
@@ -368,7 +368,7 @@ describe("GraphQLInvoker unary", () => {
         init?.signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")), { once: true });
       });
     const call = new GraphQLInvoker().invokeBinding({
-      source: { format: "graphql", location: ENDPOINT }, // forces introspection
+      source: { bindingSpec: "graphql", location: ENDPOINT }, // forces introspection
       ref: "Query/ping",
       fetch: fn,
     });
@@ -557,7 +557,7 @@ describe("GraphQLSynthesizer inspectSource", () => {
   it("suggests the same operationKey synthesizeInterface would assign (Go parity)", async () => {
     vi.stubGlobal("fetch", async () => jsonResponse({ data: { __schema: testSchema } }));
 
-    const insp = await new GraphQLSynthesizer().inspectSource({ format: "graphql", location: ENDPOINT });
+    const insp = await new GraphQLSynthesizer().inspectSource({ bindingSpec: "graphql", location: ENDPOINT });
     const byRef = new Map(insp.targets.map((t) => [t.ref, t]));
 
     expect(byRef.get("Query/user")?.operationKey).toBe("user");

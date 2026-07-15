@@ -361,7 +361,7 @@ describe("storeContextResolver", () => {
 
 function echoContextInvoker(seen: (Record<string, unknown> | undefined)[]): BindingInvoker {
   return {
-    formats: () => [{ token: "mock@1.0" }],
+    bindingSpecs: () => [{ bindingSpec: "mock@1.0" }],
     invokeBinding<I, O>(args: BindingInvocationArgs): Invocation<I, O> {
       const inv = new InvocationImpl<unknown, unknown>({ signal: args.signal });
       seen.push(args.context);
@@ -378,7 +378,7 @@ function echoContextInvoker(seen: (Record<string, unknown> | undefined)[]): Bind
 const iface: OBInterface = {
   openbindings: "0.2.0",
   operations: { ping: {} },
-  sources: { mock: { format: "mock@1.0", location: "mem://" } },
+  sources: { mock: { bindingSpec: "mock@1.0", location: "mem://" } },
   bindings: { "ping.main": { operation: "ping", source: "mock", ref: "ping" } },
 };
 
@@ -402,10 +402,10 @@ describe("context flow", () => {
     expect(seen).toHaveLength(1); // shared registry still routes
   });
 
-  it("formats() returns a defensive copy", () => {
+  it("bindingSpecs() returns a defensive copy", () => {
     const op = new OperationInvoker([echoContextInvoker([])]);
-    const a = op.formats();
-    a.push({ token: "junk@0.0" });
-    expect(op.formats()).toHaveLength(1);
+    const a = op.bindingSpecs();
+    a.push({ bindingSpec: "junk@0.0" });
+    expect(op.bindingSpecs()).toHaveLength(1);
   });
 });

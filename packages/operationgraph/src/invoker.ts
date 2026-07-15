@@ -10,7 +10,7 @@
 import type {
   BindingInvocationArgs,
   BindingInvoker,
-  FormatInfo,
+  BindingSpecInfo,
   Invocation,
   OperationInvoker,
 } from "@openbindings/sdk";
@@ -25,7 +25,7 @@ import {
   InvocationImpl,
   isHttpUrl,
 } from "@openbindings/sdk";
-import { FORMAT_TOKEN } from "./constants.js";
+import { BINDING_SPEC } from "./constants.js";
 import { Engine } from "./engine.js";
 import { RefError, resolveRef } from "./jsonpointer.js";
 import { SchemaCache } from "./state.js";
@@ -48,8 +48,8 @@ export class OperationGraphInvoker implements BindingInvoker {
     this.invoker = invoker;
   }
 
-  formats(): FormatInfo[] {
-    return [{ token: FORMAT_TOKEN, description: "OpenBindings operation graphs" }];
+  bindingSpecs(): BindingSpecInfo[] {
+    return [{ bindingSpec: BINDING_SPEC, description: "OpenBindings operation graphs" }];
   }
 
   /**

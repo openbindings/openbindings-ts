@@ -50,7 +50,7 @@ const TEST_OBI: OBInterface = {
       output: { type: "object", properties: { ok: { type: "boolean" }, id: { type: "string" } } },
     },
   },
-  sources: { rpc: { format: "workers-rpc@^1.0.0", location: "workers-rpc://test-service" } },
+  sources: { rpc: { bindingSpec: "workers-rpc@^1.0.0", location: "workers-rpc://test-service" } },
   bindings: {
     "ping.rpc": { operation: "ping", source: "rpc", ref: "ping" },
     "addItem.rpc": { operation: "addItem", source: "rpc", ref: "addItem" },

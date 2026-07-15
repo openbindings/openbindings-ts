@@ -1,70 +1,37 @@
 import type { BindingInvoker, InterfaceSynthesizer, SourceInspector } from "./invokers.js";
 import type {
   BindingInvocationArgs,
-  FormatInfo,
+  BindingSpecInfo,
   SynthesizeInput,
   SourceInspection,
 } from "./invoker-types.js";
 import type { ContextRequiredDetails, Invocation } from "./invocation.js";
 import type { OBInterface, Source } from "./types.js";
-import { type VersionRange, parseRange, matchesRange } from "./format-token.js";
-import { formatName } from "./helpers.js";
 import { NoInvokerError, NoSynthesizerError, NoSourcesError } from "./errors.js";
-
-interface InvokerEntry {
-  range: VersionRange;
-  invoker: BindingInvoker;
-  info: FormatInfo;
-}
-
-interface SynthesizerEntry {
-  range: VersionRange;
-  synthesizer: InterfaceSynthesizer;
-  info: FormatInfo;
-}
-
-interface InspectorEntry {
-  range: VersionRange;
-  inspector: SourceInspector;
-  info: FormatInfo;
-}
 
 /**
  * Returns a single BindingInvoker that routes to the appropriate inner
- * invoker based on the source format token. First match wins.
+ * invoker by the source's binding-specification identifier. Identifiers are
+ * exact and opaque (core §6): matching is string equality, never
+ * version-range interpretation. First registration wins for a given
+ * identifier; order matters.
  */
 export interface CombinedInvoker extends BindingInvoker {
-  /** Register an additional invoker after construction. First match wins. */
+  /** Register an additional invoker after construction. First registration wins per identifier. */
   add(invoker: BindingInvoker): void;
   /** Always present on the combiner: routes to the inner invoker's preflight, or reports no requirement. */
   prepareBinding(args: BindingInvocationArgs): Promise<ContextRequiredDetails | null>;
 }
 
 export function combineInvokers(...invokers: BindingInvoker[]): CombinedInvoker {
-  const entries: InvokerEntry[] = [];
-  const byName = new Map<string, number[]>();
-  const allFormats: FormatInfo[] = [];
+  const bySpec = new Map<string, BindingInvoker>(); // exact identifier -> invoker
+  const specs: BindingSpecInfo[] = [];
 
   function register(invoker: BindingInvoker): void {
-    for (const info of invoker.formats()) {
-      let range: VersionRange;
-      try {
-        range = parseRange(info.token);
-      } catch {
-        continue;
-      }
-
-      const idx = entries.length;
-      entries.push({ range, invoker, info });
-
-      const indices = byName.get(range.name);
-      if (indices) {
-        indices.push(idx);
-      } else {
-        byName.set(range.name, [idx]);
-      }
-
-      allFormats.push(info);
+    for (const info of invoker.bindingSpecs()) {
+      if (bySpec.has(info.bindingSpec)) continue; // first registration wins
+      bySpec.set(info.bindingSpec, invoker);
+      specs.push(info);
     }
   }
 
@@ -72,34 +39,21 @@ export function combineInvokers(...invokers: BindingInvoker[]): CombinedInvoker 
     register(invoker);
   }
 
-  function findInvoker(sourceFormat: string): BindingInvoker | undefined {
-    const name = formatName(sourceFormat);
-    const indices = byName.get(name);
-    if (!indices) return undefined;
-    for (const idx of indices) {
-      const entry = entries[idx];
-      if (entry.info.token === sourceFormat || matchesRange(entry.range, sourceFormat)) {
-        return entry.invoker;
-      }
-    }
-    return undefined;
-  }
-
   return {
     add: register,
-    formats(): FormatInfo[] {
-      return [...allFormats];
+    bindingSpecs(): BindingSpecInfo[] {
+      return [...specs];
     },
     invokeBinding<I, O>(args: BindingInvocationArgs): Invocation<I, O> {
-      const invoker = findInvoker(args.source.format);
+      const invoker = bySpec.get(args.source.bindingSpec);
       // A missing invoker is a wiring error, knowable synchronously: throw
       // rather than returning a pre-errored handle.
-      if (!invoker) throw new NoInvokerError(args.source.format);
+      if (!invoker) throw new NoInvokerError(args.source.bindingSpec);
       return invoker.invokeBinding<I, O>(args);
     },
     async prepareBinding(args: BindingInvocationArgs): Promise<ContextRequiredDetails | null> {
-      const invoker = findInvoker(args.source.format);
-      if (!invoker) throw new NoInvokerError(args.source.format);
+      const invoker = bySpec.get(args.source.bindingSpec);
+      if (!invoker) throw new NoInvokerError(args.source.bindingSpec);
       // An invoker without preflight support simply reports no requirement.
       return invoker.prepareBinding ? invoker.prepareBinding(args) : null;
     },
@@ -108,60 +62,32 @@ export function combineInvokers(...invokers: BindingInvoker[]): CombinedInvoker 
 
 /**
  * Returns a single InterfaceSynthesizer that routes to the appropriate inner
- * synthesizer based on the source format token. First match wins.
+ * synthesizer by the source's binding-specification identifier (exact
+ * match). First registration wins for a given identifier; order matters.
  */
 export function combineSynthesizers(...synthesizers: InterfaceSynthesizer[]): InterfaceSynthesizer {
-  const entries: SynthesizerEntry[] = [];
-  const byName = new Map<string, number[]>();
-  const allFormats: FormatInfo[] = [];
+  const bySpec = new Map<string, InterfaceSynthesizer>(); // exact identifier -> synthesizer
+  const specs: BindingSpecInfo[] = [];
 
   for (const synthesizer of synthesizers) {
-    for (const info of synthesizer.formats()) {
-      let range: VersionRange;
-      try {
-        range = parseRange(info.token);
-      } catch {
-        continue;
-      }
-
-      const idx = entries.length;
-      entries.push({ range, synthesizer, info });
-
-      const indices = byName.get(range.name);
-      if (indices) {
-        indices.push(idx);
-      } else {
-        byName.set(range.name, [idx]);
-      }
-
-      allFormats.push(info);
+    for (const info of synthesizer.bindingSpecs()) {
+      if (bySpec.has(info.bindingSpec)) continue; // first registration wins
+      bySpec.set(info.bindingSpec, synthesizer);
+      specs.push(info);
     }
-  }
-
-  function findSynthesizer(sourceFormat: string): InterfaceSynthesizer | undefined {
-    const name = formatName(sourceFormat);
-    const indices = byName.get(name);
-    if (!indices) return undefined;
-    for (const idx of indices) {
-      const entry = entries[idx];
-      if (entry.info.token === sourceFormat || matchesRange(entry.range, sourceFormat)) {
-        return entry.synthesizer;
-      }
-    }
-    return undefined;
   }
 
   return {
-    formats(): FormatInfo[] {
-      return [...allFormats];
+    bindingSpecs(): BindingSpecInfo[] {
+      return [...specs];
     },
     async synthesizeInterface(
       input: SynthesizeInput,
       options?: { signal?: AbortSignal },
     ): Promise<OBInterface> {
       if (!input.sources?.length) throw new NoSourcesError();
-      const synthesizer = findSynthesizer(input.sources[0].format);
-      if (!synthesizer) throw new NoSynthesizerError(input.sources[0].format);
+      const synthesizer = bySpec.get(input.sources[0].bindingSpec);
+      if (!synthesizer) throw new NoSynthesizerError(input.sources[0].bindingSpec);
       return synthesizer.synthesizeInterface(input, options);
     },
   };
@@ -169,59 +95,31 @@ export function combineSynthesizers(...synthesizers: InterfaceSynthesizer[]): In
 
 /**
  * Returns a single SourceInspector that routes to the appropriate inner
- * inspector based on the source format token. First match wins.
+ * inspector by the source's binding-specification identifier (exact match).
+ * First registration wins for a given identifier; order matters.
  */
 export function combineSourceInspectors(...inspectors: SourceInspector[]): SourceInspector {
-  const entries: InspectorEntry[] = [];
-  const byName = new Map<string, number[]>();
-  const allFormats: FormatInfo[] = [];
+  const bySpec = new Map<string, SourceInspector>(); // exact identifier -> inspector
+  const specs: BindingSpecInfo[] = [];
 
   for (const inspector of inspectors) {
-    for (const info of inspector.formats()) {
-      let range: VersionRange;
-      try {
-        range = parseRange(info.token);
-      } catch {
-        continue;
-      }
-
-      const idx = entries.length;
-      entries.push({ range, inspector, info });
-
-      const indices = byName.get(range.name);
-      if (indices) {
-        indices.push(idx);
-      } else {
-        byName.set(range.name, [idx]);
-      }
-
-      allFormats.push(info);
+    for (const info of inspector.bindingSpecs()) {
+      if (bySpec.has(info.bindingSpec)) continue; // first registration wins
+      bySpec.set(info.bindingSpec, inspector);
+      specs.push(info);
     }
-  }
-
-  function findInspector(sourceFormat: string): SourceInspector | undefined {
-    const name = formatName(sourceFormat);
-    const indices = byName.get(name);
-    if (!indices) return undefined;
-    for (const idx of indices) {
-      const entry = entries[idx];
-      if (entry.info.token === sourceFormat || matchesRange(entry.range, sourceFormat)) {
-        return entry.inspector;
-      }
-    }
-    return undefined;
   }
 
   return {
-    formats(): FormatInfo[] {
-      return [...allFormats];
+    bindingSpecs(): BindingSpecInfo[] {
+      return [...specs];
     },
     async inspectSource(
       source: Source,
       options?: { signal?: AbortSignal },
     ): Promise<SourceInspection> {
-      const inspector = findInspector(source.format);
-      if (!inspector) throw new NoSynthesizerError(source.format);
+      const inspector = bySpec.get(source.bindingSpec);
+      if (!inspector) throw new NoSynthesizerError(source.bindingSpec);
       return inspector.inspectSource(source, options);
     },
   };

@@ -1,7 +1,7 @@
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from "node:http";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { AsyncAPIInvoker } from "./invoker.js";
-import { FORMAT_TOKEN } from "./constants.js";
+import { BINDING_SPEC } from "./constants.js";
 
 // Regression coverage for spec/formats/asyncapi.md's Open points: "the
 // reference packages cap events/responses at 10 MiB per delivery unit
@@ -50,7 +50,7 @@ describe("SSE receive size cap is per-event, not cumulative", () => {
 
     const invoker = new AsyncAPIInvoker();
     const call = invoker.invokeBinding({
-      source: { format: FORMAT_TOKEN, content: spec("/") },
+      source: { bindingSpec: BINDING_SPEC, content: spec("/") },
       ref: "#/operations/receiveCaps",
     });
     const events: unknown[] = [];
@@ -78,7 +78,7 @@ describe("SSE receive size cap is per-event, not cumulative", () => {
 
     const invoker = new AsyncAPIInvoker();
     const call = invoker.invokeBinding({
-      source: { format: FORMAT_TOKEN, content: spec("/") },
+      source: { bindingSpec: BINDING_SPEC, content: spec("/") },
       ref: "#/operations/receiveCaps",
     });
 

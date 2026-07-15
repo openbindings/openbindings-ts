@@ -1,5 +1,5 @@
-/** Semver format token identifying AsyncAPI 3.x bindings. */
-export const FORMAT_TOKEN = "asyncapi@^3.0.0";
+/** The binding-specification identifier this package implements (exact and opaque, core §6). */
+export const BINDING_SPEC = "openbindings.asyncapi@1";
 
 /** Default source key used when generating OBInterface entries from AsyncAPI docs. */
 export const DEFAULT_SOURCE_NAME = "asyncapi";

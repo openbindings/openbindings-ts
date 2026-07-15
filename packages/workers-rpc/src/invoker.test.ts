@@ -8,12 +8,12 @@ import {
   single,
 } from "@openbindings/sdk";
 import { WorkersRpcInvoker, type WorkersRpcBinding } from "./invoker.js";
-import { FORMAT_TOKEN } from "./constants.js";
+import { BINDING_SPEC } from "./constants.js";
 
 // Helper: minimal BindingInvocationArgs for the tests.
 function args(ref: string, extra?: Partial<BindingInvocationArgs>): BindingInvocationArgs {
   return {
-    source: { format: FORMAT_TOKEN, location: "workers-rpc://test" },
+    source: { bindingSpec: BINDING_SPEC, location: "workers-rpc://test" },
     ref,
     ...extra,
   };
@@ -31,13 +31,13 @@ async function callOnce(
   return single(call.outputs);
 }
 
-describe("WorkersRpcInvoker.formats", () => {
-  it("declares workers-rpc@^1.0.0 as the supported format token", () => {
+describe("WorkersRpcInvoker.bindingSpecs", () => {
+  it("declares workers-rpc@^1.0.0 as its identifier (draft token until promotion)", () => {
     const invoker = new WorkersRpcInvoker({ binding: {} });
-    const formats = invoker.formats();
-    expect(formats).toHaveLength(1);
-    expect(formats[0].token).toBe(FORMAT_TOKEN);
-    expect(formats[0].description).toBeTypeOf("string");
+    const specs = invoker.bindingSpecs();
+    expect(specs).toHaveLength(1);
+    expect(specs[0].bindingSpec).toBe(BINDING_SPEC);
+    expect(specs[0].description).toBeTypeOf("string");
   });
 });
 

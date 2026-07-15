@@ -11,10 +11,10 @@ function nonObiFetch(): typeof globalThis.fetch {
     })) as unknown as typeof globalThis.fetch;
 }
 
-/** A synthesizer that always throws for its one format. */
-function failingSynthesizer(token: string, err: string): InterfaceSynthesizer {
+/** A synthesizer that always throws for its one binding specification. */
+function failingSynthesizer(bindingSpec: string, err: string): InterfaceSynthesizer {
   return {
-    formats: () => [{ token }],
+    bindingSpecs: () => [{ bindingSpec }],
     synthesizeInterface: async () => {
       throw new Error(err);
     },

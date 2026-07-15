@@ -35,7 +35,7 @@ export type {
   SynthesizeSource,
   SynthesizeInput,
   SynthesizerWarning,
-  FormatInfo,
+  BindingSpecInfo,
   BindableTarget,
   SourceInspection,
 } from "./invoker-types.js";
@@ -122,18 +122,6 @@ export {
   isUnsupportedPrerelease,
 } from "./version.js";
 
-export type { FormatToken, VersionRange, RangeKind } from "./format-token.js";
-export {
-  parseFormatToken,
-  isFormatToken,
-  normalizeFormatToken,
-  formatTokenToString,
-  isValidFormatName,
-  isOpenBindingsToken,
-  parseRange,
-  matchesRange,
-} from "./format-token.js";
-
 export { canonicalize } from "./canonical-json.js";
 
 export { canonicalizeLocation, resolveRef, unknownFields } from "./uri.js";
@@ -147,7 +135,7 @@ export type { CompatibilityIssue } from "./compatibility.js";
 export { resolveOperation, allOperationIdentifiers } from "./resolve-operation.js";
 export type { ResolvedOperation } from "./resolve-operation.js";
 
-export { formatName, isJSONContentType, detectFormatVersion, isHttpUrl } from "./helpers.js";
+export { familyName, isJSONContentType, isHttpUrl } from "./helpers.js";
 
 export {
   InvokeHooks,
@@ -158,7 +146,7 @@ export {
   floorStamped,
   newInvokeHooks,
   nonDiscriminatingOutput,
-  siteFormatName,
+  siteFamilyName,
 } from "./hooks.js";
 export type {
   BindingPlan,
