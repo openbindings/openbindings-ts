@@ -58,61 +58,79 @@ async function drainOutputs(call: Invocation): Promise<{ vals: unknown[]; err: u
 // slower than local hardware, and vitest's 5s default flakes there.
 describe("WS receive backpressure", { timeout: 30_000 }, () => {
   it("fails the subscription loudly when the frame-count bound trips", async () => {
-    const { wss, port } = await startServer();
-    const floodCount = 1024 + 200; // MAX_BUFFERED_FRAMES default + margin
-    let resolveFloodDone!: () => void;
-    const floodDone = new Promise<void>((resolve) => {
-      resolveFloodDone = resolve;
-    });
-
-    wss.on("connection", (ws) => {
-      // Wait for the client's first frame: guarantees the subscription's
-      // onMessage handler is registered (it's registered, synchronously,
-      // strictly before the input pump that could ever get a frame out to
-      // the socket) before the flood starts, so no early frame is lost to
-      // a race with subscription setup.
-      ws.once("message", () => {
-        for (let i = 0; i < floodCount; i++) {
-          ws.send(JSON.stringify({ n: i }));
-        }
-        resolveFloodDone();
-      });
-    });
-
-    const invoker = new AsyncAPIInvoker();
+    // Lowered bound (the test seam, mirroring the Go suite): with a bound
+    // far below the frames one TCP segment carries, a single synchronous
+    // ws-dispatch burst (frames parsed from one chunk fire back-to-back
+    // with no microtask turn between them) is guaranteed to trip the bound
+    // before the drain loop can interleave — deterministic on any runner.
+    // At the 1024 default, a slow runner could interleave delivery with the
+    // drain, keep pace, never trip, and hang on a socket nobody closes.
+    const bound = 64;
+    const restoreBounds = setBackpressureBoundsForTest(bound, 1_000_000);
     try {
-      const call = invoker.invokeBinding({
-        source: { format: FORMAT_TOKEN, content: spec(port) },
-        ref: "#/operations/subscribe",
+      const { wss, port } = await startServer();
+      const floodCount = 512;
+      let resolveFloodDone!: () => void;
+      const floodDone = new Promise<void>((resolve) => {
+        resolveFloodDone = resolve;
       });
-      await call.write({ ready: true });
 
-      // Let the flood land in the buffer before this test ever iterates
-      // outputs: the handle's own output buffer is only OUTPUT_BUFFER_CAPACITY
-      // (4) deep, so it's the runWSReceive-local `frames` buffer under test
-      // that has to absorb the rest.
-      await floodDone;
+      wss.on("connection", (ws) => {
+        // Wait for the client's first frame: guarantees the subscription's
+        // onMessage handler is registered (it's registered, synchronously,
+        // strictly before the input pump that could ever get a frame out to
+        // the socket) before the flood starts, so no early frame is lost to
+        // a race with subscription setup.
+        ws.once("message", () => {
+          for (let i = 0; i < floodCount; i++) {
+            ws.send(JSON.stringify({ n: i }));
+          }
+          // Hang-guard: close after the flood so a hypothetical no-overflow
+          // run ends in a visible assertion failure, never a parked drain.
+          ws.close();
+          resolveFloodDone();
+        });
+      });
 
-      const { vals, err } = await drainOutputs(call);
-      expect(err).toBeInstanceOf(Error);
-      expect((err as { code?: string }).code).toBe("ERR_STREAM_ERROR");
-      expect((err as Error).message).toBe("backpressure overflow: more than 1024 undelivered frames");
-      // Drain-before-terminal: some already-buffered frames were delivered
-      // ahead of the terminal error, but never everything the flood sent —
-      // some frames were genuinely dropped by the overflow.
-      expect(vals.length).toBeGreaterThan(0);
-      expect(vals.length).toBeLessThan(floodCount);
+      const invoker = new AsyncAPIInvoker();
+      try {
+        const call = invoker.invokeBinding({
+          source: { format: FORMAT_TOKEN, content: spec(port) },
+          ref: "#/operations/subscribe",
+        });
+        await call.write({ ready: true });
+
+        // Let the flood land in the buffer before this test ever iterates
+        // outputs: the handle's own output buffer is only
+        // OUTPUT_BUFFER_CAPACITY (4) deep, so it's the subscription-local
+        // `frames` buffer under test that has to absorb the rest.
+        await floodDone;
+
+        const { vals, err } = await drainOutputs(call);
+        expect(err).toBeInstanceOf(Error);
+        expect((err as { code?: string }).code).toBe("ERR_STREAM_ERROR");
+        expect((err as Error).message).toBe(`backpressure overflow: more than ${bound} undelivered frames`);
+        // Drain-before-terminal: some already-buffered frames were delivered
+        // ahead of the terminal error, but never everything the flood sent —
+        // some frames were genuinely dropped by the overflow.
+        expect(vals.length).toBeGreaterThan(0);
+        expect(vals.length).toBeLessThan(floodCount);
+      } finally {
+        invoker.close();
+        wss.close();
+      }
     } finally {
-      invoker.close();
-      wss.close();
+      restoreBounds();
     }
   });
 
   it("fails the subscription loudly when the byte-budget bound trips", async () => {
-    const restoreBounds = setBackpressureBoundsForTest(1_000_000, 2048);
+    const restoreBounds = setBackpressureBoundsForTest(1_000_000, 1024);
     try {
       const { wss, port } = await startServer();
-      const byteBudget = 2048;
+      // Below one full TCP segment's worth of frames (~1448B): a single
+      // synchronous dispatch burst trips the budget deterministically.
+      const byteBudget = 1024;
       // ~54 bytes of JSON per frame; 200 frames is comfortably more than
       // byteBudget in total while each individual frame is far under it
       // (an accumulation trip, not a single-oversized-frame trip).
@@ -128,6 +146,9 @@ describe("WS receive backpressure", { timeout: 30_000 }, () => {
           for (let i = 0; i < frameCount; i++) {
             ws.send(JSON.stringify({ n: i, pad: payload }));
           }
+          // Hang-guard: a hypothetical no-overflow run ends in a visible
+          // assertion failure, never a parked drain.
+          ws.close();
           resolveFloodDone();
         });
       });
