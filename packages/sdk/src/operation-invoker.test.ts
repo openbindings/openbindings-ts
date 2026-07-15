@@ -30,6 +30,7 @@ import {
   ERR_CANCELLED,
   ERR_MISSING_INPUT,
   ERR_RUNTIME,
+  ERR_SCHEMA_UNRESOLVED,
   ERR_TRANSFORM_ERROR,
   ERR_VALIDATION_FAILED,
 } from "./errcodes.js";
@@ -503,7 +504,7 @@ describe("OBI-T-07 — input validation", () => {
     const mock = new MockBindingInvoker();
     const op = makeInvoker(mock);
     const call = op.invoke(iface, operationSignature("getUser"));
-    await expect(call.write({ id: "u1" })).rejects.toMatchObject({ code: ERR_VALIDATION_FAILED });
+    await expect(call.write({ id: "u1" })).rejects.toMatchObject({ code: ERR_SCHEMA_UNRESOLVED });
     expect(mock.reads.flat()).toEqual([]); // the binding never saw the message
   });
 
@@ -618,6 +619,45 @@ describe("OBI-T-08 — output validation", () => {
 // ---------------------------------------------------------------------------
 // CONTEXT_REQUIRED negotiation
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// OBI-T-16 — claim semantics: unresolvable graph is distinct from mismatch;
+// `format` is an annotation, never an assertion
+// ---------------------------------------------------------------------------
+
+describe("OBI-T-16 claim semantics", () => {
+  it("an unresolvable output schema graph is ERR_SCHEMA_UNRESOLVED, never partial validation", async () => {
+    const iface = testInterface();
+    iface.operations["watchTyped"].output = { $ref: "#/schemas/DoesNotExist" };
+
+    const op = makeInvoker();
+    const call = op.invoke(iface, operationSignature("watchTyped"));
+    await expect(collect(call.outputs)).rejects.toMatchObject({ code: "ERR_SCHEMA_UNRESOLVED" });
+  });
+
+  it("an unresolvable input schema graph is ERR_SCHEMA_UNRESOLVED on write", async () => {
+    const iface = testInterface();
+    iface.operations["getUser"].input = { $ref: "#/schemas/DoesNotExist" };
+
+    const op = makeInvoker();
+    const call = op.invoke(iface, operationSignature("getUser"));
+    await expect(call.write({ id: "u1" })).rejects.toMatchObject({ code: "ERR_SCHEMA_UNRESOLVED" });
+  });
+
+  it("`format` annotates, never asserts: a failing format value still validates", async () => {
+    const iface = testInterface();
+    iface.operations["getUser"].input = {
+      type: "object",
+      properties: { id: { type: "string", format: "email" } },
+      required: ["id"],
+    };
+
+    const op = makeInvoker();
+    const call = op.invoke(iface, operationSignature("getUser"));
+    await call.write({ id: "not-an-email" });
+    await expect(single(call.outputs)).resolves.toMatchObject({ name: "Ada" });
+  });
+});
 
 describe("CONTEXT_REQUIRED", () => {
   it("surfaces to the caller when no resolver is configured", async () => {

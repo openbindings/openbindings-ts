@@ -108,8 +108,21 @@ export const ERR_BINDING_NOT_FOUND = "ERR_BINDING_NOT_FOUND";
 /** Transform evaluation failed. */
 export const ERR_TRANSFORM_ERROR = "ERR_TRANSFORM_ERROR";
 
-/** Input (OBI-T-07) or output (OBI-T-08) schema validation failed. */
+/**
+ * A value failed validation against the operation's declared input or
+ * output schema — a validation claim evaluated per the core's claim
+ * semantics (OBI-T-16) and found FALSE.
+ */
 export const ERR_VALIDATION_FAILED = "ERR_VALIDATION_FAILED";
+
+/**
+ * The governing schema graph could not be established (an unresolvable
+ * $ref, or a schema that will not compile), so the validation claim could
+ * not be EVALUATED at all — reported distinctly from a value mismatch and
+ * never papered over with partial validation (OBI-T-16; the
+ * openbindings.operation-invoker contract names this convention code).
+ */
+export const ERR_SCHEMA_UNRESOLVED = "ERR_SCHEMA_UNRESOLVED";
 
 /** A generic runtime failure inside a binding implementation. */
 export const ERR_RUNTIME = "ERR_RUNTIME";
@@ -174,6 +187,7 @@ export type InvocationErrorCode =
   | typeof ERR_BINDING_NOT_FOUND
   | typeof ERR_TRANSFORM_ERROR
   | typeof ERR_VALIDATION_FAILED
+  | typeof ERR_SCHEMA_UNRESOLVED
   | typeof ERR_RUNTIME
   | typeof ERR_EVENT_LIMIT_EXCEEDED
   | typeof ERR_OPERATION_GRAPH_EXIT

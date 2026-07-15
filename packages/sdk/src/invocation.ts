@@ -201,7 +201,7 @@ export interface Invocation<I = unknown, O = unknown> {
    * buffer is full (backpressure).
    *
    * Every rejection is truthful: a flow signal (`ERR_INPUT_CLOSED` once the
-   * input side has closed), an OBI-T-07 validation error (terminal — the
+   * input side has closed), an input-validation error (terminal — the
    * same error surfaces on both faces), or, when a terminal has already
    * fired, the terminal error itself, never a weaker substitute. The output
    * side remains the authoritative verdict: a write racing a clean
@@ -328,7 +328,7 @@ export interface BindingHandle<I = unknown, O = unknown> {
    * The teardown signal — the only lifecycle channel bindings observe.
    * It aborts on EVERY terminal transition (caller `cancel()`, an external
    * signal, `closeOutput`, or `fireError` — including terminals raised on
-   * the caller side, such as an OBI-T-07 validation failure), mirroring the
+   * the caller side, such as an input-validation failure), mirroring the
    * Go SDK's `Done()`. On abort, tear down underlying work; if your binding
    * initiated no terminal itself, call `fireError(ERR_CANCELLED)`.
    */
@@ -375,7 +375,7 @@ export interface InvocationImplOptions<I> {
   /** External cancellation; converges with `cancel()` on the internal controller. */
   signal?: AbortSignal;
   /**
-   * OBI-T-07 hook: validates a caller input before it is enqueued. A
+   * Input-validation hook (OBI-T-16 claim semantics): validates a caller input before it is enqueued. A
    * returned error is terminal AND rejects the offending `write` with the
    * same `InvocationError` (the binding never sees the message). Used by
    * the operation-layer invoker; bindings and direct binding-invoker
@@ -499,7 +499,7 @@ export class InvocationImpl<I = unknown, O = unknown>
       const err = await this.validateInputHook(input);
       // State may have moved while validating.
       if (err) {
-        // OBI-T-07 dual signal: terminal AND the offending write rejects
+        // Input-validation dual signal: terminal AND the offending write rejects
         // with the same error. The binding never sees the message.
         this.fireError(err);
         throw err;
@@ -762,7 +762,7 @@ export class InvocationImpl<I = unknown, O = unknown>
     }
     this.rejectClosed(error);
     // The signal fires on every terminal transition, not just cancel():
-    // a terminal raised on the caller side (e.g. an OBI-T-07 validation
+    // a terminal raised on the caller side (e.g. an input-validation
     // failure) must tear down the binding's underlying work too. Without
     // this, a binding parked on inputs()/transport strands forever.
     this.controller.abort();

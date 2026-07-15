@@ -34,6 +34,7 @@ import { contextConfiguration } from "./context.js";
 import { resolveOperation, allOperationIdentifiers } from "./resolve-operation.js";
 import {
   ERR_BINDING_NOT_FOUND,
+  ERR_SCHEMA_UNRESOLVED,
   ERR_INPUT_CLOSED,
   ERR_RUNTIME,
   ERR_TRANSFORM_ERROR,
@@ -89,13 +90,17 @@ export interface OperationInvokerOptions {
  * cardinality-agnostic {@link Invocation} handle.
  *
  * Between the caller and the binding it enforces the operation contract:
- *   - OBI-T-07: every caller input validates against the operation's input
- *     schema BEFORE the input transform; a failure is terminal and rejects
- *     the offending `write` with the same error.
- *   - inputTransform / outputTransform evaluate per message (JSONata 2.0).
- *   - OBI-T-08: each (transformed) output validates against the output
- *     schema before it is emitted; a failure is terminal and the value is
- *     not emitted. Callers that need to inspect unvalidated payloads call
+ * (validation carries the core's claim semantics, OBI-T-16: complete
+ * statically reachable schema graph, `format` as annotation, per value; a
+ * mismatch is ERR_VALIDATION_FAILED, an unresolvable governing graph is
+ * ERR_SCHEMA_UNRESOLVED, never partial validation):
+ *   - every caller input validates against the operation's input schema
+ *     BEFORE the input transform; a failure is terminal and rejects the
+ *     offending `write` with the same error.
+ *   - inputTransform / outputTransform evaluate per message (JSONata 2.1).
+ *   - each (transformed) output validates against the output schema before
+ *     it is emitted; a failure is terminal and the value is not emitted.
+ *     Callers that need to inspect unvalidated payloads call
  *     `invokeBinding` directly.
  *   - CONTEXT_REQUIRED negotiation: challenges raised by the binding before
  *     any input was consumed are resolved via the configured resolver and
@@ -383,7 +388,7 @@ export class OperationInvoker {
   /**
    * Drives the binding-layer invocation(s) behind one caller-facing handle:
    * an input pump forwarding (transformed) caller inputs, an output loop
-   * forwarding (transformed, T-08-validated) binding outputs, and the
+   * forwarding (transformed, schema-validated) binding outputs, and the
    * CONTEXT_REQUIRED resolve-replay-retry machinery between attempts.
    */
   private async run<I, O>(
@@ -405,7 +410,11 @@ export class OperationInvoker {
       return;
     }
 
-    // OBI-T-08: compile the output schema once per invocation.
+    // Compile the output schema once per invocation, over the complete
+    // statically reachable schema graph (every document schema rides as
+    // $defs). A graph that cannot be established is ERR_SCHEMA_UNRESOLVED —
+    // the claim could not be evaluated — never partial validation
+    // (OBI-T-16).
     let outputValidator: CompiledSchema | undefined;
     if (op.output != null) {
       try {
@@ -413,8 +422,8 @@ export class OperationInvoker {
       } catch (err) {
         callerInv.fireError(
           new InvocationError(
-            ERR_VALIDATION_FAILED,
-            `openbindings: output schema compilation failed for "${bindingKey}": ${(err as Error).message}`,
+            ERR_SCHEMA_UNRESOLVED,
+            `openbindings: output schema graph for "${bindingKey}" could not be established: ${(err as Error).message}`,
           ),
         );
         return;
@@ -711,7 +720,13 @@ export class OperationInvoker {
   }
 }
 
-/** Builds the OBI-T-07 write-validation hook for an operation, compiling lazily on first write. */
+/**
+ * Builds the write-validation hook for an operation, compiling lazily on
+ * first write. Validation carries the core's claim semantics (OBI-T-16):
+ * the complete statically reachable schema graph, `format` as annotation,
+ * applied per value — a mismatch is ERR_VALIDATION_FAILED; a graph that
+ * cannot be established is ERR_SCHEMA_UNRESOLVED, never partial validation.
+ */
 function makeInputValidator(
   op: Operation,
   iface: OBInterface,
@@ -728,8 +743,8 @@ function makeInputValidator(
         validator = compileExampleSchema(op.input!, buildSchemaDefs(iface.schemas));
       } catch (err) {
         compileError = new InvocationError(
-          ERR_VALIDATION_FAILED,
-          `openbindings: input schema compilation failed for "${operationName}": ${(err as Error).message}`,
+          ERR_SCHEMA_UNRESOLVED,
+          `openbindings: input schema graph for "${operationName}" could not be established: ${(err as Error).message}`,
         );
       }
     }
