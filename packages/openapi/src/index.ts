@@ -1,5 +1,5 @@
 export { OpenAPIInvoker, OpenAPISynthesizer } from "./invoker.js";
-export { FORMAT_TOKEN, DEFAULT_SOURCE_NAME } from "./constants.js";
+export { BINDING_SPEC, DEFAULT_SOURCE_NAME } from "./constants.js";
 export type {
   OpenAPIDocument,
   OpenAPIPathItem,

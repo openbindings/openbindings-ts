@@ -8,7 +8,7 @@ import type {
   Invocation,
   OBInterface,
   Source,
-  FormatInfo,
+  BindingSpecInfo,
   SourceInspection,
 } from "@openbindings/sdk";
 import {
@@ -20,7 +20,7 @@ import {
   ERR_SOURCE_LOAD_FAILED,
 } from "@openbindings/sdk";
 import type { AsyncAPIDocument } from "./asyncapi-types.js";
-import { FORMAT_TOKEN, DEFAULT_SOURCE_NAME } from "./constants.js";
+import { BINDING_SPEC, DEFAULT_SOURCE_NAME } from "./constants.js";
 import { runBinding, requiredContext, resolveServer } from "./invoke.js";
 import { convertToInterface } from "./synthesize.js";
 import { parseAsyncAPIDocument, parseRef, errorMessage, sanitizeKey, uniqueKey } from "./util.js";
@@ -73,9 +73,9 @@ export class AsyncAPIInvoker implements BindingInvoker {
   private readonly docCache = new Map<string, AsyncAPIDocument>();
   /** @internal */ readonly wsPool = new WSPool();
 
-  /** Returns the format tokens this invoker supports. */
-  formats(): FormatInfo[] {
-    return [{ token: FORMAT_TOKEN, description: "AsyncAPI 3.x event-driven APIs" }];
+  /** Returns the binding specifications this invoker supports, by exact identifier. */
+  bindingSpecs(): BindingSpecInfo[] {
+    return [{ bindingSpec: BINDING_SPEC, description: "AsyncAPI 3.x event-driven APIs" }];
   }
 
   /**
@@ -172,9 +172,9 @@ export class AsyncAPIInvoker implements BindingInvoker {
 
 /** Synthesizes OBInterface definitions from AsyncAPI 3.x documents. */
 export class AsyncAPISynthesizer implements InterfaceSynthesizer, SourceInspector {
-  /** Returns the format tokens this synthesizer supports. */
-  formats(): FormatInfo[] {
-    return [{ token: FORMAT_TOKEN, description: "AsyncAPI 3.x event-driven APIs" }];
+  /** Returns the binding specifications this synthesizer supports, by exact identifier. */
+  bindingSpecs(): BindingSpecInfo[] {
+    return [{ bindingSpec: BINDING_SPEC, description: "AsyncAPI 3.x event-driven APIs" }];
   }
 
   /** Parses an AsyncAPI document and converts it into an OBInterface. */

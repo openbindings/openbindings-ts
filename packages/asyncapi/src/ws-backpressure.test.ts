@@ -2,7 +2,7 @@ import { WebSocketServer } from "ws";
 import { describe, it, expect } from "vitest";
 import type { Invocation } from "@openbindings/sdk";
 import { AsyncAPIInvoker } from "./invoker.js";
-import { FORMAT_TOKEN } from "./constants.js";
+import { BINDING_SPEC } from "./constants.js";
 import { setBackpressureBoundsForTest } from "./invoke.js";
 
 // WS slow-consumer backpressure (spec/formats/asyncapi.md, "WS slow-consumer
@@ -95,7 +95,7 @@ describe("WS receive backpressure", { timeout: 30_000 }, () => {
       const invoker = new AsyncAPIInvoker();
       try {
         const call = invoker.invokeBinding({
-          source: { format: FORMAT_TOKEN, content: spec(port) },
+          source: { bindingSpec: BINDING_SPEC, content: spec(port) },
           ref: "#/operations/subscribe",
         });
         await call.write({ ready: true });
@@ -156,7 +156,7 @@ describe("WS receive backpressure", { timeout: 30_000 }, () => {
       const invoker = new AsyncAPIInvoker();
       try {
         const call = invoker.invokeBinding({
-          source: { format: FORMAT_TOKEN, content: spec(port) },
+          source: { bindingSpec: BINDING_SPEC, content: spec(port) },
           ref: "#/operations/subscribe",
         });
         await call.write({ ready: true });
@@ -203,7 +203,7 @@ describe("WS receive backpressure", { timeout: 30_000 }, () => {
 
       const invoker = new AsyncAPIInvoker();
       try {
-        const source = { format: FORMAT_TOKEN, content: spec(port) };
+        const source = { bindingSpec: BINDING_SPEC, content: spec(port) };
         // Sequence the acquires so the second one provably reuses the first
         // socket (same server|address|credential pool key).
         const slow = invoker.invokeBinding({ source, ref: "#/operations/subscribe" });
@@ -266,7 +266,7 @@ describe("WS receive backpressure", { timeout: 30_000 }, () => {
     const invoker = new AsyncAPIInvoker();
     try {
       const call = invoker.invokeBinding({
-        source: { format: FORMAT_TOKEN, content: spec(port) },
+        source: { bindingSpec: BINDING_SPEC, content: spec(port) },
         ref: "#/operations/subscribe",
       });
       const vals: unknown[] = [];

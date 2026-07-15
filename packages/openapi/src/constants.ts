@@ -1,5 +1,5 @@
-/** Format token identifying this package as an OpenAPI 3.x handler. */
-export const FORMAT_TOKEN = "openapi@^3.0.0";
+/** The binding-specification identifier this package implements (exact and opaque, core §6). */
+export const BINDING_SPEC = "openbindings.openapi@1";
 
 /** Default source name used when registering an OpenAPI source in an OBInterface. */
 export const DEFAULT_SOURCE_NAME = "openapi";

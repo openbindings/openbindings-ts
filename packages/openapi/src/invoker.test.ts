@@ -95,7 +95,7 @@ const SPEC = {
   },
 };
 
-const SOURCE = { format: "openapi@3.1", content: SPEC };
+const SOURCE = { bindingSpec: "openbindings.openapi@1", content: SPEC };
 
 const REF_PING = "#/paths/~1ping/get";
 const REF_GET_USER = "#/paths/~1users~1{id}/get";
@@ -128,17 +128,17 @@ function authSpec(opts: {
 const REF_DATA = "#/paths/~1data/get";
 
 function authSource(spec: Record<string, unknown>) {
-  return { format: "openapi@3.1", content: spec };
+  return { bindingSpec: "openbindings.openapi@1", content: spec };
 }
 
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
-describe("OpenAPIInvoker.formats", () => {
-  it("advertises the OpenAPI 3.x range token", () => {
-    expect(new OpenAPIInvoker().formats()).toEqual([
-      { token: "openapi@^3.0.0", description: "OpenAPI 3.x HTTP APIs" },
+describe("OpenAPIInvoker.bindingSpecs", () => {
+  it("advertises the exact binding-specification identifier", () => {
+    expect(new OpenAPIInvoker().bindingSpecs()).toEqual([
+      { bindingSpec: "openbindings.openapi@1", description: "OpenAPI 3.x HTTP APIs" },
     ]);
   });
 });
@@ -217,7 +217,7 @@ describe("invokeBinding — request construction", () => {
     };
     const { fetch, requests } = mockFetch(() => jsonResponse({ ok: true }));
     const call = new OpenAPIInvoker().invokeBinding({
-      source: { format: "openapi@3.1", content: spec },
+      source: { bindingSpec: "openbindings.openapi@1", content: spec },
       ref: "#/paths/~1users~1{id}/put",
       fetch,
     });
@@ -305,7 +305,7 @@ describe("invokeBinding — request construction", () => {
     };
     const { fetch, requests } = mockFetch(() => jsonResponse({ ok: true }));
     const call = new OpenAPIInvoker().invokeBinding({
-      source: { format: "openapi@3.0", content: spec },
+      source: { bindingSpec: "openbindings.openapi@1", content: spec },
       ref: "#/paths/~1users~1{id}/get",
       fetch,
     });
@@ -342,7 +342,7 @@ describe("invokeBinding — request construction", () => {
     };
     const { fetch, requests } = mockFetch(() => jsonResponse({ ok: true }));
     const call = new OpenAPIInvoker().invokeBinding({
-      source: { format: "openapi@3.1", content: spec },
+      source: { bindingSpec: "openbindings.openapi@1", content: spec },
       ref: "#/paths/~1session/get",
       fetch,
     });
@@ -387,7 +387,7 @@ describe("invokeBinding — request construction", () => {
     };
     const { fetch, requests } = mockFetch(() => jsonResponse({ ok: true }));
     const call = new OpenAPIInvoker().invokeBinding({
-      source: { format: "openapi@3.1", content: spec },
+      source: { bindingSpec: "openbindings.openapi@1", content: spec },
       ref: "#/paths/~1users~1{id}/put",
       fetch,
     });
@@ -445,7 +445,7 @@ describe("invokeBinding — pre-dispatch failures", () => {
     const { fetch, requests } = mockFetch(() => jsonResponse({}));
     const spec = { ...SPEC, servers: undefined };
     const call = new OpenAPIInvoker().invokeBinding({
-      source: { format: "openapi@3.1", content: spec },
+      source: { bindingSpec: "openbindings.openapi@1", content: spec },
       ref: REF_PING,
       fetch,
     });
@@ -457,7 +457,7 @@ describe("invokeBinding — pre-dispatch failures", () => {
   it("errors ERR_SOURCE_LOAD_FAILED when the source document cannot be fetched", async () => {
     const { fetch } = mockFetch(() => new Response("nope", { status: 500 }));
     const call = new OpenAPIInvoker().invokeBinding({
-      source: { format: "openapi@3.1", location: "https://example.com/openapi.json" },
+      source: { bindingSpec: "openbindings.openapi@1", location: "https://example.com/openapi.json" },
       ref: REF_PING,
       fetch,
     });
@@ -1541,7 +1541,7 @@ describe("prepareBinding", () => {
 
   it("returns null instead of fetching a location-only source", async () => {
     const details = await new OpenAPIInvoker().prepareBinding({
-      source: { format: "openapi@3.1", location: "https://example.com/openapi.json" },
+      source: { bindingSpec: "openbindings.openapi@1", location: "https://example.com/openapi.json" },
       ref: REF_DATA,
     });
 
@@ -1557,14 +1557,14 @@ describe("prepareBinding", () => {
 
     // The challenged invocation loads and caches the document.
     const call = inv.invokeBinding({
-      source: { format: "openapi@3.1", location: SPEC_URL },
+      source: { bindingSpec: "openbindings.openapi@1", location: SPEC_URL },
       ref: REF_DATA,
       fetch,
     });
     await expect(call.closed).rejects.toMatchObject({ code: CONTEXT_REQUIRED });
 
     const details = await inv.prepareBinding({
-      source: { format: "openapi@3.1", location: SPEC_URL },
+      source: { bindingSpec: "openbindings.openapi@1", location: SPEC_URL },
       ref: REF_DATA,
     });
     expect(details).toMatchObject({ target: "https://api.example.com" });
@@ -1581,7 +1581,7 @@ describe("prepareBinding", () => {
     // Content is authoritative: no fetch of SPEC_URL happens here, but the
     // parse must still land in the location-keyed cache.
     const call = inv.invokeBinding({
-      source: { format: "openapi@3.1", location: SPEC_URL, content: BEARER },
+      source: { bindingSpec: "openbindings.openapi@1", location: SPEC_URL, content: BEARER },
       ref: REF_DATA,
       fetch,
     });
@@ -1591,7 +1591,7 @@ describe("prepareBinding", () => {
     // Location-only preflight: prepareBinding's location-only path never
     // fetches, so a non-null result here proves the cache was warm.
     const details = await inv.prepareBinding({
-      source: { format: "openapi@3.1", location: SPEC_URL },
+      source: { bindingSpec: "openbindings.openapi@1", location: SPEC_URL },
       ref: REF_DATA,
     });
     expect(details).toMatchObject({ target: "https://api.example.com" });

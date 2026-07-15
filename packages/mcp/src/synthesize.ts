@@ -2,7 +2,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import type { OBInterface, Operation, BindingEntry, JSONSchema } from "@openbindings/sdk";
 import { MAX_TESTED_VERSION } from "@openbindings/sdk";
-import { CLIENT_NAME, CLIENT_VERSION, FORMAT_TOKEN, DEFAULT_SOURCE_NAME } from "./constants.js";
+import { CLIENT_NAME, CLIENT_VERSION, BINDING_SPEC, DEFAULT_SOURCE_NAME } from "./constants.js";
 
 interface MCPDiscovery {
   serverName?: string;
@@ -154,7 +154,7 @@ export function convertToInterface(disc: MCPDiscovery, location?: string): OBInt
   const bindings: Record<string, BindingEntry> = {};
   const usedKeys = new Map<string, string>();
 
-  const source: { format: string; location?: string } = { format: FORMAT_TOKEN };
+  const source: { bindingSpec: string; location?: string } = { bindingSpec: BINDING_SPEC };
   if (location) source.location = location;
 
   // Sort all entities alphabetically for deterministic output.

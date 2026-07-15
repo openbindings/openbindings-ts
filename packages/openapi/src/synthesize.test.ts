@@ -153,7 +153,7 @@ describe("convertToInterface", () => {
     const iface = await convertToInterface(undefined, MINIMAL_SPEC);
 
     expect(iface.sources?.["openapi"]).toBeDefined();
-    expect(iface.sources?.["openapi"].format).toBe("openapi@3.1");
+    expect(iface.sources?.["openapi"].bindingSpec).toBe("openbindings.openapi@1");
   });
 
   it("handles specs with no paths", async () => {
@@ -273,9 +273,9 @@ describe("convertToInterface — OpenAPI 3.0 dialect translation", () => {
     expect(props["count"]).toEqual({ type: "integer" });
   });
 
-  it("emits format token openapi@3.0 for 3.0.x sources", async () => {
+  it("stamps the exact identifier for 3.0.x sources (the artifact version drives dialect only)", async () => {
     const iface = await convertToInterface(undefined, SPEC_30_NULLABLE);
-    expect(iface.sources?.["openapi"].format).toBe("openapi@3.0");
+    expect(iface.sources?.["openapi"].bindingSpec).toBe("openbindings.openapi@1");
   });
 
   it("preserves 3.1 schemas verbatim (already 2020-12)", async () => {
@@ -365,8 +365,8 @@ describeMS("multi-source refusal", () => {
     await expectMS(
       synth.synthesizeInterface({
         sources: [
-          { format: "openapi@3.0", content: "{}" },
-          { format: "openapi@3.0", content: "{}" },
+          { bindingSpec: "openbindings.openapi@1", content: "{}" },
+          { bindingSpec: "openbindings.openapi@1", content: "{}" },
         ],
       }),
     ).rejects.toBeInstanceOf(MultipleSourcesError);
@@ -406,7 +406,7 @@ describe("param/body field collision", () => {
     };
     const warnings: Array<{ code: string; path?: string }> = [];
     const iface = await new OpenAPISynthesizer().synthesizeInterface({
-      sources: [{ format: "openapi@3.1", content: spec }],
+      sources: [{ bindingSpec: "openbindings.openapi@1", content: spec }],
       onWarning: (w) => warnings.push(w),
     });
     expect(warnings).toHaveLength(1);
@@ -445,7 +445,7 @@ describe("inspectSource", () => {
 
   it("suggests the same operationKey synthesis would assign, including de-duplication", async () => {
     const inspection = await new OpenAPISynthesizer().inspectSource({
-      format: "openapi@3.1",
+      bindingSpec: "openbindings.openapi@1",
       content: SPEC_WITH_COLLISION,
     });
     const byRef = Object.fromEntries(inspection.targets.map((t) => [t.ref, t.operationKey]));
@@ -458,7 +458,7 @@ describe("inspectSource", () => {
   it("matches convertToInterface's own operation keys exactly", async () => {
     const iface = await convertToInterface(undefined, SPEC_WITH_COLLISION);
     const inspection = await new OpenAPISynthesizer().inspectSource({
-      format: "openapi@3.1",
+      bindingSpec: "openbindings.openapi@1",
       content: SPEC_WITH_COLLISION,
     });
 
@@ -484,7 +484,7 @@ describe("content-fed synthesis", () => {
       paths: { "/x": { get: { operationId: "getX", responses: { "200": { description: "ok" } } } } },
     });
     const iface = await new OpenAPISynthesizer().synthesizeInterface({
-      sources: [{ format: "openapi@3.0", content }],
+      sources: [{ bindingSpec: "openbindings.openapi@1", content }],
     });
 
     const src = iface.sources?.[DEFAULT_SOURCE_NAME];
@@ -499,7 +499,7 @@ describe("content-fed synthesis", () => {
       paths: {},
     };
     const iface = await new OpenAPISynthesizer().synthesizeInterface({
-      sources: [{ format: "openapi@3.0", content }],
+      sources: [{ bindingSpec: "openbindings.openapi@1", content }],
     });
 
     const src = iface.sources?.[DEFAULT_SOURCE_NAME];
@@ -510,7 +510,7 @@ describe("content-fed synthesis", () => {
   it("does not re-embed content when a location is present (location is provenance)", async () => {
     const content = { openapi: "3.0.3", info: { title: "T", version: "1" }, paths: {} };
     const iface = await new OpenAPISynthesizer().synthesizeInterface({
-      sources: [{ format: "openapi@3.0", location: "https://example.com/openapi.json", content }],
+      sources: [{ bindingSpec: "openbindings.openapi@1", location: "https://example.com/openapi.json", content }],
     });
 
     const src = iface.sources?.[DEFAULT_SOURCE_NAME];

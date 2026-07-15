@@ -1,15 +1,15 @@
-/** Thrown when no invoker matches the requested binding format. */
+/** Thrown when no invoker matches the requested binding specification. */
 export class NoInvokerError extends Error {
-  constructor(format: string) {
-    super(`openbindings: no invoker for format: ${format}`);
+  constructor(bindingSpec: string) {
+    super(`openbindings: no invoker for format: ${bindingSpec}`);
     this.name = "NoInvokerError";
   }
 }
 
-/** Thrown when no synthesizer matches the requested binding format. */
+/** Thrown when no synthesizer matches the requested binding specification. */
 export class NoSynthesizerError extends Error {
-  constructor(format: string) {
-    super(`openbindings: no synthesizer for format: ${format}`);
+  constructor(bindingSpec: string) {
+    super(`openbindings: no synthesizer for format: ${bindingSpec}`);
     this.name = "NoSynthesizerError";
   }
 }
@@ -28,10 +28,10 @@ export class OperationNotFoundError extends Error {
 
 /**
  * Thrown when no binding is available for the requested operation. When the
- * operation HAS a binding but its source format has no registered invoker,
- * `detail` names the gap (which format, what is registered) so the reader is
- * sent to their own OperationInvoker construction rather than to auditing the
- * OBI.
+ * operation HAS a binding but its governing binding specification has no
+ * registered invoker, `detail` names the gap (which binding spec, what is
+ * registered) so the reader is sent to their own OperationInvoker
+ * construction rather than to auditing the OBI.
  */
 export class BindingNotFoundError extends Error {
   constructor(operation: string, detail?: string) {

@@ -7,7 +7,7 @@ import {
   type BindingInvocationArgs,
   type BindingInvoker,
   type SynthesizeInput,
-  type FormatInfo,
+  type BindingSpecInfo,
   type InterfaceSynthesizer,
   type Invocation,
   type OBInterface,
@@ -15,7 +15,7 @@ import {
   type SourceInspection,
   type SourceInspector,
 } from "@openbindings/sdk";
-import { FORMAT_TOKEN } from "./constants.js";
+import { BINDING_SPEC } from "./constants.js";
 import { runMCPBinding } from "./invoke.js";
 import { discover, convertToInterface, sanitizeKey, resolveKey } from "./synthesize.js";
 
@@ -25,8 +25,8 @@ import { discover, convertToInterface, sanitizeKey, resolveKey } from "./synthes
 
 /** Invokes MCP bindings by connecting to MCP servers via Streamable HTTP. */
 export class MCPInvoker implements BindingInvoker {
-  formats(): FormatInfo[] {
-    return [{ token: FORMAT_TOKEN, description: "MCP via Streamable HTTP" }];
+  bindingSpecs(): BindingSpecInfo[] {
+    return [{ bindingSpec: BINDING_SPEC, description: "MCP via Streamable HTTP" }];
   }
 
   /**
@@ -77,8 +77,8 @@ export class MCPSynthesizer implements InterfaceSynthesizer, SourceInspector {
     this.fetchImpl = options?.fetch;
   }
 
-  formats(): FormatInfo[] {
-    return [{ token: FORMAT_TOKEN, description: "MCP via Streamable HTTP" }];
+  bindingSpecs(): BindingSpecInfo[] {
+    return [{ bindingSpec: BINDING_SPEC, description: "MCP via Streamable HTTP" }];
   }
 
   async synthesizeInterface(

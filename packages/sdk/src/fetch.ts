@@ -77,21 +77,21 @@ export async function fetchInterface(
     );
   }
 
-  for (const info of synthesizer.formats()) {
+  for (const info of synthesizer.bindingSpecs()) {
     let iface: OBInterface;
     try {
       iface = await synthesizer.synthesizeInterface(
-        { sources: [{ format: info.token, location: url }] },
+        { sources: [{ bindingSpec: info.bindingSpec, location: url }] },
         { signal },
       );
     } catch (e) {
-      trail.push(`synthesize as ${info.token}: ${errText(e)}`);
+      trail.push(`synthesize as ${info.bindingSpec}: ${errText(e)}`);
       continue;
     }
     if (iface && iface.operations && Object.keys(iface.operations).length > 0) {
       return { iface, synthesized: true };
     }
-    trail.push(`synthesize as ${info.token}: no operations derived`);
+    trail.push(`synthesize as ${info.bindingSpec}: no operations derived`);
   }
 
   throw new Error(

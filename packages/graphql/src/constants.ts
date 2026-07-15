@@ -1,5 +1,9 @@
-/** Format token identifying this package as a GraphQL handler. */
-export const FORMAT_TOKEN = "graphql";
+/**
+ * The identifier this package advertises and matches on. GraphQL has no
+ * published openbindings binding specification yet; until promotion the
+ * draft token stands as the exact, opaque identifier.
+ */
+export const BINDING_SPEC = "graphql";
 
 /** Default source name used when registering a GraphQL source in an OBInterface. */
 export const DEFAULT_SOURCE_NAME = "graphql";

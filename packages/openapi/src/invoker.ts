@@ -9,7 +9,7 @@ import {
   type BindingInvocationArgs,
   type ContextRequiredDetails,
   type SynthesizeInput,
-  type FormatInfo,
+  type BindingSpecInfo,
   type InterfaceSynthesizer,
   type Invocation,
   type OBInterface,
@@ -18,7 +18,7 @@ import {
   type SourceInspector,
 } from "@openbindings/sdk";
 import type { OpenAPIDocument, OpenAPIOperation } from "./types.js";
-import { DEFAULT_SOURCE_NAME, FORMAT_TOKEN } from "./constants.js";
+import { DEFAULT_SOURCE_NAME, BINDING_SPEC } from "./constants.js";
 import { requiredContext, resolveRequestBaseURL, runBinding } from "./invoke.js";
 import { convertToInterface, deriveOperationKey, HTTP_METHODS } from "./synthesize.js";
 import { buildJsonPointerRef, errorMessage, loadOpenAPIDocument, parseRef } from "./util.js";
@@ -63,9 +63,9 @@ async function loadDoc(
 export class OpenAPIInvoker implements BindingInvoker {
   private readonly docCache = new Map<string, OpenAPIDocument>();
 
-  /** Returns the format tokens this invoker supports. */
-  formats(): FormatInfo[] {
-    return [{ token: FORMAT_TOKEN, description: "OpenAPI 3.x HTTP APIs" }];
+  /** Returns the binding specifications this invoker supports, by exact identifier. */
+  bindingSpecs(): BindingSpecInfo[] {
+    return [{ bindingSpec: BINDING_SPEC, description: "OpenAPI 3.x HTTP APIs" }];
   }
 
   /**
@@ -166,9 +166,9 @@ export class OpenAPIInvoker implements BindingInvoker {
 
 /** Synthesizes OBInterface definitions from OpenAPI specification documents. */
 export class OpenAPISynthesizer implements InterfaceSynthesizer, SourceInspector {
-  /** Returns the format tokens this synthesizer supports. */
-  formats(): FormatInfo[] {
-    return [{ token: FORMAT_TOKEN, description: "OpenAPI 3.x HTTP APIs" }];
+  /** Returns the binding specifications this synthesizer supports, by exact identifier. */
+  bindingSpecs(): BindingSpecInfo[] {
+    return [{ bindingSpec: BINDING_SPEC, description: "OpenAPI 3.x HTTP APIs" }];
   }
 
   /** Converts an OpenAPI source into an OBInterface, applying optional name/version/description overrides. */

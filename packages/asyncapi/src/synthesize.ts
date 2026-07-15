@@ -1,11 +1,11 @@
 import type { OBInterface, Operation, Source } from "@openbindings/sdk";
-import { MAX_TESTED_VERSION, detectFormatVersion } from "@openbindings/sdk";
+import { MAX_TESTED_VERSION } from "@openbindings/sdk";
 import type {
   AsyncAPIDocument,
   AsyncAPIOperation,
   AsyncAPIOperationReply,
 } from "./asyncapi-types.js";
-import { DEFAULT_SOURCE_NAME } from "./constants.js";
+import { BINDING_SPEC, DEFAULT_SOURCE_NAME } from "./constants.js";
 import { sanitizeKey, uniqueKey } from "./util.js";
 
 export async function convertToInterface(
@@ -15,10 +15,9 @@ export async function convertToInterface(
 ): Promise<OBInterface> {
   if (!content) throw new Error("asyncapi convertToInterface: content is required");
   const doc = content;
-  const formatVersion = detectFormatVersion(doc.asyncapi);
 
   const sourceEntry: Source = {
-    format: `asyncapi@${formatVersion}`,
+    bindingSpec: BINDING_SPEC,
   };
   if (location) sourceEntry.location = location;
 

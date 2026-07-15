@@ -289,7 +289,7 @@ describe("BEC Integration (real HTTP)", () => {
     const iface = await fetchIface();
 
     const args = {
-      source: { format: "openapi@3.0", location: specURL },
+      source: { bindingSpec: "openbindings.openapi@1", location: specURL },
       ref: "#/paths/~1items/get",
     };
 

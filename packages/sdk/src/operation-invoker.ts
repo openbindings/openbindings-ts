@@ -3,7 +3,7 @@ import { resolveTransform } from "./types.js";
 import type {
   BindingInvocationArgs,
   InvokeOptions,
-  FormatInfo,
+  BindingSpecInfo,
 } from "./invoker-types.js";
 import type { OperationSignature } from "./operation-signature.js";
 import type {
@@ -40,7 +40,6 @@ import {
   ERR_TRANSFORM_ERROR,
   ERR_VALIDATION_FAILED,
 } from "./errcodes.js";
-import { matchesRange, parseRange } from "./format-token.js";
 import { buildSchemaDefs, compileExampleSchema, safeValidate , type CompiledSchema } from "./schema-validation.js";
 import {
   type FieldRouter,
@@ -75,7 +74,7 @@ export interface OperationInvokerOptions {
    * Invoker-level consumer hooks (specification + configuration = complete
    * invocation): consulted after any per-invocation hook declines, before
    * the format built-in. Site-guard your hook bodies (site.operation,
-   * siteFormatName) when the invoker serves multiple interfaces.
+   * siteFamilyName) when the invoker serves multiple interfaces.
    */
   outputDecoder?: OutputDecoder;
   resultClassifier?: ResultClassifier;
@@ -193,17 +192,17 @@ export class OperationInvoker {
   }
 
   /**
-   * All formats registered with this invoker. An aggregation convenience
-   * over the registered binding invokers; the operation-invoker interface itself
-   * carries no listFormats operation (its format reach is dynamic, e.g. via
-   * delegates).
+   * All binding specifications registered with this invoker, by exact
+   * identifier. An aggregation convenience over the registered binding
+   * invokers; the operation-invoker interface itself carries no
+   * listBindingSpecs operation (its reach is dynamic, e.g. via delegates).
    */
-  formats(): FormatInfo[] {
-    return this.invoker.formats();
+  bindingSpecs(): BindingSpecInfo[] {
+    return this.invoker.bindingSpecs();
   }
 
-  private availableFormats(): Set<string> {
-    return new Set(this.invoker.formats().map(f => f.token));
+  private availableBindingSpecs(): Set<string> {
+    return new Set(this.invoker.bindingSpecs().map(f => f.bindingSpec));
   }
 
   /**
@@ -228,7 +227,7 @@ export class OperationInvoker {
         operation: args.binding?.operation ?? "",
         invokedAs: args.binding?.operation ?? "",
         bindingKey: "",
-        format: args.source.format,
+        bindingSpec: args.source.bindingSpec,
         ref: args.ref,
         target: "",
       };
@@ -272,7 +271,7 @@ export class OperationInvoker {
       operation: opKey,
       invokedAs: sig.key,
       bindingKey,
-      format: source.format,
+      bindingSpec: source.bindingSpec,
       ref: binding.ref ?? "",
       target: "",
     };
@@ -306,7 +305,7 @@ export class OperationInvoker {
     const { op, binding, source } = this.resolveBinding(obi, operation, opts?.bindingKey, opts?.context);
     return this.prepareBinding({
       source: {
-        format: source.format,
+        bindingSpec: source.bindingSpec,
         location: source.location,
         ...(source.content != null ? { content: source.content } : {}),
       },
@@ -368,13 +367,13 @@ export class OperationInvoker {
         iface,
         opKey,
         contextSelectionOverride(callerContext),
-        this.availableFormats(),
+        this.availableBindingSpecs(),
       );
       if (overridden) {
         ({ key: bindingKey, binding } = overridden);
       } else {
         const selector = this.bindingSelector ?? ((i: OBInterface, o: string) =>
-          defaultBindingSelector(i, o, this.availableFormats()));
+          defaultBindingSelector(i, o, this.availableBindingSpecs()));
         ({ key: bindingKey, binding } = selector(iface, opKey));
       }
     }
@@ -434,7 +433,7 @@ export class OperationInvoker {
     const bindingArgs = (): BindingInvocationArgs =>
       this.withFetch({
         source: {
-          format: source.format,
+          bindingSpec: source.bindingSpec,
           location: source.location,
           ...(source.content != null ? { content: source.content } : {}),
         },
@@ -807,7 +806,7 @@ function wireError(err: unknown): InvocationError {
 /**
  * Resolves the operation-invoker contract's context.configuration.selection
  * override: the first listed binding key that is invocable — defined on the
- * interface, targeting the resolved operation, and (when availableFormats is
+ * interface, targeting the resolved operation, and (when availableSpecs is
  * provided) governed by a specification the invoker can act on — wins.
  * Returns null when no listed key is invocable, in which case the selection
  * policy applies.
@@ -816,14 +815,14 @@ function selectionOverride(
   iface: OBInterface,
   opKey: string,
   keys: string[],
-  availableFormats?: Set<string>,
+  availableSpecs?: Set<string>,
 ): { key: string; binding: BindingEntry } | null {
   for (const k of keys) {
     const b = iface.bindings?.[k];
     if (!b || b.operation !== opKey) continue;
-    if (availableFormats) {
+    if (availableSpecs) {
       const source = iface.sources?.[b.source];
-      if (source && !formatMatches(source.format, availableFormats)) continue;
+      if (source && !availableSpecs.has(source.bindingSpec)) continue;
     }
     return { key: k, binding: b };
   }
@@ -848,13 +847,14 @@ function contextSelectionOverride(ctx: Record<string, unknown> | null | undefine
  * and a candidate with no declared preference ranks below every candidate
  * with one; remaining ties break by lexicographic binding key. Preference is
  * the binding's own — the core defines no source-level preference and
- * nothing is inherited. When availableFormats is provided, bindings whose
- * source format is not in the set are skipped.
+ * nothing is inherited. When availableSpecs is provided, bindings whose
+ * governing binding specification is not in the set (by exact identifier)
+ * are skipped.
  */
 export function defaultBindingSelector(
   iface: OBInterface,
   opKey: string,
-  availableFormats?: Set<string>,
+  availableSpecs?: Set<string>,
 ): { key: string; binding: BindingEntry } {
   if (!iface.bindings || Object.keys(iface.bindings).length === 0) {
     throw new BindingNotFoundError(opKey);
@@ -866,20 +866,20 @@ export function defaultBindingSelector(
   let bestDeclared = false;
   let bestDeprecated = true;
   // Bindings that matched the operation but were skipped because no registered
-  // invoker handles their source format. The distinction is load-bearing for
-  // the error: "the document has no binding" sends the reader to audit the
-  // OBI; "the binding needs a format you didn't register" sends them to their
-  // own OperationInvoker construction.
-  const formatSkipped = new Map<string, string>(); // binding key -> required format
+  // invoker handles their governing binding specification. The distinction is
+  // load-bearing for the error: "the document has no binding" sends the reader
+  // to audit the OBI; "the binding needs a spec you didn't register" sends
+  // them to their own OperationInvoker construction.
+  const specSkipped = new Map<string, string>(); // binding key -> required binding spec
 
   for (const [k, b] of Object.entries(iface.bindings)) {
     if (b.operation !== opKey) continue;
 
     const source = iface.sources?.[b.source];
 
-    // Skip bindings whose source format the invoker can't handle.
-    if (availableFormats && source && !formatMatches(source.format, availableFormats)) {
-      formatSkipped.set(k, source.format);
+    // Skip bindings whose governing binding specification the invoker can't handle.
+    if (availableSpecs && source && !availableSpecs.has(source.bindingSpec)) {
+      specSkipped.set(k, source.bindingSpec);
       continue;
     }
 
@@ -911,35 +911,20 @@ export function defaultBindingSelector(
   }
 
   if (!best || !bestKey) {
-    if (formatSkipped.size > 0) {
-      const needs = [...formatSkipped.keys()]
+    if (specSkipped.size > 0) {
+      const needs = [...specSkipped.keys()]
         .sort()
-        .map((k) => `"${k}" requires format ${formatSkipped.get(k)}`)
+        .map((k) => `"${k}" requires binding spec ${specSkipped.get(k)}`)
         .join(", ");
-      const registered = availableFormats ? [...availableFormats].sort().join(", ") : "";
+      const registered = availableSpecs ? [...availableSpecs].sort().join(", ") : "";
       throw new BindingNotFoundError(
         opKey,
-        `binding ${needs}; registered invoker formats: [${registered}] (did you register the format's invoker in the OperationInvoker constructor?)`,
+        `binding ${needs}; registered binding specs: [${registered}] (did you register the spec's invoker in the OperationInvoker constructor?)`,
       );
     }
     throw new BindingNotFoundError(opKey);
   }
   return { key: bestKey, binding: best };
-}
-
-/**
- * Checks whether a source format token satisfies any advertised token/range.
- */
-function formatMatches(sourceFormat: string, available: Set<string>): boolean {
-  if (available.has(sourceFormat)) return true;
-  for (const f of available) {
-    try {
-      if (matchesRange(parseRange(f), sourceFormat)) return true;
-    } catch {
-      // Ignore malformed advertised ranges.
-    }
-  }
-  return false;
 }
 
 async function applyTransformRef(

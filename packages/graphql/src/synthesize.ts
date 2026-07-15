@@ -2,12 +2,12 @@ import type { OBInterface, Operation, JSONSchema } from "@openbindings/sdk";
 import { MAX_TESTED_VERSION } from "@openbindings/sdk";
 import type { IntrospectionSchema, TypeRef, TypeMap, InputValue } from "./introspection.js";
 import { buildTypeMap, rootTypeName, unwrapTypeName } from "./introspection.js";
-import { FORMAT_TOKEN, DEFAULT_SOURCE_NAME, QUERY_FIELD_NAME } from "./constants.js";
+import { BINDING_SPEC, DEFAULT_SOURCE_NAME, QUERY_FIELD_NAME } from "./constants.js";
 import { buildQueryFromIntrospection } from "./invoke.js";
 
 /** Convert a GraphQL introspection schema to an OBInterface. */
 export function convertToInterface(schema: IntrospectionSchema, location?: string): OBInterface {
-  const source: { format: string; location?: string } = { format: FORMAT_TOKEN };
+  const source: { bindingSpec: string; location?: string } = { bindingSpec: BINDING_SPEC };
   if (location) source.location = location;
 
   const operations: Record<string, Operation> = {};

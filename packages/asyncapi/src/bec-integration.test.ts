@@ -2,7 +2,7 @@ import { createServer, type Server, type IncomingMessage, type ServerResponse } 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { single, CONTEXT_REQUIRED, type OBInterface } from "@openbindings/sdk";
 import { AsyncAPIInvoker, AsyncAPISynthesizer } from "./invoker.js";
-import { FORMAT_TOKEN } from "./constants.js";
+import { BINDING_SPEC } from "./constants.js";
 
 const SECRET = "test-token-abc";
 
@@ -157,7 +157,7 @@ describe("AsyncAPI binding invoker (real HTTP)", () => {
 
   function source() {
     return {
-      format: FORMAT_TOKEN,
+      bindingSpec: BINDING_SPEC,
       content: JSON.stringify(makeAsyncAPISpec(port)),
     };
   }
@@ -165,7 +165,7 @@ describe("AsyncAPI binding invoker (real HTTP)", () => {
   async function buildOBI(): Promise<OBInterface> {
     const synthesizer = new AsyncAPISynthesizer();
     return synthesizer.synthesizeInterface({
-      sources: [{ format: FORMAT_TOKEN, content: JSON.stringify(makeAsyncAPISpec(port)) }],
+      sources: [{ bindingSpec: BINDING_SPEC, content: JSON.stringify(makeAsyncAPISpec(port)) }],
     });
   }
 
@@ -329,7 +329,7 @@ describe("AsyncAPI binding invoker (real HTTP)", () => {
 
       const invoker = new AsyncAPIInvoker();
       const details = await invoker.prepareBinding({
-        source: { format: FORMAT_TOKEN, content: spec },
+        source: { bindingSpec: BINDING_SPEC, content: spec },
         ref: "#/operations/publish",
       });
       expect(details).toMatchObject({
@@ -347,7 +347,7 @@ describe("AsyncAPI binding invoker (real HTTP)", () => {
 
       // Satisfying any one alternative suffices.
       const withKey = await invoker.prepareBinding({
-        source: { format: FORMAT_TOKEN, content: spec },
+        source: { bindingSpec: BINDING_SPEC, content: spec },
         ref: "#/operations/publish",
         context: { apiKey: "k-123" },
       });

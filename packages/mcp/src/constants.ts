@@ -1,5 +1,5 @@
-/** Format token identifying this package as an MCP handler. */
-export const FORMAT_TOKEN = "mcp@2025-11-25";
+/** The binding-specification identifier this package implements (exact and opaque, core §6). */
+export const BINDING_SPEC = "openbindings.mcp@1";
 
 /** Default source name used when registering an MCP source in an OBInterface. */
 export const DEFAULT_SOURCE_NAME = "mcpServer";

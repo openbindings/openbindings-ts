@@ -80,7 +80,7 @@ describe("validateDocument", () => {
   it("throws on rule-walk failure (delegates to validateInterface)", () => {
     // Passes parse (valid version + meta-schema shape) but fails a cross-
     // reference rule-walk check only validateInterface performs (OBI-D-08).
-    const doc = `{"openbindings":"0.2.0","operations":{"ping":{}},"sources":{"s":{"format":"x","content":{}}},"bindings":{"b":{"operation":"missing","source":"s"}}}`;
+    const doc = `{"openbindings":"0.2.0","operations":{"ping":{}},"sources":{"s":{"bindingSpec":"x","content":{}}},"bindings":{"b":{"operation":"missing","source":"s"}}}`;
     expect(() => validateDocument(doc)).toThrow(/OBI-D-08/);
   });
 

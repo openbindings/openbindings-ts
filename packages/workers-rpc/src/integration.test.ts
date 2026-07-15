@@ -64,7 +64,7 @@ const TEST_OBI: OBInterface = {
   },
   sources: {
     rpc: {
-      format: "workers-rpc@^1.0.0",
+      bindingSpec: "workers-rpc@^1.0.0",
       location: "workers-rpc://test-service",
     },
   },

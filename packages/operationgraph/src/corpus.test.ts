@@ -15,7 +15,7 @@ import jsonata from "jsonata";
 import type {
   BindingHandle,
   BindingInvocationArgs,
-  FormatInfo,
+  BindingSpecInfo,
   OBInterface,
   Invocation,
   TransformEvaluatorWithBindings,
@@ -28,7 +28,7 @@ import {
   OperationInvoker,
   single,
 } from "@openbindings/sdk";
-import { FORMAT_TOKEN } from "./constants.js";
+import { BINDING_SPEC } from "./constants.js";
 import { OperationGraphInvoker } from "./invoker.js";
 import { validate } from "./validate.js";
 import type { Graph } from "./types.js";
@@ -128,8 +128,8 @@ function sortKeys(v: unknown): unknown {
 class MockBindingInvoker {
   constructor(private readonly ops: Record<string, MockOp>) {}
 
-  formats(): FormatInfo[] {
-    return [{ token: MOCK_FORMAT }];
+  bindingSpecs(): BindingSpecInfo[] {
+    return [{ bindingSpec: MOCK_FORMAT }];
   }
 
   invokeBinding<I = unknown, O = unknown>(args: BindingInvocationArgs): Invocation<I, O> {
@@ -235,7 +235,7 @@ describe.skipIf(!dir)("conformance corpus: execution", () => {
       const iface = {
         openbindings: "0.2.0",
         operations: {} as Record<string, object>,
-        sources: { mock: { format: MOCK_FORMAT, content: {} } },
+        sources: { mock: { bindingSpec: MOCK_FORMAT, content: {} } },
         bindings: {} as Record<string, { operation: string; source: string }>,
       };
       for (const opKey of Object.keys(ops)) {
@@ -249,7 +249,7 @@ describe.skipIf(!dir)("conformance corpus: execution", () => {
       opInvoker.addBindingInvoker(new OperationGraphInvoker(opInvoker));
 
       const call = opInvoker.invokeBinding({
-        source: { format: FORMAT_TOKEN, content: { graphs: { g: fx.graph } } },
+        source: { bindingSpec: BINDING_SPEC, content: { graphs: { g: fx.graph } } },
         ref: "#/graphs/g",
         interface: iface as unknown as OBInterface,
       });
@@ -374,7 +374,7 @@ describe("loadDocument: location-only sources", () => {
     const iface = {
       openbindings: "0.2.0",
       operations: {} as Record<string, unknown>,
-      sources: { mock: { format: MOCK_FORMAT, content: {} } },
+      sources: { mock: { bindingSpec: MOCK_FORMAT, content: {} } },
       bindings: {} as Record<string, { operation: string; source: string }>,
     };
     for (const opKey of Object.keys(ops)) {
@@ -400,7 +400,7 @@ describe("loadDocument: location-only sources", () => {
     const fetch = vi.fn(async () => httpResponse(HOST_DOC));
 
     const call = opInvoker.invokeBinding({
-      source: { format: FORMAT_TOKEN, location },
+      source: { bindingSpec: BINDING_SPEC, location },
       ref: "#/graphs/g",
       interface: iface,
       fetch: fetch as unknown as typeof globalThis.fetch,
@@ -420,7 +420,7 @@ describe("loadDocument: location-only sources", () => {
     const ogInvoker = new OperationGraphInvoker(opInvoker);
     // Use a dedicated invoker instance so the docCache is observable in isolation.
     const args = (): Parameters<typeof ogInvoker.invokeBinding>[0] => ({
-      source: { format: FORMAT_TOKEN, location },
+      source: { bindingSpec: BINDING_SPEC, location },
       ref: "#/graphs/g",
       interface: iface,
       fetch: fetch as unknown as typeof globalThis.fetch,
@@ -441,7 +441,7 @@ describe("loadDocument: location-only sources", () => {
     const { opInvoker, iface } = makeInvoker(USERS_GET);
     const fetch = vi.fn(async () => httpResponse("not found", 404));
     const call = opInvoker.invokeBinding({
-      source: { format: FORMAT_TOKEN, location: "https://graphs.example.com/missing.json" },
+      source: { bindingSpec: BINDING_SPEC, location: "https://graphs.example.com/missing.json" },
       ref: "#/graphs/g",
       interface: iface,
       fetch: fetch as unknown as typeof globalThis.fetch,
@@ -454,7 +454,7 @@ describe("loadDocument: location-only sources", () => {
     const huge = "x".repeat((8 << 20) + 1); // one byte past the 8 MiB bound
     const fetch = vi.fn(async () => httpResponse(huge));
     const call = opInvoker.invokeBinding({
-      source: { format: FORMAT_TOKEN, location: "https://graphs.example.com/huge.json" },
+      source: { bindingSpec: BINDING_SPEC, location: "https://graphs.example.com/huge.json" },
       ref: "#/graphs/g",
       interface: iface,
       fetch: fetch as unknown as typeof globalThis.fetch,
@@ -465,7 +465,7 @@ describe("loadDocument: location-only sources", () => {
   it("rejects a source with neither location nor content as ERR_SOURCE_LOAD_FAILED", async () => {
     const { opInvoker, iface } = makeInvoker(USERS_GET);
     const call = opInvoker.invokeBinding({
-      source: { format: FORMAT_TOKEN },
+      source: { bindingSpec: BINDING_SPEC },
       ref: "#/graphs/g",
       interface: iface,
     });

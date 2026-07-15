@@ -1,5 +1,5 @@
-/** Format token identifying this package as an operation-graph handler. */
-export const FORMAT_TOKEN = "openbindings.operation-graph@0.2.0";
+/** The binding-specification identifier this package implements (exact and opaque, core §6). */
+export const BINDING_SPEC = "openbindings.operation-graph@1";
 
 /**
  * Spec-defined error identifiers (SCREAMING_SNAKE_CASE, per the format

@@ -1,6 +1,6 @@
 export { OperationGraphInvoker } from "./invoker.js";
 export {
-  FORMAT_TOKEN,
+  BINDING_SPEC,
   MAP_NOT_ARRAY,
   TIMEOUT_EXCEEDED,
   TRANSFORM_UNDEFINED,

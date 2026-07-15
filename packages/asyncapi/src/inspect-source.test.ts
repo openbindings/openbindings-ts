@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { AsyncAPISynthesizer } from "./invoker.js";
-import { FORMAT_TOKEN } from "./constants.js";
+import { BINDING_SPEC } from "./constants.js";
 
 // Regression coverage: the Go SDK's InspectSource suggests the same
 // operation key SynthesizeInterface assigns (list_refs.go: "so an
@@ -30,7 +30,7 @@ describe("AsyncAPISynthesizer.inspectSource operationKey", () => {
 
   it("suggests a sanitized operationKey per target", async () => {
     const result = await new AsyncAPISynthesizer().inspectSource({
-      format: FORMAT_TOKEN,
+      bindingSpec: BINDING_SPEC,
       content,
     });
 
@@ -58,11 +58,11 @@ describe("AsyncAPISynthesizer.inspectSource operationKey", () => {
     const specContent = JSON.stringify(specDoc);
 
     const iface = await synthesizer.synthesizeInterface({
-      sources: [{ format: FORMAT_TOKEN, content: specContent }],
+      sources: [{ bindingSpec: BINDING_SPEC, content: specContent }],
     });
     const synthesizedKeys = new Set(Object.keys(iface.operations));
 
-    const result = await synthesizer.inspectSource({ format: FORMAT_TOKEN, content: specContent });
+    const result = await synthesizer.inspectSource({ bindingSpec: BINDING_SPEC, content: specContent });
     const inspectedKeys = new Set(result.targets.map((t) => t.operationKey));
 
     expect(inspectedKeys).toEqual(synthesizedKeys);
