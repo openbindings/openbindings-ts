@@ -30,6 +30,7 @@ import {
   UnknownSourceError,
 } from "./errors.js";
 import { combineInvokers, type CombinedInvoker } from "./combiners.js";
+import { contextConfiguration } from "./context.js";
 import { resolveOperation, allOperationIdentifiers } from "./resolve-operation.js";
 import {
   ERR_BINDING_NOT_FOUND,
@@ -82,7 +83,9 @@ export interface OperationInvokerOptions {
 
 /**
  * The operation-layer invoker: resolves an OBI operation to a binding
- * (OBI-T-12 name resolution, OBI-T-09 selection) and returns a
+ * (OBI-T-12 name resolution; selection by the operation-invoker contract's
+ * default policy, consumer-overridable via context.configuration.selection)
+ * and returns a
  * cardinality-agnostic {@link Invocation} handle.
  *
  * Between the caller and the binding it enforces the operation contract:
@@ -249,7 +252,7 @@ export class OperationInvoker {
     sig: OperationSignature<I, O>,
     opts?: InvokeOptions,
   ): Invocation<I, O> {
-    const { op, opKey, bindingKey, binding, source } = this.resolveBinding(obi, sig.key, opts?.bindingKey);
+    const { op, opKey, bindingKey, binding, source } = this.resolveBinding(obi, sig.key, opts?.bindingKey, opts?.context);
 
     const callerInv = new InvocationImpl<I, O>({
       signal: opts?.signal,
@@ -281,7 +284,8 @@ export class OperationInvoker {
   /**
    * Operation-layer side-effect-free preflight (the operation-invoker interface
    * `prepareOperation`), the by-reference counterpart to `prepareBinding`. It
-   * resolves `operation` on `obi` to a concrete binding (OBI-T-12 + OBI-T-09
+   * resolves `operation` on `obi` to a concrete binding (OBI-T-12 resolution +
+   * contract-default selection or the context.configuration.selection override
    * selection, or an `opts.bindingKey`-pinned binding) and reports that
    * binding's context requirements without invoking or causing side effects.
    * Resolves to null when requirements cannot be determined without invoking
@@ -294,7 +298,7 @@ export class OperationInvoker {
     operation: string,
     opts?: InvokeOptions,
   ): Promise<ContextRequiredDetails | null> {
-    const { op, binding, source } = this.resolveBinding(obi, operation, opts?.bindingKey);
+    const { op, binding, source } = this.resolveBinding(obi, operation, opts?.bindingKey, opts?.context);
     return this.prepareBinding({
       source: {
         format: source.format,
@@ -312,14 +316,16 @@ export class OperationInvoker {
   /**
    * Shared operation-layer resolution behind {@link invoke} and
    * {@link prepareOperation}: resolves `operation` against obi's flat key+alias
-   * namespace (OBI-T-12), selects a binding (OBI-T-09) or uses the caller-pinned
-   * `bindingKey`, and looks up its source. Throws synchronously on a wiring
-   * failure (unknown operation, binding, or source).
+   * namespace (OBI-T-12), selects a binding (the contract's default policy,
+   * displaced by a context.configuration.selection override or the
+   * caller-pinned `bindingKey`), and looks up its source. Throws synchronously
+   * on a wiring failure (unknown operation, binding, or source).
    */
   private resolveBinding(
     obi: OBInterface,
     operation: string,
     pinnedBindingKey?: string,
+    callerContext?: Record<string, unknown>,
   ): { op: Operation; opKey: string; bindingKey: string; binding: BindingEntry; source: Source } {
     const iface = obi;
     if (!iface) throw new MissingInterfaceError();
@@ -348,9 +354,24 @@ export class OperationInvoker {
       bindingKey = pinnedBindingKey;
       binding = b;
     } else {
-      const selector = this.bindingSelector ?? ((i: OBInterface, o: string) =>
-        defaultBindingSelector(i, o, this.availableFormats()));
-      ({ key: bindingKey, binding } = selector(iface, opKey));
+      // The operation-invoker contract's consumer override
+      // (context.configuration.selection): an ordered list of binding keys,
+      // the first invocable entry winning. It displaces whatever selection
+      // policy is in place; when no listed key is invocable, the policy
+      // applies.
+      const overridden = selectionOverride(
+        iface,
+        opKey,
+        contextSelectionOverride(callerContext),
+        this.availableFormats(),
+      );
+      if (overridden) {
+        ({ key: bindingKey, binding } = overridden);
+      } else {
+        const selector = this.bindingSelector ?? ((i: OBInterface, o: string) =>
+          defaultBindingSelector(i, o, this.availableFormats()));
+        ({ key: bindingKey, binding } = selector(iface, opKey));
+      }
     }
 
     const source = iface.sources?.[binding.source];
@@ -769,11 +790,51 @@ function wireError(err: unknown): InvocationError {
 }
 
 /**
- * Picks the best binding for an operation (OBI-T-09). Non-deprecated
- * bindings are preferred. Higher preference values win (binding preference
- * overrides source preference; an absent preference is the neutral baseline
- * of 0). Ties broken alphabetically. When availableFormats is provided,
- * bindings whose source format is not in the set are skipped.
+ * Resolves the operation-invoker contract's context.configuration.selection
+ * override: the first listed binding key that is invocable — defined on the
+ * interface, targeting the resolved operation, and (when availableFormats is
+ * provided) governed by a specification the invoker can act on — wins.
+ * Returns null when no listed key is invocable, in which case the selection
+ * policy applies.
+ */
+function selectionOverride(
+  iface: OBInterface,
+  opKey: string,
+  keys: string[],
+  availableFormats?: Set<string>,
+): { key: string; binding: BindingEntry } | null {
+  for (const k of keys) {
+    const b = iface.bindings?.[k];
+    if (!b || b.operation !== opKey) continue;
+    if (availableFormats) {
+      const source = iface.sources?.[b.source];
+      if (source && !formatMatches(source.format, availableFormats)) continue;
+    }
+    return { key: k, binding: b };
+  }
+  return null;
+}
+
+/**
+ * Extracts the operation-invoker contract's `selection` configuration point
+ * from context: an ordered list of binding keys. Anything that is not an
+ * array of strings is no override.
+ */
+function contextSelectionOverride(ctx: Record<string, unknown> | null | undefined): string[] {
+  const raw = contextConfiguration(ctx)["selection"];
+  if (!Array.isArray(raw) || !raw.every((e) => typeof e === "string")) return [];
+  return raw as string[];
+}
+
+/**
+ * Picks the best binding for an operation, by the operation-invoker
+ * contract's normative default policy: non-deprecated candidates rank before
+ * deprecated ones; within a tier, higher declared `preference` ranks first,
+ * and a candidate with no declared preference ranks below every candidate
+ * with one; remaining ties break by lexicographic binding key. Preference is
+ * the binding's own — the core defines no source-level preference and
+ * nothing is inherited. When availableFormats is provided, bindings whose
+ * source format is not in the set are skipped.
  */
 export function defaultBindingSelector(
   iface: OBInterface,
@@ -787,6 +848,7 @@ export function defaultBindingSelector(
   let bestKey: string | undefined;
   let best: BindingEntry | undefined;
   let bestPref = -Infinity;
+  let bestDeclared = false;
   let bestDeprecated = true;
   // Bindings that matched the operation but were skipped because no registered
   // invoker handles their source format. The distinction is load-bearing for
@@ -806,22 +868,29 @@ export function defaultBindingSelector(
       continue;
     }
 
-    // Binding preference overrides source preference; absent on both is the
-    // neutral baseline of 0.
-    const bPref = b.preference ?? source?.preference ?? 0;
+    // The ruled default policy: a candidate with no declared preference
+    // ranks below every candidate with one (a declared negative beats
+    // undeclared). Preference is the binding's own; the core defines no
+    // source-level preference and nothing is inherited.
+    const declared = b.preference != null;
+    const bPref = declared ? b.preference! : -Infinity;
 
     const betterDeprecation = bestDeprecated && !b.deprecated;
     const sameTier = (b.deprecated ?? false) === bestDeprecated;
+    const betterPref =
+      (declared !== bestDeclared && declared) || (declared === bestDeclared && bPref > bestPref);
+    const samePref = declared === bestDeclared && bPref === bestPref;
 
     if (
       !best ||
       betterDeprecation ||
-      (sameTier && bPref > bestPref) ||
-      (sameTier && bPref === bestPref && k < bestKey!)
+      (sameTier && betterPref) ||
+      (sameTier && samePref && k < bestKey!)
     ) {
       bestKey = k;
       best = b;
       bestPref = bPref;
+      bestDeclared = declared;
       bestDeprecated = b.deprecated ?? false;
     }
   }

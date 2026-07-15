@@ -53,7 +53,8 @@ export interface BindingInvocationArgs {
  * Optional, per-call inputs to `OperationInvoker.invoke`. All fields are
  * usually omitted: invocation context is normally resolved by the invoker's
  * contextResolver via the reactive CONTEXT_REQUIRED path, and the binding is
- * normally selected by OBI-T-09. The operation and interface are not here: the
+ * normally selected by the operation-invoker contract's default policy. The
+ * operation and interface are not here: the
  * operation comes from the {@link OperationSignature} and the interface is a
  * positional argument, so one signature works against any interface.
  */
