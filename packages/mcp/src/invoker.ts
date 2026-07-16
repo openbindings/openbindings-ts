@@ -23,24 +23,56 @@ import { discover, convertToInterface, sanitizeKey, resolveKey } from "./synthes
 // Invoker
 // ---------------------------------------------------------------------------
 
+/** Constructor options for {@link MCPInvoker}. */
+export interface MCPInvokerOptions {
+  /**
+   * Consumer-level value of this family's `solicit` configuration point
+   * (openbindings.mcp@1 §9.3): whether a tools/call carries a progressToken
+   * so the server's correlated progress notifications stream as output
+   * values ahead of the result (§9.2). Mirrors the Go SDK's
+   * WithSolicitProgress (invoker.go). The consultation order is
+   * per-invocation context.configuration["solicit"] → this consumer-level
+   * setting → the default, which is NOT solicited: without an opt-in the
+   * output stream is the result value alone. Solicitation applies to tool
+   * invocations only; undefined declines and falls through.
+   */
+  solicitProgress?: boolean;
+}
+
 /** Invokes MCP bindings by connecting to MCP servers via Streamable HTTP. */
 export class MCPInvoker implements BindingInvoker {
+  private readonly solicitProgress?: boolean;
+
+  constructor(options?: MCPInvokerOptions) {
+    this.solicitProgress = options?.solicitProgress;
+  }
+
   bindingSpecs(): BindingSpecInfo[] {
     return [{ bindingSpec: BINDING_SPEC, description: "MCP via Streamable HTTP" }];
   }
 
   /**
    * Returns the invocation handle synchronously; the MCP session work is
-   * scheduled asynchronously. Tool and prompt arguments arrive as the
-   * operation's single input message through the handle's `write` channel;
-   * resource reads take no input (the binding closes the input side on
-   * entry). Pre-dispatch failures (bad ref, missing endpoint, non-object
-   * input) terminate the handle before any network side effect.
+   * scheduled asynchronously. The ref resolves against the listing before
+   * dispatch (openbindings.mcp@1 §7): offline against a pinned listing when
+   * the source carries content, otherwise against the live
+   * capability-gated, pagination-exhausted listing (MCP-P-02). Tool
+   * arguments, prompt arguments, and a resource template's variables arrive
+   * as the operation's single input message through the handle's `write`
+   * channel; static resource reads take no input (the binding closes the
+   * input side once resolution says the ref names a static resource).
+   * Progress notifications stream as outputs ahead of the result only when
+   * solicited (§9.3's `solicit` configuration point — per-invocation
+   * context.configuration.solicit, then the constructor's solicitProgress,
+   * default off). Pre-dispatch failures (bad ref, missing endpoint, invalid
+   * pin, invalid input, unresolvable ref) terminate the handle before the
+   * entity request is sent.
    */
   invokeBinding<I = unknown, O = unknown>(args: BindingInvocationArgs): Invocation<I, O> {
     const inv = new InvocationImpl<unknown, unknown>({ signal: args.signal });
+    const opts = { solicitProgress: this.solicitProgress };
     queueMicrotask(() => {
-      runMCPBinding(args, inv).catch((err: unknown) => {
+      runMCPBinding(args, inv, opts).catch((err: unknown) => {
         inv.fireError(
           err instanceof InvocationError
             ? err

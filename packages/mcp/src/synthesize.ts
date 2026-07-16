@@ -1,8 +1,10 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { UriTemplate } from "@modelcontextprotocol/sdk/shared/uriTemplate.js";
 import type { OBInterface, Operation, BindingEntry, JSONSchema } from "@openbindings/sdk";
 import { MAX_TESTED_VERSION } from "@openbindings/sdk";
 import { CLIENT_NAME, CLIENT_VERSION, BINDING_SPEC, DEFAULT_SOURCE_NAME } from "./constants.js";
+import { exhaustPages } from "./listing.js";
 
 interface MCPDiscovery {
   serverName?: string;
@@ -48,51 +50,108 @@ export async function discover(url: string, options?: DiscoverOptions): Promise<
       prompts: [],
     };
 
+    // Each list request follows nextCursor to pagination exhaustion
+    // (MCP-P-02): the artifact is always the pagination-exhausted
+    // aggregate (openbindings.mcp@1 §3) — a first-page-only discovery
+    // would synthesize a truncated interface.
     if (caps?.tools) {
-      const result = await client.listTools();
-      disc.tools = (result.tools ?? []).map((t) => ({
-        name: t.name,
-        description: t.description,
-        inputSchema: t.inputSchema as Record<string, unknown> | undefined,
-        outputSchema: (t as { outputSchema?: Record<string, unknown> }).outputSchema,
-      }));
+      await exhaustPages(
+        (cursor) => client.listTools(cursor !== undefined ? { cursor } : undefined),
+        (result) => {
+          for (const t of result.tools ?? []) {
+            disc.tools.push({
+              name: t.name,
+              description: t.description,
+              inputSchema: t.inputSchema as Record<string, unknown> | undefined,
+              outputSchema: (t as { outputSchema?: Record<string, unknown> }).outputSchema,
+            });
+          }
+        },
+      );
     }
 
     if (caps?.resources) {
-      const result = await client.listResources();
-      disc.resources = (result.resources ?? []).map((r) => ({
-        name: r.name,
-        uri: r.uri,
-        description: r.description,
-        mimeType: r.mimeType,
-      }));
+      await exhaustPages(
+        (cursor) => client.listResources(cursor !== undefined ? { cursor } : undefined),
+        (result) => {
+          for (const r of result.resources ?? []) {
+            disc.resources.push({
+              name: r.name,
+              uri: r.uri,
+              description: r.description,
+              mimeType: r.mimeType,
+            });
+          }
+        },
+      );
 
-      const templates = await client.listResourceTemplates();
-      disc.resourceTemplates = (templates.resourceTemplates ?? []).map((t) => ({
-        name: t.name,
-        uriTemplate: t.uriTemplate,
-        description: t.description,
-        mimeType: t.mimeType,
-      }));
+      await exhaustPages(
+        (cursor) => client.listResourceTemplates(cursor !== undefined ? { cursor } : undefined),
+        (result) => {
+          for (const t of result.resourceTemplates ?? []) {
+            disc.resourceTemplates.push({
+              name: t.name,
+              uriTemplate: t.uriTemplate,
+              description: t.description,
+              mimeType: t.mimeType,
+            });
+          }
+        },
+      );
     }
 
     if (caps?.prompts) {
-      const result = await client.listPrompts();
-      disc.prompts = (result.prompts ?? []).map((p) => ({
-        name: p.name,
-        description: p.description,
-        arguments: p.arguments?.map((a) => ({
-          name: a.name,
-          description: a.description,
-          required: a.required,
-        })),
-      }));
+      await exhaustPages(
+        (cursor) => client.listPrompts(cursor !== undefined ? { cursor } : undefined),
+        (result) => {
+          for (const p of result.prompts ?? []) {
+            disc.prompts.push({
+              name: p.name,
+              description: p.description,
+              arguments: p.arguments?.map((a) => ({
+                name: a.name,
+                description: a.description,
+                required: a.required,
+              })),
+            });
+          }
+        },
+      );
     }
 
     return disc;
   } finally {
     try { await client.close(); } catch { /* ignore */ }
   }
+}
+
+/**
+ * Derives a resource template's input schema from its RFC 6570 variables —
+ * the operation's input value per openbindings.mcp@1 §8/§9.1: one string
+ * property per declared variable (template variables are string-typed,
+ * never coerced), none required (an unsupplied variable follows RFC 6570's
+ * undefined-value expansion), and no undeclared members (the invoker
+ * refuses them, hence additionalProperties: false). Mirrors the Go SDK's
+ * templateInputSchema (synthesize.go). A template that does not parse
+ * yields no input schema; the invoker refuses it loudly at invocation time.
+ */
+function templateInputSchema(template: string): JSONSchema | undefined {
+  let tmpl: UriTemplate;
+  try {
+    tmpl = new UriTemplate(template);
+  } catch {
+    return undefined;
+  }
+  const properties: Record<string, unknown> = {};
+  for (const name of tmpl.variableNames) {
+    properties[name] = { type: "string" };
+  }
+  return {
+    type: "object",
+    description: `Variables of RFC 6570 template ${JSON.stringify(template)}`,
+    properties,
+    additionalProperties: false,
+  } as JSONSchema;
 }
 
 /**
@@ -178,7 +237,9 @@ export function convertToInterface(disc: MCPDiscovery, location?: string): OBInt
     bindings[`${opKey}.${DEFAULT_SOURCE_NAME}`] = { operation: opKey, source: DEFAULT_SOURCE_NAME, ref };
   }
 
-  // Resources
+  // Resources: static resources take no input value (openbindings.mcp@1
+  // §8/§9.1): the URI is the binding's ref, not caller input, so the
+  // operation declares no input schema.
   for (const res of resources) {
     const ref = `resources/${res.uri}`;
     const opKey = resolveKey(sanitizeKey(res.name), "resource", usedKeys);
@@ -186,18 +247,13 @@ export function convertToInterface(disc: MCPDiscovery, location?: string): OBInt
 
     const op: Operation = {};
     if (res.description) op.description = res.description;
-    op.input = {
-      type: "object",
-      properties: {
-        uri: { type: "string", const: res.uri },
-      },
-    } as JSONSchema;
 
     operations[opKey] = op;
     bindings[`${opKey}.${DEFAULT_SOURCE_NAME}`] = { operation: opKey, source: DEFAULT_SOURCE_NAME, ref };
   }
 
-  // Resource templates
+  // Resource templates: the operation's input value is the object of the
+  // template's RFC 6570 variables (§8/§9.1).
   for (const tmpl of templates) {
     const ref = `resources/${tmpl.uriTemplate}`;
     const opKey = resolveKey(sanitizeKey(tmpl.name), "resource_template", usedKeys);
@@ -205,12 +261,8 @@ export function convertToInterface(disc: MCPDiscovery, location?: string): OBInt
 
     const op: Operation = {};
     if (tmpl.description) op.description = tmpl.description;
-    op.input = {
-      type: "object",
-      properties: {
-        uriTemplate: { type: "string", const: tmpl.uriTemplate },
-      },
-    } as JSONSchema;
+    const input = templateInputSchema(tmpl.uriTemplate);
+    if (input) op.input = input;
 
     operations[opKey] = op;
     bindings[`${opKey}.${DEFAULT_SOURCE_NAME}`] = { operation: opKey, source: DEFAULT_SOURCE_NAME, ref };

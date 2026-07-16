@@ -33,7 +33,10 @@ describe("convertToInterface", () => {
     expect(binding.source).toBe("mcpServer");
   });
 
-  it("converts resources with const URI", () => {
+  it("static resources declare no input (openbindings.mcp@1 §8/§9.1)", () => {
+    // Updated for openbindings.mcp@1: this test previously pinned a
+    // const-uri input schema, an input the conformant invoker refuses. The
+    // URI is the binding's ref, not caller input.
     const iface = convertToInterface({
       tools: [],
       resources: [
@@ -45,10 +48,45 @@ describe("convertToInterface", () => {
 
     const op = iface.operations.config;
     expect(op.description).toBe("Config file");
-    expect((op.input as Record<string, unknown>)?.properties).toHaveProperty("uri");
+    expect(op.input).toBeUndefined();
 
     const binding = iface.bindings!["config.mcpServer"];
     expect(binding.ref).toBe("resources/file:///etc/config.json");
+  });
+
+  it("resource templates declare their RFC 6570 variables as input (§8/§9.1, MCP-P-03)", () => {
+    // Updated for openbindings.mcp@1: a template operation's input is the
+    // object of its RFC 6570 variables (string-typed, none required) —
+    // this test previously pinned a const-uriTemplate input schema, whose
+    // only member the conformant invoker refuses as an undeclared variable.
+    const iface = convertToInterface({
+      tools: [],
+      resources: [],
+      resourceTemplates: [
+        { name: "user_profile", uriTemplate: "users/{userId}/profile" },
+      ],
+      prompts: [],
+    });
+
+    const op = iface.operations.user_profile;
+    const input = op.input as Record<string, unknown>;
+    expect(input).toBeDefined();
+
+    const props = input.properties as Record<string, unknown>;
+    const varSchema = props.userId as Record<string, unknown>;
+    expect(varSchema).toBeDefined();
+    // Template variables are string-typed (never coerced).
+    expect(varSchema.type).toBe("string");
+    // uriTemplate must not appear as an input property.
+    expect(props).not.toHaveProperty("uriTemplate");
+    // Undeclared variables are refused, hence additionalProperties: false.
+    expect(input.additionalProperties).toBe(false);
+    // No variable is required: unsupplied variables follow RFC 6570
+    // undefined-value expansion.
+    expect(input).not.toHaveProperty("required");
+
+    const binding = iface.bindings!["user_profile.mcpServer"];
+    expect(binding.ref).toBe("resources/users/{userId}/profile");
   });
 
   it("converts prompts with arguments", () => {
