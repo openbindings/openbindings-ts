@@ -100,23 +100,23 @@ describe("convertToInterface", () => {
   it("generates input schemas from parameters", async () => {
     const iface = await convertToInterface(undefined, MINIMAL_SPEC);
 
-    const listInput = iface.operations["listUsers"].input;
+    const listInput = iface.operations["listUsers"].input as Record<string, unknown>;
     expect(listInput).toBeDefined();
-    expect(listInput!.type).toBe("object");
-    const props = listInput!.properties as Record<string, unknown>;
+    expect(listInput.type).toBe("object");
+    const props = listInput.properties as Record<string, unknown>;
     expect(props["limit"]).toEqual({ type: "integer" });
   });
 
   it("generates input schemas from request body", async () => {
     const iface = await convertToInterface(undefined, MINIMAL_SPEC);
 
-    const synthesizeInput = iface.operations["createUser"].input;
+    const synthesizeInput = iface.operations["createUser"].input as Record<string, unknown>;
     expect(synthesizeInput).toBeDefined();
-    const props = synthesizeInput!.properties as Record<string, unknown>;
+    const props = synthesizeInput.properties as Record<string, unknown>;
     expect(props["name"]).toEqual({ type: "string" });
     expect(props["email"]).toEqual({ type: "string" });
-    expect(synthesizeInput!.required).toContain("email");
-    expect(synthesizeInput!.required).toContain("name");
+    expect(synthesizeInput.required).toContain("email");
+    expect(synthesizeInput.required).toContain("name");
   });
 
   it("generates output schemas from 200/201 responses", async () => {
@@ -133,11 +133,11 @@ describe("convertToInterface", () => {
   it("merges path-level parameters into operation", async () => {
     const iface = await convertToInterface(undefined, MINIMAL_SPEC);
 
-    const getInput = iface.operations["getUser"].input;
+    const getInput = iface.operations["getUser"].input as Record<string, unknown>;
     expect(getInput).toBeDefined();
-    const props = getInput!.properties as Record<string, unknown>;
+    const props = getInput.properties as Record<string, unknown>;
     expect(props["id"]).toBeDefined();
-    expect(getInput!.required).toContain("id");
+    expect(getInput.required).toContain("id");
   });
 
   it("creates bindings with JSON pointer refs", async () => {
@@ -267,7 +267,7 @@ describe("convertToInterface — OpenAPI 3.0 dialect translation", () => {
 
   it("translates nullable: true in 3.0 documents to type arrays with 'null'", async () => {
     const iface = await convertToInterface(undefined, SPEC_30_NULLABLE);
-    const output = iface.operations["abilityList"].output!;
+    const output = iface.operations["abilityList"].output as Record<string, unknown>;
     const props = output.properties as Record<string, Record<string, unknown>>;
     expect(props["next"]).toEqual({ type: ["string", "null"], format: "uri" });
     expect(props["previous"]).toEqual({ type: ["string", "null"], format: "uri" });
@@ -309,7 +309,7 @@ describe("convertToInterface — OpenAPI 3.0 dialect translation", () => {
       },
     };
     const iface = await convertToInterface(undefined, spec31);
-    const output = iface.operations["x"].output!;
+    const output = iface.operations["x"].output as Record<string, unknown>;
     const props = output.properties as Record<string, Record<string, unknown>>;
     expect(props["next"]).toEqual({ type: ["string", "null"], format: "uri" });
     // The inert nullable: true survives untouched in 3.1 — we don't second-guess.
@@ -343,7 +343,7 @@ describe("convertToInterface — OpenAPI 3.0 dialect translation", () => {
       },
     };
     const iface = await convertToInterface(undefined, spec30);
-    const input = iface.operations["q"].input!;
+    const input = iface.operations["q"].input as Record<string, unknown>;
     const props = input.properties as Record<string, Record<string, unknown>>;
     expect(props["page"]).toEqual({
       type: "integer",
@@ -417,7 +417,7 @@ describe("free-form object bodies", () => {
       undefined,
       specWithBody({ type: "array", items: { type: "integer" } }),
     );
-    const input = iface.operations["makeThing"].input!;
+    const input = iface.operations["makeThing"].input as Record<string, unknown>;
     const props = input.properties as Record<string, unknown>;
     expect(props["body"]).toMatchObject({ type: "array" });
     expect(input.required).toEqual(["body"]);
