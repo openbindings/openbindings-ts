@@ -396,10 +396,16 @@ export function floorStamped(schema: JSONSchema | undefined | null): boolean {
 
 /**
  * Reports whether an output contract cannot catch a wrong decode lane:
- * absent, empty, or admitting bare strings. Content-independent contract
- * inspection (the unvalidated-assumption warning's trigger arms).
+ * absent, empty, boolean-true, or admitting bare strings. Content-
+ * independent contract inspection (the unvalidated-assumption warning's
+ * trigger arms).
  */
 export function nonDiscriminatingOutput(schema: JSONSchema | undefined | null): boolean {
+  if (typeof schema === "boolean") {
+    // Boolean-true accepts everything (cannot catch a wrong lane);
+    // boolean-false rejects everything (any wrong decode fails loudly).
+    return schema;
+  }
   if (!schema || typeof schema !== "object") return true;
   const m = schema as Record<string, unknown>;
   if (Object.keys(m).length === 0) return true;
@@ -436,10 +442,11 @@ export function assumptionWarning(
   outputSchema: JSONSchema | undefined | null,
 ): string {
   if (!decodeStamp.startsWith("assumption/")) return "";
+  const isObj = typeof outputSchema === "object" && outputSchema !== null;
   let reason: string;
   if (floorStamped(outputSchema)) {
     reason = "floor-stamped output schema";
-  } else if (!outputSchema || Object.keys(outputSchema as object).length === 0) {
+  } else if (outputSchema == null || (isObj && Object.keys(outputSchema).length === 0)) {
     reason = "no output schema";
   } else if (nonDiscriminatingOutput(outputSchema)) {
     reason = "non-discriminating output schema";

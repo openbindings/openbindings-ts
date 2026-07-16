@@ -9,7 +9,12 @@ import {
   MIN_SUPPORTED_VERSION,
 } from "./version.js";
 import { ValidationError } from "./errors.js";
-import { validateAgainstOBISchema, validateExamplesAgainstOpSchemas } from "./schema-validation.js";
+import {
+  validateAgainstOBISchema,
+  validateExamplesAgainstOpSchemas,
+  validateSchemaWellFormedness,
+} from "./schema-validation.js";
+import jsonata from "jsonata";
 
 export interface ValidateOptions {
   rejectUnknownTypedFields?: boolean;
@@ -106,11 +111,13 @@ export function validateInterface(
   }
 
   // Validate schemas: keys match identifier pattern (OBI-D-03); each schema
-  // walked for OBI-D-05 ($ref URI), OBI-D-06 ($schema dialect), OBI-D-07 (no
-  // $vocabulary).
+  // checked for well-formedness against the 2020-12 meta-schemas (OBI-D-17)
+  // and walked for OBI-D-05 ($ref URI), OBI-D-06 ($schema dialect), OBI-D-07
+  // (no $vocabulary).
   if (iface.schemas) {
     for (const k of Object.keys(iface.schemas).sort()) {
       validateIdent(errs, "schemas key", k);
+      validateSchemaWellFormedness(errs, `schemas["${k}"]`, iface.schemas[k]);
       walkSchema(errs, `schemas["${k}"]`, iface.schemas[k], iface, false);
     }
   }
@@ -160,11 +167,14 @@ export function validateInterface(
     }
 
 
-    // Walk operation input/output schemas for OBI-D-05/D-07/D-08.
+    // Check operation input/output schemas for well-formedness (OBI-D-17)
+    // and walk them for OBI-D-05/D-06/D-07/D-16.
     if (op.input != null) {
+      validateSchemaWellFormedness(errs, `operations["${k}"].input`, op.input);
       walkSchema(errs, `operations["${k}"].input`, op.input, iface, false);
     }
     if (op.output != null) {
+      validateSchemaWellFormedness(errs, `operations["${k}"].output`, op.output);
       walkSchema(errs, `operations["${k}"].output`, op.output, iface, false);
     }
 
@@ -205,6 +215,11 @@ export function validateInterface(
     }
   }
 
+  // OBI-D-18: every value in the transforms map parses as a syntactically
+  // valid expression of the pinned transform language (JSONata 2.1,
+  // jsonata-js 2.1.1 parse-acceptance tiebreak). Parse-only: evaluation
+  // failures (undefined results, dynamic errors) remain invoke-time
+  // outcomes per OBI-T-10 / ERR_TRANSFORM_ERROR.
   for (const k of Object.keys(iface.transforms ?? {}).sort()) {
     // OBI-D-03: transform keys must match the identifier pattern.
     validateIdent(errs, "transforms key", k);
@@ -303,13 +318,32 @@ function validateInlineTransform(
   prefix: string,
   expr: TransformOrRef,
 ): void {
-  // Per v0.2 spec §6.5, inline transforms are JSONata 2.0 expression
-  // strings. No document rule constrains the expression's content (an empty
-  // string is schema-valid); evaluation failures, including empty
-  // expressions, surface at invoke time per OBI-T-10
-  // (EmptyTransformExpressionError / ERR_TRANSFORM_ERROR).
+  // Per §5.5, transforms are JSONata expression strings. OBI-D-18: every
+  // transform expression parses as a syntactically valid expression of the
+  // pinned language (JSONata 2.1, jsonata-js 2.1.1 parse-acceptance
+  // tiebreak). Parse-only — membership in the language, not success of
+  // evaluation: undefined results and dynamic errors remain invoke-time
+  // outcomes per OBI-T-10 / ERR_TRANSFORM_ERROR.
   if (typeof expr !== "string") {
     errs.push(`${prefix}: must be a JSONata expression string or a $ref object`);
+    return;
+  }
+  if (!jsonataParses(expr)) {
+    errs.push(`${prefix}: not a syntactically valid JSONata expression (OBI-D-18)`);
+  }
+}
+
+/**
+ * Whether expr parses under the bundled JSONata parser. The parser is only
+ * ever handed document-supplied strings; any thrown error is a parse
+ * failure.
+ */
+function jsonataParses(expr: string): boolean {
+  try {
+    jsonata(expr);
+    return true;
+  } catch {
+    return false;
   }
 }
 

@@ -9,7 +9,7 @@ export type {
   BindingEntry,
   OBInterface,
 } from "./types.js";
-export { isTransformRef, resolveTransform } from "./types.js";
+export { isTransformRef, resolveTransform, schemaObjectForm } from "./types.js";
 
 export type {
   Invocation,

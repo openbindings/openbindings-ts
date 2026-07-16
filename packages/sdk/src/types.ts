@@ -3,7 +3,31 @@
  * Avoids coupling to any one JSON Schema library while preserving
  * arbitrary keys/values structurally.
  */
-export type JSONSchema = Record<string, unknown>;
+/**
+ * A JSON Schema 2020-12 value in either of its two forms: an object schema
+ * or a boolean schema — §5.2 admits boolean schemas at every schema
+ * position (`true` accepts every value, `false` accepts none, `{}` is
+ * equivalent to `true`). Intentionally untyped beyond that to avoid
+ * coupling to any one JSON Schema library. Well-formedness of a present
+ * value is a document rule (OBI-D-17), enforced by validateInterface
+ * rather than by this type.
+ */
+export type JSONSchema = Record<string, unknown> | boolean;
+
+/**
+ * Returns the object form of a schema value: an object schema as itself,
+ * boolean `true` as `{}`, and boolean `false` as `{"not": {}}` (the
+ * equivalent object spellings per JSON Schema 2020-12). Returns undefined
+ * when v is neither an object nor a boolean — a malformed schema value
+ * (an OBI-D-17 violation, reported by validateInterface).
+ */
+export function schemaObjectForm(v: JSONSchema | unknown): Record<string, unknown> | undefined {
+  if (typeof v === "boolean") return v ? {} : { not: {} };
+  if (typeof v === "object" && v !== null && !Array.isArray(v)) {
+    return v as Record<string, unknown>;
+  }
+  return undefined;
+}
 
 /** An example input/output pair for an operation. */
 export interface OperationExample {
