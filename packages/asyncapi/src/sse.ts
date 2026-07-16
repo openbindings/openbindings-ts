@@ -185,27 +185,35 @@ export async function streamSSE(
 
   const reader = body.getReader();
   const decoder = new TextDecoder();
-  // buffer holds text with no line terminator yet; a trailing CR is held
-  // back one round because the LF of a CRLF pair may not have arrived yet.
+  // buffer holds text with no line terminator yet; scanned marks how far
+  // terminator scanning has advanced (everything before it is known
+  // terminator-free), so an arriving chunk never re-scans text a previous
+  // round already checked — a single line spanning many chunks stays
+  // linear in stream size. A trailing CR is held back one round because
+  // the LF of a CRLF pair may not have arrived yet.
   let buffer = "";
+  let scanned = 0;
+  // Per-invocation (never module-level: lastIndex is mutable state and
+  // interleaved invocations would corrupt each other's scans).
+  const terminator = /\r\n|\r|\n/g;
 
   // drainLines extracts every complete line from the buffer per the WHATWG
   // event-stream line grammar (CRLF, lone CR, or lone LF terminate a line).
   const drainLines = async (atEOF: boolean): Promise<boolean> => {
     let start = 0;
-    for (let i = 0; i < buffer.length; i++) {
-      const c = buffer[i];
-      if (c === "\n") {
-        if (!(await processLine(buffer.slice(start, i)))) return false;
-        start = i + 1;
-      } else if (c === "\r") {
-        if (i + 1 === buffer.length && !atEOF) break; // CR at the edge: wait for a possible LF
-        if (!(await processLine(buffer.slice(start, i)))) return false;
-        if (i + 1 < buffer.length && buffer[i + 1] === "\n") i++;
-        start = i + 1;
-      }
+    terminator.lastIndex = scanned;
+    for (;;) {
+      const m = terminator.exec(buffer);
+      if (!m) break;
+      // A lone CR at the buffer's edge may be the first half of a CRLF
+      // pair whose LF has not arrived; hold it back until more data (or EOF).
+      if (m[0] === "\r" && m.index + 1 === buffer.length && !atEOF) break;
+      if (!(await processLine(buffer.slice(start, m.index)))) return false;
+      start = m.index + m[0].length;
+      terminator.lastIndex = start;
     }
     buffer = buffer.slice(start);
+    scanned = buffer.endsWith("\r") && !atEOF ? buffer.length - 1 : buffer.length;
     return true;
   };
 
