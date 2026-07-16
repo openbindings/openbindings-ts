@@ -57,6 +57,12 @@ describe("parseRef", () => {
   it("throws for empty operation ID after prefix", () => {
     expect(() => parseRef("#/operations/")).toThrow("empty operation ID");
   });
+
+  // ASYNC-D-03: operation keys containing `/` or `~` carry RFC 6901
+  // escaping in the pointer (~1 → /, ~0 → ~).
+  it("unescapes RFC 6901 sequences in the operation key", () => {
+    expect(parseRef("#/operations/orders~1create~0v2")).toBe("orders/create~v2");
+  });
 });
 
 describe("parseAsyncAPIDocument", () => {

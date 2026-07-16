@@ -2,7 +2,7 @@ import yaml from "js-yaml";
 import { dereference } from "@openbindings/sdk";
 
 import type { AsyncAPIDocument } from "./asyncapi-types.js";
-import { REF_NAME_TAG } from "./constants.js";
+import { CHANNEL_NAME_TAG, REF_NAME_TAG, SERVER_NAME_TAG } from "./constants.js";
 
 const NON_KEY_CHARS = /[^a-zA-Z0-9._-]/g;
 
@@ -18,29 +18,6 @@ export function uniqueKey(key: string, used: Set<string>): string {
   for (let i = 2; ; i++) {
     const candidate = `${key}_${i}`;
     if (!used.has(candidate)) return candidate;
-  }
-}
-
-/**
- * Channel-address fallback: a channel without a declared `address` is
- * assumed addressable by its own channel name — the 2.x-lineage habit
- * documented as an [assumption] in spec/formats/asyncapi.md, and what the
- * Go SDK's runBinding already does (its address defaults to the channel
- * name extracted from the operation's `$ref`). Applied on the RAW
- * (pre-dereference) document, keyed by the top-level `channels` map, so
- * every channel — however an operation reaches it — carries a concrete
- * address by the time dereferencing merges `$ref` targets in.
- */
-function applyChannelAddressFallback(raw: unknown): void {
-  if (raw == null || typeof raw !== "object") return;
-  const channels = (raw as Record<string, unknown>).channels;
-  if (channels == null || typeof channels !== "object") return;
-  for (const [name, channel] of Object.entries(channels as Record<string, unknown>)) {
-    if (channel == null || typeof channel !== "object") continue;
-    const ch = channel as Record<string, unknown>;
-    if (typeof ch.address !== "string" || ch.address === "") {
-      ch.address = name;
-    }
   }
 }
 
@@ -71,8 +48,8 @@ function tagSecurityRefNames(list: unknown): void {
 /**
  * Applies {@link tagSecurityRefNames} to every `security` list in the raw
  * (pre-dereference) document: each operation's and each server's. Mirrors
- * applyChannelAddressFallback's shape — a targeted pass over the RAW
- * document before the generic dereferencer runs.
+ * tagNameKeys' shape — a targeted pass over the RAW document before the
+ * generic dereferencer runs.
  */
 function tagAllSecurityRefNames(raw: unknown): void {
   if (raw == null || typeof raw !== "object") return;
@@ -92,6 +69,25 @@ function tagAllSecurityRefNames(raw: unknown): void {
         tagSecurityRefNames((server as Record<string, unknown>).security);
       }
     }
+  }
+}
+
+/**
+ * Tags each entry of a raw top-level map (`channels`, `servers`) with its
+ * own map key under `tag`, so the key survives dereferencing: an
+ * operation's channel `$ref` and a channel's `servers` subset entries
+ * resolve to clones of these tagged objects, and the invoke path reads the
+ * name back off the resolved object (target.ts's channelNameOf /
+ * serverNameOf). The tag rides the TARGET object — the name is the entry's
+ * own map key, a property of the target, not of any one reference.
+ */
+function tagNameKeys(raw: unknown, mapField: string, tag: string): void {
+  if (raw == null || typeof raw !== "object") return;
+  const map = (raw as Record<string, unknown>)[mapField];
+  if (map == null || typeof map !== "object") return;
+  for (const [name, entry] of Object.entries(map as Record<string, unknown>)) {
+    if (entry == null || typeof entry !== "object") continue;
+    (entry as Record<string, unknown>)[tag] = name;
   }
 }
 
@@ -122,7 +118,8 @@ export async function parseAsyncAPIDocument(
     throw new Error("source must have location or content");
   }
 
-  applyChannelAddressFallback(raw);
+  tagNameKeys(raw, "channels", CHANNEL_NAME_TAG);
+  tagNameKeys(raw, "servers", SERVER_NAME_TAG);
   tagAllSecurityRefNames(raw);
 
   // Resolve all $ref pointers. External $refs fetch through the injected
@@ -137,9 +134,9 @@ export async function parseAsyncAPIDocument(
   if (!resolved.asyncapi) {
     throw new Error("not a valid AsyncAPI document (missing 'asyncapi' field)");
   }
-  // Per spec/formats/asyncapi.md: AsyncAPI 2.x documents are out of the
-  // supported range and refused loudly at load, mirroring the Go SDK's
-  // loadDocument (which requires a "3." prefix).
+  // Per spec/binding-specs/asyncapi (ASYNC-P-01): AsyncAPI 2.x documents
+  // are out of the supported range and refused loudly at load, mirroring
+  // the Go SDK's loadDocument (which requires a "3." prefix).
   if (!resolved.asyncapi.startsWith("3.")) {
     throw new Error(`unsupported AsyncAPI version "${resolved.asyncapi}" (expected 3.x)`);
   }
@@ -147,7 +144,12 @@ export async function parseAsyncAPIDocument(
   return resolved;
 }
 
-/** Extracts the operation ID from a `#/operations/<id>` ref string, or returns the ref as-is. */
+/**
+ * Extracts the operation key from a `#/operations/<key>` ref string, or
+ * returns the ref as-is (a pre-existing lenience, pinned by test). Keys
+ * containing `/` or `~` carry RFC 6901 escaping in the pointer
+ * (ASYNC-D-03): `~1` → `/`, `~0` → `~`, in that order.
+ */
 export function parseRef(ref: string): string {
   ref = ref.trim();
   if (!ref) throw new Error("empty ref");
@@ -156,7 +158,7 @@ export function parseRef(ref: string): string {
   if (ref.startsWith(prefix)) {
     const opID = ref.slice(prefix.length);
     if (!opID) throw new Error(`empty operation ID in ref "${ref}"`);
-    return opID;
+    return opID.replaceAll("~1", "/").replaceAll("~0", "~");
   }
 
   return ref;

@@ -21,7 +21,8 @@ import {
 } from "@openbindings/sdk";
 import type { AsyncAPIDocument } from "./asyncapi-types.js";
 import { BINDING_SPEC, DEFAULT_SOURCE_NAME } from "./constants.js";
-import { runBinding, requiredContext, resolveServer } from "./invoke.js";
+import { runBinding, requiredContext } from "./invoke.js";
+import { resolveTarget } from "./target.js";
 import { convertToInterface } from "./synthesize.js";
 import { parseAsyncAPIDocument, parseRef, errorMessage, sanitizeKey, uniqueKey } from "./util.js";
 import { WSPool } from "./ws-pool.js";
@@ -137,8 +138,11 @@ export class AsyncAPIInvoker implements BindingInvoker {
       const opID = parseRef(args.ref);
       const asyncOp = (doc.operations ?? {})[opID];
       if (!asyncOp) return null;
-      const { url: serverURL, server } = resolveServer(doc, args.context);
-      return requiredContext(asyncOp, server, serverURL, args.context);
+      // The server whose declared security applies (§9.5): resolveTarget's
+      // securityServer — the connection's server, or under a full-URL
+      // override the server the default selection would have targeted.
+      const target = resolveTarget(doc, asyncOp.channel, args.context);
+      return requiredContext(asyncOp, target.securityServer, target.serverURL, args.context);
     } catch {
       return null;
     }
