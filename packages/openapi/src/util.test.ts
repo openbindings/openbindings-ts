@@ -7,9 +7,18 @@ describe("parseRef", () => {
     expect(result).toEqual({ path: "/users", method: "get" });
   });
 
-  it("parses without leading #/", () => {
-    const result = parseRef("paths/~1users~1{id}/delete");
-    expect(result).toEqual({ path: "/users/{id}", method: "delete" });
+  // OAPI-D-03: the ref MUST be a JSON Pointer of the exact form
+  // #/paths/<escaped-path>/<method>. A prefix-less spelling was previously
+  // accepted leniently; that acceptance was non-conformant.
+  it("refuses a ref without the #/paths/ prefix (OAPI-D-03)", () => {
+    expect(() => parseRef("paths/~1users~1{id}/delete")).toThrow("must be a JSON Pointer");
+  });
+
+  // OAPI-D-03: the path segment carries RFC 6901 escaping, so a conformant
+  // ref has exactly one path token. Unescaped multi-token spellings were
+  // previously accepted leniently; that acceptance was non-conformant.
+  it("refuses unescaped path tokens (OAPI-D-03)", () => {
+    expect(() => parseRef("#/paths/users/posts/get")).toThrow("must be a JSON Pointer");
   });
 
   it("handles tilde escaping correctly", () => {
@@ -17,17 +26,19 @@ describe("parseRef", () => {
     expect(result).toEqual({ path: "/a~b/c", method: "post" });
   });
 
-  it("normalizes method to lowercase", () => {
-    const result = parseRef("#/paths/~1users/GET");
-    expect(result).toEqual({ path: "/users", method: "get" });
+  // OAPI-D-03: the method is lowercase exactly as the artifact spells it —
+  // acceptance never case-folds. (This flips the previous lenient
+  // lower-casing pin, which was non-conformant.)
+  it("refuses an uppercase method, never case-folds (OAPI-D-03)", () => {
+    expect(() => parseRef("#/paths/~1users/GET")).toThrow("lowercase");
   });
 
   it("throws for too few parts", () => {
-    expect(() => parseRef("#/paths")).toThrow("must be in format");
+    expect(() => parseRef("#/paths")).toThrow("must be a JSON Pointer");
   });
 
   it("throws for non-paths prefix", () => {
-    expect(() => parseRef("#/components/schemas/get")).toThrow("must be in format");
+    expect(() => parseRef("#/components/schemas/get")).toThrow("must be a JSON Pointer");
   });
 
   it("throws for invalid HTTP method", () => {

@@ -25,7 +25,7 @@ import { OpenAPIInvoker } from "@openbindings/openapi";
 const invoker = new OperationInvoker([new OpenAPIInvoker()]);
 ```
 
-The invoker declares `openapi@^3.0.0` — it handles any OpenAPI 3.x spec.
+The invoker declares the binding specification `openbindings.openapi@1` — it handles OpenAPI 3.0.x and 3.1.x documents, discriminated by the artifact's own `openapi` field. This package implements the published [`openbindings.openapi@1`](https://github.com/openbindings/spec/blob/main/binding-specs/openapi/openbindings.openapi.md) binding specification; that document is normative for input mapping (the flattened model, OAS style/explode serialization), request media selection, server resolution, interaction shape, and channel assembly.
 
 ### Invoke a binding
 
@@ -38,7 +38,7 @@ const invoker = new OpenAPIInvoker();
 
 const call = invoker.invokeBinding({
   source: {
-    format: "openapi@3.1.0",
+    bindingSpec: "openbindings.openapi@1",
     location: "https://api.example.com/openapi.json",
   },
   ref: "#/paths/~1users~1{id}/get",
@@ -76,7 +76,7 @@ const synth = new OpenAPISynthesizer();
 
 const iface = await synth.synthesizeInterface({
   sources: [{
-    format: "openapi@3.1.0",
+    bindingSpec: "openbindings.openapi@1",
     location: "https://api.example.com/openapi.json",
   }],
 });
@@ -87,26 +87,28 @@ const iface = await synth.synthesizeInterface({
 
 ### Execution flow
 
-1. Loads and caches the OpenAPI document (JSON or YAML, local or remote)
-2. Parses the ref as a JSON Pointer (`#/paths/~1users/get` -> path `/users`, method `get`)
-3. Resolves the base URL from the spec's `servers` array
+1. Loads and caches the OpenAPI document (JSON or YAML, local or remote), discriminating the accepted 3.0.x/3.1.x lines (OAPI-P-01)
+2. Parses the ref as a JSON Pointer (`#/paths/~1users/get` -> path `/users`, method `get`); the method is lowercase exactly as the artifact spells it — an uppercase method is refused, never case-folded (OAPI-D-03)
+3. Resolves the server (the OAS effective list + variables + the `server` configuration point, OAPI-P-05)
 4. Derives auth requirements from the operation's (or document's) `security` and challenges `CONTEXT_REQUIRED` when the context can't satisfy them — before any request is dispatched
-5. Reads the input message from the handle and classifies its fields as path, query, header, or body parameters based on the OpenAPI parameter definitions
-6. Applies credentials from the context using the spec's `securitySchemes` (bearer, basic, apiKey, oauth2 with correct placement)
-7. Makes the HTTP request, sets the response headers as leading metadata, classifies the outcome (success iff status is 2xx; error statuses terminate the handle with `{ status, body }` details), decodes the body by the response's `Content-Type` header (strict JSON for `application/json` and `+json` suffixes, text otherwise), and emits the value — classification and decode both run through the consumer hooks seam, and the trailer metadata carries `x-ob-decode`/`x-ob-classify` provenance stamps
+5. Reads the input message from the handle and routes its fields per the flattened model (OAPI-P-03) — parameters serialize per the OAS style/explode rules (OAPI-P-02); unmatched fields pass into a declared request body and refuse loudly otherwise — and selects the request media type per the specification's preference order (OAPI-P-04)
+6. Applies credentials from the context using the spec's `securitySchemes` (bearer, basic, apiKey, oauth2 with correct placement), refusing credential/parameter channel collisions pre-dispatch (OAPI-P-10)
+7. Makes the HTTP request, sets the response headers as leading metadata; the declared success media bound the interaction shape (unary, or server-streaming for a declared `text/event-stream` response, OAPI-P-06); classifies the outcome (success iff status is 2xx, OAPI-P-08; error statuses terminate the handle with `{ status, body }` details), decodes the body by the response's `Content-Type` header (strict JSON for `application/json` and `+json` suffixes, the charset-honoring text lane otherwise, OAPI-P-07), and emits the value — classification and decode both run through the consumer hooks seam, and the trailer metadata carries `x-ob-decode`/`x-ob-classify` provenance stamps
 
-### Base URL override
+### Server selection
 
-By default the request target is the spec's first `servers[]` entry (a relative server URL like `/api/v3` is resolved against the source `location`'s origin). To send the same OBI at a different host, e.g. staging or a local mock, set `metadata.baseURL` in the invocation context:
+By default the request target is the OAS effective server list's first entry (operation `servers`, else the path item's, else the document's, else the implied `/`), with server-variable defaults substituted; a relative server URL resolves against the source `location`. Server resolution is the specification's named configuration point (OAPI-P-05): set `configuration.server` in the invocation context to select another declared entry (`url` or `index`), supply `variables`, or supply a complete `baseUrl` outright:
 
 ```typescript
 context: {
-  metadata: { baseURL: "https://staging.example.com" },
+  configuration: {
+    server: { baseUrl: "https://staging.example.com" },
+  },
   bearerToken: "tok_123",
 }
 ```
 
-`metadata.baseURL` takes precedence over the spec's `servers`. When absent and the spec has no server URL, invocation fails with a message telling you to set one or the other.
+The legacy `metadata.baseURL` override still works, below the configuration point.
 
 ### Consumer hooks
 

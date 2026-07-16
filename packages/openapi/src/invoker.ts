@@ -19,9 +19,9 @@ import {
 } from "@openbindings/sdk";
 import type { OpenAPIDocument, OpenAPIOperation } from "./types.js";
 import { DEFAULT_SOURCE_NAME, BINDING_SPEC } from "./constants.js";
-import { requiredContext, resolveRequestBaseURL, runBinding } from "./invoke.js";
+import { preflightTarget, requiredContext, runBinding } from "./invoke.js";
 import { convertToInterface, deriveOperationKey, HTTP_METHODS } from "./synthesize.js";
-import { buildJsonPointerRef, errorMessage, loadOpenAPIDocument, parseRef } from "./util.js";
+import { buildJsonPointerRef, errorMessage, loadOpenAPIDocument } from "./util.js";
 
 // ---------------------------------------------------------------------------
 // Shared doc-cache helper
@@ -119,24 +119,11 @@ export class OpenAPIInvoker implements BindingInvoker {
     }
     if (!doc) return null;
 
-    let op: OpenAPIOperation | undefined;
-    try {
-      const { path, method } = parseRef(args.ref);
-      op = doc.paths?.[path]?.[method] as OpenAPIOperation | undefined;
-    } catch {
-      return null;
-    }
-    if (!op) return null;
-
-    let baseURL: string;
-    try {
-      baseURL = resolveRequestBaseURL(doc, args.context, args.source.location);
-    } catch {
-      // No server URL: the invocation fails with ERR_SOURCE_CONFIG_ERROR
-      // before auth matters, so there is no context to report.
-      return null;
-    }
-    return requiredContext(doc, op, args.context, baseURL);
+    // An unresolvable ref or server means the invocation fails with its own
+    // pre-dispatch refusal before auth matters: no context to report.
+    const target = preflightTarget(doc, args.ref, args.context, args.source.location);
+    if (!target) return null;
+    return requiredContext(doc, target.op, args.context, target.baseURL);
   }
 
   private async run(

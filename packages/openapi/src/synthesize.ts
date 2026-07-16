@@ -145,6 +145,7 @@ function buildInputSchema(
 ): JSONSchema | undefined {
   const properties: Record<string, unknown> = {};
   const required: string[] = [];
+  let hasOpenBody = false;
 
   const allParams = mergeParameters(pathParams, op.parameters ?? []);
 
@@ -179,6 +180,14 @@ function buildInputSchema(
         if (Array.isArray(bodySchema.required)) {
           required.push(...bodySchema.required);
         }
+      } else if (isObjectTypedSchema(bodySchema)) {
+        // A free-form object body (type object, no named properties): the
+        // flattened model passes unmatched input fields through into the
+        // body (openbindings.openapi@1 §9.1), so the flattened surface
+        // stays an OPEN object — the synthetic `body` wrap is reserved for
+        // NON-object body schemas, and wrapping here would describe a
+        // field the conformant invoker refuses as unmatched.
+        hasOpenBody = true;
       } else {
         properties["body"] = bodySchema;
         if (rb.required) required.push("body");
@@ -186,13 +195,29 @@ function buildInputSchema(
     }
   }
 
-  if (Object.keys(properties).length === 0) return undefined;
+  if (Object.keys(properties).length === 0) {
+    if (hasOpenBody) return { type: "object" };
+    return undefined;
+  }
 
   const schema: JSONSchema = { type: "object", properties };
   if (required.length > 0) {
     schema.required = [...required].sort();
   }
   return schema;
+}
+
+/**
+ * Reports whether a body schema is explicitly object-typed (3.0 string
+ * form or a single-element 3.1 type array): the flattened model's
+ * passthrough case, never the synthetic-body wrap. Mirrors the Go SDK's
+ * isObjectTypedSchema (formats/openapi/synthesize.go).
+ */
+function isObjectTypedSchema(schema: Record<string, unknown>): boolean {
+  const ty = schema["type"];
+  if (typeof ty === "string") return ty === "object";
+  if (Array.isArray(ty)) return ty.length === 1 && ty[0] === "object";
+  return false;
 }
 
 function paramToSchema(param: OpenAPIParameter): Record<string, unknown> | undefined {

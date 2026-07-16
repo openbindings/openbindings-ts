@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { convertToInterface } from "./synthesize.js";
+import { OpenAPIInvoker } from "./invoker.js";
 import { DEFAULT_SOURCE_NAME } from "./constants.js";
 
 const MINIMAL_SPEC = {
@@ -377,6 +378,78 @@ describeMS("multi-source refusal", () => {
 // deterministic (body schema wins) and never silent — a synthesizer
 // warning names the field and the delivery rule. Also closes the TS
 // warning-channel gap (SynthesizeInput.onWarning, mirroring Go).
+// Free-form object bodies flatten OPEN, never wrap under the synthetic
+// `body` property (openbindings.openapi@1 §9.1): the synthetic wrap is
+// reserved for NON-object body schemas, and wrapping would describe a field
+// the conformant invoker refuses as unmatched — breaking the
+// synthesize→invoke round trip. Mirrors the Go SDK's hasOpenBody /
+// isObjectTypedSchema (formats/openapi/synthesize.go).
+describe("free-form object bodies", () => {
+  function specWithBody(bodySchema: Record<string, unknown>) {
+    return {
+      openapi: "3.1.0",
+      info: { title: "t", version: "1" },
+      servers: [{ url: "https://api.example.com" }],
+      paths: {
+        "/things": {
+          post: {
+            operationId: "makeThing",
+            requestBody: {
+              required: true,
+              content: { "application/json": { schema: bodySchema } },
+            },
+            responses: { "200": { description: "ok" } },
+          },
+        },
+      },
+    };
+  }
+
+  it("synthesizes a free-form object body as an OPEN flattened surface", async () => {
+    const iface = await convertToInterface(undefined, specWithBody({ type: "object" }));
+    // No parameters and no named properties: the flattened surface is the
+    // open object itself — never a synthetic `body` wrap, never absent.
+    expect(iface.operations["makeThing"].input).toEqual({ type: "object" });
+  });
+
+  it("still wraps a NON-object body schema under the synthetic body property", async () => {
+    const iface = await convertToInterface(
+      undefined,
+      specWithBody({ type: "array", items: { type: "integer" } }),
+    );
+    const input = iface.operations["makeThing"].input!;
+    const props = input.properties as Record<string, unknown>;
+    expect(props["body"]).toMatchObject({ type: "array" });
+    expect(input.required).toEqual(["body"]);
+  });
+
+  it("treats a single-element 3.1 type array [\"object\"] as object-typed", async () => {
+    const iface = await convertToInterface(undefined, specWithBody({ type: ["object"] }));
+    expect(iface.operations["makeThing"].input).toEqual({ type: "object" });
+  });
+
+  // The round trip the wrap used to break: the synthesized open surface's
+  // fields pass through into the body at invocation (§9.1 evaluation-free
+  // passthrough) instead of refusing as unmatched.
+  it("round-trips: invoking with free-form fields passes them through into the body", async () => {
+    const spec = specWithBody({ type: "object" });
+    let captured: string | undefined;
+    const fetchFn = (async (_url: RequestInfo | URL, init?: RequestInit) => {
+      captured = init?.body as string;
+      return new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } });
+    }) as typeof globalThis.fetch;
+
+    const call = new OpenAPIInvoker().invokeBinding({
+      source: { bindingSpec: "openbindings.openapi@1", content: spec },
+      ref: "#/paths/~1things/post",
+      fetch: fetchFn,
+    });
+    await call.write({ anything: "goes", n: 1 });
+    for await (const _ of call.outputs) void _;
+    expect(JSON.parse(captured!)).toEqual({ anything: "goes", n: 1 });
+  });
+});
+
 describe("param/body field collision", () => {
   it("warns and flattens to one field", async () => {
     const spec = {
