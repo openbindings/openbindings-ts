@@ -1,11 +1,27 @@
+/**
+ * Conformance corpus adapter: runs this package's normalization and
+ * directional compatibility checks against the interfaces repository's
+ * schema-comparison corpus unmodified (conformance/comparison — the
+ * schema-comparison profile's fail-closed boundary, normalization
+ * equivalence, directional subsumption, boolean schema forms, and the
+ * unspecified-schema suppression rule).
+ *
+ * The corpus is located via OB_INTERFACES_CORPUS or the local-dev sibling
+ * path (openbindings/interfaces next to openbindings/openbindings-ts); the
+ * suite skips when it is absent.
+ */
 import { describe, it, expect } from "vitest";
-import * as fs from "node:fs";
-import * as path from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import canonicalize from "canonicalize";
 import { Normalizer } from "./normalize.js";
 import { OutsideProfileError } from "./errors.js";
 
-// ----- Types matching the spec conformance format -----
+const __dirname = dirname(fileURLToPath(import.meta.url));
+
+// ----- Types matching the corpus conventions -----
+// (interfaces/conformance/comparison/manifest.schema.json and fixture.schema.json)
 
 interface Manifest {
   conventionVersion: string;
@@ -28,6 +44,7 @@ interface Fixture {
   right: OBInterface;
   mode: string;
   options: { profile: string };
+  expected?: { summary?: { verdict?: string } };
 }
 
 interface OBInterface {
@@ -36,61 +53,57 @@ interface OBInterface {
   schemas?: Record<string, unknown>;
 }
 
+// Schema slots are `unknown` because fixtures may use either JSON Schema
+// form: an object, or a boolean (§5.2). Absent slots mean unspecified.
 interface OBOperation {
-  input?: Record<string, unknown>;
-  output?: Record<string, unknown>;
+  input?: unknown;
+  output?: unknown;
   aliases?: string[];
 }
 
-// ----- Configuration -----
+// ----- Corpus location -----
 
-const CONFORMANCE_DIR = path.resolve(
-  __dirname,
-  "../../../../../spec/conformance/comparison",
-);
-
-// Known gaps: fixtures that expose unimplemented features in the TS schema-profile
-// package. Each entry maps a fixture path to the reason it must be skipped.
-const KNOWN_GAPS: Record<string, string> = {
-  // The normalizer does not detect draft-04 boolean exclusiveMinimum/
-  // exclusiveMaximum as non-2020-12 schema constructs. It should reject
-  // them with OutsideProfileError to produce an "indeterminate" verdict.
-  "profile/profile-schema-not-2020-12-indeterminate.json":
-    "normalizer does not detect draft-04 boolean exclusiveMinimum as non-2020-12",
-
-  // Same root cause: one operation uses draft-04 boolean exclusiveMinimum,
-  // which should collapse the multi-op verdict to indeterminate.
-  "structural/verdict-collapse-indeterminate-dominates.json":
-    "normalizer does not detect draft-04 boolean exclusiveMinimum as non-2020-12",
-
-  // The compat logic skips additionalProperties for input direction, but the
-  // spec says disabling additionalProperties on the candidate is a breaking
-  // input change.
-  "subsumption/additional-properties-input-disabled-breaking.json":
-    "inputCompatible does not enforce additionalProperties restriction",
-
-  // The schema-profile package does not implement the suppression mechanism.
-  // Suppressions are an interface-level concern that downgrade breaking
-  // findings to compatible.
-  "suppression/suppressed-required-input-added-audit.json":
-    "suppression mechanism not implemented",
-
-  // The fixture expects an "unverified" verdict for regex pattern containment,
-  // which is outside the schemaprofile scope.
-  "subsumption/string-pattern-input-mismatch-unverified.json":
-    "unverified verdict for regex containment outside schemaprofile scope",
-};
+/**
+ * Locates the interfaces conformance corpus: the OB_INTERFACES_CORPUS
+ * environment variable, or the local-dev sibling checkout. Same convention
+ * as selection-corpus.test.ts.
+ */
+function corpusDir(): string | null {
+  if (process.env.OB_INTERFACES_CORPUS) return process.env.OB_INTERFACES_CORPUS;
+  const dir = resolve(__dirname, "..", "..", "..", "..", "..", "interfaces", "conformance");
+  return existsSync(dir) ? dir : null;
+}
 
 // ----- Helpers -----
 
 type OpVerdict = "compatible" | "incompatible" | "indeterminate";
 
-/** Collapse per-operation verdicts using spec dominance: indeterminate > incompatible > compatible. */
+/** Collapse per-operation verdicts using the profile's dominance: indeterminate > incompatible > compatible. */
 function collapseVerdicts(verdicts: OpVerdict[]): string {
   const has = new Set(verdicts);
   if (has.has("indeterminate")) return "indeterminate";
   if (has.has("incompatible")) return "incompatible";
   return "compatible";
+}
+
+/**
+ * Maps a fixture schema value to the object form the profile compares: an
+ * object schema as itself, boolean `true` as `{}`, and boolean `false` as
+ * `{"not": {}}` — the same equivalent spellings schemaObjectForm applies at
+ * the compatibility layer.
+ */
+function fixtureSchemaObjectForm(v: unknown): Record<string, unknown> | undefined {
+  if (typeof v === "boolean") {
+    return v ? {} : { not: {} };
+  }
+  if (v && typeof v === "object" && !Array.isArray(v)) {
+    return v as Record<string, unknown>;
+  }
+  return undefined;
+}
+
+function directionSchema(direction: string, op: OBOperation): unknown {
+  return direction === "input" ? op.input : op.output;
 }
 
 /**
@@ -120,21 +133,31 @@ async function compareOperation(
   leftOp: OBOperation,
   rightOp: OBOperation,
   leftInterface: OBInterface,
-  rightInterface: OBInterface,
 ): Promise<OpVerdict> {
-  let leftSchema = direction === "input" ? leftOp.input : leftOp.output;
-  let rightSchema = direction === "input" ? rightOp.input : rightOp.output;
-  leftSchema ??= {};
-  rightSchema ??= {};
+  const leftRaw = directionSchema(direction, leftOp);
+  const rightRaw = directionSchema(direction, rightOp);
+
+  // An absent schema is unspecified, not Top: the slot's comparison is
+  // skipped and reports no finding — the profile's suppression rule, the
+  // same treatment checkInterfaceCompatibility applies.
+  if (leftRaw == null || rightRaw == null) return "compatible";
+
+  const leftSchema = fixtureSchemaObjectForm(leftRaw);
+  const rightSchema = fixtureSchemaObjectForm(rightRaw);
+  expect(leftSchema, "left schema must be an object or boolean").toBeDefined();
+  expect(rightSchema, "right schema must be an object or boolean").toBeDefined();
 
   // Each schema resolves $ref against its own interface document.
+  // inputCompatible/outputCompatible normalize both schemas internally, so
+  // we use the left document as root; corpus fixtures only carry $refs that
+  // resolve against the left document.
   const n = new Normalizer({ root: leftInterface as unknown as Record<string, unknown> });
 
   try {
     const result =
       direction === "input"
-        ? await n.inputCompatible(leftSchema, rightSchema)
-        : await n.outputCompatible(leftSchema, rightSchema);
+        ? await n.inputCompatible(leftSchema!, rightSchema!)
+        : await n.outputCompatible(leftSchema!, rightSchema!);
     return result.compatible ? "compatible" : "incompatible";
   } catch (err) {
     if (err instanceof OutsideProfileError) {
@@ -173,13 +196,7 @@ async function runSubsumeFixture(
     }
     pairedRight.add(pair.rightKey);
 
-    const verdict = await compareOperation(
-      entry.direction,
-      leftOp,
-      pair.rightOp,
-      fix.left,
-      fix.right,
-    );
+    const verdict = await compareOperation(entry.direction, leftOp, pair.rightOp, fix.left);
     verdicts.push(verdict);
   }
 
@@ -202,10 +219,8 @@ async function runIdenticalFixture(
     const rightOp = fix.right.operations[opKey];
     expect(rightOp, `operation "${opKey}" in left but not in right`).toBeDefined();
 
-    let leftSchema = entry.direction === "input" ? leftOp.input : leftOp.output;
-    let rightSchema = entry.direction === "input" ? rightOp.input : rightOp.output;
-    leftSchema ??= {};
-    rightSchema ??= {};
+    const leftSchema = fixtureSchemaObjectForm(directionSchema(entry.direction, leftOp)) ?? {};
+    const rightSchema = fixtureSchemaObjectForm(directionSchema(entry.direction, rightOp)) ?? {};
 
     const nLeft = new Normalizer({
       root: fix.left as unknown as Record<string, unknown>,
@@ -232,21 +247,20 @@ async function runIdenticalFixture(
 
 // ----- Test suite -----
 
-const manifestPath = path.join(CONFORMANCE_DIR, "manifest.json");
-const fixturesAvailable = fs.existsSync(manifestPath);
+const dir = corpusDir();
+const comparisonDir = dir ? join(dir, "comparison") : null;
+const manifestPath = comparisonDir ? join(comparisonDir, "manifest.json") : null;
+const fixturesAvailable = manifestPath !== null && existsSync(manifestPath);
 
 describe.skipIf(!fixturesAvailable)("comparison conformance", () => {
   const manifest: Manifest = fixturesAvailable
-    ? JSON.parse(fs.readFileSync(manifestPath, "utf-8"))
+    ? JSON.parse(readFileSync(manifestPath!, "utf-8"))
     : { conventionVersion: "", profile: "", files: [] };
 
   for (const entry of manifest.files) {
-    const skipReason = KNOWN_GAPS[entry.path];
-    const isUnverified = entry.verdict === "unverified";
-
-    it.skipIf(!!skipReason || isUnverified)(entry.path, async () => {
-      const fixturePath = path.join(CONFORMANCE_DIR, entry.path);
-      const fix: Fixture = JSON.parse(fs.readFileSync(fixturePath, "utf-8"));
+    it(entry.path, async () => {
+      const fixturePath = join(comparisonDir!, entry.path);
+      const fix: Fixture = JSON.parse(readFileSync(fixturePath, "utf-8"));
 
       let got: string;
       switch (entry.mode) {
@@ -265,10 +279,11 @@ describe.skipIf(!fixturesAvailable)("comparison conformance", () => {
   }
 
   it("manifest references only existing files", () => {
+    expect(manifest.files.length).toBeGreaterThan(0);
     for (const entry of manifest.files) {
-      const fixturePath = path.join(CONFORMANCE_DIR, entry.path);
+      const fixturePath = join(comparisonDir!, entry.path);
       expect(
-        fs.existsSync(fixturePath),
+        existsSync(fixturePath),
         `manifest references missing file: ${entry.path}`,
       ).toBe(true);
     }
@@ -276,23 +291,13 @@ describe.skipIf(!fixturesAvailable)("comparison conformance", () => {
 
   it("fixture verdicts match manifest verdicts", () => {
     for (const entry of manifest.files) {
-      const fixturePath = path.join(CONFORMANCE_DIR, entry.path);
-      const raw = JSON.parse(fs.readFileSync(fixturePath, "utf-8"));
+      const fixturePath = join(comparisonDir!, entry.path);
+      const raw = JSON.parse(readFileSync(fixturePath, "utf-8"));
       const fixtureVerdict = raw.expected?.summary?.verdict;
       expect(
         fixtureVerdict,
         `${entry.path}: manifest verdict "${entry.verdict}" != fixture verdict "${fixtureVerdict}"`,
       ).toBe(entry.verdict);
-    }
-  });
-
-  it("known gaps reference real manifest entries", () => {
-    const manifestPaths = new Set(manifest.files.map((f) => f.path));
-    for (const gapPath of Object.keys(KNOWN_GAPS)) {
-      expect(
-        manifestPaths.has(gapPath),
-        `known gap "${gapPath}" does not appear in manifest; remove it`,
-      ).toBe(true);
     }
   });
 });
