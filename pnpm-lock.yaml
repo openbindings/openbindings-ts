@@ -120,6 +120,9 @@ importers:
       json-schema-library:
         specifier: ^11.6.1
         version: 11.6.1
+      jsonata:
+        specifier: ^2.1.0
+        version: 2.2.1
 
   packages/workers-rpc:
     dependencies:

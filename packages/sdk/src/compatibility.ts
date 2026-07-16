@@ -1,4 +1,5 @@
 import type { OBInterface } from "./types.js";
+import { schemaObjectForm } from "./types.js";
 import { resolveOperation } from "./resolve-operation.js";
 import { Normalizer, inputCompatible, outputCompatible } from "./schema-profile/index.js";
 import type { JSONObject } from "./schema-profile/index.js";
@@ -42,33 +43,58 @@ export async function checkInterfaceCompatibility(
       continue;
     }
 
-    if (requiredOp.output && providedOp.output) {
-      try {
-        const reqOutput = await reqNorm.normalize(requiredOp.output as JSONObject);
-        const provOutput = await provNorm.normalize(providedOp.output as JSONObject);
-        const outputResult = outputCompatible(reqOutput, provOutput);
-        if (!outputResult.compatible) {
-          issues.push({
-            operation: opKey,
-            kind: "output_incompatible",
-            detail: outputResult.reason
-              ? `provided output does not satisfy the required output schema: ${outputResult.reason}`
-              : "provided output does not satisfy the required output schema",
-          });
-        }
-      } catch (e: unknown) {
+    // Per spec: absent/null schemas are "unspecified" (skip in
+    // compatibility); {} and boolean schemas are specified and must be
+    // checked. Boolean schemas take their equivalent object spellings
+    // (true = {}, false = {"not": {}}) so the profile normalizer sees one
+    // form.
+    if (requiredOp.output != null && providedOp.output != null) {
+      const reqOutObj = schemaObjectForm(requiredOp.output);
+      const provOutObj = schemaObjectForm(providedOp.output);
+      if (reqOutObj === undefined || provOutObj === undefined) {
         issues.push({
           operation: opKey,
           kind: "output_incompatible",
-          detail: `output schema check failed: ${e instanceof Error ? e.message : String(e)}`,
+          detail: "output schema check failed: schema is not a JSON Schema object or boolean",
         });
+      } else {
+        try {
+          const reqOutput = await reqNorm.normalize(reqOutObj as JSONObject);
+          const provOutput = await provNorm.normalize(provOutObj as JSONObject);
+          const outputResult = outputCompatible(reqOutput, provOutput);
+          if (!outputResult.compatible) {
+            issues.push({
+              operation: opKey,
+              kind: "output_incompatible",
+              detail: outputResult.reason
+                ? `provided output does not satisfy the required output schema: ${outputResult.reason}`
+                : "provided output does not satisfy the required output schema",
+            });
+          }
+        } catch (e: unknown) {
+          issues.push({
+            operation: opKey,
+            kind: "output_incompatible",
+            detail: `output schema check failed: ${e instanceof Error ? e.message : String(e)}`,
+          });
+        }
       }
     }
 
-    if (requiredOp.input && providedOp.input) {
+    if (requiredOp.input != null && providedOp.input != null) {
+      const reqInObj = schemaObjectForm(requiredOp.input);
+      const provInObj = schemaObjectForm(providedOp.input);
+      if (reqInObj === undefined || provInObj === undefined) {
+        issues.push({
+          operation: opKey,
+          kind: "input_incompatible",
+          detail: "input schema check failed: schema is not a JSON Schema object or boolean",
+        });
+        continue;
+      }
       try {
-        const reqInput = await reqNorm.normalize(requiredOp.input as JSONObject);
-        const provInput = await provNorm.normalize(providedOp.input as JSONObject);
+        const reqInput = await reqNorm.normalize(reqInObj as JSONObject);
+        const provInput = await provNorm.normalize(provInObj as JSONObject);
         const inputResult = inputCompatible(reqInput, provInput);
         if (!inputResult.compatible) {
           issues.push({

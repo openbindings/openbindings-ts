@@ -290,10 +290,10 @@ describe("validateInterface", () => {
     );
   });
 
-  it("accepts empty transform expressions (no document rule forbids them)", () => {
-    // The schema allows any string; empty expressions fail at invoke time
-    // (ERR_TRANSFORM_ERROR / EmptyTransformExpressionError), not at
-    // document validation.
+  it("rejects empty transform expressions (OBI-D-18)", () => {
+    // OBI-D-18: every transform expression parses as a syntactically valid
+    // JSONata expression; an empty string is not one (jsonata-js 2.1.1
+    // rejects it at parse, the normative tiebreak).
     const iface = minimalInterface();
     iface.transforms = { t: "" };
     iface.bindings!["getUser.main"] = {
@@ -301,7 +301,18 @@ describe("validateInterface", () => {
       inputTransform: "",
       outputTransform: { $ref: "#/transforms/t" },
     };
-    expect(() => validateInterface(iface)).not.toThrow();
+    let msg = "";
+    try {
+      validateInterface(iface);
+    } catch (e) {
+      msg = (e as Error).message;
+    }
+    expect(msg).toContain(
+      'transforms["t"]: not a syntactically valid JSONata expression (OBI-D-18)',
+    );
+    expect(msg).toContain(
+      'bindings["getUser.main"].inputTransform: not a syntactically valid JSONata expression (OBI-D-18)',
+    );
   });
 
   it("cites OBI-D-10 for unresolvable transform $refs", () => {
@@ -514,5 +525,156 @@ describe("OBI-T-04 downward refusal", () => {
   it("refuses a document below MIN_SUPPORTED_VERSION", () => {
     expect(() => validateInterface({ openbindings: "0.1.0", operations: {} }))
       .toThrowError(/below this SDK's MinSupportedVersion "0\.2\.0" \(OBI-T-04\)/);
+  });
+});
+
+// OBI-D-17: every schema in the document is well-formed — object or boolean
+// form, meta-schema-valid, recursively through subschemas. Mirrors the Go
+// SDK's tests and detail strings.
+describe("OBI-D-17 schema well-formedness", () => {
+  it("accepts boolean-form schemas at every schema position", () => {
+    const iface: OBInterface = {
+      openbindings: "0.2.0",
+      schemas: { Anything: true },
+      operations: {
+        op: { input: true, output: false },
+        nested: {
+          input: {
+            type: "object",
+            properties: {
+              locked: false,
+              values: { type: "array", items: true },
+            },
+            additionalProperties: false,
+          },
+        },
+      },
+    };
+    expect(() => validateInterface(iface)).not.toThrow();
+  });
+
+  it.each([
+    ["type as number at input", { input: { type: 42 } }, 'operations["op"].input'],
+    ["unknown simple type", { input: { type: "str" } }, 'operations["op"].input'],
+    [
+      "nested minLength as string",
+      { output: { type: "object", properties: { a: { minLength: "3" } } } },
+      'operations["op"].output',
+    ],
+    [
+      "oneOf as object",
+      { output: { oneOf: { type: "string" } } },
+      'operations["op"].output',
+    ],
+  ])("rejects meta-schema violations: %s", (_name, op, prefix) => {
+    const iface: OBInterface = {
+      openbindings: "0.2.0",
+      operations: { op: op as never },
+    };
+    let msg = "";
+    try {
+      validateInterface(iface);
+    } catch (e) {
+      msg = (e as Error).message;
+    }
+    expect(msg).toContain(`${prefix}: not a well-formed JSON Schema 2020-12 schema:`);
+    expect(msg).toContain("(OBI-D-17)");
+  });
+
+  it("rejects non-object-non-boolean schema values with a deterministic diagnostic", () => {
+    const iface: OBInterface = {
+      openbindings: "0.2.0",
+      schemas: { Task: 42 as never },
+      operations: { op: { output: "not-a-schema" as never } },
+    };
+    let msg = "";
+    try {
+      validateInterface(iface);
+    } catch (e) {
+      msg = (e as Error).message;
+    }
+    expect(msg).toContain(
+      'schemas["Task"]: a schema is a JSON Schema 2020-12 object or boolean; got number (OBI-D-17)',
+    );
+    expect(msg).toContain(
+      'operations["op"].output: a schema is a JSON Schema 2020-12 object or boolean; got string (OBI-D-17)',
+    );
+  });
+
+  it("is deliberately narrow: unknown keywords, bad pattern regexes, unresolvable external $refs pass", () => {
+    const iface: OBInterface = {
+      openbindings: "0.2.0",
+      operations: {
+        op: {
+          input: {
+            type: "object",
+            "x-internal": true,
+            futureKeyword: { arbitrary: "annotation" },
+            properties: {
+              code: { type: "string", pattern: "([unclosed" },
+            },
+          },
+          output: { $ref: "https://schemas.example.com/never-published/task.json" },
+        },
+      },
+    };
+    expect(() => validateInterface(iface)).not.toThrow();
+  });
+});
+
+// OBI-D-18: transform parse-validity — parse-only membership in the pinned
+// language. Mirrors the Go SDK's tests and detail strings.
+describe("OBI-D-18 transform parse-validity", () => {
+  it("accepts parse-valid transforms, including expressions whose evaluation would fail", () => {
+    const iface = minimalInterface();
+    iface.transforms = {
+      nontrivial:
+        'items[price > 10].{ "label": name & " ($" & $string(price) & ")", "total": price * quantity }',
+      evalWouldFail: "payload.does.not.exist",
+      unknownFunction: "$definitelyNotARealFunction(payload)",
+    };
+    iface.bindings!["getUser.main"] = {
+      ...iface.bindings!["getUser.main"],
+      inputTransform: '{ "task_title": title }',
+    };
+    expect(() => validateInterface(iface)).not.toThrow();
+  });
+
+  it("rejects expressions that do not parse, at named and inline positions", () => {
+    const iface = minimalInterface();
+    iface.transforms = { unbalanced: "(a + b" };
+    iface.bindings!["getUser.main"] = {
+      ...iface.bindings!["getUser.main"],
+      inputTransform: "items[",
+      outputTransform: '{ "id": }',
+    };
+    let msg = "";
+    try {
+      validateInterface(iface);
+    } catch (e) {
+      msg = (e as Error).message;
+    }
+    for (const want of [
+      'transforms["unbalanced"]: not a syntactically valid JSONata expression (OBI-D-18)',
+      'bindings["getUser.main"].inputTransform: not a syntactically valid JSONata expression (OBI-D-18)',
+      'bindings["getUser.main"].outputTransform: not a syntactically valid JSONata expression (OBI-D-18)',
+    ]) {
+      expect(msg).toContain(want);
+    }
+  });
+});
+
+// Boolean schemas must survive parse and round-trip (§5.2 admits boolean
+// form at every schema position).
+describe("boolean schema round-trip", () => {
+  it("parses and re-serializes boolean input/output/schemas entries", () => {
+    const raw = '{"openbindings":"0.2.0","operations":{"op":{"input":true,"output":false}},"schemas":{"Anything":true}}';
+    const iface = JSON.parse(raw) as OBInterface;
+    expect(() => validateInterface(iface)).not.toThrow();
+    const round = JSON.parse(JSON.stringify(iface)) as Record<string, unknown>;
+    const op = (round.operations as Record<string, Record<string, unknown>>).op;
+    expect(op.input).toBe(true);
+    expect(op.output).toBe(false);
+    expect((round.schemas as Record<string, unknown>).Anything).toBe(true);
   });
 });

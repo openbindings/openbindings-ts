@@ -75,6 +75,46 @@ function wrapNode(node: ReturnType<typeof compileSchema>): CompiledSchema {
   };
 }
 
+/** Names the JSON type of a decoded value for diagnostics (Go parity). */
+function jsonTypeName(v: unknown): string {
+  if (v === null) return "null";
+  if (typeof v === "boolean") return "boolean";
+  if (typeof v === "number") return "number";
+  if (typeof v === "string") return "string";
+  if (Array.isArray(v)) return "array";
+  if (typeof v === "object") return "object";
+  return typeof v;
+}
+
+/**
+ * Reports OBI-D-17 violations at one schema position: the value must be a
+ * JSON Schema 2020-12 schema in object or boolean form, and the object
+ * form must validate against the 2020-12 meta-schemas (which cover
+ * subschemas recursively; the meta-schemas are vendored locally, never
+ * fetched, per the rule's verification note). The check is deliberately
+ * narrow, mirroring §5.2: unknown keywords, unparseable `pattern` values,
+ * and unresolvable `$ref` targets all pass — they surface when the schema
+ * is used, not here.
+ */
+export function validateSchemaWellFormedness(
+  errs: string[],
+  prefix: string,
+  schema: unknown,
+): void {
+  if (typeof schema === "boolean") return; // boolean form is always well-formed
+  if (typeof schema === "object" && schema !== null && !Array.isArray(schema)) {
+    const meta = metaValidator().validate(schema);
+    if (!meta.valid) {
+      for (const f of meta.failures) {
+        const line = f.path ? `${f.path}: ${f.message}` : f.message;
+        errs.push(`${prefix}: not a well-formed JSON Schema 2020-12 schema: ${line} (OBI-D-17)`);
+      }
+    }
+    return;
+  }
+  errs.push(`${prefix}: a schema is a JSON Schema 2020-12 object or boolean; got ${jsonTypeName(schema)} (OBI-D-17)`);
+}
+
 let _documentValidator: CompiledSchema | null = null;
 
 function documentValidator(): CompiledSchema {
@@ -224,7 +264,7 @@ export function validateExamplesAgainstOpSchemas(
  * unresolvable without fetching external resources, so document validation
  * abstains from example checks against them. (An absolute $ref matching an
  * embedded $id would resolve locally per §10; abstaining on it here is
- * conservative partial verification, which the spec's §14.2 posture
+ * conservative partial verification, which the spec's §10.2 posture
  * permits — unverified, not non-conformant.)
  */
 function schemaHasExternalRef(value: unknown): boolean {

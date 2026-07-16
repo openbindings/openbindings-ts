@@ -111,7 +111,7 @@ describe("convertToInterface", () => {
 
     const pubOp = iface.operations["sendMessage"];
     expect(pubOp.input).toBeDefined();
-    expect(pubOp.input!.type).toBe("object");
+    expect((pubOp.input as Record<string, unknown>).type).toBe("object");
   });
 
   it("sets output schema for send operations (invoking subscribes, ASYNC-P-02)", async () => {
@@ -120,7 +120,7 @@ describe("convertToInterface", () => {
 
     const subOp = iface.operations["receiveEvents"];
     expect(subOp.output).toBeDefined();
-    expect(subOp.output!.type).toBe("object");
+    expect((subOp.output as Record<string, unknown>).type).toBe("object");
   });
 
   it("omits security metadata (credentials are runtime context, not OBI surface)", async () => {
