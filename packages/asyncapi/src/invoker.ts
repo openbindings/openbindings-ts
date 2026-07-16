@@ -24,7 +24,7 @@ import { BINDING_SPEC, DEFAULT_SOURCE_NAME } from "./constants.js";
 import { runBinding, requiredContext } from "./invoke.js";
 import { resolveTarget } from "./target.js";
 import { convertToInterface } from "./synthesize.js";
-import { parseAsyncAPIDocument, parseRef, errorMessage, sanitizeKey, uniqueKey } from "./util.js";
+import { operationRef, parseAsyncAPIDocument, parseRef, errorMessage, sanitizeKey, uniqueKey } from "./util.js";
 import { WSPool } from "./ws-pool.js";
 
 /**
@@ -232,7 +232,7 @@ export class AsyncAPISynthesizer implements InterfaceSynthesizer, SourceInspecto
         const operationKey = uniqueKey(sanitizeKey(opID), usedKeys);
         usedKeys.add(operationKey);
         targets.push({
-          ref: `#/operations/${opID}`,
+          ref: operationRef(opID),
           operationKey,
           operation: desc ? { description: desc } : undefined,
         });

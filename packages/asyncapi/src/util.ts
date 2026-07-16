@@ -107,6 +107,9 @@ export async function parseAsyncAPIDocument(
       raw = content;
     }
   } else if (location) {
+    // `location` must be an absolute URI (ASYNC-D-02) — a bare filesystem
+    // path is refused loudly before any fetch is attempted.
+    validateDocumentAddress(location);
     const doFetch = fetchFn ?? fetch;
     const resp = await doFetch(location, { signal: options?.signal });
     if (!resp.ok) {
@@ -134,34 +137,74 @@ export async function parseAsyncAPIDocument(
   if (!resolved.asyncapi) {
     throw new Error("not a valid AsyncAPI document (missing 'asyncapi' field)");
   }
-  // Per spec/binding-specs/asyncapi (ASYNC-P-01): AsyncAPI 2.x documents
-  // are out of the supported range and refused loudly at load, mirroring
-  // the Go SDK's loadDocument (which requires a "3." prefix).
-  if (!resolved.asyncapi.startsWith("3.")) {
-    throw new Error(`unsupported AsyncAPI version "${resolved.asyncapi}" (expected 3.x)`);
+  // ASYNC-P-01: the artifact's own `asyncapi` field discriminates the
+  // accepted line — 3.0.x ONLY. A later 3.x line is adopted by compatible
+  // revision of the binding specification, never sight-unseen.
+  if (!resolved.asyncapi.startsWith("3.0.")) {
+    throw new Error(
+      `unsupported AsyncAPI version "${resolved.asyncapi}": openbindings.asyncapi@1 accepts the 3.0.x line only (ASYNC-P-01)`,
+    );
   }
 
   return resolved;
 }
 
 /**
- * Extracts the operation key from a `#/operations/<key>` ref string, or
- * returns the ref as-is (a pre-existing lenience, pinned by test). Keys
- * containing `/` or `~` carry RFC 6901 escaping in the pointer
- * (ASYNC-D-03): `~1` → `/`, `~0` → `~`, in that order.
+ * Checks ASYNC-D-02's location grammar offline, without dereferencing:
+ * `location`, when present, is an absolute URI addressing the AsyncAPI
+ * document itself. A bare filesystem path is a relative reference in form
+ * (core OBI-D-05) and is refused — a local artifact is addressed as
+ * file:// or embedded as the source's content.
+ */
+export function validateDocumentAddress(location: string): void {
+  try {
+    new URL(location);
+  } catch {
+    throw new Error(
+      `asyncapi location ${JSON.stringify(location)} is not an absolute URI addressing the document (ASYNC-D-02): a local artifact is addressed as file:// or embedded as the source's content`,
+    );
+  }
+}
+
+/**
+ * Parses a binding ref per ASYNC-D-03: a JSON Pointer
+ * `#/operations/<operation-key>` addressing an operations-map entry is the
+ * ONLY conformant spelling. A bare operation key without the pointer
+ * prefix is refused (the former lenience is gone), and an unescaped `/`
+ * after the prefix addresses a deeper path — never an operations-map
+ * entry — so it is refused too. Operation keys containing `/` or `~` carry
+ * RFC 6901 escaping in the pointer: `~1` → `/`, `~0` → `~`, decoded in
+ * that order.
  */
 export function parseRef(ref: string): string {
   ref = ref.trim();
-  if (!ref) throw new Error("empty ref");
-
-  const prefix = "#/operations/";
-  if (ref.startsWith(prefix)) {
-    const opID = ref.slice(prefix.length);
-    if (!opID) throw new Error(`empty operation ID in ref "${ref}"`);
-    return opID.replaceAll("~1", "/").replaceAll("~0", "~");
+  if (!ref) {
+    throw new Error("ref is required and must be a JSON Pointer #/operations/<operation-key> (ASYNC-D-03)");
   }
 
-  return ref;
+  const prefix = "#/operations/";
+  if (!ref.startsWith(prefix)) {
+    throw new Error(
+      `ref "${ref}" is not a JSON Pointer #/operations/<operation-key>: the pointer is the only conformant spelling — a bare operation key is not accepted (ASYNC-D-03)`,
+    );
+  }
+  const token = ref.slice(prefix.length);
+  if (!token) throw new Error(`empty operation key in ref "${ref}" (ASYNC-D-03)`);
+  if (token.includes("/")) {
+    throw new Error(
+      `ref "${ref}" addresses a deeper path, not an operations-map entry: an operation key containing / carries RFC 6901 escaping (~1) (ASYNC-D-03)`,
+    );
+  }
+  return token.replaceAll("~1", "/").replaceAll("~0", "~");
+}
+
+/**
+ * Builds the conformant ASYNC-D-03 spelling for an operation key:
+ * `#/operations/` + the RFC 6901-escaped key (`~` → `~0` first, then
+ * `/` → `~1` — escape order is the reverse of decode order).
+ */
+export function operationRef(opID: string): string {
+  return `#/operations/${opID.replaceAll("~", "~0").replaceAll("/", "~1")}`;
 }
 
 /** Extracts a human-readable message from an unknown thrown value. */
