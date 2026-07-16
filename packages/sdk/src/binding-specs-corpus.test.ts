@@ -60,6 +60,10 @@ interface CorpusFixture {
 const root = corpusRoot();
 
 describe.skipIf(!root)("binding-specs subcorpus, core-level checks", () => {
+  // skipIf marks the tests skipped, but this callback still RUNS at
+  // collection time — without the corpus checkout (CI) the filesystem
+  // reads below would crash the suite instead of skipping it.
+  if (!root) return;
   for (const family of ALL_FAMILIES) {
     describe(family, () => {
       const dir = path.join(root!, "binding-specs", family);

@@ -124,6 +124,10 @@ async function judgeDocument(doc: CorpusDocument): Promise<string | undefined> {
 const dir = corpusDir();
 
 describe.skipIf(!dir)("binding-spec conformance corpus (asyncapi)", () => {
+  // skipIf marks the tests skipped, but this callback still RUNS at
+  // collection time — without the corpus checkout (CI) the filesystem
+  // reads below would crash the suite instead of skipping it.
+  if (!dir) return;
   const files = readdirSync(dir!).filter((f) => f.endsWith(".json"));
   expect(files.length).toBeGreaterThan(0);
   for (const file of files) {
