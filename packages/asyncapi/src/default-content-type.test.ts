@@ -3,11 +3,13 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { AsyncAPIInvoker } from "./invoker.js";
 import { BINDING_SPEC } from "./constants.js";
 
-// Regression coverage for spec/formats/asyncapi.md: decode looks at "the
-// declared message contentType decides (operation messages, then reply
-// messages, then the document's defaultContentType)". Mirrors the Go SDK's
-// TestDeclaredContentType_FallsBackToDocumentDefault, exercised end-to-end
-// since declaredContentType is not part of the TS package's public surface.
+// Regression coverage for openbindings.asyncapi@1 §9.3 (ASYNC-P-05): the
+// per-message EFFECTIVE content type is the message's `contentType`, else
+// the document's `defaultContentType` — still the declared lane, never
+// payload sniffing. A publish output decodes by the REPLY-side governing
+// declarations (direction-correct decode), so the fixture declares a reply.
+// Mirrors the Go SDK's TestEffectiveContentType_FallsBackToDocumentDefault,
+// exercised end-to-end.
 describe("defaultContentType fallback", () => {
   let server: Server;
   let port: number;
@@ -49,6 +51,9 @@ describe("defaultContentType fallback", () => {
           action: "receive" as const,
           channel: { $ref: "#/channels/reply" },
           messages: [{ $ref: "#/channels/reply/messages/Msg" }],
+          // The response decodes by the REPLY-side governing set
+          // (direction-correct decode, ASYNC-P-05).
+          reply: { messages: [{ $ref: "#/channels/reply/messages/Msg" }] },
         },
       },
     };

@@ -22,3 +22,26 @@ export const DEFAULT_SOURCE_NAME = "asyncapi";
  * components.securitySchemes key to name).
  */
 export const REF_NAME_TAG = "x-ob-asyncapi-ref-name";
+
+/**
+ * Synthetic field tagged onto each entry of the raw document's `channels`
+ * map (its own map key) before the shared dereferencer runs, and read back
+ * off an operation's resolved `channel` object to recover the channel's
+ * name — the address configuration point's refusals name the refusing
+ * channel (ASYNC-P-04), and dereferencing has replaced the operation's
+ * channel `$ref` with the resolved object by then. Same survival mechanics
+ * as {@link REF_NAME_TAG}, except the tag rides the TARGET object itself
+ * (the name is the channel's own map key, not a property of any one
+ * reference), so every `$ref` resolving to the channel sees it.
+ */
+export const CHANNEL_NAME_TAG = "x-ob-asyncapi-channel-name";
+
+/**
+ * Synthetic field tagged onto each entry of the raw document's `servers`
+ * map (its own map key) before the shared dereferencer runs, and read back
+ * off a channel's resolved `servers` subset entries to recover each
+ * member's servers-map key. The effective server set (ASYNC-P-04) is
+ * name-addressable — consumer `configuration.server` selects a member by
+ * name — and dereferencing would otherwise erase the names.
+ */
+export const SERVER_NAME_TAG = "x-ob-asyncapi-server-name";

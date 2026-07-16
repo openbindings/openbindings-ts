@@ -42,12 +42,6 @@ export interface PooledWS {
    * after the connection died.
    */
   send(data: string): void;
-  /**
-   * Returns true the first time the marker `key` is claimed on this
-   * CONNECTION, false afterwards. Lets per-connection conventions (e.g. the
-   * first-frame bearer) run once per socket rather than once per invocation.
-   */
-  once(key: string): boolean;
   /** Release this reference. Starts idle timer if last ref. */
   release(): void;
 }
@@ -56,15 +50,27 @@ export interface AcquireOptions {
   /** Custom URL builder (e.g. to add query-param credentials). */
   buildURL?: (base: string, addr: string) => string;
   /**
-   * Fingerprint of the credential identity a dial would use (e.g. from
-   * {@link credentialFingerprint} in invoke.ts). Included in the pool key
-   * alongside server/address: two acquires with different credential
-   * fingerprints MUST NOT share a connection (cross-tenant credential
-   * leak — the same property the Go SDK's `wsPoolKey` enforces via its
-   * SHA-256 credential digest). Omitted or empty means "no credentials",
-   * which still partitions correctly (two anonymous callers share).
+   * Fingerprint of the credential identity a dial would use (invoke.ts's
+   * wsUpgradeMaterial hashes exactly the upgrade-request material — no
+   * credential rides in-band under openbindings.asyncapi@1 §9.5, so the
+   * upgrade request IS the connection's credential identity). Included in
+   * the pool key alongside server/address: two acquires with different
+   * credential fingerprints MUST NOT share a connection (cross-tenant
+   * credential leak — the same property the Go SDK's `wsPoolKey` enforces
+   * via its SHA-256 credential digest). Omitted or empty means "no
+   * credentials", which still partitions correctly (two anonymous callers
+   * share).
    */
   credentialKey?: string;
+  /**
+   * Headers for the upgrade request (credential placement plus resolved
+   * ws-binding header values, §9.5/§8). Applied on runtimes whose WebSocket
+   * constructor accepts a headers option (Node's undici does; the WHATWG
+   * surface browsers implement does not — there the constructor rejects the
+   * option LOUDLY, per §9.5's "surfaced, never silently dropped" floor for
+   * carriage the platform cannot apply).
+   */
+  headers?: Record<string, string>;
   /** Aborts a dial in flight; the acquire rejects with the signal's reason. */
   signal?: AbortSignal;
 }
@@ -75,8 +81,6 @@ interface PoolEntry {
   idleTimer: ReturnType<typeof setTimeout> | null;
   messageHandlers: Set<(data: string) => void>;
   closeHandlers: Set<(err?: Error) => void>;
-  /** Markers claimed via PooledWS.once for this connection's lifetime. */
-  onceKeys: Set<string>;
   ready: Promise<void>;
   key: string;
 }
@@ -99,7 +103,7 @@ export class WSPool {
     address: string,
     options: AcquireOptions = {},
   ): Promise<PooledWS> {
-    const { buildURL, credentialKey, signal } = options;
+    const { buildURL, credentialKey, headers, signal } = options;
     if (signal?.aborted) throw abortError(signal);
 
     const key = poolKey(serverURL, address, credentialKey);
@@ -125,7 +129,7 @@ export class WSPool {
     }
 
     // Create a new connection.
-    const createPromise = this.createEntry(key, serverURL, address, buildURL);
+    const createPromise = this.createEntry(key, serverURL, address, buildURL, headers);
     this.creating.set(key, createPromise);
 
     let entry: PoolEntry;
@@ -163,12 +167,23 @@ export class WSPool {
     serverURL: string,
     address: string,
     buildURL?: (base: string, addr: string) => string,
+    headers?: Record<string, string>,
   ): Promise<PoolEntry> {
     const url = buildURL
       ? buildURL(serverURL, address)
       : new URL(`/${address.replace(/^\/+/, "")}`, serverURL).toString();
 
-    const ws = new WebSocket(url);
+    // Credentials and resolved ws-binding headers ride the UPGRADE REQUEST
+    // (§9.5, ASYNC-P-07: no credential ever rides a message body or a first
+    // frame). Node's WebSocket (undici) accepts a non-standard `headers`
+    // init option; on a WHATWG-only runtime (browsers) the option is not
+    // applicable and the constructor errors LOUDLY — surfaced, never
+    // silently dropped or rerouted, per §9.5. When there is no header
+    // material the standard one-argument form is used everywhere.
+    const ws =
+      headers && Object.keys(headers).length > 0
+        ? new WebSocket(url, { headers } as unknown as string[])
+        : new WebSocket(url);
 
     const messageHandlers = new Set<(data: string) => void>();
     const closeHandlers = new Set<(err?: Error) => void>();
@@ -205,7 +220,6 @@ export class WSPool {
       idleTimer: null,
       messageHandlers,
       closeHandlers,
-      onceKeys: new Set(),
       ready,
       key,
     };
@@ -251,12 +265,6 @@ export class WSPool {
           throw new Error("WebSocket is not open");
         }
         entry.ws.send(data);
-      },
-
-      once(key: string): boolean {
-        if (entry.onceKeys.has(key)) return false;
-        entry.onceKeys.add(key);
-        return true;
       },
 
       release: () => {

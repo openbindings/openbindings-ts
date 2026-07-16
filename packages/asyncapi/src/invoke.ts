@@ -11,7 +11,8 @@
  * One entrypoint ({@link runBinding}) drives every cell against the
  * binding-facing {@link BindingHandle}:
  *
- *   - receive + http/https  unary publish: one input -> request body (POST),
+ *   - receive + http/https  unary publish: one input -> request body (POST,
+ *                           or the http binding's declared method),
  *                           response -> at most one output
  *   - receive + ws/wss      client-streaming publish: every input -> one
  *                           socket frame; the caller closing input ends it
@@ -19,9 +20,11 @@
  *   - send + ws/wss         streaming subscription (bidi-capable): socket
  *                           frames -> outputs, caller inputs forward as frames
  *
- * All pre-dispatch failures (bad ref, missing server, missing context,
- * missing publish input) are raised via `fireError` BEFORE any network I/O,
- * per the binding-author contract.
+ * All pre-dispatch failures (bad ref, no resolvable server, missing
+ * context, an unresolved address or server variable, an unsatisfied
+ * ws-binding declaration, an excluded input content family, missing publish
+ * input) are raised via `fireError` BEFORE any network I/O, per the
+ * binding-author contract and ASYNC-P-02/-03/-04's pre-dispatch refusals.
  */
 
 import {
@@ -35,15 +38,16 @@ import {
   contextString,
   contextHeaders,
   contextCookies,
-  contextMetadata,
   httpErrorCode,
   ERR_INVALID_REF,
+  ERR_PROTOCOL,
   ERR_SOURCE_CONFIG_ERROR,
   ERR_REF_NOT_FOUND,
   ERR_MISSING_INPUT,
   ERR_CONNECT_FAILED,
   ERR_RESPONSE_ERROR,
   ERR_STREAM_ERROR,
+  ERR_VALIDATION_FAILED,
   type BindingHandle,
   type BindingInvocationArgs,
   type ContextAlternative,
@@ -52,13 +56,13 @@ import {
   type Metadata,
   isJSONContentType,
   decodeThroughHooks,
-  USE_DEFAULT,
   type InvokeHooks,
   type InvokeSite,
   type OutputDecoder,
   type RawResult,
 } from "@openbindings/sdk";
 import type {
+  AsyncAPIChannel,
   AsyncAPIDocument,
   AsyncAPIOperation,
   AsyncAPIOAuthFlow,
@@ -68,6 +72,25 @@ import type {
 } from "./asyncapi-types.js";
 import { isSecurityScheme } from "./asyncapi-types.js";
 import { REF_NAME_TAG } from "./constants.js";
+import { mergeQuery, requestMethod, resolveWSUpgrade } from "./bindings.js";
+import {
+  decodeContentType,
+  encodeInput,
+  governingMessages,
+  normalizeMediaType,
+  replyGoverningMessages,
+  resolveInputCodec,
+  type InputCodec,
+} from "./content.js";
+import { streamSSE } from "./sse.js";
+import {
+  addressConfiguration,
+  channelNameOf,
+  joinURL,
+  resolveAddress,
+  resolveTarget,
+  type ResolvedTarget,
+} from "./target.js";
 import { parseRef, errorMessage } from "./util.js";
 import type { PooledWS, WSPool } from "./ws-pool.js";
 
@@ -105,19 +128,25 @@ export async function runBinding(
     return;
   }
 
-  let serverURL: string;
-  let protocol: string;
-  let server: AsyncAPIServer | undefined;
+  // The binding target is the addressed operation's channel (§8), reached
+  // through a resolved server and expanded address (§9.2). A channel `$ref`
+  // the dereferencer could not resolve is no channel at all.
+  const ch = resolvedChannel(asyncOp.channel);
+  const channelName = channelNameOf(ch);
+
+  let target: ResolvedTarget;
   try {
-    ({ url: serverURL, protocol, server } = resolveServer(doc, args.context));
+    target = resolveTarget(doc, ch, args.context);
   } catch (e: unknown) {
     h.fireError(new InvocationError(ERR_SOURCE_CONFIG_ERROR, errorMessage(e)));
     return;
   }
 
-  // Context negotiation: challenge BEFORE any connection is opened.
-  // Requirements derive from the SAME server the connection targets.
-  const required = requiredContext(asyncOp, server, serverURL, args.context);
+  // Context negotiation: challenge BEFORE any connection is opened. The
+  // requirements derive from the server whose declared security applies
+  // (§9.5): the server the connection targets — or, under a full-URL
+  // override, the server the default selection would have targeted.
+  const required = requiredContext(asyncOp, target.securityServer, target.serverURL, args.context);
   if (required) {
     h.fireError(
       contextRequiredError(
@@ -128,105 +157,85 @@ export async function runBinding(
     return;
   }
 
-  const address = asyncOp.channel?.address ?? "";
-
-  const defaultContentType = doc.defaultContentType ?? "";
+  // The address configuration point (ASYNC-P-04): the declared address with
+  // every {name} expression expanded — an absent address or an unresolved
+  // expression is a pre-dispatch refusal, never a guess.
+  let address: string;
+  let addrParams: Record<string, string> | undefined;
+  try {
+    const addrCfg = addressConfiguration(args.context);
+    addrParams = addrCfg.parameters;
+    address = resolveAddress(ch, channelName, addrCfg);
+  } catch (e: unknown) {
+    h.fireError(new InvocationError(ERR_SOURCE_CONFIG_ERROR, errorMessage(e)));
+    return;
+  }
 
   // The complementary perspective (ASYNC-P-02): `receive` means the
   // described application receives, so invoking PUBLISHES; `send` means it
   // sends, so invoking SUBSCRIBES.
-  switch (asyncOp.action) {
-    case "receive":
-      if (protocol === "ws" || protocol === "wss") {
-        await runWSPublish(wsPool, serverURL, address, asyncOp, server, args, h);
-      } else if (protocol === "http" || protocol === "https") {
-        await runUnaryPublish(serverURL, address, asyncOp, server, args, h, defaultContentType);
+  if (asyncOp.action !== "receive" && asyncOp.action !== "send") {
+    h.fireError(
+      new InvocationError(
+        ERR_SOURCE_CONFIG_ERROR,
+        `unknown action "${(asyncOp as { action: string }).action}"`,
+      ),
+    );
+    return;
+  }
+
+  switch (target.protocol) {
+    case "ws":
+    case "wss": {
+      // The websockets channel binding governs the upgrade request where it
+      // speaks (§8): declared query and header values, supplied like
+      // address parameters, with unsatisfied required declarations a
+      // pre-dispatch refusal.
+      let up: ReturnType<typeof resolveWSUpgrade>;
+      try {
+        up = resolveWSUpgrade(ch, channelName, addrParams, contextHeaders(args.context));
+      } catch (e: unknown) {
+        h.fireError(new InvocationError(ERR_SOURCE_CONFIG_ERROR, errorMessage(e)));
+        return;
+      }
+      const dialAddress = mergeQuery(address, up.query);
+      if (asyncOp.action === "receive") {
+        await runWSPublish(wsPool, target, dialAddress, up.headers, doc, ch, asyncOp, args, h);
       } else {
-        h.fireError(
-          new InvocationError(
-            ERR_SOURCE_CONFIG_ERROR,
-            `receive (publish) not supported for protocol "${protocol}" (supported: http, https, ws, wss)`,
-          ),
-        );
+        await runWSSubscribe(wsPool, target, dialAddress, up.headers, doc, ch, asyncOp, args, h);
       }
       return;
-    case "send":
-      if (protocol === "ws" || protocol === "wss") {
-        await runWSSubscribe(wsPool, serverURL, address, asyncOp, server, args, h, defaultContentType);
-      } else if (protocol === "http" || protocol === "https") {
-        await runSSESubscribe(serverURL, address, asyncOp, server, args, h, defaultContentType);
+    }
+    case "http":
+    case "https":
+      if (asyncOp.action === "receive") {
+        await runUnaryPublish(target, address, doc, ch, asyncOp, args, h);
       } else {
-        h.fireError(
-          new InvocationError(
-            ERR_SOURCE_CONFIG_ERROR,
-            `send (subscribe) not supported for protocol "${protocol}" (supported: http, https, ws, wss)`,
-          ),
-        );
+        await runSSESubscribe(target, address, doc, ch, asyncOp, args, h);
       }
       return;
     default:
+      // resolveTarget only yields bound protocols; defensive.
       h.fireError(
         new InvocationError(
           ERR_SOURCE_CONFIG_ERROR,
-          `unknown action "${(asyncOp as { action: string }).action}"`,
+          `protocol "${target.protocol}" is not bound by openbindings.asyncapi@1 (supported: http, https, ws, wss)`,
         ),
       );
   }
 }
 
-// ---------------------------------------------------------------------------
-// Server resolution
-// ---------------------------------------------------------------------------
-
-const SUPPORTED_PROTOCOLS = new Set(["http", "https", "ws", "wss"]);
-
-function pickDocServer(
-  doc: AsyncAPIDocument,
-): { url: string; protocol: string; server: AsyncAPIServer } | null {
-  const servers = doc.servers ?? {};
-  // Sort by id for deterministic selection
-  const sorted = Object.entries(servers).sort(([a], [b]) => a.localeCompare(b));
-  for (const [, server] of sorted) {
-    const proto = server.protocol.toLowerCase();
-    if (SUPPORTED_PROTOCOLS.has(proto)) {
-      let url = `${proto}://${server.host}`;
-      const pathname = server.pathname;
-      if (pathname) url += pathname;
-      return { url, protocol: proto, server };
-    }
-  }
-  return null;
+/** The operation's resolved channel object, or undefined when the channel
+ *  `$ref` did not resolve (the dereferencer leaves dangling refs in place). */
+function resolvedChannel(ch: AsyncAPIChannel | undefined): AsyncAPIChannel | undefined {
+  if (!ch) return undefined;
+  if (typeof (ch as unknown as Record<string, unknown>).$ref === "string") return undefined;
+  return ch;
 }
 
-/**
- * Resolves the server the connection targets. `server` is the selected
- * document server — the single source of server-level security for this
- * invocation. With a `baseURL` context override the connection goes to the
- * override, but the document's selected server still supplies the security
- * model (undefined when the document declares no supported server).
- */
-export function resolveServer(
-  doc: AsyncAPIDocument,
-  ctx?: Record<string, unknown>,
-): { url: string; protocol: string; server: AsyncAPIServer | undefined } {
-  const meta = contextMetadata(ctx);
-  if (meta["baseURL"]) {
-    const base = String(meta["baseURL"]);
-    let proto = "http";
-    if (base.startsWith("https://")) proto = "https";
-    else if (base.startsWith("wss://")) proto = "wss";
-    else if (base.startsWith("ws://")) proto = "ws";
-    return {
-      url: base.replace(/\/+$/, ""),
-      protocol: proto,
-      server: pickDocServer(doc)?.server,
-    };
-  }
-
-  const picked = pickDocServer(doc);
-  if (!picked) throw new Error("no supported server found (need http, https, ws, or wss protocol)");
-  return { url: picked.url.replace(/\/+$/, ""), protocol: picked.protocol, server: picked.server };
-}
+// Server and address resolution (the §9.2 configuration points) live in
+// target.ts; protocol-bindings honoring in bindings.ts; governing
+// content-type resolution in content.ts.
 
 // ---------------------------------------------------------------------------
 // Context requirements (CONTEXT_REQUIRED negotiation)
@@ -263,8 +272,8 @@ function schemeList(raw: AsyncAPIOperation["security"]): NamedSecurityScheme[] {
   return (raw ?? []).filter(isSecurityScheme).map((scheme) => ({ scheme, name: nameForScheme(scheme) }));
 }
 
-/** The security list of the server the connection targets — never some
- * other server's declaration. */
+/** The security list of the server whose declared security applies (§9.5)
+ * — never some other server's declaration. */
 function serverSecuritySchemes(server: AsyncAPIServer | undefined): NamedSecurityScheme[] {
   return schemeList(server?.security);
 }
@@ -388,13 +397,14 @@ function schemeRequirement(
  * the provided context already satisfies it (or the doc declares nothing
  * checkable). The declaration semantics are AsyncAPI 3.0's, incorporated,
  * and they are CONJUNCTIVE (ASYNC-P-07): the targeted server's `security`
- * applies (`server` is the server the connection logic picked — never some
- * other server's declaration), and the operation's `security`, when
- * declared, applies IN ADDITION. Within each declared list one entry
- * suffices, so the challenge is the cross product: each alternative pairs
- * one server entry with one operation entry (or is a single entry when only
- * one list is declared). Side-effect-free; shared by runBinding and
- * prepareBinding.
+ * applies (`server` is the server whose declared security applies per §9.5:
+ * resolveTarget's securityServer — the connection's server, or under a
+ * full-URL override the server the default selection would have targeted),
+ * and the operation's `security`, when declared, applies IN ADDITION.
+ * Within each declared list one entry suffices, so the challenge is the
+ * cross product: each alternative pairs one server entry with one operation
+ * entry (or is a single entry when only one list is declared).
+ * Side-effect-free; shared by runBinding and prepareBinding.
  */
 export function requiredContext(
   asyncOp: AsyncAPIOperation,
@@ -586,141 +596,17 @@ function applyContext(
 }
 
 // ---------------------------------------------------------------------------
-// Subscribe over HTTP (`send` action): SSE
-// ---------------------------------------------------------------------------
-
-async function runSSESubscribe(
-  serverURL: string,
-  address: string,
-  asyncOp: AsyncAPIOperation,
-  server: AsyncAPIServer | undefined,
-  args: BindingInvocationArgs,
-  h: Handle,
-  defaultContentType: string,
-): Promise<void> {
-  // The described application sends; we subscribe. An SSE subscription
-  // takes no input: input closes on entry, and a late write rejects
-  // non-terminally at the handle (the refusal surface for supplied input).
-  void h.closeInput();
-
-  let url = `${serverURL}/${address.replace(/^\/+/, "")}`;
-  const headers = new Headers({ Accept: "text/event-stream" });
-  const authQueryParams = applyContext(headers, asyncOp, server, args.context);
-  if (authQueryParams) {
-    const sep = url.includes("?") ? "&" : "?";
-    url += sep + new URLSearchParams(authQueryParams).toString();
-  }
-
-  const doFetch = args.fetch ?? fetch;
-  let resp: Response;
-  try {
-    resp = await doFetch(url, { headers, signal: h.signal });
-  } catch (e: unknown) {
-    if (h.signal.aborted) return; // cancellation is already terminal
-    h.fireError(new InvocationError(ERR_CONNECT_FAILED, errorMessage(e)));
-    return;
-  }
-
-  if (resp.status < 200 || resp.status >= 300) {
-    const body = await readErrorBody(resp);
-    h.fireError(
-      new InvocationError(
-        httpErrorCode(resp.status),
-        `HTTP ${resp.status} ${resp.statusText}`,
-        { status: resp.status, body },
-      ),
-    );
-    return;
-  }
-
-  const reader = resp.body?.getReader();
-  if (!reader) {
-    h.fireError(new InvocationError(ERR_CONNECT_FAILED, "no response body"));
-    return;
-  }
-
-  h.setHeader(headersToMetadata(resp.headers));
-
-  const decoder = new TextDecoder();
-  const encoder = new TextEncoder();
-  let buffer = "";
-  let dataLines: string[] = [];
-  // The size cap is PER EVENT, not cumulative: a long-lived subscription
-  // legitimately streams more than MAX_RESPONSE_BYTES in total (the same
-  // choice the Go SDK's runSSESubscribe documents, and connect/streaming.go's
-  // per-envelope cap). eventBytes resets at every event boundary (blank
-  // line), mirroring the Go SDK's scanner-driven accounting exactly.
-  let eventBytes = 0;
-
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split("\n");
-      buffer = lines.pop()!;
-
-      for (const line of lines) {
-        eventBytes += encoder.encode(line).length + 1; // +1 for the newline
-        if (eventBytes > MAX_RESPONSE_BYTES) {
-          h.fireError(
-            new InvocationError(
-              ERR_RESPONSE_ERROR,
-              `SSE event exceeds ${MAX_RESPONSE_BYTES} byte limit`,
-            ),
-          );
-          return;
-        }
-
-        if (line.startsWith("data:")) {
-          dataLines.push(line.slice(5).trim());
-          continue;
-        }
-        if (line === "") {
-          eventBytes = 0;
-          if (dataLines.length > 0) {
-            // Throws if the invocation terminated while parked: stop reading.
-            await h.emitOutput(
-              await decodeSSEEvent(args, serverURL, asyncOp, resp, dataLines, defaultContentType),
-            );
-            dataLines = [];
-          }
-        }
-      }
-    }
-
-    if (dataLines.length > 0) {
-      await h.emitOutput(
-        await decodeSSEEvent(args, serverURL, asyncOp, resp, dataLines, defaultContentType),
-      );
-    }
-    h.closeOutput();
-  } catch (e: unknown) {
-    // emitOutput rethrows the terminal error (fireError is then a no-op);
-    // anything else is a genuine mid-stream failure.
-    h.fireError(
-      e instanceof InvocationError
-        ? e
-        : new InvocationError(ERR_STREAM_ERROR, errorMessage(e)),
-    );
-  } finally {
-    reader.cancel().catch(() => {});
-  }
-}
-
-// ---------------------------------------------------------------------------
 // Publish over HTTP (`receive` action): unary POST
 // ---------------------------------------------------------------------------
 
 async function runUnaryPublish(
-  serverURL: string,
+  target: ResolvedTarget,
   address: string,
+  doc: AsyncAPIDocument,
+  ch: AsyncAPIChannel | undefined,
   asyncOp: AsyncAPIOperation,
-  server: AsyncAPIServer | undefined,
   args: BindingInvocationArgs,
   h: Handle,
-  defaultContentType: string,
 ): Promise<void> {
   // Unary: the one input IS the message payload (ASYNC-P-03). A publish
   // invocation requires an input value — this family defines no empty
@@ -737,6 +623,17 @@ async function runUnaryPublish(
     );
     return;
   }
+
+  // Input encoding follows the governing request-side declaration
+  // (ASYNC-P-03); an excluded declared family refuses BEFORE dispatch.
+  let codec: InputCodec;
+  try {
+    codec = resolveInputCodec(doc, governingMessages(asyncOp, ch));
+  } catch (e: unknown) {
+    h.fireError(new InvocationError(ERR_SOURCE_CONFIG_ERROR, errorMessage(e)));
+    return;
+  }
+
   const first = await readFirstInput(h);
   if (!first.ok) {
     h.fireError(
@@ -745,15 +642,25 @@ async function runUnaryPublish(
     return;
   }
   void h.closeInput();
-  const body = JSON.stringify(first.value ?? null);
 
-  let url = `${serverURL}/${address.replace(/^\/+/, "")}`;
+  let body: string;
+  try {
+    body = encodeInput(codec, first.value);
+  } catch (e: unknown) {
+    h.fireError(new InvocationError(ERR_VALIDATION_FAILED, errorMessage(e)));
+    return;
+  }
 
-  const headers = new Headers({
-    "Content-Type": "application/json",
-    Accept: "application/json",
-  });
-  const authQueryParams = applyContext(headers, asyncOp, server, args.context);
+  let url = joinURL(target.serverURL, address);
+
+  const headers = new Headers();
+  if (codec.contentType !== "") headers.set("Content-Type", codec.contentType);
+  // Direction-correct Accept: the reply-side governing declaration, when it
+  // names exactly one type (ASYNC-P-05); nothing is advertised when the
+  // declaration names none. Accept is never hardcoded.
+  const replyDecode = decodeContentType(doc, replyGoverningMessages(asyncOp));
+  if (replyDecode !== "") headers.set("Accept", replyDecode);
+  const authQueryParams = applyContext(headers, asyncOp, target.securityServer, args.context);
   if (authQueryParams) {
     const sep = url.includes("?") ? "&" : "?";
     url += sep + new URLSearchParams(authQueryParams).toString();
@@ -762,7 +669,14 @@ async function runUnaryPublish(
   const doFetch = args.fetch ?? fetch;
   let resp: Response;
   try {
-    resp = await doFetch(url, { method: "POST", headers, body, signal: h.signal });
+    // The request method is the http operation binding's `method` where
+    // declared, else POST (§8, ASYNC-P-02).
+    resp = await doFetch(url, {
+      method: requestMethod(asyncOp, "POST"),
+      headers,
+      body,
+      signal: h.signal,
+    });
   } catch (e: unknown) {
     if (h.signal.aborted) return;
     h.fireError(new InvocationError(ERR_CONNECT_FAILED, errorMessage(e)));
@@ -783,12 +697,6 @@ async function runUnaryPublish(
 
   h.setHeader(headersToMetadata(resp.headers));
 
-  if (resp.status === 202 || resp.status === 204) {
-    // Accepted with no payload: a publish acknowledgment, not an output.
-    h.closeOutput();
-    return;
-  }
-
   let respText: string;
   try {
     respText = await readResponseText(resp, MAX_RESPONSE_BYTES);
@@ -798,23 +706,26 @@ async function runUnaryPublish(
   }
 
   if (respText.length === 0) {
+    // An empty body (202/204 acknowledgments included) yields no output
+    // value: an acknowledgment is not a message and emits no value (§8).
+    // The rule is body-based, never status-based.
     h.closeOutput();
     return;
   }
 
   // Decode through the consultation seam — content-independent, per the
-  // conventions record's recommended built-in defaults
-  // (spec/formats/README.md): the operation's declared message contentType
-  // decides the lane — JSON for application/json and +json suffixes (a
+  // conventions record's recommended built-in defaults: the reply-side
+  // governing declaration decides the lane (direction-correct decode,
+  // ASYNC-P-05) — JSON for application/json and +json suffixes (a
   // declared-JSON payload that fails to parse is loud), text otherwise.
   // Never sniffed.
   let output: unknown;
   try {
     output = await decodeThroughHooks(
       args.hooks,
-      siteFor(args, serverURL),
+      siteFor(args, target.serverURL),
       { status: resp.status, body: respText, meta: headersToMetadata(resp.headers) },
-      builtinDecodeFor(replyContentType(asyncOp, defaultContentType)),
+      builtinDecodeFor(replyDecode),
     );
   } catch (e: unknown) {
     h.fireError(toInvocationError(e));
@@ -822,43 +733,107 @@ async function runUnaryPublish(
   }
 
   // Success provenance stamps (per the conventions record's recommended
-  // built-in defaults, spec/formats/README.md): decode is
-  // spec/content-type (the message's declared contentType decides the
-  // lane), hook when overridden; classify is not-consulted (asyncapi runs
-  // no result classifier — the HTTP status guard above is transport, not
-  // a format verdict).
+  // built-in defaults): decode is spec/content-type (the governing declared
+  // contentType decides the lane), hook when overridden; classify is
+  // not-consulted (asyncapi runs no result classifier — the HTTP status
+  // guard above is transport, not a format verdict).
   h.setTrailer(decodeTrailer(args.hooks, "spec/content-type"));
   await h.emitOutput(output);
   h.closeOutput();
 }
 
 // ---------------------------------------------------------------------------
-// WebSocket frames
+// Subscribe over HTTP (`send` action): SSE
 // ---------------------------------------------------------------------------
 
-function buildWSURL(
-  serverURL: string,
+async function runSSESubscribe(
+  target: ResolvedTarget,
   address: string,
+  doc: AsyncAPIDocument,
+  ch: AsyncAPIChannel | undefined,
   asyncOp: AsyncAPIOperation,
-  server: AsyncAPIServer | undefined,
-  ctx?: Record<string, unknown>,
-): string {
-  const url = new URL(`/${address.replace(/^\/+/, "")}`, serverURL);
-  // Apply query-param credentials (e.g. apiKey in query) to the WebSocket URL.
-  // Browser WebSocket cannot set handshake headers, so header-based auth is
-  // handled via the first-frame bearer convention instead.
-  const tempHeaders = new Headers();
-  const authQueryParams = applyContext(tempHeaders, asyncOp, server, ctx);
+  args: BindingInvocationArgs,
+  h: Handle,
+): Promise<void> {
+  // The described application sends; we subscribe. An SSE subscription
+  // takes no input: input closes on entry, and a late write rejects
+  // non-terminally at the handle (the refusal surface for supplied input).
+  void h.closeInput();
+
+  let url = joinURL(target.serverURL, address);
+  const headers = new Headers({ Accept: "text/event-stream" });
+  const authQueryParams = applyContext(headers, asyncOp, target.securityServer, args.context);
   if (authQueryParams) {
-    for (const [k, v] of Object.entries(authQueryParams)) {
-      url.searchParams.set(k, v);
-    }
+    const sep = url.includes("?") ? "&" : "?";
+    url += sep + new URLSearchParams(authQueryParams).toString();
   }
-  return url.toString();
+
+  const doFetch = args.fetch ?? fetch;
+  let resp: Response;
+  try {
+    // The subscription framing is this specification's own pin (§8): the
+    // request is a GET unless the http operation binding declares otherwise
+    // (ASYNC-P-02: bindings are authoritative where they speak).
+    resp = await doFetch(url, {
+      method: requestMethod(asyncOp, "GET"),
+      headers,
+      signal: h.signal,
+    });
+  } catch (e: unknown) {
+    if (h.signal.aborted) return; // cancellation is already terminal
+    h.fireError(new InvocationError(ERR_CONNECT_FAILED, errorMessage(e)));
+    return;
+  }
+
+  // Establishment (§8, ASYNC-P-06): a 2xx response bearing the
+  // text/event-stream content type, judged on the FINAL response after any
+  // redirects (fetch followed them; resp is final). Anything else is a
+  // failure — non-2xx classifies as the transport status does; a 2xx
+  // without the pinned framing is a protocol error, never a silent
+  // reclassification.
+  if (resp.status < 200 || resp.status >= 300) {
+    const body = await readErrorBody(resp);
+    h.fireError(
+      new InvocationError(
+        httpErrorCode(resp.status),
+        `HTTP ${resp.status} ${resp.statusText}`,
+        { status: resp.status, body },
+      ),
+    );
+    return;
+  }
+  const ct = resp.headers.get("Content-Type") ?? "";
+  if (normalizeMediaType(ct) !== "text/event-stream") {
+    h.fireError(
+      new InvocationError(
+        ERR_PROTOCOL,
+        `SSE subscription establishment requires a text/event-stream response, got content type ${JSON.stringify(ct)} (openbindings.asyncapi@1 §8)`,
+      ),
+    );
+    return;
+  }
+
+  const invocationMeta = headersToMetadata(resp.headers);
+  h.setHeader(invocationMeta);
+
+  // One transport, one invocation: transport close COMPLETES the
+  // subscription — reconnection (`retry`, `Last-Event-ID`) is excluded from
+  // revision 1 (§8), so no reconnect is ever attempted here. Outputs decode
+  // by the operation's own message declarations (direction-correct decode,
+  // ASYNC-P-05).
+  const decodeCT = decodeContentType(doc, governingMessages(asyncOp, ch));
+  await streamSSE(
+    resp,
+    args,
+    siteFor(args, target.serverURL),
+    h,
+    invocationMeta,
+    builtinDecodeFor(decodeCT),
+  );
 }
 
 // ---------------------------------------------------------------------------
-// WebSocket connection-pool credential partitioning
+// WebSocket upgrade material
 // ---------------------------------------------------------------------------
 
 /** One FNV-1a (32-bit) pass over `str`, seeded, returned as an unsigned int. */
@@ -872,82 +847,64 @@ function fnv1a(str: string, seed: number): number {
 }
 
 /**
- * Fingerprints the credential identity a WebSocket dial for this operation
- * would use: the same header names/values and query params
- * `applyContext`/`buildWSURL` would place on the connection, plus the
- * first-frame bearer token (which authenticates the connection itself even
- * when no scheme places it on the upgrade request or query — see
- * `sendFirstFrameBearer`). A digest — not the raw material — feeds the pool
- * key, mirroring the Go SDK's `credentialDigest`: two invocations whose
- * fingerprints differ must never share a pooled connection (cross-tenant
- * credential leak).
+ * The upgrade request a WebSocket dial for this operation would send: the
+ * full dial URL (server + dial address, query-placed credentials applied),
+ * the upgrade headers (credential placement via {@link applyContext} plus
+ * the resolved ws-binding header values), and a fingerprint of exactly that
+ * material.
+ *
+ * NO credential ever rides a message body or a first frame under this
+ * specification (§9.5, ASYNC-P-07) — the upgrade request IS the
+ * connection's credential identity, so the fingerprint hashes exactly the
+ * upgrade material (mirrors the Go SDK's credentialDigest). A digest — not
+ * the raw material — feeds the pool key, so credentials never sit in map
+ * keys. Two invocations whose fingerprints differ must never share a
+ * pooled connection (cross-tenant credential leak).
  *
  * Non-cryptographic by design: two 32-bit FNV-1a passes with distinct seeds
  * give a 64-bit digest, which is plenty for a pool-key partition function
- * (the realistic collision surface is auth material containing
- * high-entropy tokens, not an adversary crafting collisions). This avoids a
+ * (the realistic collision surface is auth material containing high-entropy
+ * tokens, not an adversary crafting collisions). This avoids a
  * `globalThis.crypto.subtle` dependency, which is not guaranteed available
  * without a flag on this package's minimum supported Node (18).
  */
-function credentialFingerprint(
+function wsUpgradeMaterial(
+  target: ResolvedTarget,
+  dialAddress: string,
   asyncOp: AsyncAPIOperation,
-  server: AsyncAPIServer | undefined,
+  wsHeaders: Record<string, string> | undefined,
   ctx?: Record<string, unknown>,
-): string {
+): { url: string; headers: Record<string, string>; fingerprint: string } {
   const headers = new Headers();
-  const queryParams = applyContext(headers, asyncOp, server, ctx);
+  const authQueryParams = applyContext(headers, asyncOp, target.securityServer, ctx);
+  // The resolved ws-binding header values (§8) are set after credential
+  // placement, mirroring the Go SDK's createConn.
+  for (const [name, val] of Object.entries(wsHeaders ?? {})) {
+    headers.set(name, val);
+  }
+
+  const url = new URL(joinURL(target.serverURL, dialAddress));
+  if (authQueryParams) {
+    for (const [k, v] of Object.entries(authQueryParams)) {
+      url.searchParams.set(k, v);
+    }
+  }
+
+  const headerRecord: Record<string, string> = {};
   const headerParts: string[] = [];
   headers.forEach((value, name) => {
+    headerRecord[name] = value;
     headerParts.push(`h:${name}=${value}`);
   });
   headerParts.sort();
-  const parts: string[] = [...headerParts];
-  if (queryParams) {
-    for (const key of Object.keys(queryParams).sort()) {
-      parts.push(`q:${key}=${queryParams[key]}`);
-    }
-  }
-  const bearer = contextBearerToken(ctx);
-  if (bearer) parts.push(`b:${bearer}`);
-  const material = parts.join(" ");
+  const material = [...headerParts, `q:${url.search}`].join(" ");
   const a = fnv1a(material, 0x811c9dc5);
   const b = fnv1a(material, 0x9e3779b9);
-  return a.toString(16).padStart(8, "0") + b.toString(16).padStart(8, "0");
-}
-
-/**
- * True when the resolved security declares a bearer-family scheme (HTTP
- * bearer, httpBearer, or an OAuth2 access token presented as a bearer).
- * Gates the first-frame bearer convention: the `{bearerToken}` frame is
- * only sent to servers that declare they expect one.
- */
-function declaresBearerScheme(
-  asyncOp: AsyncAPIOperation,
-  server: AsyncAPIServer | undefined,
-): boolean {
-  return resolveSecuritySchemes(asyncOp, server).some(({ scheme: s }) => {
-    if (s.type === "httpBearer" || s.type === "oauth2") return true;
-    return s.type === "http" && (s.scheme ?? "").toLowerCase() === "bearer";
-  });
-}
-
-/**
- * First-frame bearer convention: browsers cannot set headers on WebSocket
- * upgrades, so the token travels in the first message body — once per
- * CONNECTION (a reused pooled socket must not re-authenticate per
- * invocation), and only when the resolved security declares a
- * bearer-family scheme.
- */
-function sendFirstFrameBearer(
-  pooled: PooledWS,
-  asyncOp: AsyncAPIOperation,
-  server: AsyncAPIServer | undefined,
-  ctx?: Record<string, unknown>,
-): void {
-  const bearer = contextBearerToken(ctx);
-  if (!bearer || !declaresBearerScheme(asyncOp, server)) return;
-  if (!pooled.once("first-frame-bearer")) return;
-  pooled.send(JSON.stringify({ bearerToken: bearer }));
+  return {
+    url: url.toString(),
+    headers: headerRecord,
+    fingerprint: a.toString(16).padStart(8, "0") + b.toString(16).padStart(8, "0"),
+  };
 }
 
 /** Operation-layer no-input convention: binding populated, no input schema. */
@@ -962,14 +919,14 @@ function noInputDeclared(args: BindingInvocationArgs): boolean {
 /**
  * Backpressure bounds for the undelivered-frame buffer between the socket
  * and the output pump: whichever bound trips first fails the stream
- * (bounded-queue-fail-loud, per spec/formats/asyncapi.md's WS slow-consumer
- * ruling — Redis client-output-buffer-limit, NATS slow-consumer, and MQTT
- * max_queued_messages are the pub/sub-ecosystem precedent, and NATS pairs a
- * count bound with a byte bound the same way). The handle's bounded output
- * buffer IS the backpressure contract for a draining consumer; an unbounded
- * second buffer here would defeat it for a non-draining one, so overflow
- * fails the stream and closes the socket instead. Reference-package
- * defaults, not spec-mandated numbers.
+ * (bounded-queue-fail-loud, per the asyncapi binding spec's WS
+ * slow-consumer ruling — Redis client-output-buffer-limit, NATS
+ * slow-consumer, and MQTT max_queued_messages are the pub/sub-ecosystem
+ * precedent, and NATS pairs a count bound with a byte bound the same way).
+ * The handle's bounded output buffer IS the backpressure contract for a
+ * draining consumer; an unbounded second buffer here would defeat it for a
+ * non-draining one, so overflow fails the stream and closes the socket
+ * instead. Reference-package defaults, not spec-mandated numbers.
  *
  * `let`, not `const`: setBackpressureBoundsForTest lowers these for a test
  * instead of pushing the full frame count / byte volume through a real
@@ -997,19 +954,36 @@ export function setBackpressureBoundsForTest(frames: number, bytes: number): () 
 
 async function runWSSubscribe(
   pool: WSPool,
-  serverURL: string,
-  address: string,
+  target: ResolvedTarget,
+  dialAddress: string,
+  wsHeaders: Record<string, string> | undefined,
+  doc: AsyncAPIDocument,
+  ch: AsyncAPIChannel | undefined,
   asyncOp: AsyncAPIOperation,
-  server: AsyncAPIServer | undefined,
   args: BindingInvocationArgs,
   h: Handle,
-  defaultContentType: string,
 ): Promise<void> {
+  // Outputs decode by the operation's own message declarations
+  // (direction-correct decode, ASYNC-P-05); forwarded input frames use the
+  // same governing declaration (§9.1). An excluded declared family refuses
+  // only when an input frame actually arrives — a duplex subscription's
+  // inputs are optional, and the exclusion belongs to the input lane.
+  const wsContentType = decodeContentType(doc, governingMessages(asyncOp, ch));
+  let codec: InputCodec | undefined;
+  let codecErr: unknown;
+  try {
+    codec = resolveInputCodec(doc, governingMessages(asyncOp, ch));
+  } catch (e: unknown) {
+    codecErr = e;
+  }
+
+  const material = wsUpgradeMaterial(target, dialAddress, asyncOp, wsHeaders, args.context);
   let pooled: PooledWS;
   try {
-    pooled = await pool.acquire(serverURL, address, {
-      buildURL: (base, addr) => buildWSURL(base, addr, asyncOp, server, args.context),
-      credentialKey: credentialFingerprint(asyncOp, server, args.context),
+    pooled = await pool.acquire(target.serverURL, dialAddress, {
+      buildURL: () => material.url,
+      credentialKey: material.fingerprint,
+      headers: material.headers,
       signal: h.signal,
     });
   } catch (e: unknown) {
@@ -1017,6 +991,12 @@ async function runWSSubscribe(
     h.fireError(new InvocationError(ERR_CONNECT_FAILED, errorMessage(e)));
     return;
   }
+
+  // NO in-band auth: no credential ever rides a message body or a first
+  // frame under this specification (§9.5, ASYNC-P-07) — credentials ride
+  // the upgrade request. In-band auth conventions (a first-frame bearer
+  // message) are consumer configuration riding this duplex cell as an
+  // ordinary input frame, never a built-in.
 
   const frames: string[] = [];
   // Parallel to `frames`: the byte length of each still-buffered frame, so
@@ -1067,13 +1047,12 @@ async function runWSSubscribe(
   h.signal.addEventListener("abort", onAbort);
 
   // Socket -> outputs. Owns the terminal transition. Each frame is one
-  // delivery unit decoded through the consultation seam by the declared
-  // message contentType (status null — a WS frame has no completion
+  // delivery unit decoded through the consultation seam by the governing
+  // declared content type (status null — a WS frame has no completion
   // status; never fabricated). Convention envelopes ({error}/{data}
   // unwrapping) are consumer knowledge: a decode hook's job, never the
   // builtin's.
-  const wsContentType = messageContentType(asyncOp, defaultContentType);
-  const wsSite = siteFor(args, serverURL);
+  const wsSite = siteFor(args, target.serverURL);
   const outputPump = async (): Promise<void> => {
     while (true) {
       // Drain-before-terminal: unconditionally, regardless of `overflowed`
@@ -1124,11 +1103,24 @@ async function runWSSubscribe(
 
   // Inputs -> socket: the duplex lane — caller-supplied input values forward
   // as frames, and closing input does NOT end the subscription (outputs keep
-  // flowing).
+  // flowing). Frames encode per the same governing declaration as §9.1
+  // (resolved above); an excluded declared family refuses only here, when
+  // an input actually arrives.
   const inputPump = async (): Promise<void> => {
     try {
       for await (const msg of h.inputs()) {
-        pooled.send(JSON.stringify(msg));
+        if (codecErr !== undefined || !codec) {
+          h.fireError(new InvocationError(ERR_SOURCE_CONFIG_ERROR, errorMessage(codecErr)));
+          return;
+        }
+        let frame: string;
+        try {
+          frame = encodeInput(codec, msg);
+        } catch (e: unknown) {
+          h.fireError(new InvocationError(ERR_VALIDATION_FAILED, errorMessage(e)));
+          return;
+        }
+        pooled.send(frame);
       }
     } catch {
       // Invocation terminated; the output pump owns the terminal transition.
@@ -1136,11 +1128,6 @@ async function runWSSubscribe(
   };
 
   try {
-    // sendFirstFrameBearer may throw on a dead socket (pooled.send throws
-    // when the socket is not open), before either pump owns the terminal.
-    // Catch it here — mirroring runWSPublish — so the terminal is a meaningful
-    // ERR_STREAM_ERROR, not the invoker's generic ERR_RUNTIME fallback.
-    sendFirstFrameBearer(pooled, asyncOp, server, args.context);
     await Promise.all([
       outputPump().catch((e: unknown) => {
         h.fireError(
@@ -1171,10 +1158,12 @@ async function runWSSubscribe(
 
 async function runWSPublish(
   pool: WSPool,
-  serverURL: string,
-  address: string,
+  target: ResolvedTarget,
+  dialAddress: string,
+  wsHeaders: Record<string, string> | undefined,
+  doc: AsyncAPIDocument,
+  ch: AsyncAPIChannel | undefined,
   asyncOp: AsyncAPIOperation,
-  server: AsyncAPIServer | undefined,
   args: BindingInvocationArgs,
   h: Handle,
 ): Promise<void> {
@@ -1192,11 +1181,24 @@ async function runWSPublish(
     return;
   }
 
+  // Input encoding follows the governing request-side declaration
+  // (ASYNC-P-03); an excluded declared family refuses BEFORE dispatch —
+  // before any socket is dialed.
+  let codec: InputCodec;
+  try {
+    codec = resolveInputCodec(doc, governingMessages(asyncOp, ch));
+  } catch (e: unknown) {
+    h.fireError(new InvocationError(ERR_SOURCE_CONFIG_ERROR, errorMessage(e)));
+    return;
+  }
+
+  const material = wsUpgradeMaterial(target, dialAddress, asyncOp, wsHeaders, args.context);
   let pooled: PooledWS;
   try {
-    pooled = await pool.acquire(serverURL, address, {
-      buildURL: (base, addr) => buildWSURL(base, addr, asyncOp, server, args.context),
-      credentialKey: credentialFingerprint(asyncOp, server, args.context),
+    pooled = await pool.acquire(target.serverURL, dialAddress, {
+      buildURL: () => material.url,
+      credentialKey: material.fingerprint,
+      headers: material.headers,
       signal: h.signal,
     });
   } catch (e: unknown) {
@@ -1218,18 +1220,26 @@ async function runWSPublish(
   });
 
   try {
-    // Deliberately NO sendFirstFrameBearer here: the first-frame bearer
-    // convention belongs to the subscription cell only. Auth never rides a
-    // publish's message frames — mirrors the Go SDK's runWSPublish.
+    // NO auth frame, ever: no credential rides a message body or a first
+    // frame under this specification (§9.5, ASYNC-P-07) — credentials ride
+    // the upgrade request.
     //
-    // Every input is one frame; the loop ends cleanly when the caller
-    // closes input, and throws if the invocation terminates. `send` throws
-    // on a dead socket, so no frame is ever silently dropped. Closing with
-    // zero messages sent is the streaming face of the presence rule
-    // (ASYNC-P-03): nothing was published, so the invocation fails loudly.
+    // Every input is one frame, encoded per the governing declaration
+    // (§9.1); the loop ends cleanly when the caller closes input, and
+    // throws if the invocation terminates. `send` throws on a dead socket,
+    // so no frame is ever silently dropped. Closing with zero messages sent
+    // is the streaming face of the presence rule (ASYNC-P-03): nothing was
+    // published, so the invocation fails loudly.
     let sent = 0;
     for await (const msg of h.inputs()) {
-      pooled.send(JSON.stringify(msg));
+      let frame: string;
+      try {
+        frame = encodeInput(codec, msg);
+      } catch (e: unknown) {
+        h.fireError(new InvocationError(ERR_VALIDATION_FAILED, errorMessage(e)));
+        return;
+      }
+      pooled.send(frame);
       sent++;
     }
     if (sent === 0) {
@@ -1291,41 +1301,7 @@ async function readErrorBody(resp: Response): Promise<unknown> {
 // ---------------------------------------------------------------------------
 
 /**
- * Returns the effective content type of the operation's own messages — the
- * declarations governing a subscription's outputs and a publish's input
- * encoding (direction-correct decode, ASYNC-P-05) — falling back to the
- * document's `defaultContentType`, else "" (the text lane). The SPEC'S
- * answer; never payload bytes.
- */
-function messageContentType(
-  asyncOp: AsyncAPIOperation | undefined,
-  defaultContentType: string,
-): string {
-  for (const m of asyncOp?.messages ?? []) {
-    if (m.contentType) return m.contentType;
-  }
-  return defaultContentType;
-}
-
-/**
- * Returns the effective content type of the operation's REPLY-side messages
- * — the declarations governing a publish invocation's output: the response
- * decodes by the reply side (direction-correct decode, ASYNC-P-05) —
- * falling back to the document's `defaultContentType`, else "" (the text
- * lane).
- */
-function replyContentType(
-  asyncOp: AsyncAPIOperation | undefined,
-  defaultContentType: string,
-): string {
-  for (const m of asyncOp?.reply?.messages ?? []) {
-    if (m.contentType) return m.contentType;
-  }
-  return defaultContentType;
-}
-
-/**
- * Returns the builtin decoder for a declared message contentType: strict
+ * Returns the builtin decoder for a governing declared content type: strict
  * JSON for application/json and +json suffixes (a declared-JSON payload
  * that fails to parse is loud), text otherwise; an empty body is a null
  * output. Content-independent — the declaration decides, never the bytes.
@@ -1346,28 +1322,6 @@ export function builtinDecodeFor(contentType: string): OutputDecoder {
     }
     return raw.body;
   };
-}
-
-/** Decodes one SSE event through the consultation seam. */
-async function decodeSSEEvent(
-  args: BindingInvocationArgs,
-  serverURL: string,
-  asyncOp: AsyncAPIOperation,
-  resp: Response,
-  dataLines: string[],
-  defaultContentType: string,
-): Promise<unknown> {
-  const raw: RawResult = {
-    status: resp.status,
-    body: dataLines.join("\n"),
-    meta: headersToMetadata(resp.headers),
-  };
-  return decodeThroughHooks(
-    args.hooks,
-    siteFor(args, serverURL),
-    raw,
-    builtinDecodeFor(messageContentType(asyncOp, defaultContentType)),
-  );
 }
 
 /**
@@ -1394,7 +1348,7 @@ function siteFor(args: BindingInvocationArgs, serverURL: string): InvokeSite {
  * Builds the x-ob-decode stamp (and the fixed x-ob-classify not-consulted
  * stamp — asyncapi runs no classifier) for a successful message decode,
  * given the builtin decode provenance token, per the conventions record's
- * recommended built-in defaults (spec/formats/README.md).
+ * recommended built-in defaults.
  */
 function decodeTrailer(hooks: InvokeHooks | null | undefined, builtinDecode: string): Metadata {
   const decode = hooks?.decodeDecidedBy() === "hook" ? "hook" : builtinDecode;
