@@ -10,111 +10,13 @@ import {
   single,
 } from "@openbindings/sdk";
 import { MCPInvoker, MCPSynthesizer } from "./invoker.js";
+import { ENDPOINT, jsonResponse, mcpServer, textResult } from "./testserver.js";
 
-// ---------------------------------------------------------------------------
-// Fake MCP server (Streamable HTTP over a fetch stub)
-// ---------------------------------------------------------------------------
-
-const ENDPOINT = "https://mcp.example.com/mcp";
 const source = { bindingSpec: "openbindings.mcp@1", location: ENDPOINT };
 
-interface RpcRequest {
-  jsonrpc: string;
-  id: number | string;
-  method: string;
-  params: Record<string, unknown> & { _meta?: { progressToken?: number | string } };
-}
-
-interface CapturedCall {
-  method: string;
-  params: RpcRequest["params"];
-  headers: Record<string, string>;
-}
-
-/** A reply from the fake server to one JSON-RPC request. */
-type RpcReply =
-  | { result: unknown; headers?: Record<string, string> }
-  | { error: { code: number; message: string; data?: unknown } }
-  | { sse: unknown[] }
-  | { http: Response }
-  | { hang: true };
-
-function jsonResponse(body: unknown, headers?: Record<string, string>): Response {
-  return new Response(JSON.stringify(body), {
-    status: 200,
-    headers: { "content-type": "application/json", ...headers },
-  });
-}
-
-/**
- * A fetch stub speaking just enough MCP Streamable HTTP for the client:
- * answers `initialize`, accepts notifications with 202, declines the
- * standalone GET SSE stream with 405, and routes entity-call requests
- * (tools/call, resources/read, prompts/get) to the responder. Records each
- * entity call and counts every fetch so pre-dispatch tests can assert zero
- * network I/O.
- */
-function mcpServer(
-  respond: (req: RpcRequest) => RpcReply,
-  opts?: { initResponse?: Response },
-) {
-  const calls: CapturedCall[] = [];
-  let fetchCount = 0;
-
-  const fn: typeof fetch = async (_input, init) => {
-    fetchCount++;
-    const method = init?.method ?? "GET";
-    if (method === "GET") return new Response(null, { status: 405 });
-    if (method === "DELETE") return new Response(null, { status: 200 });
-
-    const msg = JSON.parse(String(init?.body)) as Partial<RpcRequest> & { method: string };
-    if (msg.method === "initialize") {
-      if (opts?.initResponse) return opts.initResponse;
-      const params = msg.params as { protocolVersion: string };
-      return jsonResponse({
-        jsonrpc: "2.0",
-        id: msg.id,
-        result: {
-          protocolVersion: params.protocolVersion,
-          capabilities: { tools: {}, resources: {}, prompts: {} },
-          serverInfo: { name: "fake-server", version: "1.0.0" },
-        },
-      });
-    }
-    if (msg.id === undefined) return new Response(null, { status: 202 }); // notifications
-
-    const req = msg as RpcRequest;
-    const headers: Record<string, string> = {};
-    new Headers(init?.headers).forEach((value, key) => { headers[key] = value; });
-    calls.push({ method: req.method, params: req.params, headers });
-
-    const reply = respond(req);
-    if ("hang" in reply) {
-      return new Promise<Response>((_resolve, reject) => {
-        init?.signal?.addEventListener(
-          "abort",
-          () => reject(new DOMException("aborted", "AbortError")),
-          { once: true },
-        );
-      });
-    }
-    if ("http" in reply) return reply.http;
-    if ("sse" in reply) {
-      const body = reply.sse.map((m) => `data: ${JSON.stringify(m)}\n\n`).join("");
-      return new Response(body, { status: 200, headers: { "content-type": "text/event-stream" } });
-    }
-    if ("error" in reply) {
-      return jsonResponse({ jsonrpc: "2.0", id: req.id, error: reply.error });
-    }
-    return jsonResponse({ jsonrpc: "2.0", id: req.id, result: reply.result }, reply.headers);
-  };
-
-  return { fn, calls, fetches: () => fetchCount };
-}
-
-const textResult = (text: string): RpcReply => ({
-  result: { content: [{ type: "text", text }] },
-});
+// The invoker resolves every ref against the listing before dispatch
+// (openbindings.mcp@1 §7, MCP-P-02), so each test declares the live listing
+// its ref must resolve against; the fixture serves it via the list requests.
 
 // ---------------------------------------------------------------------------
 // Tools
@@ -124,67 +26,83 @@ describe("MCPInvoker tools", () => {
   it("invokes a tool: write + single; text content is a STRING, never sniffed", async () => {
     // MCP 2025-11-25 defines JSON-in-text as the backwards-compatibility
     // shadow of structuredContent; a client never parses text by shape.
-    const { fn, calls } = mcpServer(() => textResult('{"tempC":20}'));
-    const call = new MCPInvoker().invokeBinding({ source, ref: "tools/get_weather", fetch: fn });
+    const server = mcpServer(() => textResult('{"tempC":20}'), { tools: ["get_weather"] });
+    const call = new MCPInvoker().invokeBinding({ source, ref: "tools/get_weather", fetch: server.fn });
 
     await call.write({ city: "Oslo" });
     await expect(single(call.outputs)).resolves.toEqual('{"tempC":20}');
     await expect(call.closed).resolves.toBeUndefined();
 
+    const calls = server.params("tools/call");
     expect(calls).toHaveLength(1);
-    expect(calls[0].method).toBe("tools/call");
-    expect(calls[0].params.name).toBe("get_weather");
-    expect(calls[0].params.arguments).toEqual({ city: "Oslo" });
+    expect(calls[0].name).toBe("get_weather");
+    expect(calls[0].arguments).toEqual({ city: "Oslo" });
   });
 
   it("joins multiple text content blocks verbatim, never JSON-sniffed, even when one looks like JSON", async () => {
     // Exercises the real wiring's parseContent lane (reached because there
     // are two content items, not one) end to end, per the de-sniff ruling.
-    const { fn } = mcpServer(() => ({
-      result: { content: [{ type: "text", text: "note:" }, { type: "text", text: '{"a":1}' }] },
-    }));
-    const call = new MCPInvoker().invokeBinding({ source, ref: "tools/multi", fetch: fn });
+    const server = mcpServer(
+      () => ({ result: { content: [{ type: "text", text: "note:" }, { type: "text", text: '{"a":1}' }] } }),
+      { tools: ["multi"] },
+    );
+    const call = new MCPInvoker().invokeBinding({ source, ref: "tools/multi", fetch: server.fn });
 
     await call.write({});
     await expect(single(call.outputs)).resolves.toBe('note:\n{"a":1}');
   });
 
   it("prefers structuredContent over the content array", async () => {
-    const { fn } = mcpServer(() => ({
-      result: { content: [{ type: "text", text: "ignored" }], structuredContent: { ok: true } },
-    }));
-    const call = new MCPInvoker().invokeBinding({ source, ref: "tools/check", fetch: fn });
+    const server = mcpServer(
+      () => ({ result: { content: [{ type: "text", text: "ignored" }], structuredContent: { ok: true } } }),
+      { tools: ["check"] },
+    );
+    const call = new MCPInvoker().invokeBinding({ source, ref: "tools/check", fetch: server.fn });
 
     await call.write({});
     await expect(single(call.outputs)).resolves.toEqual({ ok: true });
   });
 
-  it("treats close-without-write as empty arguments", async () => {
-    const { fn, calls } = mcpServer(() => textResult("ok"));
-    const call = new MCPInvoker().invokeBinding({ source, ref: "tools/ping", fetch: fn });
+  it("omits the arguments member entirely on close-without-write (§9.1, MCP-P-03)", async () => {
+    // An absent input value omits the arguments member ENTIRELY — never
+    // arguments: {} (this test previously pinned the non-conformant
+    // arguments: {} the invoker used to send).
+    const server = mcpServer(() => textResult("ok"), { tools: ["ping"] });
+    const call = new MCPInvoker().invokeBinding({ source, ref: "tools/ping", fetch: server.fn });
 
     await call.close();
     await expect(single(call.outputs)).resolves.toBe("ok");
-    expect(calls[0].params.arguments).toEqual({});
+    expect(server.params("tools/call")[0]).not.toHaveProperty("arguments");
   });
 
-  it("streams progress notifications as outputs ahead of the result", async () => {
-    const { fn } = mcpServer((req) => ({
-      sse: [
-        {
-          jsonrpc: "2.0",
-          method: "notifications/progress",
-          params: { progressToken: req.params._meta?.progressToken, progress: 1, total: 2 },
-        },
-        {
-          jsonrpc: "2.0",
-          method: "notifications/progress",
-          params: { progressToken: req.params._meta?.progressToken, progress: 2, total: 2 },
-        },
-        { jsonrpc: "2.0", id: req.id, result: { content: [{ type: "text", text: "done" }] } },
-      ],
-    }));
-    const call = new MCPInvoker().invokeBinding({ source, ref: "tools/long_job", fetch: fn });
+  it("streams progress ahead of the result only when solicited (§9.2/§9.3)", async () => {
+    // Solicitation is the family's `solicit` configuration point, DEFAULT
+    // OFF (this test previously pinned always-on solicitation); the
+    // per-invocation opt-in is context.configuration.solicit.
+    const server = mcpServer(
+      (req) => ({
+        sse: [
+          {
+            jsonrpc: "2.0",
+            method: "notifications/progress",
+            params: { progressToken: req.params._meta?.progressToken, progress: 1, total: 2 },
+          },
+          {
+            jsonrpc: "2.0",
+            method: "notifications/progress",
+            params: { progressToken: req.params._meta?.progressToken, progress: 2, total: 2 },
+          },
+          { jsonrpc: "2.0", id: req.id, result: { content: [{ type: "text", text: "done" }] } },
+        ],
+      }),
+      { tools: ["long_job"] },
+    );
+    const call = new MCPInvoker().invokeBinding({
+      source,
+      ref: "tools/long_job",
+      context: { configuration: { solicit: true } },
+      fetch: server.fn,
+    });
 
     await call.write({});
     const outputs: unknown[] = [];
@@ -197,46 +115,12 @@ describe("MCPInvoker tools", () => {
     await expect(call.closed).resolves.toBeUndefined();
   });
 
-  it("NAMED GAP: preserves an explicit total:0 the server sent, unlike Go", async () => {
-    // Go's runTool (invoke.go) builds the progress map with `if p.Total !=
-    // 0`, because the go-mcp SDK's ProgressNotificationParams.Total is a
-    // plain (non-pointer) float64 tagged `json:"total,omitempty"` -- its
-    // own doc comment says "Zero means unknown" -- so Go cannot distinguish
-    // an explicit total:0 from an absent total once go-mcp has unmarshaled
-    // it; both collapse to the Go zero value and get dropped. TS's zod
-    // schema (ProgressSchema: total is z.optional(z.number())) has no such
-    // collapse: an explicit total:0 on the wire survives into the emitted
-    // object. This is a real, verified divergence forced by the two SDKs'
-    // underlying MCP libraries, not a choice either binding author made;
-    // tracked as a named gap (see final report) rather than "fixed" on
-    // either side, since aligning would mean either bypassing go-mcp's
-    // typed API to hand-parse raw JSON-RPC (disproportionate to a total=0
-    // edge case) or teaching TS to lie about a value the server actually
-    // sent.
-    const { fn } = mcpServer((req) => ({
-      sse: [
-        {
-          jsonrpc: "2.0",
-          method: "notifications/progress",
-          params: { progressToken: req.params._meta?.progressToken, progress: 1, total: 0 },
-        },
-        { jsonrpc: "2.0", id: req.id, result: { content: [{ type: "text", text: "done" }] } },
-      ],
-    }));
-    const call = new MCPInvoker().invokeBinding({ source, ref: "tools/long_job", fetch: fn });
-
-    await call.write({});
-    const outputs: unknown[] = [];
-    for await (const o of call.outputs) outputs.push(o);
-
-    expect(outputs[0]).toEqual({ progress: 1, total: 0 });
-  });
-
   it("maps a tool isError result to ERR_EXECUTION_FAILED", async () => {
-    const { fn } = mcpServer(() => ({
-      result: { content: [{ type: "text", text: "tool blew up" }], isError: true },
-    }));
-    const call = new MCPInvoker().invokeBinding({ source, ref: "tools/boom", fetch: fn });
+    const server = mcpServer(
+      () => ({ result: { content: [{ type: "text", text: "tool blew up" }], isError: true } }),
+      { tools: ["boom"] },
+    );
+    const call = new MCPInvoker().invokeBinding({ source, ref: "tools/boom", fetch: server.fn });
 
     await call.write({});
     await expect(call.closed).rejects.toMatchObject({
@@ -246,8 +130,8 @@ describe("MCPInvoker tools", () => {
   });
 
   it("maps a JSON-RPC error to ERR_EXECUTION_FAILED with the MCP code in details", async () => {
-    const { fn } = mcpServer(() => ({ error: { code: -32602, message: "unknown tool" } }));
-    const call = new MCPInvoker().invokeBinding({ source, ref: "tools/nope", fetch: fn });
+    const server = mcpServer(() => ({ error: { code: -32602, message: "unknown tool" } }), { tools: ["nope"] });
+    const call = new MCPInvoker().invokeBinding({ source, ref: "tools/nope", fetch: server.fn });
 
     await call.write({});
     await expect(call.closed).rejects.toMatchObject({
@@ -257,8 +141,8 @@ describe("MCPInvoker tools", () => {
   });
 
   it("maps a dispatch-time HTTP 500 to ERR_EXECUTION_FAILED with status details", async () => {
-    const { fn } = mcpServer(() => ({ http: new Response("boom", { status: 500 }) }));
-    const call = new MCPInvoker().invokeBinding({ source, ref: "tools/flaky", fetch: fn });
+    const server = mcpServer(() => ({ http: new Response("boom", { status: 500 }) }), { tools: ["flaky"] });
+    const call = new MCPInvoker().invokeBinding({ source, ref: "tools/flaky", fetch: server.fn });
 
     await call.write({});
     await expect(call.closed).rejects.toMatchObject({
@@ -268,11 +152,11 @@ describe("MCPInvoker tools", () => {
   });
 
   it("exposes HTTP response headers as leading metadata", async () => {
-    const { fn } = mcpServer(() => ({
-      result: { content: [{ type: "text", text: "ok" }] },
-      headers: { "x-request-id": "r1" },
-    }));
-    const call = new MCPInvoker().invokeBinding({ source, ref: "tools/ping", fetch: fn });
+    const server = mcpServer(
+      () => ({ result: { content: [{ type: "text", text: "ok" }] }, headers: { "x-request-id": "r1" } }),
+      { tools: ["ping"] },
+    );
+    const call = new MCPInvoker().invokeBinding({ source, ref: "tools/ping", fetch: server.fn });
 
     await call.write({});
     await expect(single(call.outputs)).resolves.toBe("ok");
@@ -280,33 +164,35 @@ describe("MCPInvoker tools", () => {
   });
 
   it("applies bearer context to the Authorization header", async () => {
-    const { fn, calls } = mcpServer(() => textResult("ok"));
+    const server = mcpServer(() => textResult("ok"), { tools: ["ping"] });
     const call = new MCPInvoker().invokeBinding({
-      source, ref: "tools/ping", fetch: fn, context: { bearerToken: "tok_123" },
+      source, ref: "tools/ping", fetch: server.fn, context: { bearerToken: "tok_123" },
     });
 
     await call.write({});
     await expect(single(call.outputs)).resolves.toBe("ok");
-    expect(calls[0].headers["authorization"]).toBe("Bearer tok_123");
+    const toolCall = server.calls.find((c) => c.method === "tools/call");
+    expect(toolCall?.headers["authorization"]).toBe("Bearer tok_123");
   });
 
   it("rejects a non-object input with ERR_VALIDATION_FAILED before any I/O", async () => {
-    const { fn, fetches } = mcpServer(() => textResult("ok"));
-    const call = new MCPInvoker().invokeBinding({ source, ref: "tools/ping", fetch: fn });
+    const server = mcpServer(() => textResult("ok"), { tools: ["ping"] });
+    const call = new MCPInvoker().invokeBinding({ source, ref: "tools/ping", fetch: server.fn });
 
     await call.write("not an object");
     await expect(call.closed).rejects.toMatchObject({ code: ERR_VALIDATION_FAILED });
-    expect(fetches()).toBe(0);
+    expect(server.fetches()).toBe(0);
   });
 
   it("cancel aborts an in-flight call", async () => {
-    const { fn, calls } = mcpServer(() => ({ hang: true }));
-    const call = new MCPInvoker().invokeBinding({ source, ref: "tools/slow", fetch: fn });
+    const server = mcpServer(() => ({ hang: true }), { tools: ["slow"] });
+    const call = new MCPInvoker().invokeBinding({ source, ref: "tools/slow", fetch: server.fn });
 
     await call.write({});
-    // Let the session connect and the tool call dispatch, then cancel.
+    // Let the session connect, the listing resolve, and the tool call
+    // dispatch, then cancel.
     await new Promise<void>((resolve) => {
-      const tick = () => (calls.length > 0 ? resolve() : setTimeout(tick, 0));
+      const tick = () => (server.count("tools/call") > 0 ? resolve() : setTimeout(tick, 0));
       tick();
     });
     await call.cancel();
@@ -319,45 +205,80 @@ describe("MCPInvoker tools", () => {
 // ---------------------------------------------------------------------------
 
 describe("MCPInvoker resources", () => {
-  it("reads a resource without any input (no-input recipe); declared JSON parses", async () => {
+  it("reads a resource without any input; the output is always the array of decoded items (§9.3, MCP-P-05)", async () => {
     // Resources decode by their DECLARED mimeType — the header-driven
-    // lane, never a payload sniff.
-    const { fn, calls } = mcpServer(() => ({
-      result: { contents: [{ uri: "file:///data.json", mimeType: "application/json", text: '{"a":1}' }] },
-    }));
-    const call = new MCPInvoker().invokeBinding({ source, ref: "resources/file:///data.json", fetch: fn });
+    // lane, never a payload sniff — and the output value is uniformly the
+    // array of decoded contents items (this test previously pinned the
+    // non-conformant single-item unwrap).
+    const server = mcpServer(
+      () => ({ result: { contents: [{ uri: "file:///data.json", mimeType: "application/json", text: '{"a":1}' }] } }),
+      { resources: ["file:///data.json"] },
+    );
+    const call = new MCPInvoker().invokeBinding({ source, ref: "resources/file:///data.json", fetch: server.fn });
 
-    // No write, no close: the binding closes input on entry.
-    await expect(single(call.outputs)).resolves.toEqual({ a: 1 });
-    expect(calls[0].method).toBe("resources/read");
-    expect(calls[0].params.uri).toBe("file:///data.json");
+    // No write, no close: static resources take no input (§9.1).
+    await expect(single(call.outputs)).resolves.toEqual([{ a: 1 }]);
+    const reads = server.params("resources/read");
+    expect(reads).toHaveLength(1);
+    expect(reads[0].uri).toBe("file:///data.json");
   });
 
   it("a resource with no declared JSON mimeType stays text, whatever its shape", async () => {
-    const { fn } = mcpServer(() => ({
-      result: { contents: [{ uri: "file:///notes.txt", mimeType: "text/plain", text: '{"a":1}' }] },
-    }));
-    const call = new MCPInvoker().invokeBinding({ source, ref: "resources/file:///notes.txt", fetch: fn });
-    await expect(single(call.outputs)).resolves.toEqual('{"a":1}');
+    const server = mcpServer(
+      () => ({ result: { contents: [{ uri: "file:///notes.txt", mimeType: "text/plain", text: '{"a":1}' }] } }),
+      { resources: ["file:///notes.txt"] },
+    );
+    const call = new MCPInvoker().invokeBinding({ source, ref: "resources/file:///notes.txt", fetch: server.fn });
+    await expect(single(call.outputs)).resolves.toEqual(['{"a":1}']);
   });
 
   it("declared-JSON that does not parse is a loud error, never a silent string", async () => {
-    const { fn } = mcpServer(() => ({
-      result: { contents: [{ uri: "file:///bad.json", mimeType: "application/json", text: "{not json" }] },
-    }));
-    const call = new MCPInvoker().invokeBinding({ source, ref: "resources/file:///bad.json", fetch: fn });
+    const server = mcpServer(
+      () => ({ result: { contents: [{ uri: "file:///bad.json", mimeType: "application/json", text: "{not json" }] } }),
+      { resources: ["file:///bad.json"] },
+    );
+    const call = new MCPInvoker().invokeBinding({ source, ref: "resources/file:///bad.json", fetch: server.fn });
     await expect(single(call.outputs)).rejects.toMatchObject({ code: ERR_EXECUTION_FAILED });
   });
 
-  it("returns the raw contents array for multi-content responses", async () => {
-    const contents = [
-      { uri: "file:///a.txt", text: "a" },
-      { uri: "file:///b.txt", text: "b" },
-    ];
-    const { fn } = mcpServer(() => ({ result: { contents } }));
-    const call = new MCPInvoker().invokeBinding({ source, ref: "resources/file:///dir", fetch: fn });
+  it("decodes multiple contents items item-by-item, in order (§9.3, MCP-P-05)", async () => {
+    // The output value is ALWAYS the array of decoded contents items (this
+    // test previously pinned the raw contents-array passthrough): a
+    // declared-JSON item parses, a text item stays text.
+    const server = mcpServer(
+      () => ({
+        result: {
+          contents: [
+            { uri: "file:///a.json", mimeType: "application/json", text: '{"n":1}' },
+            { uri: "file:///b.txt", mimeType: "text/plain", text: "second" },
+          ],
+        },
+      }),
+      { resources: ["file:///dir"] },
+    );
+    const call = new MCPInvoker().invokeBinding({ source, ref: "resources/file:///dir", fetch: server.fn });
 
-    await expect(single(call.outputs)).resolves.toEqual(contents);
+    await expect(single(call.outputs)).resolves.toEqual([{ n: 1 }, "second"]);
+  });
+
+  it("a blob item passes as its Base64 string, whatever mimeType it declares (§9.3)", async () => {
+    // Structural first: the blob member wins before any mimeType
+    // consideration — even a declared application/json.
+    const blob = Buffer.from("hello world").toString("base64");
+    const server = mcpServer(
+      () => ({ result: { contents: [{ uri: "app://blob", mimeType: "application/json", blob }] } }),
+      { resources: ["app://blob"] },
+    );
+    const call = new MCPInvoker().invokeBinding({ source, ref: "resources/app://blob", fetch: server.fn });
+
+    await expect(single(call.outputs)).resolves.toEqual([blob]);
+  });
+
+  it("contents: [] yields [] — the shape never depends on the item count (§9.3)", async () => {
+    const server = mcpServer(() => ({ result: { contents: [] } }), { resources: ["app://empty"] });
+    const call = new MCPInvoker().invokeBinding({ source, ref: "resources/app://empty", fetch: server.fn });
+
+    await expect(single(call.outputs)).resolves.toEqual([]);
   });
 });
 
@@ -368,7 +289,7 @@ describe("MCPInvoker resources", () => {
 describe("MCPInvoker prompts", () => {
   it("closes input on entry under the operation-layer no-input convention (zero-argument prompt)", async () => {
     const messages = [{ role: "user", content: { type: "text", text: "Hi" } }];
-    const { fn, calls } = mcpServer(() => ({ result: { messages } }));
+    const server = mcpServer(() => ({ result: { messages } }), { prompts: ["greeting"] });
     // binding present + inputSchema absent: the operation declares NO input
     // (the synthesizer emits no input schema for zero-argument prompts), so the
     // caller never writes nor closes — the call must not park on a read.
@@ -376,29 +297,44 @@ describe("MCPInvoker prompts", () => {
       source,
       ref: "prompts/greeting",
       binding: { operation: "greeting", source: "mcp", ref: "prompts/greeting" },
-      fetch: fn,
+      fetch: server.fn,
     });
 
     await expect(single(call.outputs)).resolves.toEqual({ messages });
     await expect(call.closed).resolves.toBeUndefined();
-    expect(calls[0].method).toBe("prompts/get");
-    expect(calls[0].params.name).toBe("greeting");
+    const gets = server.params("prompts/get");
+    expect(gets).toHaveLength(1);
+    expect(gets[0].name).toBe("greeting");
+    // The no-input convention also omits the arguments member (§9.1).
+    expect(gets[0]).not.toHaveProperty("arguments");
   });
 
-  it("renders a prompt with stringified arguments", async () => {
+  it("renders a prompt with string arguments, verbatim", async () => {
     const messages = [{ role: "user", content: { type: "text", text: "Summarize this" } }];
-    const { fn, calls } = mcpServer(() => ({
-      result: { description: "A summary prompt", messages },
-    }));
-    const call = new MCPInvoker().invokeBinding({ source, ref: "prompts/summarize", fetch: fn });
+    const server = mcpServer(() => ({ result: { description: "A summary prompt", messages } }), {
+      prompts: ["summarize"],
+    });
+    const call = new MCPInvoker().invokeBinding({ source, ref: "prompts/summarize", fetch: server.fn });
 
-    await call.write({ text: "hello", maxWords: 10 });
+    await call.write({ text: "hello", style: "brief" });
     await expect(single(call.outputs)).resolves.toEqual({
       messages,
       description: "A summary prompt",
     });
-    expect(calls[0].method).toBe("prompts/get");
-    expect(calls[0].params.arguments).toEqual({ text: "hello", maxWords: "10" });
+    const gets = server.params("prompts/get");
+    expect(gets[0].name).toBe("summarize");
+    expect(gets[0].arguments).toEqual({ text: "hello", style: "brief" });
+  });
+
+  it("refuses a non-string prompt argument, never coerced (§9.1, MCP-P-03)", async () => {
+    // MCP prompt arguments are string-typed; this test previously pinned
+    // the non-conformant String(v) stringification of non-string members.
+    const server = mcpServer(() => textResult("unreachable"), { prompts: ["summarize"] });
+    const call = new MCPInvoker().invokeBinding({ source, ref: "prompts/summarize", fetch: server.fn });
+
+    await call.write({ text: "hello", maxWords: 10 });
+    await expect(call.closed).rejects.toMatchObject({ code: ERR_VALIDATION_FAILED });
+    expect(server.count("prompts/get")).toBe(0); // refused before dispatch
   });
 });
 
@@ -408,11 +344,11 @@ describe("MCPInvoker prompts", () => {
 
 describe("MCPInvoker failures", () => {
   it("fails a malformed ref pre-dispatch without any I/O", async () => {
-    const { fn, fetches } = mcpServer(() => textResult("ok"));
-    const call = new MCPInvoker().invokeBinding({ source, ref: "bogus", fetch: fn });
+    const server = mcpServer(() => textResult("ok"));
+    const call = new MCPInvoker().invokeBinding({ source, ref: "bogus", fetch: server.fn });
 
     await expect(call.closed).rejects.toMatchObject({ code: ERR_INVALID_REF });
-    expect(fetches()).toBe(0);
+    expect(server.fetches()).toBe(0);
   });
 
   it("fails a non-HTTP location scheme pre-dispatch with ERR_SOURCE_CONFIG_ERROR (Go parity)", async () => {
@@ -422,32 +358,33 @@ describe("MCPInvoker failures", () => {
     // transport/URL machinery did with it (ERR_RUNTIME for a string
     // that fails URL parsing, or straight through to the network for a
     // syntactically valid non-http URL like ftp://).
-    const { fn, fetches } = mcpServer(() => textResult("ok"));
+    const server = mcpServer(() => textResult("ok"));
     const call = new MCPInvoker().invokeBinding({
       source: { bindingSpec: "openbindings.mcp@1", location: "ftp://mcp.example.com" },
       ref: "resources/file:///x",
-      fetch: fn,
+      fetch: server.fn,
     });
 
     await expect(call.closed).rejects.toMatchObject({ code: ERR_SOURCE_CONFIG_ERROR });
-    expect(fetches()).toBe(0);
+    expect(server.fetches()).toBe(0);
   });
 
-  it("fails a missing endpoint pre-dispatch with ERR_SOURCE_CONFIG_ERROR", async () => {
-    const { fn, fetches } = mcpServer(() => textResult("ok"));
+  it("fails a missing endpoint pre-dispatch with ERR_SOURCE_CONFIG_ERROR (MCP-D-02: location is required)", async () => {
+    const server = mcpServer(() => textResult("ok"));
     const call = new MCPInvoker().invokeBinding({
-      source: { bindingSpec: "openbindings.mcp@1" }, ref: "resources/file:///x", fetch: fn,
+      source: { bindingSpec: "openbindings.mcp@1" }, ref: "resources/file:///x", fetch: server.fn,
     });
 
     await expect(call.closed).rejects.toMatchObject({ code: ERR_SOURCE_CONFIG_ERROR });
-    expect(fetches()).toBe(0);
+    expect(server.fetches()).toBe(0);
   });
 
   it("maps a connect-time HTTP 401 to ERR_AUTH_REQUIRED", async () => {
-    const { fn } = mcpServer(() => textResult("ok"), {
+    const server = mcpServer(() => textResult("ok"), {
+      tools: ["ping"],
       initResponse: new Response("denied", { status: 401 }),
     });
-    const call = new MCPInvoker().invokeBinding({ source, ref: "tools/ping", fetch: fn });
+    const call = new MCPInvoker().invokeBinding({ source, ref: "tools/ping", fetch: server.fn });
 
     await call.write({});
     await expect(call.closed).rejects.toMatchObject({
@@ -457,10 +394,11 @@ describe("MCPInvoker failures", () => {
   });
 
   it("maps a connect-time HTTP 403 to ERR_PERMISSION_DENIED", async () => {
-    const { fn } = mcpServer(() => textResult("ok"), {
+    const server = mcpServer(() => textResult("ok"), {
+      tools: ["ping"],
       initResponse: new Response("forbidden", { status: 403 }),
     });
-    const call = new MCPInvoker().invokeBinding({ source, ref: "tools/ping", fetch: fn });
+    const call = new MCPInvoker().invokeBinding({ source, ref: "tools/ping", fetch: server.fn });
 
     await call.write({});
     await expect(call.closed).rejects.toMatchObject({
@@ -481,19 +419,48 @@ describe("MCPInvoker failures", () => {
  * for both synthesizeInterface and inspectSource,
  * whose discovery lane is otherwise identical (list_refs_test.go /
  * TestInspectSource_RefsMatchSynthesizeInterface asserts the Go SDK's two
- * entry points agree; this is the TS-side discovery fixture).
+ * entry points agree; this is the TS-side discovery fixture). When
+ * pageSize is set, each list paginates via nextCursor so tests can prove
+ * discovery follows the listing to exhaustion (MCP-P-02).
  */
-function discoveryServer(): { fn: typeof fetch; fetches: () => number } {
+function discoveryServer(opts?: { pageSize?: number; toolNames?: string[] }): {
+  fn: typeof fetch;
+  fetches: () => number;
+} {
   let fetchCount = 0;
+  const toolNames = opts?.toolNames ?? ["get_weather"];
+  const tools = toolNames.map((name) => ({
+    name,
+    description: `Tool ${name}`,
+    inputSchema: { type: "object", properties: {} },
+  }));
+
+  const paginate = <T>(items: T[], cursor: unknown): { page: T[]; nextCursor?: string } => {
+    const size = opts?.pageSize && opts.pageSize > 0 ? opts.pageSize : Math.max(items.length, 1);
+    const start = typeof cursor === "string" ? Number(cursor) : 0;
+    const next = start + size;
+    return next < items.length
+      ? { page: items.slice(start, next), nextCursor: String(next) }
+      : { page: items.slice(start, next) };
+  };
+
   const fn: typeof fetch = async (_input, init) => {
     fetchCount++;
     const method = init?.method ?? "GET";
     if (method === "GET") return new Response(null, { status: 405 });
     if (method === "DELETE") return new Response(null, { status: 200 });
 
-    const msg = JSON.parse(String(init?.body)) as { id?: number | string; method: string };
+    const msg = JSON.parse(String(init?.body)) as {
+      id?: number | string;
+      method: string;
+      params?: { cursor?: string };
+    };
     const reply = (result: unknown) =>
       jsonResponse({ jsonrpc: "2.0", id: msg.id, result });
+    const page = <T>(items: T[], member: string): Response => {
+      const { page: p, nextCursor } = paginate(items, msg.params?.cursor);
+      return reply({ [member]: p, ...(nextCursor !== undefined ? { nextCursor } : {}) });
+    };
 
     switch (msg.method) {
       case "initialize":
@@ -503,15 +470,13 @@ function discoveryServer(): { fn: typeof fetch; fetches: () => number } {
           serverInfo: { name: "fake-server", version: "1.0.0" },
         });
       case "tools/list":
-        return reply({
-          tools: [{ name: "get_weather", description: "Get weather for a city", inputSchema: { type: "object", properties: {} } }],
-        });
+        return page(tools, "tools");
       case "resources/list":
-        return reply({ resources: [{ name: "config", uri: "file:///etc/config.json", description: "Config file" }] });
+        return page([{ name: "config", uri: "file:///etc/config.json", description: "Config file" }], "resources");
       case "resources/templates/list":
-        return reply({ resourceTemplates: [] });
+        return page([], "resourceTemplates");
       case "prompts/list":
-        return reply({ prompts: [{ name: "summarize", description: "Summarize text" }] });
+        return page([{ name: "summarize", description: "Summarize text" }], "prompts");
       default:
         if (msg.id === undefined) return new Response(null, { status: 202 }); // notifications (e.g. initialized)
         return reply({});
@@ -565,5 +530,18 @@ describe("MCPSynthesizer", () => {
     const before = fetches();
     await synthesizer.inspectSource({ bindingSpec: "openbindings.mcp@1", location: ENDPOINT });
     expect(fetches()).toBeGreaterThan(before);
+  });
+
+  it("follows every list to pagination exhaustion (MCP-P-02): the artifact is the exhausted aggregate", async () => {
+    // With a page size of 1, a first-page-only discovery would synthesize
+    // an interface missing every tool past the first page.
+    const { fn } = discoveryServer({ pageSize: 1, toolNames: ["alpha", "beta", "gamma"] });
+    const iface = await new MCPSynthesizer({ fetch: fn }).synthesizeInterface({
+      sources: [{ bindingSpec: "openbindings.mcp@1", location: ENDPOINT }],
+    });
+
+    for (const name of ["alpha", "beta", "gamma"]) {
+      expect(iface.operations[name]).toBeDefined();
+    }
   });
 });

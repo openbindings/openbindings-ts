@@ -4,15 +4,19 @@ import {
   StreamableHTTPError,
 } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { McpError } from "@modelcontextprotocol/sdk/types.js";
+import { UriTemplate } from "@modelcontextprotocol/sdk/shared/uriTemplate.js";
 import {
   InvocationError,
   buildAuthHeaders,
+  contextConfiguration,
   httpErrorCode,
   ERR_CANCELLED,
   ERR_CONNECT_FAILED,
   ERR_EXECUTION_FAILED,
   ERR_INVALID_REF,
+  ERR_REF_NOT_FOUND,
   ERR_SOURCE_CONFIG_ERROR,
+  ERR_SOURCE_LOAD_FAILED,
   ERR_VALIDATION_FAILED,
   type BindingHandle,
   type BindingInvocationArgs,
@@ -23,6 +27,13 @@ import {
   type RawResult,
 } from "@openbindings/sdk";
 import { CLIENT_NAME, CLIENT_VERSION } from "./constants.js";
+import { liveListing, parsePinnedListing, resolveRef, type Listing, type TargetKind } from "./listing.js";
+
+/** Consumer-level knobs the invoker threads into each run (openbindings.mcp@1 §9.3). */
+export interface RunOptions {
+  /** Consumer-level value of the `solicit` configuration point; undefined declines. */
+  solicitProgress?: boolean;
+}
 
 /** Parse a ref like "tools/name", "resources/uri", or "prompts/name". */
 export function parseRef(ref: string): { entityType: string; name: string } {
@@ -54,11 +65,19 @@ function isHTTPURL(s: string): boolean {
   return s.startsWith("http://") || s.startsWith("https://");
 }
 
+/** Names a JSON value's kind for refusal messages (the Go side prints %T). */
+function typeName(v: unknown): string {
+  if (v === null) return "null";
+  if (Array.isArray(v)) return "array";
+  return typeof v;
+}
+
 /**
  * Maps a thrown error to an InvocationError. JSON-RPC errors carry the MCP
  * error code/data in details; HTTP-status errors map via httpErrorCode;
  * anything else falls back to the phase's code (ERR_CONNECT_FAILED during
- * the initialize handshake, ERR_EXECUTION_FAILED during dispatch).
+ * the initialize handshake, ERR_SOURCE_LOAD_FAILED during live listing,
+ * ERR_EXECUTION_FAILED during dispatch).
  */
 function mapError(e: unknown, signal: AbortSignal, fallback: string): InvocationError {
   if (e instanceof InvocationError) return e;
@@ -76,16 +95,18 @@ function mapError(e: unknown, signal: AbortSignal, fallback: string): Invocation
 }
 
 /**
- * Runs one MCP binding invocation against the handle. Each call opens a
- * fresh MCP session (Streamable HTTP), dispatches the entity call, emits
- * outputs (progress notifications first, then the result), and closes.
- *
- * Pre-dispatch failures (bad ref, missing endpoint, non-object input) fire
- * BEFORE any network I/O.
+ * Runs one MCP binding invocation against the handle. Pre-dispatch failures
+ * (bad ref, missing or non-HTTP endpoint, invalid pin, non-object input,
+ * unresolvable ref) fire BEFORE the entity request is dispatched
+ * (openbindings.mcp@1 §7, §9.1); ref/location/pin/input-shape failures fire
+ * before any network I/O at all. Each call opens a fresh MCP session
+ * (Streamable HTTP), resolves the ref against the listing, dispatches the
+ * entity call, emits outputs, and closes.
  */
 export async function runMCPBinding(
   args: BindingInvocationArgs,
   inv: BindingHandle<unknown, unknown>,
+  opts?: RunOptions,
 ): Promise<void> {
   // --- Pre-dispatch validation: no network I/O has happened yet. ---
   let entityType: string;
@@ -116,37 +137,90 @@ export async function runMCPBinding(
     return;
   }
 
-  // --- Collect input from the handle. ---
-  // Tools and prompts take one named-arguments object; resource reads take
-  // no input. Close input as early as possible so callers never have to.
-  let input: Record<string, unknown> = {};
-  if (args.binding !== undefined && args.inputSchema === undefined) {
-    // Operation-layer no-input convention: the binding is populated but no
-    // input schema is, so the operation declares NO input (e.g. a
-    // zero-argument prompt or tool) — the caller never writes nor closes.
-    // Close input on entry and dispatch with empty arguments.
-    void inv.closeInput();
-  } else if (entityType === "resources") {
-    void inv.closeInput();
-  } else {
-    const first = await readFirst(inv.inputs());
-    // Validate BEFORE closing input: a terminal validation error must
-    // precede the observable input-close side effect (which resolves the
-    // `inputClosed` promise conduit consumers await). On the validation
-    // path, fireError itself closes the input side, keeping the terminal
-    // and the input-close atomic.
-    if (first != null && (typeof first !== "object" || Array.isArray(first))) {
+  // A pinned listing (source content) validates up front: an invalid pin is
+  // refused loudly before input collection and before any network I/O
+  // (MCP-D-01).
+  let pin: Listing | undefined;
+  if (args.source.content != null) {
+    try {
+      pin = parsePinnedListing(args.source.content);
+    } catch (e: unknown) {
       inv.fireError(
-        new InvocationError(
-          ERR_VALIDATION_FAILED,
-          `MCP ${entityType === "tools" ? "tool" : "prompt"} input must be an object, got ${typeof first}`,
-        ),
+        new InvocationError(ERR_SOURCE_LOAD_FAILED, e instanceof Error ? e.message : String(e)),
       );
       return;
     }
-    void inv.closeInput();
-    if (first != null) {
-      input = first as Record<string, unknown>;
+  }
+
+  // --- Resolution before dispatch (§7, MCP-P-02). ---
+  // With a pin, resolution is offline-checkable: it happens here, before
+  // input collection and before any connection, and the list requests are
+  // never consulted (§6 content primacy). Without a pin it needs the live
+  // exhausted listing and happens right after the handshake — still before
+  // dispatch.
+  let kind: TargetKind | undefined;
+  if (pin) {
+    try {
+      kind = resolveRef(pin, entityType, name);
+    } catch (e: unknown) {
+      inv.fireError(mapError(e, inv.signal, ERR_REF_NOT_FOUND));
+      return;
+    }
+  }
+
+  // --- Collect input from the handle (tools and prompts). ---
+  // Tools and prompts take one named-arguments object. Resource input
+  // handling waits for resolution below: a template takes one input (its
+  // variables), a static resource none, and only the listing can say which
+  // the ref names.
+  //
+  // No-input convention: when the operation layer drives an operation that
+  // declares no input (binding set, inputSchema absent — e.g. a
+  // zero-argument tool or prompt), close input on entry and dispatch with
+  // the arguments member omitted rather than reading. A caller of a
+  // no-input operation never writes nor closes, so an unconditional read
+  // would park forever.
+  const noInput = args.binding !== undefined && args.inputSchema === undefined;
+  let toolArgs: Record<string, unknown> | undefined; // undefined means absent: the arguments member is omitted (§9.1)
+  let promptArgs: Record<string, string> | undefined; // undefined means absent: the arguments member is omitted (§9.1)
+  if (entityType !== "resources") {
+    if (noInput) {
+      void inv.closeInput();
+    } else {
+      const first = await readFirst(inv.inputs());
+      // Validate BEFORE closing input: a terminal validation error must
+      // precede the observable input-close side effect (which resolves the
+      // `inputClosed` promise conduit consumers await). On the validation
+      // path, fireError itself closes the input side, keeping the terminal
+      // and the input-close atomic. `undefined` means the input side closed
+      // empty — absent means "never written", not "written as null", so a
+      // written null is a supplied non-object and is refused (§9.1,
+      // MCP-P-03).
+      if (first !== undefined) {
+        if (entityType === "tools") {
+          if (first === null || typeof first !== "object" || Array.isArray(first)) {
+            inv.fireError(
+              new InvocationError(
+                ERR_VALIDATION_FAILED,
+                `MCP tool input must be an object when supplied, got ${typeName(first)}`,
+              ),
+            );
+            return;
+          }
+          // Defensive shallow copy keeps the invoker contract ("never
+          // mutate caller input") even when the third-party MCP SDK passes
+          // args by reference.
+          toolArgs = { ...(first as Record<string, unknown>) };
+        } else {
+          try {
+            promptArgs = promptArguments(first);
+          } catch (e: unknown) {
+            inv.fireError(mapError(e, inv.signal, ERR_VALIDATION_FAILED));
+            return;
+          }
+        }
+      }
+      void inv.closeInput();
     }
   }
 
@@ -156,8 +230,9 @@ export async function runMCPBinding(
   const authHeaders = buildAuthHeaders(args.context);
   const baseFetch = args.fetch ?? globalThis.fetch;
 
-  // Capture HTTP response headers from POSTs (initialize, then the entity
-  // call) so the latest capture at first-emit time is the call's response.
+  // Capture HTTP response headers from POSTs (initialize, the list calls,
+  // then the entity call) so the latest capture at first-emit time is the
+  // call's response.
   let responseHeaders: Metadata = {};
   const captureFetch = async (url: string | URL, init?: RequestInit): Promise<Response> => {
     const response = await baseFetch(url, init);
@@ -192,18 +267,50 @@ export async function runMCPBinding(
     inv.setHeader(responseHeaders);
   };
 
-  // --- Dispatch. ---
   const site = siteFor(args, location);
   try {
-    switch (entityType) {
-      case "tools":
-        await runTool(client, name, input, inv, setHeaderOnce, site, args.hooks);
+    // --- Live resolution (no pin): the capability-gated, pagination-
+    // exhausted listing for the ref's entity family, then the same
+    // byte-exact match the pin path ran above (MCP-P-02). The entity
+    // request is never dispatched blind on the ref name.
+    if (kind === undefined) {
+      let listing: Listing;
+      try {
+        listing = await liveListing(client, entityType, inv.signal);
+      } catch (e: unknown) {
+        inv.fireError(mapError(e, inv.signal, ERR_SOURCE_LOAD_FAILED));
+        return;
+      }
+      kind = resolveRef(listing, entityType, name); // throws ERR_REF_NOT_FOUND
+    }
+
+    // --- Resource input (post-resolution: static vs template decides the
+    // interaction shape, §8/§9.1). ---
+    let targetURI = name;
+    if (entityType === "resources") {
+      if (kind === "staticResource") {
+        // Static resources take no input (§9.1): the input side closes
+        // without reading. A caller that then supplies a value gets a loud
+        // ERR_INPUT_CLOSED on its write — the refusal surface the handle
+        // model gives a value this binding may never read.
+        void inv.closeInput();
+      } else {
+        targetURI = await expandTemplateInput(inv, name, noInput);
+      }
+    }
+
+    // --- Dispatch. ---
+    switch (kind) {
+      case "tool": {
+        const solicit = resolveSolicit(args.context, opts?.solicitProgress);
+        await runTool(client, name, toolArgs, solicit, inv, setHeaderOnce, site, args.hooks);
         break;
-      case "resources":
-        await runResource(client, name, inv, setHeaderOnce, site, args.hooks);
+      }
+      case "prompt":
+        await runPrompt(client, name, promptArgs, inv, setHeaderOnce);
         break;
-      case "prompts":
-        await runPrompt(client, name, input, inv, setHeaderOnce);
+      default: // static resource, or a template expanded to targetURI
+        await runResource(client, targetURI, inv, setHeaderOnce, site, args.hooks);
         break;
     }
   } catch (e: unknown) {
@@ -214,31 +321,176 @@ export async function runMCPBinding(
 }
 
 /**
- * Invoke a tool call. Progress notifications stream as outputs ahead of the
- * final result -- multiple outputs are first-class on the handle.
+ * Consults the family's `solicit` configuration point in its defined order
+ * (openbindings.mcp@1 §9.3): per-invocation context.configuration["solicit"]
+ * → consumer-level MCPInvoker option → the default, NOT solicited. A
+ * non-bool per-invocation value is a declined override and falls through.
+ * The default is content-independent and keeps a binding's observable
+ * stream realization-neutral: no progressToken rides the call, and the
+ * output stream is the result value alone (§9.2).
+ */
+function resolveSolicit(bindCtx: Record<string, unknown> | undefined, consumer: boolean | undefined): boolean {
+  const v = contextConfiguration(bindCtx)["solicit"];
+  if (typeof v === "boolean") return v;
+  if (consumer !== undefined) return consumer;
+  return false;
+}
+
+/**
+ * Maps a supplied prompt input value (§9.1, MCP-P-03): it MUST be a JSON
+ * object, and MCP prompt arguments are string-typed, so every member value
+ * MUST be a string — a non-object input or a non-string member is refused
+ * loudly before prompts/get is dispatched, never coerced.
+ */
+function promptArguments(v: unknown): Record<string, string> {
+  if (v === null || typeof v !== "object" || Array.isArray(v)) {
+    throw new InvocationError(
+      ERR_VALIDATION_FAILED,
+      `MCP prompt input must be an object when supplied, got ${typeName(v)}`,
+    );
+  }
+  const out: Record<string, string> = {};
+  for (const [k, val] of Object.entries(v)) {
+    if (typeof val !== "string") {
+      throw new InvocationError(
+        ERR_VALIDATION_FAILED,
+        `MCP prompt argument ${JSON.stringify(k)} must be a string, got ${typeName(val)} (prompt arguments are string-typed and are never coerced)`,
+      );
+    }
+    out[k] = val;
+  }
+  return out;
+}
+
+/**
+ * Reads and validates a resource template's input value and expands the
+ * template per RFC 6570 (§9.1, MCP-P-03). The input, when supplied, is a
+ * JSON object of the template's variables: every member value MUST be a
+ * string and every member MUST name a declared variable — each violation is
+ * refused loudly before resources/read is dispatched. An absent input (or a
+ * no-input operation) expands with all variables undefined, which follows
+ * RFC 6570's undefined-value expansion.
+ */
+async function expandTemplateInput(
+  inv: BindingHandle<unknown, unknown>,
+  template: string,
+  noInput: boolean,
+): Promise<string> {
+  let tmpl: UriTemplate;
+  try {
+    tmpl = new UriTemplate(template);
+  } catch (e: unknown) {
+    throw new InvocationError(
+      ERR_SOURCE_LOAD_FAILED,
+      `MCP listing declares resource template ${JSON.stringify(template)}, which is not a valid RFC 6570 URI template: ${e instanceof Error ? e.message : String(e)}`,
+    );
+  }
+
+  let first: unknown;
+  let supplied = false;
+  if (noInput) {
+    void inv.closeInput();
+  } else {
+    const v = await readFirst(inv.inputs());
+    if (v !== undefined) {
+      first = v;
+      supplied = true;
+    }
+    void inv.closeInput();
+  }
+
+  const values: Record<string, string> = {};
+  if (supplied) {
+    if (first === null || typeof first !== "object" || Array.isArray(first)) {
+      throw new InvocationError(
+        ERR_VALIDATION_FAILED,
+        `MCP resource-template input must be an object of template variables when supplied, got ${typeName(first)}`,
+      );
+    }
+    const declared = new Set(tmpl.variableNames);
+    for (const [k, v] of Object.entries(first)) {
+      if (!declared.has(k)) {
+        throw new InvocationError(
+          ERR_VALIDATION_FAILED,
+          `MCP resource-template input names variable ${JSON.stringify(k)}, which template ${JSON.stringify(template)} does not declare`,
+        );
+      }
+      if (typeof v !== "string") {
+        throw new InvocationError(
+          ERR_VALIDATION_FAILED,
+          `MCP resource-template variable ${JSON.stringify(k)} must be a string, got ${typeName(v)} (template variables are never coerced)`,
+        );
+      }
+      values[k] = v;
+    }
+  }
+
+  try {
+    return tmpl.expand(values);
+  } catch (e: unknown) {
+    throw new InvocationError(
+      ERR_VALIDATION_FAILED,
+      `RFC 6570 expansion of template ${JSON.stringify(template)} failed: ${e instanceof Error ? e.message : String(e)}`,
+    );
+  }
+}
+
+/**
+ * Invoke a tool call. When progress is solicited (§9.3's `solicit` point —
+ * default off), correlated progress notifications stream as outputs ahead
+ * of the final result; the result is always last (§9.2, MCP-P-04).
  */
 async function runTool(
   client: Client,
   toolName: string,
-  toolArgs: Record<string, unknown>,
+  toolArgs: Record<string, unknown> | undefined,
+  solicit: boolean,
   inv: BindingHandle<unknown, unknown>,
   setHeaderOnce: () => void,
   site: InvokeSite,
   hooks: InvokeHooks | null | undefined,
 ): Promise<void> {
+  // A supplied input maps whole and verbatim; an absent input omits the
+  // arguments member ENTIRELY (§9.1) — never arguments: {}. The TS MCP SDK
+  // passes params through verbatim (unlike go-mcp, which injects an empty
+  // object the Go side strips at the transport), so omission here is
+  // omission on the wire.
+  const params: { name: string; arguments?: Record<string, unknown> } = { name: toolName };
+  if (toolArgs !== undefined) params.arguments = toolArgs;
+
+  if (!solicit) {
+    // Solicitation off (the default): no progressToken rides the call and
+    // the stream is exactly the result value (§9.2, MCP-P-05). The SDK
+    // attaches _meta.progressToken only when an onprogress handler is
+    // registered, so not registering one IS the wire-level off switch.
+    const result = await client.callTool(params, undefined, { signal: inv.signal });
+    await emitToolResult(result, toolName, inv, setHeaderOnce, site, hooks);
+    return;
+  }
+
   // Progress callbacks are synchronous; chain the emits so they stay
   // ordered and observe emitOutput's backpressure without a side buffer.
   // Once an emit fails the invocation is terminal: the terminated flag
-  // makes every queued and subsequent link a no-op.
+  // makes every queued and subsequent link a no-op. The SDK hands the
+  // handler the notification's params object with progressToken removed
+  // (a rest spread over the raw JSON), which is exactly §9.2's
+  // presence-preserving progress value: an explicit total: 0 survives, an
+  // absent total stays absent — no wire tee is needed, unlike Go, whose
+  // typed MCP structs collapse an explicit zero into absence.
   let progressChain: Promise<void> = Promise.resolve();
   let progressTerminated = false;
+  let resultArrived = false;
 
   const result = await client.callTool(
-    { name: toolName, arguments: toolArgs },
+    params,
     undefined,
     {
       signal: inv.signal,
       onprogress: (progress) => {
+        // A correlated notification observed after the result is discarded
+        // — §9.2's defined disposal: the result value terminates the stream
+        // (MCP-P-04).
+        if (resultArrived) return;
         progressChain = progressChain
           .then(() => {
             if (progressTerminated) return;
@@ -251,10 +503,37 @@ async function runTool(
       },
     },
   );
+  // Every pre-result notification has already appended its emit to the
+  // chain (the transport delivers in order and this flag flips before any
+  // further handler can run); anything correlated that arrives from here
+  // on is late and is discarded above.
+  resultArrived = true;
   await progressChain;
 
+  await emitToolResult(result, toolName, inv, setHeaderOnce, site, hooks);
+}
+
+/**
+ * Classifies and emits a completed tools/call result: an isError result is
+ * a failure outcome whatever its content (§9.4, MCP-P-06); every other
+ * completed result decodes per §9.3 and terminates the stream.
+ */
+async function emitToolResult(
+  result: Awaited<ReturnType<Client["callTool"]>>,
+  toolName: string,
+  inv: BindingHandle<unknown, unknown>,
+  setHeaderOnce: () => void,
+  site: InvokeSite,
+  hooks: InvokeHooks | null | undefined,
+): Promise<void> {
   if (result.isError) {
-    throw new InvocationError(ERR_EXECUTION_FAILED, extractContent(result.content));
+    // Application-level tool failure (CallToolResult.isError). The server
+    // replied normally; classification is protocol-native (§9.4).
+    const msg = extractContent(result.content);
+    throw new InvocationError(
+      ERR_EXECUTION_FAILED,
+      msg || `MCP tool ${JSON.stringify(toolName)} reported an error`,
+    );
   }
 
   // structuredContent is MCP's declared structured lane (2025-11-25:
@@ -293,8 +572,8 @@ async function runTool(
 
 /**
  * The MCP text builtin: the value is the text, verbatim.
- * Content-independent per the conventions record; JSON-in-text consumers
- * opt in with a decode hook.
+ * Content-independent per the specification's decode point (§9.3);
+ * JSON-in-text consumers opt in with a decode hook.
  */
 function builtinTextDecode(_site: InvokeSite, raw: RawResult): unknown {
   return typeof raw.body === "string" ? raw.body : String(raw.body);
@@ -305,7 +584,18 @@ function decodeStampFor(hooks: InvokeHooks | null | undefined, builtin: string):
   return hooks?.decodeDecidedBy?.() === "hook" ? "hook" : builtin;
 }
 
-/** Read an MCP resource. */
+/**
+ * Read an MCP resource. The output value is ALWAYS the array of decoded
+ * contents items, in order (§9.3, MCP-P-05) — uniformly, so the value's
+ * shape never depends on how many items the server returned: contents: []
+ * yields [], and authors who want a bare single value declare an
+ * outputTransform. Each item decodes by protocol structure FIRST: a blob
+ * item passes as its Base64 string as MCP carries it, whatever mimeType it
+ * declares; a text item decodes by its DECLARED mimeType, exactly the HTTP
+ * header rule — json/+json parses strictly (a parse failure is a loud
+ * error, never a silent fall-through), anything else is text, and the
+ * payload's shape never picks the lane.
+ */
 async function runResource(
   client: Client,
   uri: string,
@@ -316,32 +606,27 @@ async function runResource(
 ): Promise<void> {
   const result = await client.readResource({ uri }, { signal: inv.signal });
 
-  // Resources carry a DECLARED mimeType, so the builtin is the same
-  // header-driven lane HTTP uses: json/+json parses strictly (a parse
-  // failure is a loud error, never a silent fall-through), anything else
-  // is text, and the payload's shape never picks the lane.
-  let output: unknown;
-  let decodeStamp = "content";
-  const contents = result.contents;
-  if (!contents || contents.length === 0) {
-    output = null;
-  } else if (contents.length === 1) {
-    const c = contents[0];
-    const text = "text" in c ? (c as { text: string }).text : undefined;
-    if (text) {
-      const mimeType = ("mimeType" in c ? (c as { mimeType?: string }).mimeType : undefined) ?? "";
-      output = await decodeThroughHooks(hooks, site, { status: null, body: text, meta: {} }, builtinMimeDecode(mimeType));
-      decodeStamp = decodeStampFor(hooks, "declared/mime-type");
-    } else {
-      output = c;
+  const items: unknown[] = [];
+  for (const c of result.contents ?? []) {
+    if (c == null) continue;
+    const blob = (c as { blob?: unknown }).blob;
+    if (typeof blob === "string") {
+      // Structural: the wire item carried a blob member — its Base64
+      // string passes as MCP carries it, before any mimeType consideration.
+      items.push(blob);
+      continue;
     }
-  } else {
-    output = contents;
+    const text = typeof (c as { text?: unknown }).text === "string" ? (c as { text: string }).text : "";
+    const mimeType =
+      typeof (c as { mimeType?: unknown }).mimeType === "string" ? (c as { mimeType: string }).mimeType : "";
+    items.push(
+      await decodeThroughHooks(hooks, site, { status: null, body: text, meta: {} }, builtinMimeDecode(mimeType)),
+    );
   }
 
   setHeaderOnce();
-  inv.setTrailer({ "x-ob-decode": [decodeStamp] });
-  await inv.emitOutput(output);
+  inv.setTrailer({ "x-ob-decode": [decodeStampFor(hooks, "contents/declared")] });
+  await inv.emitOutput(items);
   inv.closeOutput();
 }
 
@@ -388,23 +673,16 @@ function siteFor(args: BindingInvocationArgs, target: string): InvokeSite {
 async function runPrompt(
   client: Client,
   promptName: string,
-  promptInput: Record<string, unknown>,
+  promptArgs: Record<string, string> | undefined,
   inv: BindingHandle<unknown, unknown>,
   setHeaderOnce: () => void,
 ): Promise<void> {
-  // Prompt arguments must be Record<string, string>.
-  let promptArgs: Record<string, string> | undefined;
-  if (Object.keys(promptInput).length > 0) {
-    promptArgs = {};
-    for (const [k, v] of Object.entries(promptInput)) {
-      promptArgs[k] = String(v);
-    }
-  }
+  // An absent input omits the arguments member entirely (§9.1); a supplied
+  // one was validated string-typed before dispatch (MCP-P-03).
+  const params: { name: string; arguments?: Record<string, string> } = { name: promptName };
+  if (promptArgs !== undefined) params.arguments = promptArgs;
 
-  const result = await client.getPrompt(
-    { name: promptName, arguments: promptArgs },
-    { signal: inv.signal },
-  );
+  const result = await client.getPrompt(params, { signal: inv.signal });
 
   const output: Record<string, unknown> = { messages: result.messages };
   if (result.description) {
