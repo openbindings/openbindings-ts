@@ -6,7 +6,7 @@ import type {
   AsyncAPIOperationReply,
 } from "./asyncapi-types.js";
 import { BINDING_SPEC, DEFAULT_SOURCE_NAME } from "./constants.js";
-import { sanitizeKey, uniqueKey } from "./util.js";
+import { operationRef, sanitizeKey, uniqueKey } from "./util.js";
 
 export async function convertToInterface(
   location?: string,
@@ -81,7 +81,7 @@ export async function convertToInterface(
 
     iface.operations[opKey] = obiOp;
 
-    const ref = `#/operations/${opID}`;
+    const ref = operationRef(opID);
     const bindingKey = `${opKey}.${DEFAULT_SOURCE_NAME}`;
     iface.bindings![bindingKey] = {
       operation: opKey,

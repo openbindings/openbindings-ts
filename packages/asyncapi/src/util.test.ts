@@ -42,20 +42,28 @@ describe("parseRef", () => {
     expect(parseRef("#/operations/foo")).toBe("foo");
   });
 
-  it("returns bare ID as-is", () => {
-    expect(parseRef("sendMessage")).toBe("sendMessage");
+  // ASYNC-D-03: the JSON Pointer `#/operations/<operation-key>` is the
+  // ONLY conformant spelling — the former bare-key lenience is gone.
+  it("refuses a bare operation key, citing the rule", () => {
+    expect(() => parseRef("sendMessage")).toThrow("ASYNC-D-03");
+  });
+
+  // ASYNC-D-03: an unescaped `/` after the prefix addresses a deeper path,
+  // never an operations-map entry.
+  it("refuses an unescaped / in the operation-key position", () => {
+    expect(() => parseRef("#/operations/tasks/create")).toThrow("ASYNC-D-03");
   });
 
   it("throws for empty ref", () => {
-    expect(() => parseRef("")).toThrow("empty ref");
+    expect(() => parseRef("")).toThrow("ref is required");
   });
 
   it("throws for whitespace-only ref", () => {
-    expect(() => parseRef("   ")).toThrow("empty ref");
+    expect(() => parseRef("   ")).toThrow("ref is required");
   });
 
   it("throws for empty operation ID after prefix", () => {
-    expect(() => parseRef("#/operations/")).toThrow("empty operation ID");
+    expect(() => parseRef("#/operations/")).toThrow("empty operation key");
   });
 
   // ASYNC-D-03: operation keys containing `/` or `~` carry RFC 6901
@@ -109,20 +117,28 @@ describe("parseAsyncAPIDocument", () => {
     await expect(parseAsyncAPIDocument()).rejects.toThrow("source must have location or content");
   });
 
-  // Per spec/formats/asyncapi.md: "AsyncAPI 2.x documents are out of the
-  // supported range and refused loudly at load." Mirrors the Go SDK's
-  // loadDocument, which requires a "3." prefix.
+  // ASYNC-P-01: the `asyncapi` field discriminates the accepted line —
+  // AsyncAPI 2.x documents are out of the supported range and refused
+  // loudly at load, never silently misparsed.
   it("refuses a 2.x document loudly instead of silently misparsing it", async () => {
     const doc2x = JSON.stringify({
       asyncapi: "2.6.0",
       info: { title: "Legacy", version: "1.0.0" },
       channels: { messages: { subscribe: { message: { payload: { type: "object" } } } } },
     });
-    await expect(parseAsyncAPIDocument(undefined, doc2x)).rejects.toThrow(/3\.x/);
+    await expect(parseAsyncAPIDocument(undefined, doc2x)).rejects.toThrow("ASYNC-P-01");
   });
 
-  it("accepts any 3.x patch/minor version", async () => {
-    const doc = await parseAsyncAPIDocument(undefined, validDoc.replace("3.0.0", "3.1.2"));
-    expect(doc.asyncapi).toBe("3.1.2");
+  it("accepts any 3.0.x patch version", async () => {
+    const doc = await parseAsyncAPIDocument(undefined, validDoc.replace("3.0.0", "3.0.17"));
+    expect(doc.asyncapi).toBe("3.0.17");
+  });
+
+  // ASYNC-P-01: a later 3.x line is adopted by compatible revision of the
+  // binding specification, never sight-unseen.
+  it("refuses a 3.1.x document: 3.0.x only, never sight-unseen 3.x", async () => {
+    await expect(
+      parseAsyncAPIDocument(undefined, validDoc.replace("3.0.0", "3.1.2")),
+    ).rejects.toThrow("ASYNC-P-01");
   });
 });

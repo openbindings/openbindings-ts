@@ -91,6 +91,12 @@ export async function loadOpenAPIDocument(
   options?: { signal?: AbortSignal; allowExternalRefs?: boolean },
   fetchFn?: typeof globalThis.fetch,
 ): Promise<OpenAPIDocument> {
+  // `location`, when present, must be an absolute URI (OAPI-D-02) —
+  // whether it is the fetch target or only the embedded content's base.
+  // A bare filesystem path is refused loudly before any fetch (the Go
+  // loader's posture; the former "local tooling" lenience is gone).
+  if (location) validateDocumentAddress(location);
+
   let raw: unknown;
   if (content != null) {
     if (typeof content === "string") raw = parseJSONOrYAML(content);
@@ -139,6 +145,23 @@ export async function loadOpenAPIDocument(
     signal: options?.signal,
     fetch: refFetch,
   });
+}
+
+/**
+ * Checks OAPI-D-02's location grammar offline, without dereferencing:
+ * `location`, when present, is an absolute URI addressing the OpenAPI
+ * document itself. A bare filesystem path is a relative reference in form
+ * (core OBI-D-05) and is refused — a local artifact is addressed as
+ * file:// or embedded as the source's content.
+ */
+export function validateDocumentAddress(location: string): void {
+  try {
+    new URL(location);
+  } catch {
+    throw new Error(
+      `openapi location ${JSON.stringify(location)} is not an absolute URI addressing the document (OAPI-D-02): a local artifact is addressed as file:// or embedded as the source's content`,
+    );
+  }
 }
 
 /**

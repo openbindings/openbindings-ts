@@ -65,6 +65,26 @@ function isHTTPURL(s: string): boolean {
   return s.startsWith("http://") || s.startsWith("https://");
 }
 
+/**
+ * Checks MCP-D-02's location requirement offline, without connecting:
+ * `location` is REQUIRED — this family is service-addressed, so a
+ * content-only source addresses nothing — and must be an absolute
+ * http/https URI addressing a Streamable HTTP endpoint. Throws a plain
+ * Error the caller classifies as ERR_SOURCE_CONFIG_ERROR.
+ */
+export function validateEndpoint(location: string | undefined): asserts location is string {
+  if (!location) {
+    throw new Error(
+      "MCP source requires a location (endpoint URL): a content-only source addresses nothing (MCP-D-02)",
+    );
+  }
+  if (!isHTTPURL(location)) {
+    throw new Error(
+      `MCP source location must be an absolute HTTP or HTTPS URL, got ${JSON.stringify(location)} (MCP-D-02)`,
+    );
+  }
+}
+
 /** Names a JSON value's kind for refusal messages (the Go side prints %T). */
 function typeName(v: unknown): string {
   if (v === null) return "null";
@@ -120,19 +140,13 @@ export async function runMCPBinding(
     return;
   }
 
-  const location = args.source.location;
-  if (!location) {
+  let location: string;
+  try {
+    validateEndpoint(args.source.location);
+    location = args.source.location;
+  } catch (e: unknown) {
     inv.fireError(
-      new InvocationError(ERR_SOURCE_CONFIG_ERROR, "MCP source requires a location (endpoint URL)"),
-    );
-    return;
-  }
-  if (!isHTTPURL(location)) {
-    inv.fireError(
-      new InvocationError(
-        ERR_SOURCE_CONFIG_ERROR,
-        `MCP source location must be an HTTP or HTTPS URL, got ${JSON.stringify(location)}`,
-      ),
+      new InvocationError(ERR_SOURCE_CONFIG_ERROR, e instanceof Error ? e.message : String(e)),
     );
     return;
   }
