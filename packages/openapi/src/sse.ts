@@ -9,51 +9,59 @@ import {
   type OutputDecoder,
   type RawResult,
 } from "@openbindings/sdk";
+import { normalizeMediaType } from "./media.js";
 import { errorMessage } from "./util.js";
 
 /**
  * Bounds individual SSE line length to prevent runaway memory use from a
- * misbehaving server. The W3C SSE spec does not impose a line limit, but a
- * single 16 MB line is generous in practice (Go parity: sseMaxLineBytes).
+ * misbehaving server. The WHATWG SSE spec does not impose a line limit, but
+ * a single 16 MB line is generous in practice (Go parity: sseMaxLineBytes).
  */
 const SSE_MAX_LINE_BYTES = 16 * 1024 * 1024;
 
 /**
  * Reports whether the given Content-Type header value indicates a
- * Server-Sent Events stream. Per the W3C SSE specification, the MIME type
- * is `text/event-stream`. Charset and other parameters may follow.
+ * Server-Sent Events stream (`text/event-stream`). Charset and other
+ * parameters may follow.
  */
 export function isSSEContentType(contentType: string | null): boolean {
   if (!contentType) return false;
-  let mt = contentType.trim().toLowerCase();
-  const i = mt.indexOf(";");
-  if (i >= 0) mt = mt.slice(0, i).trim();
-  return mt === "text/event-stream";
+  return normalizeMediaType(contentType) === "text/event-stream";
 }
 
 /**
- * Reads a `text/event-stream` HTTP response body line by line per the W3C
- * Server-Sent Events specification, emitting each parsed event as one output
- * on the invocation handle. It takes ownership of the terminal transition:
- * `closeOutput` when the body is exhausted cleanly, `fireError`
- * (ERR_STREAM_ERROR) on a read failure, and a clean return (the handle is
- * already terminal) when the caller cancels.
+ * Reads a `text/event-stream` HTTP response body per the WHATWG
+ * server-sent events processing model (openbindings.openapi@1 §8,
+ * OAPI-P-06), emitting one output per received event on the invocation
+ * handle. It takes ownership of the terminal transition: `closeOutput`
+ * when the body is exhausted cleanly, `fireError` (ERR_STREAM_ERROR) on a
+ * read failure (abnormal termination is a failure outcome; output values
+ * already emitted stand), and a clean return (the handle is already
+ * terminal) when the caller cancels.
  *
- * SSE event field handling (Go parity — sse.go):
+ * Event extraction, per the WHATWG model:
  *
- *   - `data:` lines accumulate; multiple data lines for one event are joined
- *     with a literal newline (per the spec)
- *   - `event:`, `id:`, `retry:` fields are FRAMING: they ride the per-unit
- *     meta (x-sse-event / x-sse-id / x-sse-retry), never the output value
- *   - Comment lines (starting with `:`) are ignored
- *   - Blank lines dispatch the accumulated event
+ *   - `data:` lines accumulate; an event's data lines joined with U+000A
+ *     form the event's text
+ *   - comment-only and empty-`data` events emit no value (an event whose
+ *     joined data text is empty is discarded, `event:`/`id:`-only events
+ *     included)
+ *   - `event`, `id`, and `retry` are FRAMING: they never enter the output
+ *     value. This implementation surfaces them out of band on the per-unit
+ *     meta (x-sse-event / x-sse-id / x-sse-retry); the last event ID
+ *     persists across events until changed, WHATWG lastEventId semantics
+ *   - CRLF, lone CR, and lone LF all terminate lines; one leading U+FEFF
+ *     BOM is ignored
+ *   - an incomplete final event (end of stream before its dispatching
+ *     blank line) is discarded, never flushed
  *
  * Decode runs per delivery unit (event) through the consultation seam. The
- * builtin lane follows the response's Content-Type header —
- * text/event-stream, hence text — never payload sniffing; JSON event
- * payloads are an OutputDecoder case. Status carries the initial response's
- * status on every unit (it is real and invocation-scoped, never fabricated);
- * classification ran once, at dispatch.
+ * builtin lane is the per-event text default (OAPI-P-07): the event's
+ * U+000A-joined data text itself — SSE events carry no per-event framing
+ * to decide otherwise, so JSON-emitting endpoints decode via consumer
+ * configuration at the decode point. Status carries the initial response's
+ * status on every unit (it is real and invocation-scoped, never
+ * fabricated); classification ran once, at dispatch.
  */
 export async function streamSSE(
   resp: Response,
@@ -64,28 +72,36 @@ export async function streamSSE(
   builtinDecode: OutputDecoder,
 ): Promise<void> {
   let eventName = "";
-  let eventID = "";
+  let lastEventID = "";
   let dataLines: string[] = [];
   let retryMs = 0;
+  let firstLine = true;
 
   const status = resp.status;
 
   // dispatch decodes and emits the accumulated event. It returns false when
   // the invocation terminated (decode error fired, or the emit rejected
-  // because the handle went terminal while parked), signalling the caller to
-  // stop reading the body.
+  // because the handle went terminal while parked), signalling the caller
+  // to stop reading the body.
   const dispatch = async (): Promise<boolean> => {
-    if (dataLines.length === 0 && eventName === "" && eventID === "") {
-      return true;
-    }
     const rawData = dataLines.join("\n");
+    const name = eventName;
+    eventName = "";
+    dataLines = [];
+    // Comment-only and empty-data events emit no value: an event whose
+    // joined data text is empty is discarded (WHATWG step 2 plus the
+    // trailing-newline strip; the last event ID, already set, persists).
+    if (rawData === "") return true;
 
     // Per-unit meta: invocation-scoped headers merged with this event's
     // framing fields.
     const meta: Metadata = { ...invocationMeta };
-    if (eventName !== "") meta["x-sse-event"] = [eventName];
-    if (eventID !== "") meta["x-sse-id"] = [eventID];
-    if (retryMs !== 0) meta["x-sse-retry"] = [String(retryMs)];
+    if (name !== "") meta["x-sse-event"] = [name];
+    if (lastEventID !== "") meta["x-sse-id"] = [lastEventID];
+    if (retryMs !== 0) {
+      meta["x-sse-retry"] = [String(retryMs)];
+      retryMs = 0;
+    }
 
     const raw: RawResult = { status, body: rawData, meta };
     let data: unknown;
@@ -95,17 +111,10 @@ export async function streamSSE(
       // A decode error mid-stream is terminal; already-emitted outputs
       // stand (drain-before-terminal).
       inv.fireError(
-        e instanceof InvocationError
-          ? e
-          : new InvocationError(ERR_STREAM_ERROR, errorMessage(e)),
+        e instanceof InvocationError ? e : new InvocationError(ERR_STREAM_ERROR, errorMessage(e)),
       );
       return false;
     }
-
-    eventName = "";
-    eventID = "";
-    dataLines = [];
-    retryMs = 0;
 
     try {
       await inv.emitOutput(data);
@@ -115,10 +124,13 @@ export async function streamSSE(
     }
   };
 
-  // processLine handles one complete (newline-terminated) SSE line.
+  // processLine handles one complete SSE line (terminator already removed).
   const processLine = async (line: string): Promise<boolean> => {
-    // Strip optional trailing CR (servers may send CRLF).
-    if (line.endsWith("\r")) line = line.slice(0, -1);
+    if (firstLine) {
+      // One leading U+FEFF BOM is ignored per the WHATWG stream grammar.
+      if (line.startsWith("\uFEFF")) line = line.slice(1);
+      firstLine = false;
+    }
 
     if (line === "") {
       return dispatch();
@@ -146,16 +158,17 @@ export async function streamSSE(
         eventName = value;
         break;
       case "id":
-        eventID = value;
+        // A value containing U+0000 NULL is ignored; otherwise it sets the
+        // last event ID (an empty value resets it), per WHATWG.
+        if (!value.includes("\0")) lastEventID = value;
         break;
       case "data":
         dataLines.push(value);
         break;
-      case "retry": {
-        const ms = Number.parseInt(value, 10);
-        if (Number.isInteger(ms) && ms >= 0) retryMs = ms;
+      case "retry":
+        // ASCII digits only, per WHATWG; anything else is ignored.
+        if (/^[0-9]+$/.test(value)) retryMs = Number.parseInt(value, 10);
         break;
-      }
       // Unknown fields are ignored per spec.
     }
     return true;
@@ -170,7 +183,29 @@ export async function streamSSE(
 
   const reader = body.getReader();
   const decoder = new TextDecoder();
+  // buffer holds text with no line terminator yet; a trailing CR is held
+  // back one round because the LF of a CRLF pair may not have arrived yet.
   let buffer = "";
+
+  // drainLines extracts every complete line from the buffer per the WHATWG
+  // event-stream line grammar (CRLF, lone CR, or lone LF terminate a line).
+  const drainLines = async (atEOF: boolean): Promise<boolean> => {
+    let start = 0;
+    for (let i = 0; i < buffer.length; i++) {
+      const c = buffer[i];
+      if (c === "\n") {
+        if (!(await processLine(buffer.slice(start, i)))) return false;
+        start = i + 1;
+      } else if (c === "\r") {
+        if (i + 1 === buffer.length && !atEOF) break; // CR at the edge: wait for a possible LF
+        if (!(await processLine(buffer.slice(start, i)))) return false;
+        if (i + 1 < buffer.length && buffer[i + 1] === "\n") i++;
+        start = i + 1;
+      }
+    }
+    buffer = buffer.slice(start);
+    return true;
+  };
 
   try {
     for (;;) {
@@ -184,47 +219,39 @@ export async function streamSSE(
         chunk = await reader.read();
       } catch (e: unknown) {
         if (inv.signal.aborted) return;
-        // Flush the pending accumulated event before surfacing the stream
-        // error (Go parity: the scan loop exits, the pending dispatch
-        // flushes, THEN scanner.Err() fires ERR_STREAM_ERROR).
-        if (!(await dispatch())) return;
+        // Abnormal termination is a failure outcome; output values already
+        // emitted stand, and the incomplete pending event is DISCARDED —
+        // never flushed (WHATWG; Go parity).
         inv.fireError(new InvocationError(ERR_STREAM_ERROR, errorMessage(e)));
         return;
       }
       if (chunk.done) break;
 
       buffer += decoder.decode(chunk.value, { stream: true });
-
-      let nl: number;
-      while ((nl = buffer.indexOf("\n")) >= 0) {
-        const line = buffer.slice(0, nl);
-        buffer = buffer.slice(nl + 1);
-        if (!(await processLine(line))) {
-          await reader.cancel().catch(() => {});
-          return;
-        }
+      if (!(await drainLines(false))) {
+        await reader.cancel().catch(() => {});
+        return;
       }
 
       if (buffer.length > SSE_MAX_LINE_BYTES) {
         await reader.cancel().catch(() => {});
         inv.fireError(
-          new InvocationError(
-            ERR_STREAM_ERROR,
-            `SSE line exceeds ${SSE_MAX_LINE_BYTES} byte limit`,
-          ),
+          new InvocationError(ERR_STREAM_ERROR, `SSE line exceeds ${SSE_MAX_LINE_BYTES} byte limit`),
         );
         return;
       }
     }
 
     buffer += decoder.decode();
-    // Process any final unterminated line, then flush the pending event when
-    // the body ends without a trailing blank line.
+    // A final line with no terminator still parses as a line; the event it
+    // belongs to has no dispatching blank line, so it is discarded below.
+    if (!(await drainLines(true))) return;
     if (buffer !== "") {
       if (!(await processLine(buffer))) return;
     }
-    if (!(await dispatch())) return;
 
+    // End of stream: an incomplete final event (no dispatching blank line)
+    // is discarded per the WHATWG processing model — never flushed.
     inv.closeOutput();
   } finally {
     reader.releaseLock();

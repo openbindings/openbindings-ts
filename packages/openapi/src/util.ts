@@ -20,22 +20,38 @@ export function uniqueKey(key: string, used: Set<string>): string {
   }
 }
 
-/** Parses a JSON Pointer ref (e.g. #/paths/~1users/get) into its path and HTTP method components. */
+/**
+ * Parses a binding ref per OAPI-D-03: a JSON Pointer of the exact form
+ * `#/paths/<escaped-path>/<method>` addressing an operation object. The
+ * path segment carries RFC 6901 escaping ("/" → "~1", "~" → "~0"), and the
+ * method is lowercase exactly as the artifact spells it — an uppercase
+ * method is non-conformant and refused, never case-folded.
+ */
 export function parseRef(ref: string): { path: string; method: string } {
-  ref = ref.replace(/^#\//, "");
-  const parts = ref.split("/");
-  if (parts.length < 3 || parts[0] !== "paths") {
-    throw new Error(`ref "${ref}" must be in format #/paths/<escaped-path>/<method>`);
+  const prefix = "#/paths/";
+  if (!ref.startsWith(prefix)) {
+    throw new Error(
+      `ref "${ref}" must be a JSON Pointer of the form #/paths/<escaped-path>/<method> (OAPI-D-03)`,
+    );
   }
-
-  const method = parts[parts.length - 1].toLowerCase();
-  const escapedPath = parts.slice(1, -1).join("/");
-  const path = escapedPath.replaceAll("~1", "/").replaceAll("~0", "~");
-
+  const parts = ref.slice(prefix.length).split("/");
+  if (parts.length !== 2) {
+    throw new Error(
+      `ref "${ref}" must be a JSON Pointer of the form #/paths/<escaped-path>/<method>: the path segment carries RFC 6901 escaping ("/" → "~1") (OAPI-D-03)`,
+    );
+  }
+  const [escapedPath, method] = parts;
   if (!VALID_METHODS.has(method)) {
+    if (VALID_METHODS.has(method.toLowerCase())) {
+      throw new Error(
+        `ref "${ref}": method "${method}" must be lowercase exactly as the artifact spells it (OAPI-D-03)`,
+      );
+    }
     throw new Error(`invalid HTTP method "${method}" in ref`);
   }
 
+  // RFC 6901 unescaping, in order: ~1 first, then ~0.
+  const path = escapedPath.replaceAll("~1", "/").replaceAll("~0", "~");
   return { path, method };
 }
 
@@ -46,18 +62,28 @@ export function buildJsonPointerRef(path: string, method: string): string {
 }
 
 /**
- * Loads and parses an OpenAPI document from a URL location or inline content
- * (JSON or YAML), then fully dereferences it in place: every `$ref` —
- * parameter, request/response schema, path item, or anything else — is
- * resolved before the document reaches invocation or synthesis logic (Go
- * parity: the kin-openapi loader resolves every `$ref` once, at load time,
- * so downstream code — `mergeParameters`, `classifyInput` — always sees
- * direct `name`/`in` values, never a `{"$ref": ...}` indirection).
+ * Loads and discriminates an OpenAPI source per openbindings.openapi@1
+ * §3–§6: `content`, when present, is the artifact (content primacy), with a
+ * co-present `location` serving as the embedded artifact's BASE URI —
+ * relative $refs resolve against it exactly as they would had the document
+ * been retrieved from that address (OAPI-D-01/D-02, §6). Embedded content
+ * with no location has no base and must be self-contained: a relative
+ * external $ref then fails with a readable error (absolute http(s) $refs
+ * still resolve — they need no base). The artifact's own `openapi` field
+ * discriminates the accepted lines (OAPI-P-01).
  *
- * External refs are followed via `fetchFn` (or the global `fetch`) unless
+ * String content parses as YAML 1.2 (JSON being a valid subset); duplicate
+ * mapping keys are refused loudly by the YAML layer itself, satisfying the
+ * §3 duplicate-key pin.
+ *
+ * The document is fully dereferenced before it reaches invocation or
+ * synthesis logic (Go parity: the kin-openapi loader resolves every `$ref`
+ * once, at load time — path items included — so downstream code always
+ * sees direct values, never a `{"$ref": ...}` indirection). External refs
+ * are followed via `fetchFn` (or the global `fetch`) unless
  * `options.allowExternalRefs` is explicitly `false`, which keeps the parse
- * side-effect-free for content-only loads (Go parity: `prepareBinding`'s
- * content path disables external I/O — "never fetches").
+ * side-effect-free (Go parity: `prepareBinding`'s content path disables
+ * external I/O — "never fetches").
  */
 export async function loadOpenAPIDocument(
   location?: string,
@@ -96,13 +122,45 @@ export async function loadOpenAPIDocument(
     }
   }
 
+  checkAcceptedOpenAPIVersion(raw);
+
   const allowExternalRefs = options?.allowExternalRefs ?? true;
+  let refFetch: typeof globalThis.fetch;
+  if (!allowExternalRefs) {
+    refFetch = blockExternalRefFetch;
+  } else if (!location && content != null) {
+    refFetch = selfContainedRefFetch(fetchFn ?? fetch);
+  } else {
+    refFetch = fetchFn ?? fetch;
+  }
   return dereference<OpenAPIDocument>(raw as Record<string, unknown>, {
     baseUrl: location,
     parse: parseJSONOrYAML,
     signal: options?.signal,
-    fetch: allowExternalRefs ? (fetchFn ?? fetch) : blockExternalRefFetch,
+    fetch: refFetch,
   });
+}
+
+/**
+ * Discriminates the accepted lines per OAPI-P-01: the artifact's own
+ * `openapi` field must declare 3.0.* or 3.1.*; any other value — a Swagger
+ * 2.0 `swagger` field included — is refused loudly at load.
+ */
+function checkAcceptedOpenAPIVersion(raw: unknown): void {
+  const doc = raw as Record<string, unknown> | null;
+  const v = doc && typeof doc === "object" ? doc["openapi"] : undefined;
+  if (typeof v !== "string" || v === "") {
+    throw new Error(
+      "document declares no `openapi` field: openbindings.openapi@1 accepts OpenAPI 3.0.x and 3.1.x documents only (OAPI-P-01; Swagger 2.0 is not accepted)",
+    );
+  }
+  const parts = v.split(".");
+  const mm = parts.length >= 2 ? `${parts[0]}.${parts[1]}` : v;
+  if (mm !== "3.0" && mm !== "3.1") {
+    throw new Error(
+      `unsupported OpenAPI version "${v}": openbindings.openapi@1 accepts the 3.0.x and 3.1.x lines only (OAPI-P-01)`,
+    );
+  }
 }
 
 /**
@@ -113,6 +171,24 @@ export async function loadOpenAPIDocument(
 const blockExternalRefFetch: typeof globalThis.fetch = (() => {
   throw new Error("external $ref resolution is disabled for this load");
 }) as unknown as typeof globalThis.fetch;
+
+/**
+ * Allows absolute http(s) reference targets (they resolve without a base)
+ * and refuses everything else: with no co-present location the embedded
+ * artifact has no base URI, so a relative reference is unresolvable by
+ * definition (§6 — bundle before embedding).
+ */
+function selfContainedRefFetch(real: typeof globalThis.fetch): typeof globalThis.fetch {
+  return ((input: RequestInfo | URL, init?: RequestInit) => {
+    const url = input instanceof Request ? input.url : String(input);
+    if (url.startsWith("http://") || url.startsWith("https://")) {
+      return real(input, init);
+    }
+    throw new Error(
+      `reference "${url}" cannot resolve: embedded content with no co-present location has no base URI and must be self-contained (bundle the document before embedding, or set the source's location)`,
+    );
+  }) as typeof globalThis.fetch;
+}
 
 /** Merges path-level and operation-level parameters, with operation parameters taking precedence. */
 export function mergeParameters(
@@ -137,10 +213,12 @@ export function errorMessage(e: unknown): string {
   return String(e);
 }
 
+/**
+ * Parses string content as YAML, of which JSON is a valid subset, so one
+ * grammar covers both spellings deterministically (§3's string-grammar
+ * pin). Duplicate mapping keys are refused loudly by the YAML layer itself
+ * — in the JSON spelling too, which JSON.parse would silently last-wins.
+ */
 function parseJSONOrYAML(text: string): unknown {
-  const trimmed = text.trim();
-  if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
-    return JSON.parse(trimmed);
-  }
-  return yaml.load(trimmed);
+  return yaml.load(text.trim());
 }

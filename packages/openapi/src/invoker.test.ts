@@ -9,6 +9,7 @@ import {
   ERR_INVALID_REF,
   ERR_MISSING_INPUT,
   ERR_PERMISSION_DENIED,
+  ERR_PROTOCOL,
   ERR_REF_NOT_FOUND,
   ERR_RESPONSE_ERROR,
   ERR_SOURCE_CONFIG_ERROR,
@@ -154,7 +155,8 @@ describe("invokeBinding — request construction", () => {
     expect(requests).toHaveLength(1);
     expect(requests[0].url).toBe("https://api.example.com/v1/ping");
     expect(requests[0].method).toBe("GET");
-    expect(requests[0].headers.get("Accept")).toBe("application/json, text/event-stream");
+    // §9.2: absent any declared success media, Accept is application/json.
+    expect(requests[0].headers.get("Accept")).toBe("application/json");
     await expect(call.closed).resolves.toBeUndefined();
   });
 
@@ -320,10 +322,10 @@ describe("invokeBinding — request construction", () => {
     expect(requests[0].body == null).toBe(true);
   });
 
-  // Tier 1: Go routes declared `in: cookie` params to a Cookie header; the
-  // TS invoker had no cookie case at all. Mirrors Go's
-  // TestClassifyInput_CookieParamsGoToCookieHeader.
-  it("declared cookie parameters join a sorted Cookie header, never the body", async () => {
+  // OAPI-P-10: declared cookie parameters join ONE Cookie header in
+  // declaration order (the previous sorted order was non-conformant).
+  // Mirrors Go's TestInvoke_CookieChannelAssembly's parameter half.
+  it("declared cookie parameters join a declaration-order Cookie header, never the body", async () => {
     const spec = {
       openapi: "3.1.0",
       info: { title: "t", version: "1" },
@@ -350,7 +352,7 @@ describe("invokeBinding — request construction", () => {
     await call.write({ session_id: "s-1", csrf: "c-2" });
     await single(call.outputs);
 
-    expect(requests[0].headers.get("Cookie")).toBe("csrf=c-2; session_id=s-1");
+    expect(requests[0].headers.get("Cookie")).toBe("session_id=s-1; csrf=c-2");
     expect(requests[0].body == null).toBe(true);
   });
 
@@ -644,10 +646,33 @@ function sseResponse(
   });
 }
 
+// §8 (OAPI-P-06): streaming capability is STATIC — an operation is
+// streaming-capable iff a declared success response declares
+// text/event-stream. These tests bind a spec that declares both shapes.
+const SSE_SPEC = {
+  openapi: "3.1.0",
+  info: { title: "Stream API", version: "1.0.0" },
+  servers: [{ url: "https://api.example.com/v1" }],
+  paths: {
+    "/events": {
+      get: {
+        responses: {
+          "200": {
+            description: "OK",
+            content: { "application/json": {}, "text/event-stream": {} },
+          },
+        },
+      },
+    },
+  },
+};
+const SSE_SOURCE = { bindingSpec: "openbindings.openapi@1", content: SSE_SPEC };
+const REF_EVENTS = "#/paths/~1events/get";
+
 describe("invokeBinding — SSE responses", () => {
-  it("requests text/event-stream alongside JSON via Accept", async () => {
+  it("advertises the declared success media — text/event-stream included — via Accept", async () => {
     const { fetch, requests } = mockFetch(() => jsonResponse({ pong: true }));
-    const call = new OpenAPIInvoker().invokeBinding({ source: SOURCE, ref: REF_PING, fetch });
+    const call = new OpenAPIInvoker().invokeBinding({ source: SSE_SOURCE, ref: REF_EVENTS, fetch });
     await single(call.outputs);
     expect(requests[0].headers.get("Accept")).toBe("application/json, text/event-stream");
   });
@@ -656,21 +681,21 @@ describe("invokeBinding — SSE responses", () => {
     const { fetch } = mockFetch(() =>
       sseResponse(['data: {"id":"1","msg":"first"}\n\n', 'data: {"id":"2","msg":"second"}\n\n']),
     );
-    const call = new OpenAPIInvoker().invokeBinding({ source: SOURCE, ref: REF_PING, fetch });
+    const call = new OpenAPIInvoker().invokeBinding({ source: SSE_SOURCE, ref: REF_EVENTS, fetch });
 
     const events: unknown[] = [];
     for await (const e of call.outputs) events.push(e);
     await call.closed;
 
-    // Default decode follows the Content-Type header (text/event-stream ->
-    // text lane), so each event's data arrives as a raw string — a JSON
-    // event payload is an OutputDecoder hook case, not a builtin sniff.
+    // The per-event decode default is the event's data text itself
+    // (OAPI-P-07): a JSON event payload is an OutputDecoder hook case,
+    // never a builtin sniff.
     expect(events).toEqual(['{"id":"1","msg":"first"}', '{"id":"2","msg":"second"}']);
   });
 
   it("joins multiple data: lines for one event with a literal newline", async () => {
     const { fetch } = mockFetch(() => sseResponse(["data: line one\ndata: line two\ndata: line three\n\n"]));
-    const call = new OpenAPIInvoker().invokeBinding({ source: SOURCE, ref: REF_PING, fetch });
+    const call = new OpenAPIInvoker().invokeBinding({ source: SSE_SOURCE, ref: REF_EVENTS, fetch });
 
     await expect(single(call.outputs)).resolves.toBe("line one\nline two\nline three");
   });
@@ -693,7 +718,7 @@ describe("invokeBinding — SSE responses", () => {
         'event: progress\nid: 42\ndata: {"msg":"third"}\n\n',
       ]),
     );
-    const call = new OpenAPIInvoker().invokeBinding({ source: SOURCE, ref: REF_PING, fetch, hooks });
+    const call = new OpenAPIInvoker().invokeBinding({ source: SSE_SOURCE, ref: REF_EVENTS, fetch, hooks });
 
     const events: unknown[] = [];
     for await (const e of call.outputs) events.push(e);
@@ -708,14 +733,14 @@ describe("invokeBinding — SSE responses", () => {
     const { fetch } = mockFetch(() =>
       sseResponse([": this is a comment, should be ignored\n\n", 'data: {"id":"survivor"}\n\n']),
     );
-    const call = new OpenAPIInvoker().invokeBinding({ source: SOURCE, ref: REF_PING, fetch });
+    const call = new OpenAPIInvoker().invokeBinding({ source: SSE_SOURCE, ref: REF_EVENTS, fetch });
 
     await expect(single(call.outputs)).resolves.toBe('{"id":"survivor"}');
   });
 
   it("a non-2xx text/event-stream response is a normal HTTP failure, not a stream", async () => {
     const { fetch } = mockFetch(() => sseResponse(["data: nope\n\n"], { status: 500 }));
-    const call = new OpenAPIInvoker().invokeBinding({ source: SOURCE, ref: REF_PING, fetch });
+    const call = new OpenAPIInvoker().invokeBinding({ source: SSE_SOURCE, ref: REF_EVENTS, fetch });
 
     await expect(call.closed).rejects.toMatchObject({
       code: ERR_EXECUTION_FAILED,
@@ -723,13 +748,23 @@ describe("invokeBinding — SSE responses", () => {
     });
   });
 
-  it("a 2xx JSON (non-SSE) response stays a plain unary invocation", async () => {
+  it("a 2xx JSON (non-SSE) response on a streaming-capable operation stays unary (framing selects)", async () => {
     const { fetch } = mockFetch(() => jsonResponse({ pong: true }));
-    const call = new OpenAPIInvoker().invokeBinding({ source: SOURCE, ref: REF_PING, fetch });
+    const call = new OpenAPIInvoker().invokeBinding({ source: SSE_SOURCE, ref: REF_EVENTS, fetch });
 
     const events: unknown[] = [];
     for await (const e of call.outputs) events.push(e);
     expect(events).toEqual([{ pong: true }]);
+  });
+
+  it("an UNDECLARED text/event-stream response is ERR_PROTOCOL, never a silent reclassification", async () => {
+    // REF_PING declares no text/event-stream success media: not
+    // streaming-capable, so an SSE response contradicts the declaration
+    // (OAPI-P-06).
+    const { fetch } = mockFetch(() => sseResponse(["data: hi\n\n"]));
+    const call = new OpenAPIInvoker().invokeBinding({ source: SOURCE, ref: REF_PING, fetch });
+
+    await expect(call.closed).rejects.toMatchObject({ code: ERR_PROTOCOL });
   });
 });
 

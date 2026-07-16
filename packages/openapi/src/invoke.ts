@@ -2,8 +2,6 @@ import {
   InvocationError,
   contextRequiredError,
   contextSatisfies,
-  isHttpUrl,
-  isJSONContentType,
   classifyThroughHooks,
   decodeThroughHooks,
   contextBearerToken,
@@ -13,7 +11,6 @@ import {
   contextString,
   contextHeaders,
   contextCookies,
-  contextMetadata,
   httpErrorCode,
   ERR_INVALID_REF,
   ERR_SOURCE_CONFIG_ERROR,
@@ -21,13 +18,14 @@ import {
   ERR_CONNECT_FAILED,
   ERR_RESPONSE_ERROR,
   ERR_MISSING_INPUT,
+  ERR_VALIDATION_FAILED,
+  ERR_PROTOCOL,
   USE_DEFAULT,
   type BindingHandle,
   type InvokeHooks,
   type InvokeSite,
   type OutputDecoder,
   type RawResult,
-  type ResultClassifier,
   type BindingInvocationArgs,
   type ContextAlternative,
   type ContextRequirement,
@@ -36,46 +34,56 @@ import {
 } from "@openbindings/sdk";
 import type {
   OpenAPIDocument,
-  OpenAPIMediaType,
   OpenAPIOperation,
   OpenAPIParameter,
+  OpenAPIPathItem,
   OpenAPISecurityScheme,
   OpenAPIOAuthFlow,
   OpenAPIOAuthFlows,
 } from "./types.js";
-import { errorMessage, mergeParameters, parseRef } from "./util.js";
+import { errorMessage, parseRef } from "./util.js";
+import {
+  MissingPathParamError,
+  effectiveParameters,
+  queryEscape,
+  routeInput,
+  unflattenableParam,
+} from "./params.js";
+import {
+  acceptHeader,
+  buildRequestBody,
+  isJSONMediaType,
+  isStreamingCapable,
+  normalizeMediaType,
+  planRequestBody,
+  type BodyPlan,
+} from "./media.js";
+import { resolveServer } from "./servers.js";
 import { isSSEContentType, streamSSE } from "./sse.js";
 
 const MAX_RESPONSE_BYTES = 10 * 1024 * 1024;
 
 /**
- * Drives one OpenAPI binding invocation over the binding-facing handle:
- * resolves the ref against the document, derives auth requirements, reads
- * the input message (if any) from the handle, performs the HTTP request,
- * and emits the parsed response body.
- *
- * Every pre-dispatch failure (bad ref, missing server URL, unresolvable
- * operation, missing context) terminates the handle BEFORE any network
- * side effect, so a no-input-consumed retry is safe.
+ * Drives one OpenAPI binding invocation over the binding-facing handle: one
+ * HTTP exchange per invocation (openbindings.openapi@1 §8). All
+ * pre-dispatch refusals — bad ref, unresolvable operation, unflattenable
+ * declarations, out-of-family request media, unresolvable server, missing
+ * context, missing path parameters, unmatched input fields, credential
+ * collisions — terminate the handle BEFORE any network side effect, and
+ * before consuming input where knowable.
  */
 export async function runBinding(
   args: BindingInvocationArgs,
   inv: BindingHandle<unknown, unknown>,
   doc: OpenAPIDocument,
 ): Promise<void> {
+  // ----- Pre-side-effect resolution. -----
+
   let path: string, method: string;
   try {
     ({ path, method } = parseRef(args.ref));
   } catch (e: unknown) {
     inv.fireError(new InvocationError(ERR_INVALID_REF, errorMessage(e)));
-    return;
-  }
-
-  let baseURL: string;
-  try {
-    baseURL = resolveRequestBaseURL(doc, args.context, args.source.location);
-  } catch (e: unknown) {
-    inv.fireError(new InvocationError(ERR_SOURCE_CONFIG_ERROR, errorMessage(e)));
     return;
   }
 
@@ -85,6 +93,9 @@ export async function runBinding(
     );
     return;
   }
+  // Pointer evaluation follows OAS reference resolution (OAPI-D-03): the
+  // loader dereferences path-item $refs (including 3.1 components.pathItems
+  // targets) at load, before this lookup.
   const pathItem = doc.paths[path];
   if (!pathItem) {
     inv.fireError(new InvocationError(ERR_REF_NOT_FOUND, `path "${path}" not in OpenAPI doc`));
@@ -98,31 +109,58 @@ export async function runBinding(
     return;
   }
 
-  // Context negotiation: challenge before any input is depended on and
-  // before any request is dispatched.
+  // The flattened model's structural refusals (§9.1) are declaration-only:
+  // they precede input consumption.
+  const params = effectiveParameters(pathItem, op);
+  const unflattenable = unflattenableParam(params);
+  if (unflattenable !== "") {
+    inv.fireError(
+      new InvocationError(
+        ERR_SOURCE_CONFIG_ERROR,
+        `operation declares parameter "${unflattenable}" in two different locations: it cannot be represented by the flattened model (OAPI-P-03, unflattenable)`,
+      ),
+    );
+    return;
+  }
+  let plan: BodyPlan;
+  try {
+    plan = planRequestBody(op);
+  } catch (e: unknown) {
+    inv.fireError(new InvocationError(ERR_SOURCE_CONFIG_ERROR, errorMessage(e)));
+    return;
+  }
+
+  let baseURL: string;
+  try {
+    baseURL = resolveServer(doc, pathItem, op, args.context, args.source.location);
+  } catch (e: unknown) {
+    inv.fireError(new InvocationError(ERR_SOURCE_CONFIG_ERROR, errorMessage(e)));
+    return;
+  }
+
+  // CONTEXT_REQUIRED is raised before any input is consumed and before any
+  // network I/O, so a no-input-consumed retry (after the operation layer
+  // resolves context) is safe.
   const details = requiredContext(doc, op, args.context, baseURL);
   if (details) {
-    // Prose only; the SDK's InvocationError appends the requirement facts
-    // (target + satisfying context fields), matching the Go format.
     inv.fireError(
       contextRequiredError("OpenAPI operation requires authentication context", details),
     );
     return;
   }
 
-  // ----- Input (flows through the handle, not the args) -----
-  const allParams = mergeParameters(pathItem.parameters, op.parameters);
-  const takesInput = allParams.length > 0 || op.requestBody != null;
-
+  // ----- Input flows through the handle, not the args. An operation with
+  // no parameters and no request body takes no input. -----
   let inputMap: Record<string, unknown>;
   if (args.binding !== undefined && args.inputSchema === undefined) {
-    // Operation-layer no-input convention: the binding is populated but no
-    // input schema is, so the operation declares NO input — the caller never
-    // writes nor closes. Close input on entry and dispatch with an empty
-    // input, overriding whatever the OpenAPI document declares.
+    // Operation-layer no-input convention (checked BEFORE the
+    // source-derived detection below): the call came through the operation
+    // layer for an operation that declares no input. Callers of no-input
+    // operations never write nor close, so reading would park forever.
+    // Dispatch with empty input even when the OpenAPI doc declares params.
     void inv.closeInput();
     inputMap = {};
-  } else if (!takesInput) {
+  } else if (params.length === 0 && op.requestBody == null) {
     // No-input operation: close input on entry so the caller never has to,
     // and dispatch immediately.
     void inv.closeInput();
@@ -131,13 +169,13 @@ export async function runBinding(
     const first = await readFirst(inv.inputs());
     void inv.closeInput();
     if (first === undefined) {
-      if (requiresInput(allParams, op)) {
-        inv.fireError(
-          new InvocationError(
-            ERR_MISSING_INPUT,
-            `operation "${method} ${path}" requires an input message`,
-          ),
-        );
+      // Bare close: with a required parameter or required requestBody the
+      // dispatch cannot succeed — fire ERR_MISSING_INPUT before any
+      // network I/O (cross-SDK parity). Otherwise parameters and body are
+      // optional; proceed with an empty input.
+      const missing = requiredInputMissing(params, op);
+      if (missing !== "") {
+        inv.fireError(new InvocationError(ERR_MISSING_INPUT, missing));
         return;
       }
       inputMap = {};
@@ -146,76 +184,82 @@ export async function runBinding(
     }
   }
 
-  await doHTTPRequest(doc, op, allParams, path, method, baseURL, inputMap, args, inv);
-}
+  // ----- Routing (§9.1) and body construction (§9.2): still pre-dispatch. -----
 
-/** Reads the first input message from the handle, or undefined when the input side closed bare. */
-async function readFirst<T>(inputs: AsyncIterable<T>): Promise<T | undefined> {
-  for await (const v of inputs) {
-    return v;
+  let routed;
+  try {
+    routed = routeInput(params, inputMap, path, plan);
+  } catch (e: unknown) {
+    const code = e instanceof MissingPathParamError ? ERR_MISSING_INPUT : ERR_VALIDATION_FAILED;
+    inv.fireError(new InvocationError(code, errorMessage(e)));
+    return;
   }
-  return undefined;
-}
 
-/** True when the operation cannot be dispatched without an input message. */
-function requiresInput(params: OpenAPIParameter[], op: OpenAPIOperation): boolean {
-  return params.some((p) => p?.required === true) || op.requestBody?.required === true;
-}
+  let wire;
+  try {
+    wire = buildRequestBody(doc, plan, routed);
+  } catch (e: unknown) {
+    inv.fireError(new InvocationError(ERR_VALIDATION_FAILED, errorMessage(e)));
+    return;
+  }
 
-async function doHTTPRequest(
-  doc: OpenAPIDocument,
-  op: OpenAPIOperation,
-  allParams: OpenAPIParameter[],
-  pathTemplate: string,
-  method: string,
-  baseURL: string,
-  inputMap: Record<string, unknown>,
-  args: BindingInvocationArgs,
-  inv: BindingHandle<unknown, unknown>,
-): Promise<void> {
-  const { resolvedPath, query, headers: headerParams, body } = classifyInput(
-    allParams,
-    inputMap,
-    pathTemplate,
-    bodyPropertyNames(op),
-  );
+  // ----- Channel assembly (§9.6, OAPI-P-10). -----
 
-  let reqURL = baseURL + resolvedPath;
-  if (Object.keys(query).length > 0) {
-    const q = new URLSearchParams();
-    for (const [k, v] of Object.entries(query)) {
-      q.set(k, String(v));
+  const placements = credentialPlacements(doc, op, args.context);
+  const collision = credentialCollision(placements, routed.populated);
+  if (collision !== "") {
+    inv.fireError(new InvocationError(ERR_VALIDATION_FAILED, collision));
+    return;
+  }
+
+  const queryUnits = [...routed.queryUnits];
+  const cookieUnits = [...routed.cookieUnits];
+  for (const pl of placements) {
+    if (pl.channel === "query") {
+      queryUnits.push(queryEscape(pl.name, false) + "=" + queryEscape(pl.value, false));
+    } else if (pl.channel === "cookie") {
+      cookieUnits.push(pl.name + "=" + pl.value);
     }
-    reqURL += "?" + q.toString();
+  }
+  // Context-supplied transport-hint cookies (consumer context, not
+  // security-scheme credentials) ride after credentials, sorted for
+  // determinism.
+  const hintCookies = contextCookies(args.context);
+  for (const k of Object.keys(hintCookies).sort()) {
+    cookieUnits.push(`${k}=${hintCookies[k]}`);
+  }
+
+  let reqURL = baseURL + routed.resolvedPath;
+  if (queryUnits.length > 0) {
+    reqURL += "?" + queryUnits.join("&");
   }
 
   const fetchHeaders = new Headers();
-  // Accept both JSON and Server-Sent Events. Servers that support SSE will
-  // return text/event-stream when streaming; otherwise we get JSON as
-  // before (Go parity: runBinding sets the same Accept value).
-  fetchHeaders.set("Accept", "application/json, text/event-stream");
-
-  for (const [k, v] of Object.entries(headerParams)) {
-    fetchHeaders.set(k, String(v));
+  if (wire.contentType !== "") {
+    fetchHeaders.set("Content-Type", wire.contentType);
   }
+  // The Accept header advertises the declared concrete media types of the
+  // operation's success responses; absent any declaration, application/json
+  // (§9.2). For streaming-capable operations the declared text/event-stream
+  // is in the set naturally.
+  fetchHeaders.set("Accept", acceptHeader(op));
 
-  const authQueryParams = applyContext(fetchHeaders, doc, op, args.context);
-  if (authQueryParams) {
-    const sep = reqURL.includes("?") ? "&" : "?";
-    reqURL += sep + new URLSearchParams(authQueryParams).toString();
+  for (const [k, v] of routed.headers) {
+    fetchHeaders.set(k, v);
   }
-
-  const hasBody = op.requestBody != null;
-  let fetchBody: string | FormData | undefined;
-  if (hasBody) {
-    const useMultipart = isMultipartRequest(op);
-    if (useMultipart) {
-      fetchBody = buildFormData(body, op);
-      // Do not set Content-Type; let the runtime set it with the boundary
-    } else {
-      fetchBody = JSON.stringify(body);
-      fetchHeaders.set("Content-Type", "application/json");
+  for (const pl of placements) {
+    if (pl.channel === "header") {
+      fetchHeaders.set(pl.name, pl.value);
     }
+  }
+  // Context-supplied transport-hint headers (consumer context) apply last.
+  for (const [k, v] of Object.entries(contextHeaders(args.context))) {
+    fetchHeaders.set(k, v);
+  }
+  // One Cookie header (OAPI-P-10): declared cookie parameters in
+  // declaration order, credentials appended after.
+  if (cookieUnits.length > 0) {
+    fetchHeaders.set("Cookie", cookieUnits.join("; "));
   }
 
   const doFetch = args.fetch ?? fetch;
@@ -224,7 +268,7 @@ async function doHTTPRequest(
     resp = await doFetch(reqURL, {
       method: method.toUpperCase(),
       headers: fetchHeaders,
-      body: fetchBody,
+      body: wire.body,
       signal: inv.signal,
     });
   } catch (e: unknown) {
@@ -243,19 +287,57 @@ async function doHTTPRequest(
   const contentType = resp.headers.get("content-type");
   const site = siteFor(args, baseURL);
 
-  // SSE dispatch: a 2xx response with text/event-stream content type is a
-  // streaming response. Hand the (still-open) response to the SSE streamer,
-  // which takes ownership of reading/closing the body and the terminal
-  // transition (Go parity: runBinding's isSSEContentType gate, run once
-  // here on the initial response status, before any body read).
-  if (resp.status >= 200 && resp.status < 300 && isSSEContentType(contentType)) {
+  // Interaction-shape dispatch (§8, OAPI-P-06): the shape is bounded by
+  // declaration and selected by framing. An operation is streaming-capable
+  // iff a declared success response declares text/event-stream; for a
+  // streaming-capable operation the response's Content-Type header — never
+  // payload bytes — selects between server-streaming and unary. A
+  // text/event-stream response on an operation that is NOT
+  // streaming-capable contradicts the declaration: a protocol error, never
+  // a silent reclassification.
+  if (isSSEContentType(contentType)) {
+    if (!isStreamingCapable(op)) {
+      await resp.body?.cancel().catch(() => {});
+      inv.fireError(
+        new InvocationError(
+          ERR_PROTOCOL,
+          "response arrived as text/event-stream, but no declared success response of this operation declares that media type (OAPI-P-06: an undeclared event-stream response is a protocol error)",
+        ),
+      );
+      return;
+    }
+    // Classification for the stream path runs once, here, at dispatch, on
+    // the initial response's status and headers (the body is the stream;
+    // it is never read for classification).
+    let ok: boolean;
+    try {
+      ok = await classifyThroughHooks(
+        args.hooks,
+        site,
+        { status: resp.status, body: "", meta: invocationMeta },
+        builtinClassify,
+      );
+    } catch (e: unknown) {
+      await resp.body?.cancel().catch(() => {});
+      inv.fireError(toInvocationError(e));
+      return;
+    }
+    if (!ok) {
+      await resp.body?.cancel().catch(() => {});
+      inv.fireError(
+        new InvocationError(httpErrorCode(resp.status), `HTTP ${resp.status} ${resp.statusText}`, {
+          status: resp.status,
+        }),
+      );
+      return;
+    }
     await streamSSE(resp, args, site, inv, invocationMeta, decodeByContentType(contentType));
     return;
   }
 
-  let respText: string;
+  let bodyBytes: Uint8Array;
   try {
-    respText = await readResponseText(resp, MAX_RESPONSE_BYTES);
+    bodyBytes = await readResponseBytes(resp, MAX_RESPONSE_BYTES);
   } catch (e: unknown) {
     if (inv.signal.aborted) return;
     inv.fireError(new InvocationError(ERR_RESPONSE_ERROR, errorMessage(e)));
@@ -267,14 +349,19 @@ async function doHTTPRequest(
 
   // Classify, then decode — both through the consultation seam
   // (per-invocation hook → invoker-level hook → the format builtins
-  // below). The conventions record's pinned rules (recommended built-in
-  // defaults, spec/formats/README.md), content-independent throughout:
-  // classify = success iff status ∈ 2xx (declared `responses` never change
-  // classification — they enrich failure details); decode = the response's
-  // Content-Type HEADER decides the lane (wire framing, not payload
-  // sniffing): JSON for application/json and +json suffixes, text
+  // below). The binding specification's defaults (OAPI-P-07/P-08),
+  // content-independent throughout: classify = success iff status ∈ 2xx
+  // (declared `responses` never change classification — they enrich
+  // failure details); decode = the response's Content-Type HEADER decides
+  // the lane (wire framing, not payload sniffing): JSON for
+  // application/json and +json suffixes, the charset-honoring text lane
   // otherwise, absent/unparseable header → text.
-  const raw: RawResult = { status: resp.status, body: respText, meta: invocationMeta };
+  //
+  // The seam's RawResult carries the unit's text; the builtin decoder
+  // below closes over the BYTES, so the charset rule (OAPI-P-07) applies
+  // to the wire bytes, not a pre-decoded string.
+  const lossyText = bodyBytes.length > 0 ? new TextDecoder().decode(bodyBytes) : "";
+  const raw: RawResult = { status: resp.status, body: lossyText, meta: invocationMeta };
 
   let ok: boolean;
   try {
@@ -287,25 +374,23 @@ async function doHTTPRequest(
     // The format's NATIVE failure: hooks change the verdict, never the
     // error vocabulary. The raw body rides details for callers.
     inv.fireError(
-      new InvocationError(
-        httpErrorCode(resp.status),
-        `HTTP ${resp.status} ${resp.statusText}`,
-        { status: resp.status, ...(respText.length > 0 ? { body: respText } : {}) },
-      ),
+      new InvocationError(httpErrorCode(resp.status), `HTTP ${resp.status} ${resp.statusText}`, {
+        status: resp.status,
+        ...(lossyText.length > 0 ? { body: lossyText } : {}),
+      }),
     );
     return;
   }
 
   let output: unknown;
   try {
-    output = await decodeThroughHooks(args.hooks, site, raw, decodeByContentType(contentType));
+    output = await decodeThroughHooks(args.hooks, site, raw, decodeBytesByContentType(contentType, bodyBytes));
   } catch (e: unknown) {
     inv.fireError(toInvocationError(e));
     return;
   }
 
-  // Success provenance stamps (per the conventions record's recommended
-  // built-in defaults, spec/formats/README.md): decode provenance is
+  // Success provenance stamps (conventions record): decode provenance is
   // header/content-type when the builtin (the Content-Type lane) decided,
   // hook when overridden; classify is always assumption/2xx unless a hook
   // widened it.
@@ -314,24 +399,49 @@ async function doHTTPRequest(
   inv.closeOutput();
 }
 
+/** Reads the first input message from the handle, or undefined when the input side closed bare. */
+async function readFirst<T>(inputs: AsyncIterable<T>): Promise<T | undefined> {
+  for await (const v of inputs) {
+    return v;
+  }
+  return undefined;
+}
+
 /**
- * The openapi builtin result classifier: success iff the HTTP status is
- * 2xx (the convention floor; declared responses refine failure DETAILS
- * only, never classification).
+ * Reports why a bare input close cannot satisfy the operation: a non-empty
+ * string names the first required parameter or the required request body.
+ * Empty string means an empty request is dispatchable.
+ */
+function requiredInputMissing(params: OpenAPIParameter[], op: OpenAPIOperation): string {
+  for (const p of params) {
+    if (p?.required === true) {
+      return `operation requires parameter "${p.name}"`;
+    }
+  }
+  if (op.requestBody != null && op.requestBody.required === true) {
+    return "operation requires a request body";
+  }
+  return "";
+}
+
+/**
+ * The openapi builtin result classifier (OAPI-P-08): success iff the final
+ * HTTP status is 2xx (declared responses refine failure DETAILS only,
+ * never classification).
  */
 export function builtinClassify(_site: InvokeSite, raw: RawResult): boolean | typeof USE_DEFAULT {
   return raw.status != null && raw.status >= 200 && raw.status < 300;
 }
 
 /**
- * Returns the builtin decoder for one response's declared Content-Type
- * header: strict JSON for application/json and +json suffixes (a
- * declared-JSON body that fails to parse is a lying server — a loud
- * ERR_RESPONSE_ERROR, never a silent string); text otherwise; an empty
- * body is a null output.
+ * Returns the builtin decoder implementing the header rule (OAPI-P-07)
+ * over one delivery unit's TEXT (the SSE per-event lane): strict JSON for
+ * application/json and +json suffixes (a declared-JSON body that fails to
+ * parse is a lying server — a loud ERR_RESPONSE_ERROR, never a silent
+ * string); the text itself otherwise; an empty unit is a null output.
  */
 export function decodeByContentType(contentType: string | null): OutputDecoder {
-  const isJSON = isJSONContentType(contentType);
+  const isJSON = isJSONMediaType(normalizeMediaType(contentType ?? ""));
   return (_site: InvokeSite, raw: RawResult): unknown => {
     if (raw.body.length === 0) return null;
     if (isJSON) {
@@ -346,6 +456,94 @@ export function decodeByContentType(contentType: string | null): OutputDecoder {
     }
     return raw.body;
   };
+}
+
+/**
+ * Returns the builtin decoder implementing the header rule (OAPI-P-07)
+ * over the response BYTES: strict JSON for application/json and +json
+ * suffixes; the charset-honoring text lane otherwise (UTF-8 default,
+ * us-ascii/latin-1 supported, invalid sequences and unsupported charsets
+ * are loud decode errors). An empty body (204 included) yields null.
+ */
+export function decodeBytesByContentType(
+  contentType: string | null,
+  bytes: Uint8Array,
+): OutputDecoder {
+  const isJSON = isJSONMediaType(normalizeMediaType(contentType ?? ""));
+  return (_site: InvokeSite, _raw: RawResult): unknown => {
+    if (bytes.length === 0) return null;
+    if (isJSON) {
+      try {
+        return JSON.parse(new TextDecoder().decode(bytes));
+      } catch (e: unknown) {
+        throw new InvocationError(
+          ERR_RESPONSE_ERROR,
+          `response declares ${JSON.stringify(contentType)} but the body is not valid JSON: ${errorMessage(e)}`,
+        );
+      }
+    }
+    return decodeTextLane(contentType, bytes);
+  };
+}
+
+/**
+ * Decodes response bytes as text per the Content-Type header's charset
+ * parameter, defaulting to UTF-8 (OAPI-P-07). Invalid sequences, and
+ * charsets this implementation cannot decode, are loud decode errors — a
+ * consumer needing another charset overrides at the decode configuration
+ * point.
+ */
+export function decodeTextLane(contentType: string | null, bytes: Uint8Array): string {
+  let charset = "utf-8";
+  if (contentType) {
+    const m = /;\s*charset\s*=\s*"?([^";]+)"?/i.exec(contentType);
+    if (m?.[1]) charset = m[1].trim();
+  }
+  switch (charset.toLowerCase()) {
+    case "utf-8":
+    case "utf8":
+      try {
+        return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+      } catch {
+        throw new InvocationError(
+          ERR_RESPONSE_ERROR,
+          "response body is not valid UTF-8 (the declared/default charset)",
+        );
+      }
+    case "us-ascii":
+    case "ascii": {
+      for (let i = 0; i < bytes.length; i++) {
+        if (bytes[i] >= 0x80) {
+          throw new InvocationError(
+            ERR_RESPONSE_ERROR,
+            `response body byte ${i} is not valid US-ASCII (the declared charset)`,
+          );
+        }
+      }
+      return latin1String(bytes);
+    }
+    case "iso-8859-1":
+    case "iso8859-1":
+    case "latin-1":
+    case "latin1":
+      // True latin-1: each byte IS its code point (a TextDecoder
+      // "iso-8859-1" label would decode windows-1252, which differs in
+      // 0x80–0x9F).
+      return latin1String(bytes);
+    default:
+      throw new InvocationError(
+        ERR_RESPONSE_ERROR,
+        `response declares charset ${JSON.stringify(charset)}, which this implementation cannot decode; override at the decode configuration point`,
+      );
+  }
+}
+
+function latin1String(bytes: Uint8Array): string {
+  let out = "";
+  for (let i = 0; i < bytes.length; i++) {
+    out += String.fromCharCode(bytes[i]);
+  }
+  return out;
 }
 
 /**
@@ -604,173 +802,18 @@ function absolutize(url: string, baseURL: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// Request construction
+// Credentials and channel assembly (§9.6: OAPI-P-09 wire application,
+// OAPI-P-10 channel assembly)
 // ---------------------------------------------------------------------------
 
-function asInputRecord(input: unknown): Record<string, unknown> {
-  if (input == null) return {};
-  if (Array.isArray(input)) return {};
-  if (typeof input === "object") return input as Record<string, unknown>;
-  return {};
-}
-
-function resolveBaseURL(doc: OpenAPIDocument, ctx?: Record<string, unknown>): string {
-  const metaBase = contextMetadata(ctx)["baseURL"];
-  if (typeof metaBase === "string" && metaBase) {
-    return metaBase.replace(/\/+$/, "");
-  }
-  if (Array.isArray(doc.servers) && doc.servers.length > 0) {
-    const url = doc.servers[0].url;
-    if (typeof url === "string" && url) {
-      return url.replace(/\/+$/, "");
-    }
-  }
-  throw new Error("no server URL: set servers in the OpenAPI doc or provide baseURL in context metadata");
-}
-
 /**
- * Resolves the request base URL from context metadata or the document's
- * servers, resolving relative server URLs against the source location.
- * Throws when no server URL can be determined.
+ * One credential's wire application: which channel it rides (header,
+ * query, or cookie) under which name.
  */
-export function resolveRequestBaseURL(
-  doc: OpenAPIDocument,
-  ctx?: Record<string, unknown>,
-  sourceLocation?: string,
-): string {
-  const base = resolveBaseURL(doc, ctx);
-  if (base.startsWith("http://") || base.startsWith("https://")) return base;
-  if (sourceLocation && isHttpUrl(sourceLocation)) {
-    try {
-      const parsed = new URL(sourceLocation);
-      return (parsed.origin + base).replace(/\/+$/, "");
-    } catch { /* fall through */ }
-  }
-  return base;
-}
-
-interface ParamClassification {
-  resolvedPath: string;
-  query: Record<string, unknown>;
-  headers: Record<string, unknown>;
-  body: Record<string, unknown>;
-}
-
-/**
- * The JSON request body's declared top-level property names. Used for the
- * field-collision rule: a flattened input field that is both a parameter
- * and a body property is delivered to both wire locations. The document is
- * dereferenced at load, so schema values are direct.
- */
-function bodyPropertyNames(op: OpenAPIOperation): Set<string> | undefined {
-  const content = op.requestBody?.content;
-  if (!content) return undefined;
-  for (const [contentType, media] of Object.entries(content)) {
-    const mt = contentType.split(";", 1)[0].trim();
-    if (mt !== "application/json" && !mt.endsWith("+json")) continue;
-    const props = (media as OpenAPIMediaType | undefined)?.schema?.properties;
-    if (!props || typeof props !== "object") return undefined;
-    return new Set(Object.keys(props));
-  }
-  return undefined;
-}
-
-function classifyInput(
-  params: OpenAPIParameter[],
-  input: Record<string, unknown>,
-  pathTemplate: string,
-  bodyProps?: Set<string>,
-): ParamClassification {
-  const query: Record<string, unknown> = {};
-  const headers: Record<string, unknown> = {};
-  const body: Record<string, unknown> = {};
-  const cookies: Record<string, unknown> = {};
-
-  const paramClassification = new Map<string, string>();
-  for (const p of params) {
-    if (p?.name && p?.in) paramClassification.set(p.name, p.in);
-  }
-
-  let resolvedPath = pathTemplate;
-  for (const [name, value] of Object.entries(input)) {
-    const classification = paramClassification.get(name);
-    if (!classification) {
-      body[name] = value;
-      continue;
-    }
-    switch (classification) {
-      case "path":
-        // Encode so a value containing `/`, `?`, or `#` cannot corrupt the
-        // request URL's path/query structure.
-        resolvedPath = resolvedPath.replaceAll(`{${name}}`, encodeURIComponent(String(value)));
-        break;
-      case "query":
-        query[name] = value;
-        break;
-      case "header":
-        headers[name] = value;
-        break;
-      case "cookie":
-        cookies[name] = value;
-        break;
-      default:
-        body[name] = value;
-    }
-    // One name, one value, delivered to EVERY declared wire location: a
-    // field that is both a parameter and a body property (PUT /users/{id}
-    // with id in the body) rides the parameter location AND stays in the
-    // body — the flattened contract says what, the wire locations are
-    // plumbing.
-    if (bodyProps?.has(name)) {
-      body[name] = value;
-    }
-  }
-
-  // Declared cookie params travel in a Cookie header (sorted for a
-  // deterministic value), never in the body. Context-supplied cookies are
-  // appended separately by applyContext via headers.append (Go parity:
-  // classifyInput's Cookie-header composition).
-  if (Object.keys(cookies).length > 0) {
-    const names = Object.keys(cookies).sort();
-    headers["Cookie"] = names.map((n) => `${n}=${cookies[n]}`).join("; ");
-  }
-
-  return { resolvedPath, query, headers, body };
-}
-
-/**
- * Applies opaque binding context (credentials via well-known fields) and
- * execution options (headers, cookies) to fetch headers, using OpenAPI
- * securitySchemes for spec-driven credential placement.
- */
-function applyContext(
-  headers: Headers,
-  doc: OpenAPIDocument,
-  op: OpenAPIOperation,
-  ctx?: Record<string, unknown>,
-): Record<string, string> | undefined {
-  let queryParams: Record<string, string> | undefined;
-
-  if (ctx) {
-    const result = applyCredentialsViaSchemes(headers, doc, op, ctx);
-    if (!result.applied) {
-      applyCredentialsFallback(headers, ctx);
-    }
-    queryParams = result.queryParams;
-    for (const [k, v] of Object.entries(contextHeaders(ctx))) {
-      headers.set(k, v);
-    }
-    const cookies = contextCookies(ctx);
-    const cookieParts: string[] = [];
-    for (const [k, v] of Object.entries(cookies)) {
-      cookieParts.push(`${k}=${encodeURIComponent(v)}`);
-    }
-    if (cookieParts.length > 0) {
-      headers.append("Cookie", cookieParts.join("; "));
-    }
-  }
-
-  return queryParams;
+export interface CredentialPlacement {
+  channel: "header" | "query" | "cookie";
+  name: string;
+  value: string;
 }
 
 /** A securityScheme paired with its addressable name (the securitySchemes key). */
@@ -779,6 +822,12 @@ interface NamedSecurityScheme {
   name: string;
 }
 
+/**
+ * The security schemes applicable to an operation, each paired with its
+ * securitySchemes key. Operation-level security overrides top-level; falls
+ * back to top-level if not set. Scheme names within each requirement
+ * iterate sorted so placement order is deterministic.
+ */
 function resolveSecuritySchemes(
   doc: OpenAPIDocument,
   op: OpenAPIOperation,
@@ -796,7 +845,7 @@ function resolveSecuritySchemes(
   const seen = new Set<string>();
 
   for (const req of requirements) {
-    for (const schemeName of Object.keys(req)) {
+    for (const schemeName of Object.keys(req).sort()) {
       if (seen.has(schemeName)) continue;
       seen.add(schemeName);
       const scheme = securitySchemes[schemeName];
@@ -807,46 +856,43 @@ function resolveSecuritySchemes(
   return result;
 }
 
-function applyCredentialsViaSchemes(
-  headers: Headers,
+/**
+ * Derives the credential wire applications for an operation from the
+ * artifact's security declarations (read at invocation time, never
+ * extracted into the OBI) and the supplied context (OAPI-P-09): an apiKey
+ * scheme's credential rides its declared in/name; http basic and bearer,
+ * oauth2, and openIdConnect ride the Authorization header. When the
+ * document declares no security schemes, well-known context credentials
+ * fall back to the Authorization header. Placements are computed BEFORE
+ * dispatch so the OAPI-P-10 collision refusal can run pre-dispatch;
+ * duplicate channel+name placements collapse to the first.
+ */
+export function credentialPlacements(
   doc: OpenAPIDocument,
   op: OpenAPIOperation,
-  ctx: Record<string, unknown>,
-): { applied: boolean; queryParams?: Record<string, string> } {
-  const named = resolveSecuritySchemes(doc, op);
-  if (!named.length) return { applied: false };
+  ctx: Record<string, unknown> | undefined,
+): CredentialPlacement[] {
+  if (!ctx || Object.keys(ctx).length === 0) return [];
 
-  let applied = false;
-  let queryParams: Record<string, string> | undefined;
+  const placements: CredentialPlacement[] = [];
+  const seen = new Set<string>();
+  const add = (channel: CredentialPlacement["channel"], name: string, value: string): void => {
+    const key = channel + "\0" + (channel === "header" ? name.toLowerCase() : name);
+    if (seen.has(key)) return;
+    seen.add(key);
+    placements.push({ channel, name, value });
+  };
 
-  for (const { scheme, name: schemeName } of named) {
+  for (const { scheme, name: schemeName } of resolveSecuritySchemes(doc, op)) {
     switch (scheme.type) {
       case "apiKey": {
-        // Rule D: the requirement's addressable name (the securitySchemes
-        // key, e.g. "headerKey") resolves the credential — distinct from
-        // scheme.name (e.g. "X-API-Key"), which is the WIRE placement name
-        // below, not the lookup key. Two ANDed apiKey schemes with
-        // different names are otherwise indistinguishable.
+        // The requirement's addressable name (the securitySchemes key)
+        // resolves the credential — distinct from scheme.name, which is
+        // the WIRE placement name, not the lookup key.
         const val = contextApiKeyFor(ctx, schemeName);
-        if (!val) continue;
-        switch (scheme.in) {
-          case "header":
-            headers.set(scheme.name ?? "Authorization", val);
-            applied = true;
-            break;
-          case "query":
-            if (scheme.name) {
-              queryParams ??= {};
-              queryParams[scheme.name] = val;
-              applied = true;
-            }
-            break;
-          case "cookie":
-            if (scheme.name) {
-              headers.append("Cookie", `${scheme.name}=${encodeURIComponent(val)}`);
-              applied = true;
-            }
-            break;
+        if (!val || !scheme.name) continue;
+        if (scheme.in === "header" || scheme.in === "query" || scheme.in === "cookie") {
+          add(scheme.in, scheme.name, val);
         }
         break;
       }
@@ -854,18 +900,13 @@ function applyCredentialsViaSchemes(
         switch ((scheme.scheme ?? "").toLowerCase()) {
           case "bearer": {
             const token = contextBearerToken(ctx);
-            if (token) {
-              headers.set("Authorization", `Bearer ${token}`);
-              applied = true;
-            }
+            if (token) add("header", "Authorization", `Bearer ${token}`);
             break;
           }
           case "basic": {
             const basic = contextBasicAuth(ctx);
             if (basic) {
-              const encoded = btoa(`${basic.username}:${basic.password}`);
-              headers.set("Authorization", `Basic ${encoded}`);
-              applied = true;
+              add("header", "Authorization", `Basic ${btoa(`${basic.username}:${basic.password}`)}`);
             }
             break;
           }
@@ -874,78 +915,68 @@ function applyCredentialsViaSchemes(
       case "oauth2":
       case "openIdConnect": {
         const token = contextString(ctx, "accessToken") || contextBearerToken(ctx);
-        if (token) {
-          headers.set("Authorization", `Bearer ${token}`);
-          applied = true;
-        }
+        if (token) add("header", "Authorization", `Bearer ${token}`);
         break;
       }
     }
   }
 
-  return { applied, queryParams };
-}
-
-function applyCredentialsFallback(headers: Headers, ctx: Record<string, unknown>): void {
-  const token = contextBearerToken(ctx);
-  if (token) {
-    headers.set("Authorization", `Bearer ${token}`);
-    return;
-  }
-  const basic = contextBasicAuth(ctx);
-  if (basic) {
-    const encoded = btoa(`${basic.username}:${basic.password}`);
-    headers.set("Authorization", `Basic ${encoded}`);
-    return;
-  }
-  const apiKey = contextApiKey(ctx);
-  if (apiKey) {
-    headers.set("Authorization", `ApiKey ${apiKey}`);
-  }
-}
-
-/**
- * Returns true when the operation's requestBody should use multipart/form-data
- * encoding. Prefers application/json when both content types are declared.
- */
-function isMultipartRequest(op: OpenAPIOperation): boolean {
-  const content = op.requestBody?.content;
-  if (!content) return false;
-  if ("application/json" in content) return false;
-  return "multipart/form-data" in content;
-}
-
-/**
- * Builds a FormData instance from the body record. Properties whose schema
- * declares `type: "string"` + `format: "binary"` are expected to already be
- * Blob/File values; everything else is appended as a string.
- */
-function buildFormData(body: Record<string, unknown>, op: OpenAPIOperation): FormData {
-  const fd = new FormData();
-  const schema = op.requestBody?.content?.["multipart/form-data"]?.schema;
-  const props: Record<string, Record<string, unknown>> =
-    (schema?.["properties"] as Record<string, Record<string, unknown>> | undefined) ?? {};
-
-  for (const [key, value] of Object.entries(body)) {
-    if (value == null) continue;
-    const propSchema = props[key];
-    const isBinary =
-      propSchema?.["type"] === "string" && propSchema?.["format"] === "binary";
-    if (isBinary && value instanceof Blob) {
-      fd.append(key, value);
-    } else {
-      fd.append(key, String(value));
+  if (placements.length === 0) {
+    // No scheme applied a credential (typically no securitySchemes
+    // declared): well-known context credentials fall back to the
+    // Authorization header.
+    const token = contextBearerToken(ctx);
+    const basic = contextBasicAuth(ctx);
+    const apiKey = contextApiKey(ctx);
+    if (token) {
+      add("header", "Authorization", `Bearer ${token}`);
+    } else if (basic) {
+      add("header", "Authorization", `Basic ${btoa(`${basic.username}:${basic.password}`)}`);
+    } else if (apiKey) {
+      add("header", "Authorization", `ApiKey ${apiKey}`);
     }
   }
-  return fd;
+  return placements;
 }
 
-async function readResponseText(resp: Response, maxBytes: number): Promise<string> {
-  if (!resp.body) return resp.text();
+/**
+ * The OAPI-P-10 refusal: a name collision between a credential and a
+ * caller-populated declared parameter on the same channel is refused
+ * before dispatch — loud, never a silent overwrite in either direction.
+ * Header names compare case-insensitively. Returns the refusal message, or
+ * "" when the channels are collision-free.
+ */
+export function credentialCollision(
+  placements: CredentialPlacement[],
+  populated: { header: Set<string>; query: Set<string>; cookie: Set<string> },
+): string {
+  for (const pl of placements) {
+    const name = pl.channel === "header" ? pl.name.toLowerCase() : pl.name;
+    if (populated[pl.channel].has(name)) {
+      return `credential "${pl.name}" collides with a caller-populated ${pl.channel} parameter of the same name (OAPI-P-10: refused before dispatch, never a silent overwrite in either direction)`;
+    }
+  }
+  return "";
+}
+
+// ---------------------------------------------------------------------------
+// Response reading
+// ---------------------------------------------------------------------------
+
+function asInputRecord(input: unknown): Record<string, unknown> {
+  if (input == null) return {};
+  if (Array.isArray(input)) return {};
+  if (typeof input === "object") return input as Record<string, unknown>;
+  return {};
+}
+
+async function readResponseBytes(resp: Response, maxBytes: number): Promise<Uint8Array> {
+  if (!resp.body) {
+    return new Uint8Array(await resp.arrayBuffer());
+  }
 
   const reader = resp.body.getReader();
-  const decoder = new TextDecoder();
-  const chunks: string[] = [];
+  const chunks: Uint8Array[] = [];
   let total = 0;
 
   try {
@@ -959,12 +990,49 @@ async function readResponseText(resp: Response, maxBytes: number): Promise<strin
         await reader.cancel().catch(() => {});
         throw new Error(`response exceeds ${maxBytes} byte limit`);
       }
-      chunks.push(decoder.decode(value, { stream: true }));
+      chunks.push(value);
     }
-    chunks.push(decoder.decode());
   } finally {
     reader.releaseLock();
   }
 
-  return chunks.join("");
+  const out = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    out.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// Preflight support (prepareBinding)
+// ---------------------------------------------------------------------------
+
+/**
+ * Resolves the pieces prepareBinding needs from a loaded document: the
+ * addressed operation and its resolved base URL. Returns null when the ref
+ * does not resolve or the server cannot (the invocation surfaces those as
+ * its own pre-dispatch refusals; there is no context to report).
+ */
+export function preflightTarget(
+  doc: OpenAPIDocument,
+  ref: string,
+  ctx: Record<string, unknown> | undefined,
+  sourceLocation: string | undefined,
+): { op: OpenAPIOperation; baseURL: string } | null {
+  let path: string, method: string;
+  try {
+    ({ path, method } = parseRef(ref));
+  } catch {
+    return null;
+  }
+  const pathItem = doc.paths?.[path] as OpenAPIPathItem | undefined;
+  const op = pathItem?.[method] as OpenAPIOperation | undefined;
+  if (!pathItem || !op) return null;
+  try {
+    return { op, baseURL: resolveServer(doc, pathItem, op, ctx, sourceLocation) };
+  } catch {
+    return null;
+  }
 }
