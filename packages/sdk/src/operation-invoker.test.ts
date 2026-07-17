@@ -953,3 +953,67 @@ describe("prepareOperation", () => {
     expect(() => op.prepareOperation(testInterface(), "nope")).toThrow();
   });
 });
+
+// ---------------------------------------------------------------------------
+// planOperation (mirrors the Go SDK's PlanOperation tests)
+// ---------------------------------------------------------------------------
+
+describe("planOperation", () => {
+  it("shares invoke's resolution and reports the selected binding without invoking", () => {
+    const mock = new MockBindingInvoker();
+    const op = makeInvoker(mock);
+    const plan = op.planOperation(testInterface(), "fetchUser");
+    expect(plan.operation).toBe("getUser");
+    expect(plan.bindingKey).toBe("getUser.main");
+    expect(plan.bindingSpec).toBe("mock@1.0");
+    expect(mock.attempts).toBe(0);
+  });
+
+  it("throws synchronously on wiring failures, like invoke", () => {
+    const op = makeInvoker(new MockBindingInvoker());
+    expect(() => op.planOperation(testInterface(), "nope")).toThrow(OperationNotFoundError);
+    expect(() => op.planOperation(testInterface(), "ping", { bindingKey: "absent" })).toThrow(
+      BindingNotFoundError,
+    );
+  });
+
+  // A format outside the consultation seam (no planContributions) must plan
+  // as not-consulted on the decode/classify axes even when an invoker-level
+  // hook is attached — the plan is the one diagnostic surface for "will my
+  // hook run?", and claiming "hook" for a format that ignores the seam is
+  // exactly the wrong answer.
+  it("reports not-consulted for a non-seam format even with hooks attached", () => {
+    const op = makeInvoker(new MockBindingInvoker());
+    op.outputDecoder = () => null;
+    const plan = op.planOperation(testInterface(), "ping");
+    expect(plan.decode.chain).toEqual(["not-consulted"]);
+    expect(plan.classify.chain).toEqual(["not-consulted"]);
+  });
+
+  it("prefixes 'hook' onto a seam-consulting format's leaves when a hook is attached", () => {
+    const mock = new MockBindingInvoker();
+    (mock as unknown as Record<string, unknown>).planContributions = () => ({
+      decode: { chain: ["assumption/json"], detail: "application/json assumed" },
+      classify: { chain: ["spec/exit-code"] },
+      route: { verbose: { chain: ["spec/flag"] } },
+    });
+    const op = makeInvoker(mock);
+
+    // No hooks attached: the leaves ride bare.
+    let plan = op.planOperation(testInterface(), "ping");
+    expect(plan.decode.chain).toEqual(["assumption/json"]);
+    expect(plan.decode.detail).toBe("application/json assumed");
+    expect(plan.classify.chain).toEqual(["spec/exit-code"]);
+    expect(plan.route).toEqual({ verbose: { chain: ["spec/flag"] } });
+
+    // Invoker-level decode hook: only the decode axis gains the hook tier.
+    op.outputDecoder = () => null;
+    plan = op.planOperation(testInterface(), "ping");
+    expect(plan.decode.chain).toEqual(["hook", "assumption/json"]);
+    expect(plan.classify.chain).toEqual(["spec/exit-code"]);
+
+    // Per-invocation route hook reaches the per-field route answers.
+    plan = op.planOperation(testInterface(), "ping", { fieldRouter: () => "" });
+    expect(plan.route).toEqual({ verbose: { chain: ["hook", "spec/flag"] } });
+  });
+});

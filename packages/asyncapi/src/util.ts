@@ -100,7 +100,10 @@ export async function parseAsyncAPIDocument(
 ): Promise<AsyncAPIDocument> {
   let raw: unknown;
 
-  if (content != null) {
+  if (content !== undefined) {
+    // A present content that is not the document text (string) or the
+    // document itself (object) — a present null included — fails the
+    // document checks below loudly.
     if (typeof content === "string") {
       raw = yaml.load(content);
     } else {
@@ -119,6 +122,10 @@ export async function parseAsyncAPIDocument(
     raw = yaml.load(text);
   } else {
     throw new Error("source must have location or content");
+  }
+
+  if (raw === null || typeof raw !== "object") {
+    throw new Error("not a valid AsyncAPI document (missing 'asyncapi' field)");
   }
 
   tagNameKeys(raw, "channels", CHANNEL_NAME_TAG);

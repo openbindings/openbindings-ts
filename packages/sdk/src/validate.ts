@@ -203,7 +203,9 @@ export function validateInterface(
       errs.push(`sources["${k}"].bindingSpec: required`);
     }
     const hasLoc = !!(src.location ?? "").trim();
-    const hasCnt = src.content != null;
+    // Member presence, not value: `content: null` is a PRESENT member
+    // (core §7) and satisfies the location-or-content requirement.
+    const hasCnt = src.content !== undefined;
     if (!hasLoc && !hasCnt) errs.push(`sources["${k}"]: must have location or content`);
     // OBI-D-05: sources[*].location must be a well-formed, absolute reference
     // (absolute URI or a bindingSpec-defined absolute address; never relative).

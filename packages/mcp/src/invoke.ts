@@ -155,7 +155,7 @@ export async function runMCPBinding(
   // refused loudly before input collection and before any network I/O
   // (MCP-D-01).
   let pin: Listing | undefined;
-  if (args.source.content != null) {
+  if (args.source.content !== undefined) {
     try {
       pin = parsePinnedListing(args.source.content);
     } catch (e: unknown) {

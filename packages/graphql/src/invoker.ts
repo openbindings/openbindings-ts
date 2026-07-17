@@ -108,7 +108,7 @@ export class GraphQLInvoker implements BindingInvoker {
       buildFor = (input) => ({ query: prebuilt, variables: inputToVariablesPassthrough(input) });
     } else {
       let schema: IntrospectionSchema;
-      if (args.source.content != null) {
+      if (args.source.content !== undefined) {
         try {
           schema = parseIntrospectionContent(args.source.content);
         } catch (e: unknown) {

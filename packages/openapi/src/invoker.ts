@@ -40,7 +40,7 @@ async function loadDoc(
   options?: { signal?: AbortSignal },
   fetchFn?: typeof globalThis.fetch,
 ): Promise<OpenAPIDocument> {
-  if (content != null) {
+  if (content !== undefined) {
     const doc = await loadOpenAPIDocument(location, content, options, fetchFn);
     if (location) cache.set(location, doc);
     return doc;
@@ -102,7 +102,7 @@ export class OpenAPIInvoker implements BindingInvoker {
    */
   async prepareBinding(args: BindingInvocationArgs): Promise<ContextRequiredDetails | null> {
     let doc: OpenAPIDocument | undefined;
-    if (args.source.content != null) {
+    if (args.source.content !== undefined) {
       try {
         // Side-effect-free preflight: internal $refs still resolve locally,
         // but external $ref fetches are disabled (Go parity: prepareDoc's
@@ -175,7 +175,7 @@ export class OpenAPISynthesizer implements InterfaceSynthesizer, SourceInspector
     // source needs location or content; with no location, dropping the
     // provided content would emit neither (Go parity: invoker.go's
     // SynthesizeInterface embeds src.Content verbatim into the same branch).
-    if (!src.location && src.content != null) {
+    if (!src.location && src.content !== undefined) {
       const entry = iface.sources?.[DEFAULT_SOURCE_NAME];
       if (entry) {
         entry.content = typeof src.content === "string" ? src.content : JSON.stringify(src.content);

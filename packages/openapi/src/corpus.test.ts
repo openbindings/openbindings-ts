@@ -32,7 +32,7 @@ function corpusDir(): string | undefined {
 }
 
 // Fixture shapes per conformance/binding-specs/fixture.schema.json. The
-// document is kept as parsed JSON: `"content" in source` preserves member
+// document is kept as parsed JSON: `content !== undefined` asks member
 // PRESENCE (`content: null` is a present member per the core §7 presence
 // rule), and an omitted binding ref is distinct from a present empty string.
 interface CorpusFixture {
@@ -72,7 +72,7 @@ async function judgeDocument(doc: CorpusDocument): Promise<string | undefined> {
     // the parsed document object or its source text. External refs are
     // disabled, so the load performs no I/O (fixtures are self-contained).
     let parsed: Record<string, unknown> | undefined;
-    if ("content" in src) {
+    if (src.content !== undefined) {
       try {
         parsed = (await loadOpenAPIDocument(undefined, src.content, {
           allowExternalRefs: false,
