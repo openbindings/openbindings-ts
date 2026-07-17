@@ -98,7 +98,7 @@ export async function loadOpenAPIDocument(
   if (location) validateDocumentAddress(location);
 
   let raw: unknown;
-  if (content != null) {
+  if (content !== undefined) {
     if (typeof content === "string") raw = parseJSONOrYAML(content);
     else if (typeof content === "object") raw = content;
     else raw = structuredClone(content);
@@ -134,7 +134,7 @@ export async function loadOpenAPIDocument(
   let refFetch: typeof globalThis.fetch;
   if (!allowExternalRefs) {
     refFetch = blockExternalRefFetch;
-  } else if (!location && content != null) {
+  } else if (!location && content !== undefined) {
     refFetch = selfContainedRefFetch(fetchFn ?? fetch);
   } else {
     refFetch = fetchFn ?? fetch;

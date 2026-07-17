@@ -146,7 +146,7 @@ export class OperationGraphInvoker implements BindingInvoker {
     fetchFn: typeof globalThis.fetch | undefined,
     signal: AbortSignal | undefined,
   ): Promise<unknown> {
-    if (location && content == null) {
+    if (location && content === undefined) {
       const cached = this.docCache.get(location);
       if (cached !== undefined) return cached;
     }
@@ -159,7 +159,7 @@ export class OperationGraphInvoker implements BindingInvoker {
       text = content;
     } else if (content instanceof Uint8Array) {
       text = new TextDecoder().decode(content);
-    } else if (content != null) {
+    } else if (content !== undefined) {
       // Already a structured value: use it directly (Go marshals+unmarshals to
       // the same end state).
       if (location) this.docCache.set(location, content);

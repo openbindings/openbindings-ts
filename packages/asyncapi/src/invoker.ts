@@ -47,7 +47,7 @@ async function loadDoc(
   options?: { signal?: AbortSignal },
   fetchFn?: typeof globalThis.fetch,
 ): Promise<AsyncAPIDocument> {
-  if (content != null || !location) {
+  if (content !== undefined || !location) {
     return parseAsyncAPIDocument(location, content, options, fetchFn);
   }
   const cached = cache.get(location);
@@ -118,7 +118,7 @@ export class AsyncAPIInvoker implements BindingInvoker {
    */
   async prepareBinding(args: BindingInvocationArgs): Promise<ContextRequiredDetails | null> {
     let doc: AsyncAPIDocument | undefined;
-    if (args.source.content != null) {
+    if (args.source.content !== undefined) {
       try {
         doc = await parseAsyncAPIDocument(
           args.source.location,
@@ -204,7 +204,7 @@ export class AsyncAPISynthesizer implements InterfaceSynthesizer, SourceInspecto
     // SynthesizeInterface, spec/formats/asyncapi.md: "A synthesized source
     // carries the artifact (location, or embedded content when synthesized
     // from content) so it stays invocable as written.").
-    if (!src.location && src.content != null) {
+    if (!src.location && src.content !== undefined) {
       const entry = iface.sources?.[DEFAULT_SOURCE_NAME];
       if (entry) {
         entry.content = contentToString(src.content);

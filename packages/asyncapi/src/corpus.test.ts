@@ -39,7 +39,7 @@ const rejectingFetch = (() => {
 }) as unknown as typeof globalThis.fetch;
 
 // Fixture shapes per conformance/binding-specs/fixture.schema.json. The
-// document is kept as parsed JSON: `"content" in source` preserves member
+// document is kept as parsed JSON: `content !== undefined` asks member
 // PRESENCE (`content: null` is a present member per the core §7 presence
 // rule), and an omitted binding ref is distinct from a present empty string.
 interface CorpusFixture {
@@ -79,7 +79,7 @@ async function judgeDocument(doc: CorpusDocument): Promise<string | undefined> {
     // be the parsed document object or its source text. The rejecting
     // fetch keeps the load side-effect-free (fixtures are self-contained).
     let parsed: AsyncAPIDocument | undefined;
-    if ("content" in src) {
+    if (src.content !== undefined) {
       try {
         parsed = await parseAsyncAPIDocument(undefined, src.content, {}, rejectingFetch);
       } catch (e: unknown) {

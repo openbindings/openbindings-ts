@@ -28,7 +28,7 @@ export function outputCompatible(tgt: JSONObject, cand: JSONObject): CompatResul
   if (Object.keys(cand).length === 0) {
     return Object.keys(tgt).length === 0
       ? COMPATIBLE
-      : fail("candidate is empty but target is not");
+      : fail("candidate is unconstrained but target is not");
   }
   return compat(tgt, cand, false);
 }
@@ -49,7 +49,7 @@ function compat(tgt: JSONObject, cand: JSONObject, isInput: boolean): CompatResu
     if (isInput) return COMPATIBLE;
     return Object.keys(tgt).length === 0
       ? COMPATIBLE
-      : fail("candidate is empty but target is not");
+      : fail("candidate is unconstrained but target is not");
   }
 
   const tgtTypes = typeSet(tgt);
@@ -129,18 +129,25 @@ function subsetTypes(a: Set<string> | null, b: Set<string> | null): boolean {
   return true;
 }
 
+/**
+ * Returns a quoted comma-separated list of types in `a` that are not in `b`,
+ * sorted lexicographically so the reason string is deterministic. Mirrors the
+ * Go SDK's missingTypes byte for byte ("all types" when `a` is untyped).
+ */
 function missingTypes(a: Set<string> | null, b: Set<string> | null): string {
-  if (a === null) return "unknown";
-  if (b === null) {
-    return `"${[...a].join('", "')}"`;
-  }
+  if (a === null) return "all types";
   const missing: string[] = [];
   for (const k of a) {
-    if (!b.has(k) && !(k === "integer" && b.has("number"))) {
+    if (b === null) {
       missing.push(`"${k}"`);
+      continue;
     }
+    if (b.has(k)) continue;
+    if (k === "integer" && b.has("number")) continue;
+    missing.push(`"${k}"`);
   }
-  return missing.join(", ") || "unknown";
+  missing.sort();
+  return missing.join(", ");
 }
 
 function hasType(schema: JSONObject, t: string): boolean {
@@ -152,6 +159,14 @@ function hasUnion(schema: JSONObject): boolean {
   return "oneOf" in schema || "anyOf" in schema;
 }
 
+/**
+ * Applies the const/enum rules. Reason prefixes follow the deciding-keyword
+ * convention: the prefix names the keyword whose constraint rejects the
+ * flowing value — for inputs the CANDIDATE's keyword (the target sends, the
+ * candidate refuses), for outputs the TARGET's (the candidate produces, the
+ * target refuses). Values and counts interpolate in JCS rendering. Mirrored
+ * byte for byte in the Go SDK's compatConstEnum.
+ */
 function compatConstEnum(tgt: JSONObject, cand: JSONObject, isInput: boolean): CompatResult {
   const tgtHasConst = "const" in tgt;
   const candHasConst = "const" in cand;
@@ -163,24 +178,27 @@ function compatConstEnum(tgt: JSONObject, cand: JSONObject, isInput: boolean): C
       if (candHasConst) {
         return canonicalKey(tgt["const"]) === canonicalKey(cand["const"])
           ? COMPATIBLE
-          : fail("const: candidate const does not match target const");
+          : fail(`const: candidate const ${canonicalKey(cand["const"])} does not match target const ${canonicalKey(tgt["const"])}`);
       }
       if (candHasEnum) {
         return candEnum!.has(canonicalKey(tgt["const"]))
           ? COMPATIBLE
-          : fail("enum: target const value not in candidate enum");
+          : fail(`enum: target const ${canonicalKey(tgt["const"])} not in candidate enum`);
       }
       return COMPATIBLE;
     }
     if (tgtHasEnum) {
       if (candHasConst) {
-        return tgtEnum!.size === 1 && tgtEnum!.has(canonicalKey(cand["const"]))
+        if (tgtEnum!.size !== 1) {
+          return fail(`const: candidate const ${canonicalKey(cand["const"])} cannot cover ${tgtEnum!.size} target enum values`);
+        }
+        return tgtEnum!.has(canonicalKey(cand["const"]))
           ? COMPATIBLE
-          : fail("const: candidate const does not match target enum");
+          : fail(`const: candidate const ${canonicalKey(cand["const"])} not in target enum`);
       }
       if (candHasEnum) {
-        for (const k of tgtEnum!) {
-          if (!candEnum!.has(k)) return fail("enum: target enum value not in candidate enum");
+        for (const k of sortedSetValues(tgtEnum!)) {
+          if (!candEnum!.has(k)) return fail(`enum: target value ${k} not in candidate enum`);
         }
         return COMPATIBLE;
       }
@@ -193,28 +211,31 @@ function compatConstEnum(tgt: JSONObject, cand: JSONObject, isInput: boolean): C
     if (candHasConst) {
       return tgtEnum!.has(canonicalKey(cand["const"]))
         ? COMPATIBLE
-        : fail("enum: candidate const value not in target enum");
+        : fail(`enum: candidate const ${canonicalKey(cand["const"])} not in target enum`);
     }
     if (candHasEnum) {
-      for (const k of candEnum!) {
-        if (!tgtEnum!.has(k)) return fail("enum: candidate enum value not in target enum");
+      for (const k of sortedSetValues(candEnum!)) {
+        if (!tgtEnum!.has(k)) return fail(`enum: candidate value ${k} not in target enum`);
       }
       return COMPATIBLE;
     }
-    return fail("enum: candidate has no const or enum but target requires enum");
+    return fail("enum: candidate is unconstrained but target has enum");
   }
   if (tgtHasConst) {
     if (candHasConst) {
       return canonicalKey(tgt["const"]) === canonicalKey(cand["const"])
         ? COMPATIBLE
-        : fail("const: candidate const does not match target const");
+        : fail(`const: candidate const ${canonicalKey(cand["const"])} does not match target const ${canonicalKey(tgt["const"])}`);
     }
     if (candHasEnum) {
-      return candEnum!.size === 1 && candEnum!.has(canonicalKey(tgt["const"]))
+      if (candEnum!.size !== 1) {
+        return fail(`const: candidate enum has ${candEnum!.size} values but target allows only const ${canonicalKey(tgt["const"])}`);
+      }
+      return candEnum!.has(canonicalKey(tgt["const"]))
         ? COMPATIBLE
-        : fail("enum: candidate enum does not match target const");
+        : fail(`const: candidate enum value does not match target const ${canonicalKey(tgt["const"])}`);
     }
-    return fail("const: candidate has no const or enum but target requires const");
+    return fail(`const: candidate is unconstrained but target requires const ${canonicalKey(tgt["const"])}`);
   }
   return COMPATIBLE;
 }
@@ -222,10 +243,22 @@ function compatConstEnum(tgt: JSONObject, cand: JSONObject, isInput: boolean): C
 function enumSetOf(schema: JSONObject): [Set<string> | null, boolean] {
   if (!("enum" in schema)) return [null, false];
   const arr = asSlice(schema["enum"]);
-  if (!arr) return [null, true];
+  // A malformed (non-array) enum value behaves as an empty set — present
+  // but admitting nothing — matching the Go SDK's nil-map semantics.
+  if (!arr) return [new Set<string>(), true];
   return [new Set(arr.map(canonicalKey)), true];
 }
 
+/** A set's values in lexicographic order — reasons never leak insertion order. */
+function sortedSetValues(set: Set<string>): string[] {
+  return [...set].sort();
+}
+
+/**
+ * Applies the object rules. Set and property iteration is SORTED so the
+ * first-failing member named in the reason is deterministic (and
+ * byte-identical with the Go SDK) when several members fail.
+ */
 function compatObject(tgt: JSONObject, cand: JSONObject, isInput: boolean): CompatResult {
   const tgtReq = stringSetOf(tgt["required"]);
   const candReq = stringSetOf(cand["required"]);
@@ -233,11 +266,11 @@ function compatObject(tgt: JSONObject, cand: JSONObject, isInput: boolean): Comp
   const candProps = asMap(cand["properties"]) ?? {};
 
   if (isInput) {
-    for (const k of candReq) {
+    for (const k of sortedSetValues(candReq)) {
       if (!tgtReq.has(k)) return fail(`required: candidate requires "${k}" but target does not`);
     }
-    for (const [p, tv] of Object.entries(tgtProps)) {
-      const tvm = asMap(tv);
+    for (const p of Object.keys(tgtProps).sort()) {
+      const tvm = asMap(tgtProps[p]);
       if (!tvm) continue;
       if (p in candProps) {
         const cvm = asMap(candProps[p]);
@@ -249,15 +282,18 @@ function compatObject(tgt: JSONObject, cand: JSONObject, isInput: boolean): Comp
     return COMPATIBLE;
   }
 
-  for (const k of tgtReq) {
+  for (const k of sortedSetValues(tgtReq)) {
     if (!candReq.has(k)) return fail(`required: target requires "${k}" but candidate does not`);
   }
 
   const tgtAP = tgt["additionalProperties"];
 
-  for (const [p, cv] of Object.entries(candProps)) {
+  for (const p of Object.keys(candProps).sort()) {
+    const cv = candProps[p];
     if (!(p in tgtProps)) {
-      if (tgtAP === false) return fail(`additionalProperties: target forbids but candidate has property "${p}"`);
+      // The extra-property fault names the property's own path (the same
+      // properties["..."] site every other property-level failure uses).
+      if (tgtAP === false) return fail(`properties["${p}"]: target forbids additional properties`);
     }
     if (p in tgtProps) {
       const tvm = asMap(tgtProps[p]);
@@ -287,7 +323,7 @@ function compatObject(tgt: JSONObject, cand: JSONObject, isInput: boolean): Comp
     } else if (typeof candAP === "boolean" && !candAP) {
       return COMPATIBLE;
     } else {
-      return fail("additionalProperties: target constrains but candidate does not");
+      return fail("additionalProperties: candidate is less restrictive than target");
     }
   }
 
@@ -303,20 +339,29 @@ function compatArray(tgt: JSONObject, cand: JSONObject, isInput: boolean): Compa
 function compatUnion(tgt: JSONObject, cand: JSONObject, isInput: boolean): CompatResult {
   const tgtVars = unionVariants(tgt);
   const candVars = unionVariants(cand);
-  if (!tgtVars || !candVars) return fail("oneOf: missing or invalid union variants");
+  if (!tgtVars || !candVars) {
+    // One side is not a (well-formed) union: the profile defines no
+    // cross-form rule. Same fixed prefix as the Go SDK.
+    if (!tgtVars) return fail("oneOf: target is not a union but candidate is");
+    return fail("oneOf: candidate is not a union but target is");
+  }
+
+  // The variant-miss reasons carry the target's REAL union key and the
+  // failing variant's index (mirrors the Go SDK).
+  const unionKey = "anyOf" in tgt ? "anyOf" : "oneOf";
 
   if (isInput) {
-    for (const v of tgtVars) {
-      if (!candVars.some((w) => compat(v, w, true).compatible)) {
-        return fail("oneOf: target variant has no compatible candidate variant");
+    for (let i = 0; i < tgtVars.length; i++) {
+      if (!candVars.some((w) => compat(tgtVars[i], w, true).compatible)) {
+        return fail(`${unionKey}: target variant ${i} has no compatible candidate variant`);
       }
     }
     return COMPATIBLE;
   }
 
-  for (const w of candVars) {
-    if (!tgtVars.some((v) => compat(v, w, false).compatible)) {
-      return fail("oneOf: candidate variant has no compatible target variant");
+  for (let i = 0; i < candVars.length; i++) {
+    if (!tgtVars.some((v) => compat(v, candVars[i], false).compatible)) {
+      return fail(`${unionKey}: candidate variant ${i} has no compatible target variant`);
     }
   }
   return COMPATIBLE;
@@ -347,28 +392,32 @@ function compatNumericBounds(tgt: JSONObject, cand: JSONObject, isInput: boolean
   const candHasLo = "minimum" in cand || "exclusiveMinimum" in cand;
   const candHasHi = "maximum" in cand || "exclusiveMaximum" in cand;
 
+  // Exclusive bounds are marked; numbers render in ECMAScript form, which
+  // is the JCS rendering the Go SDK uses — the strings match byte for byte.
+  const fmtBound = (v: number, excl: boolean): string => (excl ? `exclusive ${v}` : `${v}`);
+
   if (isInput) {
     if (tgtHasLo && candHasLo) {
       if (!lowerBoundLessOrEqual(candLo, candLoExcl, tgtLo, tgtLoExcl)) {
-        return fail(`minimum: candidate minimum ${candLo} is greater than target minimum ${tgtLo}`);
+        return fail(`minimum: candidate minimum ${fmtBound(candLo, candLoExcl)} is greater than target minimum ${fmtBound(tgtLo, tgtLoExcl)}`);
       }
     }
     if (tgtHasHi && candHasHi) {
       if (!upperBoundGreaterOrEqual(candHi, candHiExcl, tgtHi, tgtHiExcl)) {
-        return fail(`maximum: candidate maximum ${candHi} is less than target maximum ${tgtHi}`);
+        return fail(`maximum: candidate maximum ${fmtBound(candHi, candHiExcl)} is less than target maximum ${fmtBound(tgtHi, tgtHiExcl)}`);
       }
     }
   } else {
     if (tgtHasLo) {
-      if (!candHasLo) return fail("minimum: target has minimum but candidate does not");
+      if (!candHasLo) return fail(`minimum: target has minimum ${fmtBound(tgtLo, tgtLoExcl)} but candidate has none`);
       if (!lowerBoundGreaterOrEqual(candLo, candLoExcl, tgtLo, tgtLoExcl)) {
-        return fail(`minimum: candidate minimum ${candLo} is less than target minimum ${tgtLo}`);
+        return fail(`minimum: candidate minimum ${fmtBound(candLo, candLoExcl)} is less than target minimum ${fmtBound(tgtLo, tgtLoExcl)}`);
       }
     }
     if (tgtHasHi) {
-      if (!candHasHi) return fail("maximum: target has maximum but candidate does not");
+      if (!candHasHi) return fail(`maximum: target has maximum ${fmtBound(tgtHi, tgtHiExcl)} but candidate has none`);
       if (!upperBoundLessOrEqual(candHi, candHiExcl, tgtHi, tgtHiExcl)) {
-        return fail(`maximum: candidate maximum ${candHi} is greater than target maximum ${tgtHi}`);
+        return fail(`maximum: candidate maximum ${fmtBound(candHi, candHiExcl)} is greater than target maximum ${fmtBound(tgtHi, tgtHiExcl)}`);
       }
     }
   }
@@ -445,13 +494,13 @@ function compatSimpleBounds(
     }
   } else {
     if (minKey in tgt) {
-      if (!(minKey in cand)) return fail(`${minKey}: target has ${minKey} but candidate does not`);
+      if (!(minKey in cand)) return fail(`${minKey}: target has ${minKey} ${toFloat64(tgt[minKey])} but candidate has none`);
       if (toFloat64(cand[minKey]) < toFloat64(tgt[minKey])) {
         return fail(`${minKey}: candidate ${minKey} ${toFloat64(cand[minKey])} is less than target ${minKey} ${toFloat64(tgt[minKey])}`);
       }
     }
     if (maxKey in tgt) {
-      if (!(maxKey in cand)) return fail(`${maxKey}: target has ${maxKey} but candidate does not`);
+      if (!(maxKey in cand)) return fail(`${maxKey}: target has ${maxKey} ${toFloat64(tgt[maxKey])} but candidate has none`);
       if (toFloat64(cand[maxKey]) > toFloat64(tgt[maxKey])) {
         return fail(`${maxKey}: candidate ${maxKey} ${toFloat64(cand[maxKey])} is greater than target ${maxKey} ${toFloat64(tgt[maxKey])}`);
       }
