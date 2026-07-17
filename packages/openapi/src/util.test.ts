@@ -85,6 +85,14 @@ describe("sanitizeKey", () => {
   it("preserves dots and hyphens", () => {
     expect(sanitizeKey("users.get-all")).toBe("users.get-all");
   });
+
+  it("prefixes keys that would start with a non-letter (OBI-D-03, Go parity)", () => {
+    expect(sanitizeKey("2fa.enable")).toBe("_2fa.enable");
+    expect(sanitizeKey("42")).toBe("_42");
+    expect(sanitizeKey("123 go")).toBe("_123_go");
+    expect(sanitizeKey(".hidden")).toBe("_.hidden");
+    expect(sanitizeKey("-flag")).toBe("_-flag");
+  });
 });
 
 describe("uniqueKey", () => {

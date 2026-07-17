@@ -21,6 +21,12 @@ describe("sanitizeKey", () => {
   it("preserves dots and hyphens", () => {
     expect(sanitizeKey("events.receive-all")).toBe("events.receive-all");
   });
+
+  it("prefixes keys that would start with a non-letter (OBI-D-03, Go parity)", () => {
+    expect(sanitizeKey("2fa.enable")).toBe("_2fa.enable");
+    expect(sanitizeKey(".hidden")).toBe("_.hidden");
+    expect(sanitizeKey("-flag")).toBe("_-flag");
+  });
 });
 
 describe("uniqueKey", () => {

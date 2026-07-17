@@ -9,7 +9,10 @@ const NON_KEY_CHARS = /[^a-zA-Z0-9._-]/g;
 /** Replaces non-alphanumeric characters with underscores to produce a valid key. */
 export function sanitizeKey(name: string): string {
   const key = name.replace(NON_KEY_CHARS, "_").replace(/^_+|_+$/g, "");
-  return key || "unnamed";
+  if (!key) return "unnamed";
+  // OBI-D-03 requires the first character to be a letter or underscore
+  // (Go parity: SanitizeKey).
+  return /^[A-Za-z_]/.test(key) ? key : `_${key}`;
 }
 
 /** Returns a unique variant of `key` by appending a numeric suffix if it already exists in `used`. */
