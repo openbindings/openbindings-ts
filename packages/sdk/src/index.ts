@@ -149,13 +149,10 @@ export {
   siteFamilyName,
 } from "./hooks.js";
 export type {
-  BindingPlan,
   FieldRouter,
   HookSlots,
-  InvocationPlan,
   InvokeSite,
   OutputDecoder,
-  PlanAxis,
   RawResult,
   ResultClassifier,
 } from "./hooks.js";

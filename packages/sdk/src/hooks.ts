@@ -105,45 +105,6 @@ export type ResultClassifier = (
  */
 export type FieldRouter = (site: InvokeSite, field: string, value: unknown) => string;
 
-/**
- * Reports, for one wire question at one site, the CONSULTATION CHAIN —
- * never a predicted outcome (hooks are opaque and decline on data that
- * does not exist at plan time). Enumerated chain tokens (stable, for
- * machine consumers): "hook", "spec/<detail>", "assumption/<detail>",
- * "header/<detail>", "not-consulted", "delegated".
- */
-export interface PlanAxis {
-  chain: string[];
-  detail?: string;
-}
-
-/**
- * planOperation's answer: per axis (route per-field), how the wire
- * questions WOULD be answered at this site, by consultation chain.
- * Process-local: it reports THIS process's configuration.
- */
-export interface InvocationPlan {
-  operation: string;
-  bindingKey: string;
-  bindingSpec: string;
-  ref?: string;
-  target?: string;
-  route?: Record<string, PlanAxis>;
-  classify: PlanAxis;
-  decode: PlanAxis;
-}
-
-/**
- * The format package's contribution to an InvocationPlan: the leaf tokens
- * of each axis's chain (what answers the question when every hook
- * declines) and the per-field route answers.
- */
-export interface BindingPlan {
-  decode: PlanAxis;
-  classify: PlanAxis;
-  route?: Record<string, PlanAxis>;
-}
-
 /** One tier's hook slots; either tier may be all-undefined. */
 export interface HookSlots {
   decode?: OutputDecoder;

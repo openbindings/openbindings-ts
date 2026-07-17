@@ -42,13 +42,10 @@ import {
 } from "./errcodes.js";
 import { buildSchemaDefs, compileExampleSchema, safeValidate , type CompiledSchema } from "./schema-validation.js";
 import {
-  type BindingPlan,
   type FieldRouter,
-  type InvocationPlan,
   type InvokeHooks,
   type InvokeSite,
   type OutputDecoder,
-  type PlanAxis,
   type ResultClassifier,
   assumptionWarning,
   floorStamped,
@@ -323,96 +320,8 @@ export class OperationInvoker {
   }
 
   /**
-   * The side-effect-free invocation plan (the diagnostics contract's
-   * probe): per axis (route per-field), the CONSULTATION CHAIN — which
-   * tiers would be asked, in order, and the format's leaf answer — never a
-   * predicted outcome (hooks are opaque and decline on data that does not
-   * exist at plan time). Per-invocation opts are visible to it.
-   * Process-local: it reports THIS process's configuration.
-   *
-   * Shares {@link invoke}'s resolution path (OBI-T-12 name resolution, the
-   * context.configuration.selection override, `opts.bindingKey` pinning,
-   * the contract's default selection policy) and, like invoke, throws
-   * synchronously on wiring failures. Nothing is invoked. Mirrors the Go
-   * SDK's PlanOperation.
-   */
-  planOperation(obi: OBInterface, operation: string, opts?: InvokeOptions): InvocationPlan {
-    const { bindingKey, binding, source } = this.resolveBinding(
-      obi,
-      operation,
-      opts?.bindingKey,
-      opts?.context,
-    );
-
-    // The format's contribution: axis leaves + per-field route answers. A
-    // format that does not participate in the consultation seam (no
-    // planContributions — machine formats answer their own wire questions)
-    // contributes "not-consulted" on every axis, so the plan never claims
-    // a hook will run where the format ignores the seam.
-    let contrib: BindingPlan | undefined;
-    let consultsSeam = false;
-    const formatInvoker = this.invoker.find(source.bindingSpec);
-    if (formatInvoker?.planContributions) {
-      consultsSeam = true;
-      try {
-        contrib = formatInvoker.planContributions({
-          source: {
-            bindingSpec: source.bindingSpec,
-            location: source.location,
-            // content: null is a PRESENT member — see prepareOperation.
-            ...(source.content !== undefined ? { content: source.content } : {}),
-          },
-          ref: binding.ref ?? "",
-        });
-      } catch {
-        // A failing contribution contributes nothing (mirrors Go: the
-        // format still consults the seam, so no "not-consulted" stamps).
-      }
-    }
-    contrib ??= { decode: { chain: [] }, classify: { chain: [] } };
-    if (!consultsSeam) {
-      if (contrib.decode.chain.length === 0) contrib.decode = { chain: ["not-consulted"] };
-      if (contrib.classify.chain.length === 0) contrib.classify = { chain: ["not-consulted"] };
-    }
-
-    const hookAttached = (perInv: boolean, invokerLevel: boolean): boolean => perInv || invokerLevel;
-    const chain = (leaf: PlanAxis, attached: boolean): PlanAxis => {
-      const axis: PlanAxis = { chain: [] };
-      if (leaf.detail !== undefined) axis.detail = leaf.detail;
-      if (attached && (leaf.chain.length === 0 || leaf.chain[0] !== "not-consulted")) {
-        axis.chain.push("hook");
-      }
-      axis.chain.push(...leaf.chain);
-      return axis;
-    };
-
-    const plan: InvocationPlan = {
-      operation: binding.operation,
-      bindingKey,
-      bindingSpec: source.bindingSpec,
-      ref: binding.ref ?? "",
-      decode: chain(
-        contrib.decode,
-        hookAttached(opts?.outputDecoder !== undefined, this.outputDecoder !== undefined),
-      ),
-      classify: chain(
-        contrib.classify,
-        hookAttached(opts?.resultClassifier !== undefined, this.resultClassifier !== undefined),
-      ),
-    };
-    if (contrib.route && Object.keys(contrib.route).length > 0) {
-      const routeHooked = hookAttached(opts?.fieldRouter !== undefined, this.fieldRouter !== undefined);
-      plan.route = {};
-      for (const [field, leaf] of Object.entries(contrib.route)) {
-        plan.route[field] = chain(leaf, routeHooked);
-      }
-    }
-    return plan;
-  }
-
-  /**
-   * Shared operation-layer resolution behind {@link invoke},
-   * {@link prepareOperation}, and {@link planOperation}: resolves `operation` against obi's flat key+alias
+   * Shared operation-layer resolution behind {@link invoke} and
+   * {@link prepareOperation}: resolves `operation` against obi's flat key+alias
    * namespace (OBI-T-12), selects a binding (the contract's default policy,
    * displaced by a context.configuration.selection override or the
    * caller-pinned `bindingKey`), and looks up its source. Throws synchronously
