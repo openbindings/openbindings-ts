@@ -25,16 +25,32 @@ import {
   ERR_INVOCATION_CLOSED,
 } from "./errcodes.js";
 import type { InvocationErrorCode } from "./errcodes.js";
+import { type Category, type Effects, categoryForCode, defaultEffectsForCode } from "./classification.js";
 
 /**
  * The structured error type for all terminal invocation failures. A class
  * (not a plain shape) so it carries a stack trace and supports `instanceof`.
+ *
+ * Every error carries a {@link category} — the normative classification axis
+ * consumers branch on — derived from `code` through the single canonical map in
+ * classification.ts, so the constructor is the one place classification is
+ * attached (mirrors the Go SDK, which stamps it at FireError / on the wire).
+ * Where retry is in question it also carries {@link effects}; an emission site
+ * may pass it explicitly, otherwise the transport-code default applies. An
+ * absent `effects` is treated as `"possible"` by consumers.
  */
 export class InvocationError extends Error {
   readonly code: InvocationErrorCode | (string & {});
+  readonly category: Category;
+  readonly effects?: Effects;
   readonly details?: unknown;
 
-  constructor(code: InvocationErrorCode | (string & {}), message: string, details?: unknown) {
+  constructor(
+    code: InvocationErrorCode | (string & {}),
+    message: string,
+    details?: unknown,
+    effects?: Effects,
+  ) {
     // A CONTEXT_REQUIRED challenge is actionable only through its details; an
     // error string that hides the target and the requirement families strands
     // whoever sees it in a log. Formats write the prose, the challenge writes
@@ -47,6 +63,9 @@ export class InvocationError extends Error {
     super(rendered);
     this.name = "InvocationError";
     this.code = code;
+    this.category = categoryForCode(code);
+    const eff = effects ?? defaultEffectsForCode(code);
+    if (eff !== undefined) this.effects = eff;
     if (details !== undefined) this.details = details;
   }
 }

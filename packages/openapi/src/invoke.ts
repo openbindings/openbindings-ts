@@ -12,6 +12,7 @@ import {
   contextHeaders,
   contextCookies,
   httpErrorCode,
+  httpErrorEffects,
   ERR_INVALID_REF,
   ERR_SOURCE_CONFIG_ERROR,
   ERR_REF_NOT_FOUND,
@@ -325,9 +326,12 @@ export async function runBinding(
     if (!ok) {
       await resp.body?.cancel().catch(() => {});
       inv.fireError(
-        new InvocationError(httpErrorCode(resp.status), `HTTP ${resp.status} ${resp.statusText}`, {
-          status: resp.status,
-        }),
+        new InvocationError(
+          httpErrorCode(resp.status),
+          `HTTP ${resp.status} ${resp.statusText}`,
+          { status: resp.status },
+          httpErrorEffects(resp.status),
+        ),
       );
       return;
     }
@@ -374,10 +378,15 @@ export async function runBinding(
     // The format's NATIVE failure: hooks change the verdict, never the
     // error vocabulary. The raw body rides details for callers.
     inv.fireError(
-      new InvocationError(httpErrorCode(resp.status), `HTTP ${resp.status} ${resp.statusText}`, {
-        status: resp.status,
-        ...(lossyText.length > 0 ? { body: lossyText } : {}),
-      }),
+      new InvocationError(
+        httpErrorCode(resp.status),
+        `HTTP ${resp.status} ${resp.statusText}`,
+        {
+          status: resp.status,
+          ...(lossyText.length > 0 ? { body: lossyText } : {}),
+        },
+        httpErrorEffects(resp.status),
+      ),
     );
     return;
   }

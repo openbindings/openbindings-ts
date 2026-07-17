@@ -124,6 +124,14 @@ export const ERR_VALIDATION_FAILED = "ERR_VALIDATION_FAILED";
  */
 export const ERR_SCHEMA_UNRESOLVED = "ERR_SCHEMA_UNRESOLVED";
 
+/**
+ * A typed-invoker boundary failure: a value could not be decoded into (or
+ * encoded from) the generated concrete type. Emitted by the Go SDK's typed
+ * codegen boundary; documented here for cross-SDK parity and for consumers
+ * handling Go-originated values.
+ */
+export const ERR_TYPE_MISMATCH = "ERR_TYPE_MISMATCH";
+
 /** A generic runtime failure inside a binding implementation. */
 export const ERR_RUNTIME = "ERR_RUNTIME";
 
@@ -188,6 +196,7 @@ export type InvocationErrorCode =
   | typeof ERR_TRANSFORM_ERROR
   | typeof ERR_VALIDATION_FAILED
   | typeof ERR_SCHEMA_UNRESOLVED
+  | typeof ERR_TYPE_MISMATCH
   | typeof ERR_RUNTIME
   | typeof ERR_EVENT_LIMIT_EXCEEDED
   | typeof ERR_OPERATION_GRAPH_EXIT
