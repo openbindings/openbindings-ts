@@ -39,6 +39,7 @@ import {
   contextHeaders,
   contextCookies,
   httpErrorCode,
+  httpErrorEffects,
   ERR_INVALID_REF,
   ERR_PROTOCOL,
   ERR_SOURCE_CONFIG_ERROR,
@@ -690,6 +691,7 @@ async function runUnaryPublish(
         httpErrorCode(resp.status),
         `HTTP ${resp.status} ${resp.statusText}`,
         { status: resp.status, body: errBody },
+        httpErrorEffects(resp.status),
       ),
     );
     return;
@@ -798,6 +800,7 @@ async function runSSESubscribe(
         httpErrorCode(resp.status),
         `HTTP ${resp.status} ${resp.statusText}`,
         { status: resp.status, body },
+        httpErrorEffects(resp.status),
       ),
     );
     return;

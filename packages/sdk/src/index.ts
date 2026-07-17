@@ -188,10 +188,19 @@ export {
   ERR_TRANSPORT_CLOSED,
   ERR_UNKNOWN_SOURCE,
   ERR_SCHEMA_UNRESOLVED,
+  ERR_TYPE_MISMATCH,
   ERR_VALIDATION_FAILED,
   httpErrorCode,
 } from "./errcodes.js";
 export type { InvocationErrorCode } from "./errcodes.js";
+
+export {
+  CODE_CATEGORY,
+  categoryForCode,
+  defaultEffectsForCode,
+  httpErrorEffects,
+} from "./classification.js";
+export type { Category, Effects } from "./classification.js";
 
 export { dereference } from "./deref.js";
 

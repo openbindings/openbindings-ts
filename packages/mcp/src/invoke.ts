@@ -10,6 +10,7 @@ import {
   buildAuthHeaders,
   contextConfiguration,
   httpErrorCode,
+  httpErrorEffects,
   ERR_CANCELLED,
   ERR_CONNECT_FAILED,
   ERR_EXECUTION_FAILED,
@@ -109,7 +110,7 @@ function mapError(e: unknown, signal: AbortSignal, fallback: string): Invocation
     return new InvocationError(ERR_EXECUTION_FAILED, msg, { code: e.code, data: e.data });
   }
   if (e instanceof StreamableHTTPError && typeof e.code === "number" && e.code > 0) {
-    return new InvocationError(httpErrorCode(e.code), msg, { status: e.code });
+    return new InvocationError(httpErrorCode(e.code), msg, { status: e.code }, httpErrorEffects(e.code));
   }
   return new InvocationError(fallback, msg);
 }

@@ -8,6 +8,7 @@ import {
   ERR_STREAM_ERROR,
   InvocationError,
   httpErrorCode,
+  httpErrorEffects,
 } from "@openbindings/sdk";
 import type { Field, IntrospectionSchema, TypeRef, TypeMap, InputValue } from "./introspection.js";
 import { buildTypeMap, rootTypeName, unwrapTypeName, INTROSPECTION_QUERY } from "./introspection.js";
@@ -304,10 +305,12 @@ async function doGraphQLHTTP(
   const text = await readResponseText(resp, MAX_RESPONSE_BYTES);
 
   if (!resp.ok) {
-    throw new InvocationError(httpErrorCode(resp.status), `HTTP ${resp.status}: ${text}`, {
-      status: resp.status,
-      body: text,
-    });
+    throw new InvocationError(
+      httpErrorCode(resp.status),
+      `HTTP ${resp.status}: ${text}`,
+      { status: resp.status, body: text },
+      httpErrorEffects(resp.status),
+    );
   }
 
   const respBody: GraphQLResponse = JSON.parse(text);
