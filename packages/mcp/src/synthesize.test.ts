@@ -33,6 +33,20 @@ describe("convertToInterface", () => {
     expect(binding.source).toBe("mcpServer");
   });
 
+  it("prefixes digit-leading tool names to a valid key (OBI-D-03, Go parity)", () => {
+    const iface = convertToInterface({
+      tools: [
+        { name: "2fa-check", inputSchema: { type: "object", properties: {} } },
+      ],
+      resources: [],
+      resourceTemplates: [],
+      prompts: [],
+    });
+
+    expect(Object.keys(iface.operations)).toEqual(["_2fa-check"]);
+    expect(iface.bindings!["_2fa-check.mcpServer"].ref).toBe("tools/2fa-check");
+  });
+
   it("static resources declare no input (openbindings.mcp@1 §8/§9.1)", () => {
     // Updated for openbindings.mcp@1: this test previously pinned a
     // const-uri input schema, an input the conformant invoker refuses. The

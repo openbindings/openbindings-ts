@@ -4,9 +4,9 @@ import { UriTemplate } from "@modelcontextprotocol/sdk/shared/uriTemplate.js";
 import type { OBInterface, Operation, BindingEntry, JSONSchema } from "@openbindings/sdk";
 import { MAX_TESTED_VERSION } from "@openbindings/sdk";
 import { CLIENT_NAME, CLIENT_VERSION, BINDING_SPEC, DEFAULT_SOURCE_NAME } from "./constants.js";
-import { exhaustPages } from "./listing.js";
+import { exhaustPages, parsePinnedListing } from "./listing.js";
 
-interface MCPDiscovery {
+export interface MCPDiscovery {
   serverName?: string;
   serverVersion?: string;
   tools: Array<{ name: string; description?: string; inputSchema?: Record<string, unknown>; outputSchema?: Record<string, unknown> }>;
@@ -126,6 +126,99 @@ export async function discover(url: string, options?: DiscoverOptions): Promise<
 }
 
 /**
+ * Decodes a pinned listing (MCP-D-01) into the synthesis lanes' discovery
+ * view. The same grammar validation `parsePinnedListing` applies — stray
+ * members, entity-array shapes, identity members, all refused loudly —
+ * followed by decoding the 2025-11-25 entity members the synthesis lanes
+ * read (descriptions, schemas, prompt arguments), refused loudly when they
+ * contradict those shapes (Go parity: pinnedDiscovery, listing.go). The pin
+ * is authoritative (§6 content primacy): the server is never dialed. A pin
+ * carries no serverInfo, so the interface's name/version, when wanted, come
+ * from SynthesizeInput.
+ */
+export function pinnedDiscovery(content: unknown): MCPDiscovery {
+  parsePinnedListing(content);
+  const members = content as {
+    tools?: Record<string, unknown>[];
+    resources?: Record<string, unknown>[];
+    resourceTemplates?: Record<string, unknown>[];
+    prompts?: Record<string, unknown>[];
+  };
+
+  const bad = (where: string, detail: string): Error =>
+    new Error(
+      `MCP pinned listing entities do not decode as the 2025-11-25 result shapes (MCP-D-01): ${where} ${detail}`,
+    );
+  const optString = (entry: Record<string, unknown>, key: string, where: string): string | undefined => {
+    const v = entry[key];
+    if (v === undefined) return undefined;
+    if (typeof v !== "string") throw bad(where, `member ${JSON.stringify(key)} must be a string`);
+    return v;
+  };
+  const optObject = (
+    entry: Record<string, unknown>,
+    key: string,
+    where: string,
+  ): Record<string, unknown> | undefined => {
+    const v = entry[key];
+    if (v === undefined) return undefined;
+    if (v === null || typeof v !== "object" || Array.isArray(v)) {
+      throw bad(where, `member ${JSON.stringify(key)} must be an object`);
+    }
+    return v as Record<string, unknown>;
+  };
+  const promptArguments = (
+    entry: Record<string, unknown>,
+    where: string,
+  ): Array<{ name: string; description?: string; required?: boolean }> | undefined => {
+    const raw = entry["arguments"];
+    if (raw === undefined) return undefined;
+    if (!Array.isArray(raw)) throw bad(where, `member "arguments" must be an array`);
+    return raw.map((a, j) => {
+      if (a === null || typeof a !== "object" || Array.isArray(a)) {
+        throw bad(`${where}.arguments[${j}]`, "must be an object");
+      }
+      const arg = a as Record<string, unknown>;
+      const required = arg["required"];
+      if (required !== undefined && typeof required !== "boolean") {
+        throw bad(`${where}.arguments[${j}]`, `member "required" must be a boolean`);
+      }
+      return {
+        name: optString(arg, "name", `${where}.arguments[${j}]`) ?? "",
+        description: optString(arg, "description", `${where}.arguments[${j}]`),
+        required,
+      };
+    });
+  };
+
+  return {
+    tools: (members.tools ?? []).map((t, i) => ({
+      name: t["name"] as string, // the identity member, validated by parsePinnedListing
+      description: optString(t, "description", `tools[${i}]`),
+      inputSchema: optObject(t, "inputSchema", `tools[${i}]`),
+      outputSchema: optObject(t, "outputSchema", `tools[${i}]`),
+    })),
+    resources: (members.resources ?? []).map((r, i) => ({
+      name: optString(r, "name", `resources[${i}]`) ?? "",
+      uri: r["uri"] as string, // identity
+      description: optString(r, "description", `resources[${i}]`),
+      mimeType: optString(r, "mimeType", `resources[${i}]`),
+    })),
+    resourceTemplates: (members.resourceTemplates ?? []).map((t, i) => ({
+      name: optString(t, "name", `resourceTemplates[${i}]`) ?? "",
+      uriTemplate: t["uriTemplate"] as string, // identity
+      description: optString(t, "description", `resourceTemplates[${i}]`),
+      mimeType: optString(t, "mimeType", `resourceTemplates[${i}]`),
+    })),
+    prompts: (members.prompts ?? []).map((p, i) => ({
+      name: p["name"] as string, // identity
+      description: optString(p, "description", `prompts[${i}]`),
+      arguments: promptArguments(p, `prompts[${i}]`),
+    })),
+  };
+}
+
+/**
  * Derives a resource template's input schema from its RFC 6570 variables —
  * the operation's input value per openbindings.mcp@1 §8/§9.1: one string
  * property per declared variable (template variables are string-typed,
@@ -193,7 +286,11 @@ function promptOutputSchema(): JSONSchema {
  * names."
  */
 export function sanitizeKey(name: string): string {
-  return name.replace(/[^a-zA-Z0-9._-]/g, "_").replace(/^_+|_+$/g, "") || "unnamed";
+  const key = name.replace(/[^a-zA-Z0-9._-]/g, "_").replace(/^_+|_+$/g, "");
+  if (!key) return "unnamed";
+  // OBI-D-03 requires the first character to be a letter or underscore
+  // (Go parity: SanitizeKey).
+  return /^[A-Za-z_]/.test(key) ? key : `_${key}`;
 }
 
 /** Resolve key collisions by prefixing with entity type. */
