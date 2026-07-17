@@ -5,7 +5,7 @@ import { AsyncAPIInvoker } from "./invoker.js";
 import { BINDING_SPEC } from "./constants.js";
 import { setBackpressureBoundsForTest } from "./invoke.js";
 
-// WS slow-consumer backpressure (spec/formats/asyncapi.md, "WS slow-consumer
+// WS slow-consumer backpressure (spec/binding-specs/asyncapi/openbindings.asyncapi.md, "WS slow-consumer
 // backpressure" open point, settled 2026-07-11): the receive path bounds
 // undelivered frames between the socket and the output pump at
 // MAX_BUFFERED_FRAMES frames or MAX_BUFFERED_BYTES in-flight bytes,

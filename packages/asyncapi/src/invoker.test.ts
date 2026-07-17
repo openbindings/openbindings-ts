@@ -160,7 +160,7 @@ describe("AsyncAPIInvoker no-input publish refusal", () => {
 // Content-fed synthesis must embed the artifact so it stays invocable
 // ---------------------------------------------------------------------------
 
-// Per spec/formats/asyncapi.md: "A synthesized source carries the artifact
+// Per spec/binding-specs/asyncapi/openbindings.asyncapi.md: "A synthesized source carries the artifact
 // (location, or embedded content when synthesized from content) so it
 // stays invocable as written." Mirrors the Go SDK's
 // TestSynthesizeInterface_ContentOnlyEmbedsSource.

@@ -26,6 +26,7 @@
 
 const DEFAULT_IDLE_TIMEOUT_MS = 30_000;
 
+/** @internal Implementation detail of the asyncapi invoker; not public API. */
 export interface PooledWS {
   /** The underlying WebSocket. */
   ws: WebSocket;
@@ -85,6 +86,7 @@ interface PoolEntry {
   key: string;
 }
 
+/** @internal Implementation detail of the asyncapi invoker; not public API. */
 export class WSPool {
   private conns = new Map<string, PoolEntry>();
   private creating = new Map<string, Promise<PoolEntry>>();

@@ -149,6 +149,10 @@ interface EngineDeps {
  * Spawn-once: call {@link run} once; it resolves when the graph has
  * terminated (normal completion, exit node, error, or cancellation). The
  * graph is validated by the invoker before the engine is constructed.
+ *
+ * Part of the TS-first editor-support surface (see this package's README):
+ * exported to serve the planned OpenBindings headless component collection,
+ * which is TypeScript-first. The Go SDK does not export the engine by design.
  */
 export class Engine {
   private readonly graph: Graph;
@@ -761,7 +765,7 @@ function pushTo(m: Map<string, string[]>, k: string, v: string): void {
 }
 
 /**
- * JSONata 2.0's boolean cast ($boolean) for filter-expression results:
+ * JSONata 2.1's boolean cast ($boolean) for filter-expression results:
  * false/null/0/"" are false, empty composites are false, and an array is
  * true only if some member casts to true. (undefined never reaches here:
  * it fails the node with TRANSFORM_UNDEFINED per the Transforms rule.)

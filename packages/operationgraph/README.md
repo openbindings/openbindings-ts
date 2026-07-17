@@ -2,7 +2,7 @@
 
 Operation-graph binding invoker for OpenBindings. Composes existing operations on the same OBI into a graph: a new operation whose binding is a graph of nodes that fan-in, fan-out, filter, transform, and combine results from other operations.
 
-Implements the `openbindings.operation-graph` companion format at `@0.2.0` (the transparency rewrite), governed by the identity law: `input → operation(y) → output` is observationally indistinguishable from invoking `y` directly. See [`spec/formats/operation-graph/`](https://github.com/openbindings/spec/tree/main/formats/operation-graph) for the full format specification.
+Implements the `openbindings.operation-graph@1` binding specification, governed by the identity law: `input → operation(y) → output` is observationally indistinguishable from invoking `y` directly. Two versions travel together and must not be confused: `openbindings.operation-graph@1` is the opaque binding-specification identifier (the value of a source's `bindingSpec` field), while the graph-unit format it executes carries its own edition — `0.2.0`, the transparency rewrite — which each graph declares in its `openbindings.operation-graph` field. See [`spec/binding-specs/operation-graph/`](https://github.com/openbindings/spec/tree/main/binding-specs/operation-graph) for the full format specification.
 
 ## Install
 
@@ -55,7 +55,7 @@ for await (const event of call.outputs) {
 
 ## Conventions
 
-- **Format token**: `openbindings.operation-graph@0.2.0`
+- **Binding specification identifier**: `openbindings.operation-graph@1` (opaque; the `bindingSpec` value). The graph-unit format edition is separate — each graph declares it in its own `openbindings.operation-graph` field (currently `0.2.0`).
 - **Binding `ref`**: a REQUIRED JSON Pointer fragment addressing the graph definition within the source document (`"#/graphs/summarizeOrder"`, or `"#"` for a document whose root is a graph). Bare graph keys are rejected.
 - **Source document**: any JSON document; the conventional shape is a top-level `graphs` map. Each graph declares its own `openbindings.operation-graph` version, refused per OG-T-02 when unsupported.
 
@@ -100,6 +100,12 @@ Per the spec, error policy follows the two liftings:
 - **`MAX_ERROR_DEPTH = 32`** for `onError` chains, as defense in depth; the normative bound is lineage (`onError` routes count as cycle edges).
 - **Per-node mailboxes**: each node consumes from its own AsyncQueue; backpressure comes from the engine awaiting `emitOutput` on the invocation handle.
 - **Quiescence completion**: cyclic (and error-route-fed) completion resolves once nothing is in flight, per the spec's implementation-defined drain detection.
+
+## Editor-support surface (TS-first)
+
+Beyond the invoker, this package exports a small surface intended for authoring tools rather than invocation: `Engine` (the execution engine), `checkVersion` (validates a graph's declared `openbindings.operation-graph` edition), and the node-field reflection helpers `SPEC_NODE_FIELDS`, `allowedNodeFields`, and `requiredNodeFields`. They let a graph editor derive which fields a node type accepts and which survive a node retype, and check a graph's declared version, without duplicating spec knowledge.
+
+This surface deliberately serves the planned OpenBindings headless component collection (editor/invoker/graph/workbench), which is TypeScript-first. The Go SDK exports only `Invoker`/`Validate` and does not expose these by design — it is not a parity gap.
 
 ## Conformance
 

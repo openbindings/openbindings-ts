@@ -67,7 +67,7 @@ export function parseDocument(input: string | Uint8Array): OBInterface {
     try {
       if (isHigherMajorOrPre1MinorThanMaxTested(ver)) {
         throw new ValidationError([
-          `openbindings: "${ver}" exceeds this SDK's MaxTestedVersion "${MAX_TESTED_VERSION}" (OBI-T-04)`,
+          `openbindings: document declares version "${ver}", newer than the latest version this implementation supports (${MAX_TESTED_VERSION}) (OBI-T-04)`,
         ]);
       }
       // The refusal runs downward too (below MinSupported; pre-1.0 lower
@@ -75,12 +75,12 @@ export function parseDocument(input: string | Uint8Array): OBInterface {
       // gates validateInterface applies, with identical messages.
       if (isLowerThanMinSupported(ver)) {
         throw new ValidationError([
-          `openbindings: "${ver}" is below this SDK's MinSupportedVersion "${MIN_SUPPORTED_VERSION}" (OBI-T-04)`,
+          `openbindings: document declares version "${ver}", older than the oldest version this implementation supports (${MIN_SUPPORTED_VERSION}) (OBI-T-04)`,
         ]);
       }
       if (isUnsupportedPrerelease(ver)) {
         throw new ValidationError([
-          `openbindings: "${ver}" is a pre-release this SDK does not declare support for (OBI-T-04)`,
+          `openbindings: document declares version "${ver}", a pre-release this implementation does not support (OBI-T-04)`,
         ]);
       }
     } catch (err) {

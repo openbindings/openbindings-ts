@@ -19,7 +19,7 @@ export function familyName(identifier: string): string {
  * unparseable → NOT JSON. This is wire framing (the header decides the
  * decode lane), never payload sniffing — the pinned decode rule of the
  * conventions record's recommended built-in defaults
- * (spec/formats/README.md).
+ * (spec/binding-specs/README.md).
  * (Replaces the removed `maybeJSON` payload sniffer: content-dependent
  * defaults are banned; a wrong lane must fail loudly or be elected
  * explicitly, never guessed from the bytes.)

@@ -8,7 +8,7 @@ import type { JSONSchema } from "./types.js";
 // the gap is made up in CONSUMER CONFIGURATION — these hooks — never by OB
 // authoring the missing coverage into a document and never by OBI
 // absorbing format conventions. The model is stated in the conventions
-// record's completeness-spectrum section (spec/formats/README.md); this
+// record's completeness-spectrum section (spec/binding-specs/README.md); this
 // file mirrors the Go SDK's hooks.go so the two SDKs answer the wire
 // questions identically.
 //
@@ -200,7 +200,7 @@ export class InvokeHooks {
   // are tier-precise; success provenance is not. Read by the
   // contract-decided teaching and the x-ob-decode/x-ob-classify provenance
   // stamps (per the conventions record's recommended built-in defaults,
-  // spec/formats/README.md).
+  // spec/binding-specs/README.md).
   private decodeDecided = "";
   private classifyDecided = "";
 
@@ -378,7 +378,7 @@ async function runBuiltinClassify(
 
 // ---------------------------------------------------------------------------
 // Contract inspectors + the unvalidated-assumption warning (per the
-// conventions record's recommended built-in defaults, spec/formats/README.md)
+// conventions record's recommended built-in defaults, spec/binding-specs/README.md)
 // ---------------------------------------------------------------------------
 
 /**
@@ -425,7 +425,7 @@ export function nonDiscriminatingOutput(schema: JSONSchema | undefined | null): 
 /**
  * Composes the unvalidated/undiscriminating-assumption warning the
  * conventions record's recommended built-in defaults call for
- * (spec/formats/README.md): it fires when an ASSUMPTION decoded the output
+ * (spec/binding-specs/README.md): it fires when an ASSUMPTION decoded the output
  * (decodeStamp is the format's x-ob-decode trailer stamp —
  * "assumption/<detail>" means the
  * documented default ran; "hook", "header/...", "spec/...", or absent mean
