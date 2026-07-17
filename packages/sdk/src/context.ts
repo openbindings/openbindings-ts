@@ -7,7 +7,7 @@ import type { ContextResolver } from "./invokers.js";
 // ---------------------------------------------------------------------------
 
 /**
- * A key-value store for binding invocation context.
+ * A document store for binding invocation context.
  * Keys are invoker-determined strings (typically a normalized API origin).
  * Values are opaque context records — credentials, headers, cookies,
  * environment, metadata — using well-known field names for cross-invoker
@@ -31,7 +31,7 @@ import type { ContextResolver } from "./invokers.js";
  * The SDK stores and retrieves context but never inspects its contents.
  * Setting null removes the entry (the published contract pins
  * set-null ≡ delete, so get's null uniformly means "no entry").
- * The published openbindings.key-value-store interface standardizes this
+ * The published openbindings.document-store interface standardizes this
  * same get/set/delete capability where a store sits across a wire.
  * Async because browser/persistent stores are inherently async.
  */
