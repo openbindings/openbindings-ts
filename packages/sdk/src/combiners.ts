@@ -21,8 +21,6 @@ export interface CombinedInvoker extends BindingInvoker {
   add(invoker: BindingInvoker): void;
   /** Always present on the combiner: routes to the inner invoker's preflight, or reports no requirement. */
   prepareBinding(args: BindingInvocationArgs): Promise<ContextRequiredDetails | null>;
-  /** The inner invoker registered for a binding-specification identifier (exact match), if any. */
-  find(bindingSpec: string): BindingInvoker | undefined;
 }
 
 export function combineInvokers(...invokers: BindingInvoker[]): CombinedInvoker {
@@ -43,9 +41,6 @@ export function combineInvokers(...invokers: BindingInvoker[]): CombinedInvoker 
 
   return {
     add: register,
-    find(bindingSpec: string): BindingInvoker | undefined {
-      return bySpec.get(bindingSpec);
-    },
     bindingSpecs(): BindingSpecInfo[] {
       return [...specs];
     },

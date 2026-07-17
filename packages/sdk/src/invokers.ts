@@ -6,7 +6,6 @@ import type {
   SourceInspection,
 } from "./invoker-types.js";
 import type { ContextRequiredDetails, Invocation } from "./invocation.js";
-import type { BindingPlan } from "./hooks.js";
 
 /**
  * Invokes bindings whose sources are governed by specific binding
@@ -29,16 +28,6 @@ export interface BindingInvoker {
    * no-input-consumed case.
    */
   prepareBinding?(args: BindingInvocationArgs): Promise<ContextRequiredDetails | null>;
-  /**
-   * Optional consultation-seam plan half (the Go SDK's BuiltinHooksProvider
-   * mirror): reports the axis chain leaves — what answers each wire
-   * question when every hook declines — and the per-field route answers for
-   * the binding identified by args, WITHOUT invoking. A format that does
-   * not implement it does not consult the seam, and
-   * {@link OperationInvoker.planOperation | planOperation} reports
-   * "not-consulted" leaves for it.
-   */
-  planContributions?(args: BindingInvocationArgs): BindingPlan;
 }
 
 /**

@@ -12,21 +12,24 @@
  * Each fixture drives the real selection path through the public API: the
  * fixture's `supported` set is presented by a stub BindingInvoker (the
  * candidate set is formed from the invoker's registered binding
- * specifications), and `planOperation` — which shares invoke's resolution
- * (OBI-T-12 name resolution, override, pinning, default policy) — reports
- * the selected binding key without invoking anything, exactly as the Go
- * harness observes through PlanOperation.
+ * specifications) and `invoke` runs the shared resolution (OBI-T-12 name
+ * resolution, override, pinning, default policy). Selection is decided
+ * before the binding layer runs, so the selected key is observed via the
+ * invocation-site carriage the invoke path stamps on the binding-layer args
+ * (`args.site.bindingKey`) — public contract surface, no test seam added.
  */
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { OperationInvoker } from "./operation-invoker.js";
+import { operationSignature } from "./operation-signature.js";
 import { validateDocument } from "./parse.js";
 import { BindingNotFoundError } from "./errors.js";
-import { InvocationImpl, InvocationError, type Invocation } from "./invocation.js";
+import { InvocationImpl, type Invocation } from "./invocation.js";
 import type { BindingInvoker } from "./invokers.js";
 import type { BindingInvocationArgs, InvokeOptions } from "./invoker-types.js";
+import type { InvokeSite } from "./hooks.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -62,21 +65,26 @@ interface SelectionFixtureFile {
 
 /**
  * Presents the fixture's `supported` set as its registered binding
- * specifications. Selection never invokes, so invokeBinding is a guard
- * against accidental invocation, not a mock.
+ * specifications and records the invocation site of the binding it is
+ * handed. Selection is decided before the binding layer runs, so the stub
+ * completes the invocation immediately without emitting.
  */
 class SelectionSpecStub implements BindingInvoker {
+  lastSite: InvokeSite | undefined;
+
   constructor(private readonly specs: string[]) {}
 
   bindingSpecs() {
     return this.specs.map((s) => ({ bindingSpec: s }));
   }
 
-  invokeBinding<I, O>(_args: BindingInvocationArgs): Invocation<I, O> {
-    const inv = new InvocationImpl<unknown, unknown>({});
-    inv.fireError(
-      new InvocationError("ERR_NO_MOCK", "selection corpus fixtures must not invoke bindings"),
-    );
+  invokeBinding<I, O>(args: BindingInvocationArgs): Invocation<I, O> {
+    this.lastSite = args.site;
+    const inv = new InvocationImpl<unknown, unknown>({ signal: args.signal });
+    queueMicrotask(() => {
+      void inv.closeInput();
+      inv.closeOutput();
+    });
     return inv as Invocation<I, O>;
   }
 }
@@ -99,7 +107,7 @@ describe.skipIf(!dir)("conformance corpus: operation-invoker binding selection",
 
   for (const file of files) {
     for (const tc of file.tests) {
-      it(`${file.cluster}: ${tc.description}`, () => {
+      it(`${file.cluster}: ${tc.description}`, async () => {
         // Fixture documents are complete, valid OBIs; run them through the
         // SDK's real document validation. A failure here is a corpus defect.
         const iface = validateDocument(JSON.stringify(tc.document));
@@ -117,14 +125,15 @@ describe.skipIf(!dir)("conformance corpus: operation-invoker binding selection",
           // Both error kinds — unknown explicit binding key and no invocable
           // candidate — surface as the contract-named ERR_BINDING_NOT_FOUND;
           // this SDK raises them synchronously as BindingNotFoundError.
-          expect(() => invoker.planOperation(iface, tc.operation, opts)).toThrow(
+          expect(() => invoker.invoke(iface, operationSignature(tc.operation), opts)).toThrow(
             BindingNotFoundError,
           );
           return;
         }
 
-        const plan = invoker.planOperation(iface, tc.operation, opts);
-        expect(plan.bindingKey).toBe(tc.expected.binding);
+        const call = invoker.invoke(iface, operationSignature(tc.operation), opts);
+        await call.closed;
+        expect(stub.lastSite?.bindingKey).toBe(tc.expected.binding);
       });
     }
   }
