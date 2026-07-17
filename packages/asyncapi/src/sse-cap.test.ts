@@ -3,7 +3,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { AsyncAPIInvoker } from "./invoker.js";
 import { BINDING_SPEC } from "./constants.js";
 
-// Regression coverage for spec/formats/asyncapi.md's Open points: "the
+// Regression coverage for spec/binding-specs/asyncapi/openbindings.asyncapi.md's Open points: "the
 // reference packages cap events/responses at 10 MiB per delivery unit
 // (deliberately per-unit, so long-lived subscriptions are unbounded in
 // total)". Mirrors the Go SDK's TestSSEReceiveCapIsPerEvent and

@@ -71,10 +71,10 @@ export interface Source {
 }
 
 /**
- * A JSONata 2.0 transformation expression string.
+ * A JSONata 2.1 transformation expression string.
  *
- * Per OpenBindings v0.2 §6.5, transforms are JSONata expression strings;
- * tools that evaluate transforms do so per JSONata 2.0 (OBI-T-10).
+ * Per OpenBindings v0.2 §5.5, transforms are JSONata expression strings;
+ * tools that evaluate transforms do so per JSONata 2.1 (OBI-T-10).
  */
 export type Transform = string;
 

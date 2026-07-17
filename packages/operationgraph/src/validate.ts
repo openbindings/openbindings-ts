@@ -71,6 +71,15 @@ function validateEmbeddedSchema(
   }
 }
 
+/**
+ * Checks a graph's declared `openbindings.operation-graph` edition against the
+ * range this implementation supports, returning an OG-T-02 diagnostic string
+ * or null when the version is in range.
+ *
+ * Part of the TS-first editor-support surface (see this package's README):
+ * exported to serve the planned OpenBindings headless component collection,
+ * which is TypeScript-first, and absent from the Go SDK by design.
+ */
 export function checkVersion(version: string): string | null {
   const m = SEMVER_RE.exec(version);
   if (!m) return `version "${version}" is not a SemVer 2.0.0 string`;
@@ -170,6 +179,11 @@ function presentFields(n: Node): string[] {
  * All spec-defined node fields across every node type — the universe the
  * per-type whitelists draw from. Fields outside this list (x-* extensions,
  * future spec additions) are not the validator's concern.
+ *
+ * Part of the TS-first editor-support surface (see this package's README):
+ * one of the reflection helpers exported to serve the planned OpenBindings
+ * headless component collection, which is TypeScript-first, and absent from
+ * the Go SDK by design.
  */
 export const SPEC_NODE_FIELDS: readonly string[] = SPEC_FIELDS;
 
@@ -177,12 +191,23 @@ export const SPEC_NODE_FIELDS: readonly string[] = SPEC_FIELDS;
  * The spec's field whitelist for a node type (required fields included), or
  * undefined for an unknown type. Lets editors derive which fields survive a
  * node retype instead of duplicating spec knowledge.
+ *
+ * Part of the TS-first editor-support surface (see this package's README):
+ * a reflection helper for the planned OpenBindings headless component
+ * collection, absent from the Go SDK by design.
  */
 export function allowedNodeFields(type: string): ReadonlySet<string> | undefined {
   return NODE_FIELD_RULES[type]?.allowed;
 }
 
-/** The spec's required fields for a node type, or undefined for an unknown type. */
+/**
+ * The spec's required fields for a node type, or undefined for an unknown
+ * type.
+ *
+ * Part of the TS-first editor-support surface (see this package's README):
+ * a reflection helper for the planned OpenBindings headless component
+ * collection, absent from the Go SDK by design.
+ */
 export function requiredNodeFields(type: string): readonly string[] | undefined {
   return NODE_FIELD_RULES[type]?.required;
 }

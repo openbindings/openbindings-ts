@@ -72,7 +72,10 @@ const rejectNetworkFetch: typeof globalThis.fetch = () =>
 /** Invokes AsyncAPI 3.x bindings over HTTP, SSE, and WebSocket protocols. */
 export class AsyncAPIInvoker implements BindingInvoker {
   private readonly docCache = new Map<string, AsyncAPIDocument>();
-  /** @internal */ readonly wsPool = new WSPool();
+  // Connection pooling is an implementation concern (not part of the
+  // binding-invoker contract); the pool stays fully private so it never
+  // surfaces in the package's public types, matching Go's unexported pool.
+  readonly #wsPool = new WSPool();
 
   /** Returns the binding specifications this invoker supports, by exact identifier. */
   bindingSpecs(): BindingSpecInfo[] {
@@ -85,7 +88,7 @@ export class AsyncAPIInvoker implements BindingInvoker {
    * Close discipline on resource-holding invokers.
    */
   close(): void {
-    this.wsPool.closeAll();
+    this.#wsPool.closeAll();
   }
 
   /**
@@ -166,7 +169,7 @@ export class AsyncAPIInvoker implements BindingInvoker {
       inv.fireError(new InvocationError(ERR_SOURCE_LOAD_FAILED, errorMessage(e)));
       return;
     }
-    await runBinding(args, inv, doc, this.wsPool);
+    await runBinding(args, inv, doc, this.#wsPool);
   }
 }
 
@@ -201,7 +204,7 @@ export class AsyncAPISynthesizer implements InterfaceSynthesizer, SourceInspecto
     // Content-fed synthesis: the emitted source must stay invocable. A
     // source needs location or content; with no location, dropping the
     // provided content would emit neither (mirrors the Go SDK's
-    // SynthesizeInterface, spec/formats/asyncapi.md: "A synthesized source
+    // SynthesizeInterface, spec/binding-specs/asyncapi/openbindings.asyncapi.md: "A synthesized source
     // carries the artifact (location, or embedded content when synthesized
     // from content) so it stays invocable as written.").
     if (!src.location && src.content !== undefined) {

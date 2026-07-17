@@ -782,7 +782,7 @@ export class OperationInvoker {
         await forwardHeader(inner);
         const t = terminalTrailer(inner) ?? {};
         // Per the conventions record's recommended built-in defaults
-        // (spec/formats/README.md): the unvalidated-assumption warning
+        // (spec/binding-specs/README.md): the unvalidated-assumption warning
         // rides the trailer on SUCCESS only (failures carry tier-precise
         // provenance already), keyed on the format's own decode stamp —
         // only an assumption lane can trigger it.

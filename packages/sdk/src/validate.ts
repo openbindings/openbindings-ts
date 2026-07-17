@@ -99,11 +99,11 @@ export function validateInterface(
   } else {
     try {
       if (isHigherMajorOrPre1MinorThanMaxTested(ver)) {
-        errs.push(`openbindings: "${ver}" exceeds this SDK's MaxTestedVersion "${MAX_TESTED_VERSION}" (OBI-T-04)`);
+        errs.push(`openbindings: document declares version "${ver}", newer than the latest version this implementation supports (${MAX_TESTED_VERSION}) (OBI-T-04)`);
       } else if (isLowerThanMinSupported(ver)) {
-        errs.push(`openbindings: "${ver}" is below this SDK's MinSupportedVersion "${MIN_SUPPORTED_VERSION}" (OBI-T-04)`);
+        errs.push(`openbindings: document declares version "${ver}", older than the oldest version this implementation supports (${MIN_SUPPORTED_VERSION}) (OBI-T-04)`);
       } else if (isUnsupportedPrerelease(ver)) {
-        errs.push(`openbindings: "${ver}" is a pre-release this SDK does not declare support for (OBI-T-04)`);
+        errs.push(`openbindings: document declares version "${ver}", a pre-release this implementation does not support (OBI-T-04)`);
       }
     } catch (err) {
       errs.push(`openbindings: ${(err as Error).message} (OBI-T-04)`);

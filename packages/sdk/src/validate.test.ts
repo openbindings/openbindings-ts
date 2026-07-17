@@ -279,7 +279,7 @@ describe("validateInterface", () => {
   });
 
   it("catches non-string inline transform", () => {
-    // Per v0.2 §6.5, inline transforms are JSONata expression strings.
+    // Per v0.2 §5.5, inline transforms are JSONata expression strings.
     const iface = minimalInterface();
     iface.bindings!["getUser.main"] = {
       ...iface.bindings!["getUser.main"],
@@ -524,7 +524,7 @@ describe("validateInterface example validation edge cases (OBI-D-11)", () => {
 describe("OBI-T-04 downward refusal", () => {
   it("refuses a document below MIN_SUPPORTED_VERSION", () => {
     expect(() => validateInterface({ openbindings: "0.1.0", operations: {} }))
-      .toThrowError(/below this SDK's MinSupportedVersion "0\.2\.0" \(OBI-T-04\)/);
+      .toThrowError(/older than the oldest version this implementation supports \(0\.2\.0\) \(OBI-T-04\)/);
   });
 });
 

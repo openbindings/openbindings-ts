@@ -569,7 +569,7 @@ function siteFor(args: BindingInvocationArgs, baseURL: string): InvokeSite {
 /**
  * Builds the x-ob-decode/x-ob-classify success stamps (the provenance the
  * conventions record's recommended built-in defaults call for,
- * spec/formats/README.md) for the HTTP lane, given the decode axis's
+ * spec/binding-specs/README.md) for the HTTP lane, given the decode axis's
  * builtin provenance token. A hook decision on either axis stamps "hook".
  */
 function decodeClassifyTrailer(hooks: InvokeHooks | null | undefined, builtinDecode: string): Metadata {
