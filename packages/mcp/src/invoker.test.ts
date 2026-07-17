@@ -545,3 +545,115 @@ describe("MCPSynthesizer", () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// Pinned-listing synthesis and inspection (MCP-D-01, §6 content primacy)
+// ---------------------------------------------------------------------------
+
+describe("MCPSynthesizer pinned listings", () => {
+  const pin = {
+    tools: [
+      {
+        name: "get_weather",
+        description: "Get weather",
+        inputSchema: { type: "object", properties: { city: { type: "string" } } },
+      },
+    ],
+    resources: [{ uri: "app://status", name: "status", description: "Application status" }],
+    resourceTemplates: [{ uriTemplate: "file:///{path}", name: "file" }],
+    prompts: [{ name: "greet", arguments: [{ name: "name", required: true }] }],
+  };
+
+  it("synthesizes OFFLINE from a pinned listing: the server is never dialed", async () => {
+    const { fn, fetches } = discoveryServer();
+    const iface = await new MCPSynthesizer({ fetch: fn }).synthesizeInterface({
+      sources: [{ bindingSpec: "openbindings.mcp@1", location: ENDPOINT, content: pin }],
+    });
+
+    expect(Object.keys(iface.operations).sort()).toEqual(["file", "get_weather", "greet", "status"]);
+    expect(iface.bindings!["get_weather.mcpServer"].ref).toBe("tools/get_weather");
+    expect(iface.bindings!["status.mcpServer"].ref).toBe("resources/app://status");
+    expect(iface.bindings!["file.mcpServer"].ref).toBe("resources/file:///{path}");
+    expect(iface.bindings!["greet.mcpServer"].ref).toBe("prompts/greet");
+    expect(iface.operations.get_weather.input).toEqual(pin.tools[0].inputSchema);
+    expect((iface.operations.greet.input as { required?: string[] }).required).toEqual(["name"]);
+    expect(iface.sources!.mcpServer.location).toBe(ENDPOINT);
+
+    expect(fetches()).toBe(0); // pin-authoritative: zero network dials
+  });
+
+  it("inspects OFFLINE from a pinned listing, previewing the keys pinned synthesis assigns", async () => {
+    const { fn, fetches } = discoveryServer();
+    const inspection = await new MCPSynthesizer({ fetch: fn }).inspectSource({
+      bindingSpec: "openbindings.mcp@1",
+      location: ENDPOINT,
+      content: pin,
+    });
+
+    expect(inspection.exhaustive).toBe(true);
+    const keys = Object.fromEntries(inspection.targets.map((t) => [t.ref, t.operationKey]));
+    expect(keys).toEqual({
+      "tools/get_weather": "get_weather",
+      "resources/app://status": "status",
+      "resources/file:///{path}": "file",
+      "prompts/greet": "greet",
+    });
+
+    expect(fetches()).toBe(0);
+  });
+
+  it("refuses an invalid pin loudly before any I/O (grammar and entity shapes)", async () => {
+    const { fn, fetches } = discoveryServer();
+    const synthesizer = new MCPSynthesizer({ fetch: fn });
+
+    const invalid: Array<[string, unknown]> = [
+      ["stray nextCursor", { tools: [{ name: "probe" }], nextCursor: "page2" }],
+      ["non-object content", "not a listing"],
+      ["entry missing identity", { tools: [{ description: "no name" }] }],
+      ["entity shape mismatch", { tools: [{ name: "probe", description: 5 }] }],
+      ["bad prompt arguments", { prompts: [{ name: "p", arguments: "nope" }] }],
+    ];
+    for (const [, content] of invalid) {
+      await expect(
+        synthesizer.synthesizeInterface({
+          sources: [{ bindingSpec: "openbindings.mcp@1", location: ENDPOINT, content }],
+        }),
+      ).rejects.toThrow(/MCP-D-01/);
+      await expect(
+        synthesizer.inspectSource({ bindingSpec: "openbindings.mcp@1", location: ENDPOINT, content }),
+      ).rejects.toThrow(/MCP-D-01/);
+    }
+
+    expect(fetches()).toBe(0);
+  });
+
+  it("content does not waive MCP-D-02: a pinned source still requires the location", async () => {
+    const { fn, fetches } = discoveryServer();
+    const synthesizer = new MCPSynthesizer({ fetch: fn });
+
+    await expect(
+      synthesizer.synthesizeInterface({
+        sources: [{ bindingSpec: "openbindings.mcp@1", content: pin }],
+      }),
+    ).rejects.toThrow(/MCP-D-02/);
+    await expect(
+      synthesizer.inspectSource({ bindingSpec: "openbindings.mcp@1", content: pin }),
+    ).rejects.toThrow(/MCP-D-02/);
+
+    expect(fetches()).toBe(0);
+  });
+
+  it("absent content still dials live", async () => {
+    const { fn, fetches } = discoveryServer();
+    const synthesizer = new MCPSynthesizer({ fetch: fn });
+
+    await synthesizer.synthesizeInterface({
+      sources: [{ bindingSpec: "openbindings.mcp@1", location: ENDPOINT }],
+    });
+    expect(fetches()).toBeGreaterThan(0);
+
+    const before = fetches();
+    await synthesizer.inspectSource({ bindingSpec: "openbindings.mcp@1", location: ENDPOINT });
+    expect(fetches()).toBeGreaterThan(before);
+  });
+});

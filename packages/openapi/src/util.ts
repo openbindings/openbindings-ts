@@ -5,10 +5,16 @@ import yaml from "js-yaml";
 
 const NON_KEY_CHARS = /[^a-zA-Z0-9._-]/g;
 
-/** Replaces non-alphanumeric characters in a name with underscores to produce a valid key. */
+/**
+ * Replaces non-alphanumeric characters in a name with underscores to produce
+ * a valid key. The result always matches the OBI-D-03 identifier pattern
+ * ^[A-Za-z_][A-Za-z0-9_.-]*$: keys that would start with a digit, '.', or
+ * '-' are prefixed with an underscore (Go parity: SanitizeKey).
+ */
 export function sanitizeKey(name: string): string {
   const key = name.replace(NON_KEY_CHARS, "_").replace(/^_+|_+$/g, "");
-  return key || "unnamed";
+  if (!key) return "unnamed";
+  return /^[A-Za-z_]/.test(key) ? key : `_${key}`;
 }
 
 /** Returns the key as-is if unused, otherwise appends a numeric suffix to make it unique. */

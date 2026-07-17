@@ -16,8 +16,15 @@ import {
   type SourceInspector,
 } from "@openbindings/sdk";
 import { BINDING_SPEC } from "./constants.js";
-import { runMCPBinding } from "./invoke.js";
-import { discover, convertToInterface, sanitizeKey, resolveKey } from "./synthesize.js";
+import { runMCPBinding, validateEndpoint } from "./invoke.js";
+import {
+  discover,
+  convertToInterface,
+  pinnedDiscovery,
+  sanitizeKey,
+  resolveKey,
+  type MCPDiscovery,
+} from "./synthesize.js";
 
 // ---------------------------------------------------------------------------
 // Invoker
@@ -113,6 +120,14 @@ export class MCPSynthesizer implements InterfaceSynthesizer, SourceInspector {
     return [{ bindingSpec: BINDING_SPEC, description: "MCP via Streamable HTTP" }];
   }
 
+  /**
+   * Converts an MCP server's capabilities to an OBInterface. A source
+   * carrying content is a pinned listing (MCP-D-01): the pin is the
+   * artifact (§6 content primacy), synthesis is offline, and the server is
+   * never dialed — MCP-D-02 still requires the location (content does not
+   * waive it), and an invalid pin is refused loudly before any I/O.
+   * Without content, discovery connects live.
+   */
   async synthesizeInterface(
     input: SynthesizeInput,
     options?: { signal?: AbortSignal },
@@ -124,11 +139,17 @@ export class MCPSynthesizer implements InterfaceSynthesizer, SourceInspector {
       throw new MultipleSourcesError();
     }
     const src = input.sources[0];
-    if (!src.location) {
-      throw new Error("MCP source requires a location (endpoint URL)");
-    }
 
-    const disc = await discover(src.location, { signal: options?.signal, fetch: this.fetchImpl });
+    let disc: MCPDiscovery;
+    if (src.content !== undefined) {
+      validateEndpoint(src.location);
+      disc = pinnedDiscovery(src.content);
+    } else {
+      if (!src.location) {
+        throw new Error("MCP source requires a location (endpoint URL)");
+      }
+      disc = await discover(src.location, { signal: options?.signal, fetch: this.fetchImpl });
+    }
     const iface = convertToInterface(disc, src.location);
     if (input.name) iface.name = input.name;
     if (input.version) iface.version = input.version;
@@ -137,19 +158,29 @@ export class MCPSynthesizer implements InterfaceSynthesizer, SourceInspector {
   }
 
   /**
-   * Lists all bindable targets (tools, resources, prompts) from an MCP
-   * server. Each target's operationKey is the same SanitizeKey +
-   * collision-resolved key synthesizeInterface would assign it (one
-   * usedKeys map shared across all four entity kinds, in the same
-   * tools/resources/resourceTemplates/prompts order convertToInterface
-   * uses), so an inspection previews exactly what synthesis names.
+   * Lists all bindable targets (tools, resources, prompts). Each target's
+   * operationKey is the same SanitizeKey + collision-resolved key
+   * synthesizeInterface would assign it (one usedKeys map shared across all
+   * four entity kinds, in the same tools/resources/resourceTemplates/prompts
+   * order convertToInterface uses), so an inspection previews exactly what
+   * synthesis names. A source carrying content is a pinned listing
+   * (MCP-D-01): inspection reads the pin offline (§6 content primacy) and
+   * the server is never dialed — MCP-D-02 still requires the location, and
+   * an invalid pin is refused loudly before any I/O. Without content,
+   * discovery connects live.
    */
   async inspectSource(
     source: Source,
     options?: { signal?: AbortSignal },
   ): Promise<SourceInspection> {
-    if (!source.location) throw new Error("MCP source requires a location (endpoint URL)");
-    const disc = await discover(source.location, { signal: options?.signal, fetch: this.fetchImpl });
+    let disc: MCPDiscovery;
+    if (source.content !== undefined) {
+      validateEndpoint(source.location);
+      disc = pinnedDiscovery(source.content);
+    } else {
+      if (!source.location) throw new Error("MCP source requires a location (endpoint URL)");
+      disc = await discover(source.location, { signal: options?.signal, fetch: this.fetchImpl });
+    }
     const targets: SourceInspection["targets"] = [];
     const usedKeys = new Map<string, string>();
 

@@ -205,7 +205,11 @@ function unionToJSONSchema(name: string, tm: TypeMap, visited: Set<string>): Rec
  * previews exactly what synthesis would name (Go parity: list_refs.go
  * reuses the same collision-resolution helpers SynthesizeInterface uses). */
 export function sanitizeKey(name: string): string {
-  return name.replace(/[^a-zA-Z0-9._-]/g, "_").replace(/^_+|_+$/g, "") || "unnamed";
+  const key = name.replace(/[^a-zA-Z0-9._-]/g, "_").replace(/^_+|_+$/g, "");
+  if (!key) return "unnamed";
+  // OBI-D-03 requires the first character to be a letter or underscore
+  // (Go parity: SanitizeKey).
+  return /^[A-Za-z_]/.test(key) ? key : `_${key}`;
 }
 
 export function resolveKey(key: string, entityType: string, used: Map<string, string>): string {
