@@ -23,6 +23,7 @@ import {
   ERR_EXPECTED_SINGLE,
   ERR_INPUT_CLOSED,
   ERR_INVOCATION_CLOSED,
+  ERR_TIMEOUT,
 } from "./errcodes.js";
 import type { InvocationErrorCode } from "./errcodes.js";
 import { type Category, type Effects, categoryForCode, defaultEffectsForCode } from "./classification.js";
@@ -68,6 +69,35 @@ export class InvocationError extends Error {
     if (eff !== undefined) this.effects = eff;
     if (details !== undefined) this.details = details;
   }
+}
+
+/**
+ * True when an abort `reason` denotes a lifetime DEADLINE rather than a manual
+ * cancel. `AbortSignal.timeout()` aborts with a `DOMException` named
+ * `"TimeoutError"` (WHATWG); a manual `controller.abort()` / handle `cancel()`
+ * does not. Duck-typed on the reason's `name` so it holds across runtimes and
+ * polyfills, not only where the global `DOMException` constructor is present.
+ */
+function isTimeoutReason(reason: unknown): boolean {
+  return (
+    typeof reason === "object" &&
+    reason !== null &&
+    (reason as { name?: unknown }).name === "TimeoutError"
+  );
+}
+
+/**
+ * Map an abort into its terminal error, mirroring the Go SDK's `ctx.Err()`
+ * branch. A deadline (`AbortSignal.timeout()`) is a TIMEOUT — transient /
+ * effects: possible, because a deadline can fire after outputs have flowed, so
+ * the honest retry-safety answer is "may have executed". Any other abort (a
+ * caller-initiated `cancel()`) is `ERR_CANCELLED`. The InvocationError
+ * constructor stamps category and effects from the code.
+ */
+function abortToTerminal(reason: unknown): InvocationError {
+  return isTimeoutReason(reason)
+    ? new InvocationError(ERR_TIMEOUT, "invocation deadline exceeded")
+    : new InvocationError(ERR_CANCELLED, "invocation cancelled");
 }
 
 /**
@@ -487,7 +517,9 @@ export class InvocationImpl<I = unknown, O = unknown>
             // before it aborts the controller, so every signal listener observes
             // settled state (the documented terminal-state invariant). Aborting
             // here, ahead of fireError, would fire the signal mid-transition.
-            this.fireError(new InvocationError(ERR_CANCELLED, "invocation cancelled"));
+            // A deadline (AbortSignal.timeout) is ERR_TIMEOUT, a manual cancel
+            // is ERR_CANCELLED — distinguished by the abort reason.
+            this.fireError(abortToTerminal(opts.signal!.reason));
             // Propagate the external reason onto the (already-aborted) internal
             // controller; abort is idempotent so this does not re-fire the signal.
             this.controller.abort(opts.signal!.reason);
@@ -498,9 +530,11 @@ export class InvocationImpl<I = unknown, O = unknown>
     }
 
     // An already-aborted external signal transitions immediately; without
-    // this the invocation would sit "open" with an aborted controller.
+    // this the invocation would sit "open" with an aborted controller. The
+    // reason (propagated from the external signal above) decides deadline vs.
+    // cancel, just like the live-abort listener.
     if (this.controller.signal.aborted) {
-      this.fireError(new InvocationError(ERR_CANCELLED, "invocation cancelled"));
+      this.fireError(abortToTerminal(this.controller.signal.reason));
     }
   }
 

@@ -4,6 +4,18 @@
 
 ### Changed
 
+- **A mid-stream deadline is now classified `ERR_TIMEOUT` (transient / effects:
+  possible), deterministically and uniformly across formats, rather than
+  `ERR_CANCELLED` — restoring the retry-safety signal.** An explicit caller
+  cancel remains `ERR_CANCELLED`. The invocation handle now distinguishes an
+  `AbortSignal.timeout()` abort (whose reason is a `DOMException` named
+  `"TimeoutError"`) from a manual `cancel()`/abort: a timeout-reason abort fires
+  `ERR_TIMEOUT` (a deadline may fire after outputs have flowed, so retry-safety
+  is "may have executed"), any other abort fires `ERR_CANCELLED`. This mirrors
+  the Go SDK's `ctx.Err()` branch (`DeadlineExceeded` → `ERR_TIMEOUT`,
+  `Canceled` → `ERR_CANCELLED`) for cross-SDK parity of code, category, and
+  effects.
+
 - **`isSupportedVersion` now answers OBI-T-04 acceptance (patch-lenient within a
   supported minor line), matching `validateInterface`/`parseDocument`;
   previously it was the strict tested-range check.** A 0.2.0 SDK now returns
