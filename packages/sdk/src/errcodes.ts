@@ -102,6 +102,14 @@ export const ERR_STREAM_ERROR = "ERR_STREAM_ERROR";
 /** Operation timed out. */
 export const ERR_TIMEOUT = "ERR_TIMEOUT";
 
+/**
+ * The service was reached but refused the request as retryable (e.g. HTTP
+ * 429/502/503, gRPC `UNAVAILABLE`/`RESOURCE_EXHAUSTED`). Distinct from
+ * {@link ERR_CONNECT_FAILED} in that the server answered. Retryable with
+ * backoff; `effects` is `"none"` when the refusal proves non-execution.
+ */
+export const ERR_UNAVAILABLE = "ERR_UNAVAILABLE";
+
 /** No binding found for the requested operation. */
 export const ERR_BINDING_NOT_FOUND = "ERR_BINDING_NOT_FOUND";
 
@@ -192,6 +200,7 @@ export type InvocationErrorCode =
   | typeof ERR_RESPONSE_ERROR
   | typeof ERR_STREAM_ERROR
   | typeof ERR_TIMEOUT
+  | typeof ERR_UNAVAILABLE
   | typeof ERR_BINDING_NOT_FOUND
   | typeof ERR_TRANSFORM_ERROR
   | typeof ERR_VALIDATION_FAILED
@@ -203,11 +212,36 @@ export type InvocationErrorCode =
   | typeof ERR_UNSUPPORTED_FORMAT_VERSION;
 
 /**
- * Maps an HTTP status code to a standard error code.
- * Shared utility for format invokers that handle HTTP responses.
+ * Maps an HTTP status code to a standard error code, per the binding-invoker
+ * interface's "Transport status mapping" table (the pinned mapping every
+ * conforming invoker agrees on). Shared utility for format invokers that handle
+ * HTTP responses.
+ *
+ * - `401` → {@link ERR_AUTH_REQUIRED} (auth)
+ * - `403` → {@link ERR_PERMISSION_DENIED} (auth)
+ * - `408`, `504` → {@link ERR_TIMEOUT} (transient)
+ * - `429`, `502`, `503` → {@link ERR_UNAVAILABLE} (transient, retry with backoff)
+ * - every other `4xx`/`5xx` → {@link ERR_EXECUTION_FAILED} (service — reached
+ *   the server and refused on its merits, so do not blind-retry)
+ *
+ * The numeric status rides in the error's `details` so callers can still branch
+ * on 404, 422, and the like. The `effects` marker is set separately by
+ * {@link httpErrorEffects} from how far the exchange got.
  */
 export function httpErrorCode(status: number): string {
-  if (status === 401) return ERR_AUTH_REQUIRED;
-  if (status === 403) return ERR_PERMISSION_DENIED;
-  return ERR_EXECUTION_FAILED;
+  switch (status) {
+    case 401:
+      return ERR_AUTH_REQUIRED;
+    case 403:
+      return ERR_PERMISSION_DENIED;
+    case 408:
+    case 504:
+      return ERR_TIMEOUT;
+    case 429:
+    case 502:
+    case 503:
+      return ERR_UNAVAILABLE;
+    default:
+      return ERR_EXECUTION_FAILED;
+  }
 }

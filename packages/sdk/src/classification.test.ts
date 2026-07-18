@@ -13,7 +13,16 @@ import {
   type Category,
 } from "./classification.js";
 import { InvocationError } from "./invocation.js";
-import { ERR_CONNECT_FAILED, ERR_TIMEOUT, ERR_VALIDATION_FAILED } from "./errcodes.js";
+import {
+  ERR_AUTH_REQUIRED,
+  ERR_CONNECT_FAILED,
+  ERR_EXECUTION_FAILED,
+  ERR_PERMISSION_DENIED,
+  ERR_TIMEOUT,
+  ERR_UNAVAILABLE,
+  ERR_VALIDATION_FAILED,
+  httpErrorCode,
+} from "./errcodes.js";
 
 // Transcribed VERBATIM from the binding-invoker README "Standard error codes"
 // registry — the independent source of truth. If CODE_CATEGORY drifts from the
@@ -39,6 +48,7 @@ const README_CATEGORIES: Record<string, Category> = {
   ERR_RESPONSE_ERROR: "service",
   ERR_STREAM_ERROR: "transient",
   ERR_TIMEOUT: "transient",
+  ERR_UNAVAILABLE: "transient",
   ERR_OPERATION_NOT_FOUND: "permanent",
   ERR_UNKNOWN_SOURCE: "permanent",
   ERR_TRANSFORM_ERROR: "validation",
@@ -100,6 +110,54 @@ describe("effects at dispatch-aware sites", () => {
     expect(httpErrorEffects(500)).toBeUndefined();
     expect(httpErrorEffects(404)).toBeUndefined();
     expect(httpErrorEffects(401)).toBeUndefined();
+  });
+});
+
+// The binding-invoker "Transport status mapping" table, transcribed VERBATIM:
+// status → code → category, pinned so the HTTP mapper cannot drift from the
+// contract. MUST agree with the Go SDK's HTTPErrorCode.
+describe("HTTP status → code → category (transport status mapping)", () => {
+  const cases: Array<[number, string, Category]> = [
+    [401, ERR_AUTH_REQUIRED, "auth"],
+    [403, ERR_PERMISSION_DENIED, "auth"],
+    [408, ERR_TIMEOUT, "transient"],
+    [504, ERR_TIMEOUT, "transient"],
+    [429, ERR_UNAVAILABLE, "transient"],
+    [502, ERR_UNAVAILABLE, "transient"],
+    [503, ERR_UNAVAILABLE, "transient"],
+    [400, ERR_EXECUTION_FAILED, "service"],
+    [404, ERR_EXECUTION_FAILED, "service"],
+    [422, ERR_EXECUTION_FAILED, "service"],
+    [418, ERR_EXECUTION_FAILED, "service"],
+    [500, ERR_EXECUTION_FAILED, "service"],
+    [599, ERR_EXECUTION_FAILED, "service"],
+  ];
+
+  it("maps each status to its pinned code and category", () => {
+    for (const [status, code, category] of cases) {
+      expect(httpErrorCode(status), `httpErrorCode(${status})`).toBe(code);
+      expect(categoryForCode(httpErrorCode(status)), `category for ${status}`).toBe(category);
+    }
+  });
+
+  it("wires effects end-to-end from the HTTP emission site", () => {
+    // The emission site (openapi/asyncapi/mcp/graphql invokers) constructs
+    // InvocationError(httpErrorCode(s), msg, { status: s }, httpErrorEffects(s)).
+    const at = (status: number) =>
+      new InvocationError(httpErrorCode(status), `HTTP ${status}`, { status }, httpErrorEffects(status));
+
+    // Refused-before-execution: safe to backoff-retry.
+    expect(at(429).effects).toBe("none");
+    expect(at(503).effects).toBe("none");
+    // 502 may already have executed → unset (consumer reads absent as possible).
+    expect(at(502).effects).toBeUndefined();
+    // Timeouts dispatched → possible (from the ERR_TIMEOUT default).
+    expect(at(408).effects).toBe("possible");
+    expect(at(504).effects).toBe("possible");
+    // A plain 5xx that may have executed → unset.
+    expect(at(500).effects).toBeUndefined();
+    // Auth carries no effects.
+    expect(at(401).effects).toBeUndefined();
   });
 });
 
