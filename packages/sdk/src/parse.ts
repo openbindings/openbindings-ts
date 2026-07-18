@@ -2,14 +2,7 @@ import type { OBInterface } from "./types.js";
 import { ValidationError } from "./errors.js";
 import { validateAgainstOBISchema } from "./schema-validation.js";
 import { validateInterface, type ValidateOptions } from "./validate.js";
-import {
-  isValidSemver,
-  isHigherMajorOrPre1MinorThanMaxTested,
-  isLowerThanMinSupported,
-  isUnsupportedPrerelease,
-  MAX_TESTED_VERSION,
-  MIN_SUPPORTED_VERSION,
-} from "./version.js";
+import { isValidSemver, versionRefusalReason } from "./version.js";
 
 /**
  * Parses an OBI document from JSON and validates it against
@@ -65,23 +58,12 @@ export function parseDocument(input: string | Uint8Array): OBInterface {
   const ver = ((parsed as Record<string, unknown>)?.openbindings as string ?? "").trim();
   if (ver && isValidSemver(ver)) {
     try {
-      if (isHigherMajorOrPre1MinorThanMaxTested(ver)) {
-        throw new ValidationError([
-          `openbindings: document declares version "${ver}", newer than the latest version this implementation supports (${MAX_TESTED_VERSION}) (OBI-T-04)`,
-        ]);
-      }
-      // The refusal runs downward too (below MinSupported; pre-1.0 lower
-      // minor), and prereleases refuse absent declared support — the same
-      // gates validateInterface applies, with identical messages.
-      if (isLowerThanMinSupported(ver)) {
-        throw new ValidationError([
-          `openbindings: document declares version "${ver}", older than the oldest version this implementation supports (${MIN_SUPPORTED_VERSION}) (OBI-T-04)`,
-        ]);
-      }
-      if (isUnsupportedPrerelease(ver)) {
-        throw new ValidationError([
-          `openbindings: document declares version "${ver}", a pre-release this implementation does not support (OBI-T-04)`,
-        ]);
+      // Same ordered accept/refuse decision (upward, downward, and unsupported
+      // prereleases) validateInterface and isSupportedVersion make, via the
+      // shared versionRefusalReason predicate, with identical messages.
+      const reason = versionRefusalReason(ver);
+      if (reason) {
+        throw new ValidationError([`openbindings: ${reason} (OBI-T-04)`]);
       }
     } catch (err) {
       if (err instanceof ValidationError) throw err;
