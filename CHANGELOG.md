@@ -4,6 +4,18 @@
 
 ### Changed
 
+- **`isSupportedVersion` now answers OBI-T-04 acceptance (patch-lenient within a
+  supported minor line), matching `validateInterface`/`parseDocument`;
+  previously it was the strict tested-range check.** A 0.2.0 SDK now returns
+  `true` for `0.2.1`, `0.2.99`, etc. — the versions `validateInterface`/
+  `parseDocument` actually process — and continues to return `false` for a
+  different major, a pre-1.0 different minor, and unsupported prereleases. The
+  oracle now shares the single refusal predicate the validation paths use, so it
+  cannot drift from them. `MIN_SUPPORTED_VERSION`/`MAX_TESTED_VERSION`/
+  `supportedRange()` are unchanged and remain the maintainer-*tested* range — a
+  distinct, narrower notion (a version can be accepted without being inside the
+  tested range).
+
 - **BREAKING: `@openbindings/openapi` conformance to the published
   `openbindings.openapi@1` binding specification** (parity with the Go SDK's
   `formats/openapi` conformance change). The invoker now implements the

@@ -6,13 +6,49 @@ export function supportedRange(): { min: string; max: string } {
   return { min: MIN_SUPPORTED_VERSION, max: MAX_TESTED_VERSION };
 }
 
+/**
+ * Reports whether this SDK will ACCEPT (process rather than refuse) a document
+ * declaring OpenBindings version `v` — the OBI-T-04 acceptance question, not a
+ * tested-range membership test. Returns true iff `validateInterface` /
+ * `parseDocument` would NOT emit a version refusal for `v`: a different major is
+ * refused; while pre-1.0 a different minor is refused; a higher or lower PATCH
+ * is never a refusal; a prerelease is accepted only when explicitly supported.
+ * So a 0.2.0 SDK accepts 0.2.1, 0.2.99, etc. and refuses 0.1.x / 0.3.x.
+ *
+ * This is distinct from — and wider than — the maintainer-tested range reported
+ * by {@link MIN_SUPPORTED_VERSION} / {@link MAX_TESTED_VERSION} /
+ * {@link supportedRange}: a version can be accepted without being inside the
+ * tested range. It shares the single refusal predicate
+ * ({@link versionRefusalReason}) the validation paths use, so the oracle cannot
+ * drift from the actual accept/refuse decision. A malformed (non-SemVer) `v` is
+ * refused (returns false).
+ */
 export function isSupportedVersion(v: string): boolean {
-  const parsed = parseSemverStrict(v);
-  if (!parsed) return false;
-  return (
-    compareSemver(parsed, parseSemverStrict(MIN_SUPPORTED_VERSION)!) >= 0 &&
-    compareSemver(parsed, parseSemverStrict(MAX_TESTED_VERSION)!) <= 0
-  );
+  if (!isValidSemver(v)) return false;
+  return versionRefusalReason(v) === undefined;
+}
+
+/**
+ * The single OBI-T-04 accept/refuse evaluation shared by `validateInterface`,
+ * `parseDocument`, and {@link isSupportedVersion}, so the diagnostic path and
+ * the acceptance oracle consult the same ordered predicate chain and cannot
+ * diverge. Returns the diagnostic core — to which callers add the
+ * `openbindings:` prefix and `(OBI-T-04)` suffix — when this SDK MUST refuse to
+ * process a document declaring SemVer version `v`, or `undefined` when the SDK
+ * accepts it. `v` MUST be well-formed SemVer (callers gate on
+ * {@link isValidSemver} / the schema pattern first); throws otherwise.
+ */
+export function versionRefusalReason(v: string): string | undefined {
+  if (isHigherMajorOrPre1MinorThanMaxTested(v)) {
+    return `document declares version "${v}", newer than the latest version this implementation supports (${MAX_TESTED_VERSION})`;
+  }
+  if (isLowerThanMinSupported(v)) {
+    return `document declares version "${v}", older than the oldest version this implementation supports (${MIN_SUPPORTED_VERSION})`;
+  }
+  if (isUnsupportedPrerelease(v)) {
+    return `document declares version "${v}", a pre-release this implementation does not support`;
+  }
+  return undefined;
 }
 
 /**

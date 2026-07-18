@@ -1,13 +1,6 @@
 import type { OBInterface, Transform, TransformOrRef } from "./types.js";
 import { isTransformRef } from "./types.js";
-import {
-  isValidSemver,
-  isHigherMajorOrPre1MinorThanMaxTested,
-  isLowerThanMinSupported,
-  isUnsupportedPrerelease,
-  MAX_TESTED_VERSION,
-  MIN_SUPPORTED_VERSION,
-} from "./version.js";
+import { isValidSemver, versionRefusalReason } from "./version.js";
 import { ValidationError } from "./errors.js";
 import {
   validateAgainstOBISchema,
@@ -98,13 +91,8 @@ export function validateInterface(
     errs.push(`openbindings: "${ver}" is not a valid SemVer 2.0.0 string (OBI-D-12)`);
   } else {
     try {
-      if (isHigherMajorOrPre1MinorThanMaxTested(ver)) {
-        errs.push(`openbindings: document declares version "${ver}", newer than the latest version this implementation supports (${MAX_TESTED_VERSION}) (OBI-T-04)`);
-      } else if (isLowerThanMinSupported(ver)) {
-        errs.push(`openbindings: document declares version "${ver}", older than the oldest version this implementation supports (${MIN_SUPPORTED_VERSION}) (OBI-T-04)`);
-      } else if (isUnsupportedPrerelease(ver)) {
-        errs.push(`openbindings: document declares version "${ver}", a pre-release this implementation does not support (OBI-T-04)`);
-      }
+      const reason = versionRefusalReason(ver);
+      if (reason) errs.push(`openbindings: ${reason} (OBI-T-04)`);
     } catch (err) {
       errs.push(`openbindings: ${(err as Error).message} (OBI-T-04)`);
     }
