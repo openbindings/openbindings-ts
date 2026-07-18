@@ -3,12 +3,15 @@
  * operation-graph corpus unmodified (execution fixtures with mocked
  * per-invocation operation behavior, and the OG-V validation fixtures).
  *
- * The corpus is located via OB_SPEC_CORPUS or the local-dev sibling path
- * (openbindings/spec next to openbindings/openbindings-ts); the suite skips
+ * The corpus ROOT is located via OB_SPEC_CORPUS (the spec repo's
+ * conformance/ directory, the convention shared by every other format
+ * harness) or the local-dev sibling path (openbindings/spec next to
+ * openbindings/openbindings-ts); this engine's fixtures live under the
+ * operation-graph subcorpus, which the adapter appends. The suite skips
  * when it is absent.
  */
 import { existsSync, readFileSync, readdirSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
 import jsonata from "jsonata";
@@ -36,8 +39,14 @@ import type { Graph } from "./types.js";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 function corpusDir(): string | null {
-  if (process.env.OB_SPEC_CORPUS) return process.env.OB_SPEC_CORPUS;
-  const dir = resolve(__dirname, "..", "..", "..", "..", "spec", "conformance", "operation-graph");
+  // OB_SPEC_CORPUS names the conformance corpus ROOT (the convention shared
+  // by every other format harness); this engine's fixtures live under the
+  // operation-graph subcorpus, which the adapter appends. Tolerate an env var
+  // that already points at the subpath (an older invocation) so both resolve.
+  const root =
+    process.env.OB_SPEC_CORPUS ??
+    resolve(__dirname, "..", "..", "..", "..", "spec", "conformance");
+  const dir = basename(root) === "operation-graph" ? root : join(root, "operation-graph");
   return existsSync(dir) ? dir : null;
 }
 
