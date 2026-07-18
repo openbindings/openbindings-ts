@@ -179,13 +179,18 @@ class MockBindingInvoker {
       );
       return;
     }
+    // Emit any events first, so emit-then-fail fixtures (e.g. OG-EX-36)
+    // produce their outputs before the terminal error — matching the Go
+    // corpus mock and the JS reference runner.
+    if (resp.emit) {
+      try {
+        for (const v of resp.emit) await handle.emitOutput(v);
+      } catch {
+        return;
+      }
+    }
     if (resp.fail !== undefined) {
       handle.fireError(new InvocationError(resp.fail, resp.fail));
-      return;
-    }
-    try {
-      for (const v of resp.emit!) await handle.emitOutput(v);
-    } catch {
       return;
     }
     handle.closeOutput();
