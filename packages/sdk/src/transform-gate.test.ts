@@ -47,9 +47,13 @@ async function evalOutcome(expr: string, input: unknown): Promise<Outcome> {
 const dir = corpusDir();
 
 describe.skipIf(dir === null)("transform differential-conformance gate (agree)", () => {
-  const files = readdirSync(dir!).filter((f) => f.endsWith(".json"));
+  // skipIf marks the tests skipped, but this callback still RUNS at
+  // collection time — without the corpus checkout the filesystem reads
+  // below would crash the suite instead of skipping it.
+  if (dir === null) return;
+  const files = readdirSync(dir).filter((f) => f.endsWith(".json"));
   const cases: Case[] = files.flatMap(
-    (f) => (JSON.parse(readFileSync(join(dir!, f), "utf8")).cases ?? []) as Case[],
+    (f) => (JSON.parse(readFileSync(join(dir, f), "utf8")).cases ?? []) as Case[],
   );
 
   it("loaded agree cases", () => {
