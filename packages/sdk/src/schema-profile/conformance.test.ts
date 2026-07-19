@@ -69,8 +69,9 @@ interface OBOperation {
  * as selection-corpus.test.ts.
  */
 function corpusDir(): string | null {
-  if (process.env.OB_INTERFACES_CORPUS) return process.env.OB_INTERFACES_CORPUS;
-  const dir = resolve(__dirname, "..", "..", "..", "..", "..", "interfaces", "conformance");
+  const dir =
+    process.env.OB_INTERFACES_CORPUS ??
+    resolve(__dirname, "..", "..", "..", "..", "..", "interfaces", "conformance");
   return existsSync(dir) ? dir : null;
 }
 
@@ -251,6 +252,16 @@ const dir = corpusDir();
 const comparisonDir = dir ? join(dir, "comparison") : null;
 const manifestPath = comparisonDir ? join(comparisonDir, "manifest.json") : null;
 const fixturesAvailable = manifestPath !== null && existsSync(manifestPath);
+
+// OB_CORPUS_REQUIRED (set in CI) turns a missing corpus into a hard failure
+// so a mis-wired path or missing checkout turns CI red instead of silently
+// green; unset (local dev) the suite still skips.
+if (!fixturesAvailable && process.env.OB_CORPUS_REQUIRED) {
+  throw new Error(
+    "comparison conformance corpus required (OB_CORPUS_REQUIRED is set) but not located; " +
+      "set OB_INTERFACES_CORPUS to the interfaces repo's conformance dir",
+  );
+}
 
 describe.skipIf(!fixturesAvailable)("comparison conformance", () => {
   const manifest: Manifest = fixturesAvailable
