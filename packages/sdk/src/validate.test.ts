@@ -146,23 +146,25 @@ describe("validateInterface", () => {
     expect(() => validateInterface(iface)).toThrow('$id: "task.schema.json" must be an absolute URI (OBI-D-05)');
   });
 
-  it("resolves a percent-encoded fragment before RFC 6901 evaluation (OBI-D-16)", () => {
-    // #/schemas/T%61sk addresses the schemas key Task, exactly as
-    // #/schemas/Task does — RFC 6901 §6: decode the fragment first, then
-    // evaluate the result as a JSON Pointer.
+  it("rejects a percent-encoded fragment as not in literal form (OBI-D-05)", () => {
+    // Literal form (§7): same-document fragments are written with the
+    // pointer's characters unencoded, so #/schemas/T%61sk is not a
+    // conformant OBI reference even though it would decode to the existing
+    // Task schema. Reported rather than silently decoded and resolved.
     const iface = minimalInterface();
     iface.schemas = { Task: { type: "object" } };
     iface.operations.getUser.output = { $ref: "#/schemas/T%61sk" };
-    expect(() => validateInterface(iface)).not.toThrow();
+    expect(() => validateInterface(iface)).toThrow("is not in literal form");
   });
 
-  it("rejects a dangling percent-encoded fragment (OBI-D-16)", () => {
-    // Decoding does not weaken referential integrity: a percent-encoded
-    // fragment that decodes to a genuinely-missing location still fails.
+  it("rejects a dangling percent-encoded fragment at the literal-form gate (OBI-D-05, before OBI-D-16)", () => {
+    // A percent-encoded fragment is non-conformant regardless of whether it
+    // would decode to a present location: the literal-form gate fires before
+    // the referential-integrity check.
     const iface = minimalInterface();
     iface.schemas = { Task: { type: "object" } };
     iface.operations.getUser.output = { $ref: "#/schemas/M%69ssing" };
-    expect(() => validateInterface(iface)).toThrow("does not resolve within the document (OBI-D-16)");
+    expect(() => validateInterface(iface)).toThrow("is not in literal form");
   });
 
   it("rejects $dynamicRef at an operation output position (OBI-D-05)", () => {

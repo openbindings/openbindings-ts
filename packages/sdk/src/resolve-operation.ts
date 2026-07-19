@@ -29,9 +29,10 @@ export function resolveOperation(
 
   // Direct key match. By OBI-D-04 a key is never also another operation's alias,
   // so this is authoritative when it hits — order relative to alias search is
-  // irrelevant to the result.
-  const direct = ops[name];
-  if (direct) return { key: name, operation: direct };
+  // irrelevant to the result. Own property only: a name such as "constructor"
+  // must match an operation the document actually defines, never a Function
+  // inherited from the map object's prototype chain.
+  if (Object.hasOwn(ops, name)) return { key: name, operation: ops[name] };
 
   // Alias match across the flat namespace.
   for (const key of Object.keys(ops)) {

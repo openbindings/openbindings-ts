@@ -32,7 +32,10 @@ const KNOWN_BINDING_FIELDS = new Set([
 const KNOWN_EXAMPLE_FIELDS = new Set(["description", "input", "output"]);
 
 // OBI-D-03 identifier pattern: every map key and operation alias must match.
-const IDENT_PATTERN = /^[A-Za-z_][A-Za-z0-9_.-]*$/;
+// The grammar permits a leading digit (2fa.verify): names are opaque data
+// labels, not host-language identifiers, so only the start character is
+// constrained to an alphanumeric or underscore.
+const IDENT_PATTERN = /^[A-Za-z0-9_][A-Za-z0-9_.-]*$/;
 
 const DRAFT_2020_12_URI = "https://json-schema.org/draft/2020-12/schema";
 
@@ -221,15 +224,20 @@ export function validateInterface(
     validateIdent(errs, "bindings key", k);
     const b = iface.bindings![k];
     // OBI-D-08: bindings[*].operation must reference an existing operation.
+    // The lookup is own-property only: document-supplied keys such as
+    // "constructor"/"toString" must resolve against the document's own map,
+    // never a JS object's prototype chain (which would validate a dangling
+    // reference clean — a false negative at the trust boundary).
     if (!(b.operation ?? "").trim()) {
       errs.push(`bindings["${k}"].operation: required`);
-    } else if (!iface.operations?.[b.operation]) {
+    } else if (!iface.operations || !Object.hasOwn(iface.operations, b.operation)) {
       errs.push(`bindings["${k}"].operation: references unknown operation "${b.operation}" (OBI-D-08)`);
     }
-    // OBI-D-09: bindings[*].source must reference an existing source.
+    // OBI-D-09: bindings[*].source must reference an existing source (own
+    // property only, per the OBI-D-08 note above).
     if (!(b.source ?? "").trim()) {
       errs.push(`bindings["${k}"].source: required`);
-    } else if (!iface.sources?.[b.source]) {
+    } else if (!iface.sources || !Object.hasOwn(iface.sources, b.source)) {
       errs.push(`bindings["${k}"].source: references unknown source "${b.source}" (OBI-D-09)`);
     }
 
@@ -298,7 +306,10 @@ function validateTransformRef(
     errs.push(`${prefix}: transform name is empty (OBI-D-10)`);
     return;
   }
-  if (transforms?.[name] === undefined) {
+  // Own property only: a named-transform key such as "constructor" must
+  // resolve against the document's own transforms map, never a JS object's
+  // prototype chain.
+  if (!transforms || !Object.hasOwn(transforms, name)) {
     errs.push(`${prefix}: references unknown transform "${name}" (OBI-D-10)`);
   }
 }
@@ -339,7 +350,7 @@ function jsonataParses(expr: string): boolean {
 
 function validateIdent(errs: string[], prefix: string, id: string): void {
   if (!IDENT_PATTERN.test(id)) {
-    errs.push(`${prefix}: "${id}" does not match identifier pattern ^[A-Za-z_][A-Za-z0-9_.-]*$ (OBI-D-03)`);
+    errs.push(`${prefix}: "${id}" does not match identifier pattern ^[A-Za-z0-9_][A-Za-z0-9_.-]*$ (OBI-D-03)`);
   }
 }
 
@@ -501,15 +512,13 @@ function isHierarchicalURIForm(raw: string): boolean {
  * OBI-D-16 does not type-check the target.
  */
 function docPointerResolves(doc: unknown, pointer: string): boolean {
-  // The fragment is the pointer's URI-fragment representation (RFC 6901
-  // §6): percent-decode the whole fragment first, then evaluate the
-  // result as a JSON Pointer (§10). Malformed percent-encoding simply
-  // fails to resolve — it is already a D-05 char-screen violation upstream.
-  try {
-    pointer = decodeURIComponent(pointer);
-  } catch {
-    return false;
-  }
+  // Same-document OBI fragments are in literal form (§7): the pointer's
+  // characters are written unencoded, so the fragment is evaluated as an
+  // RFC 6901 JSON Pointer directly, with no percent-decoding. A
+  // percent-encoded fragment is not a conformant OBI reference and is
+  // rejected upstream by walkSchema's literal-form gate before it reaches
+  // this resolver, so this function never honors that non-conformant
+  // spelling. Only RFC 6901's own ~0/~1 escaping is unescaped below.
   if (pointer === "") return true; // bare # addresses the document root
   if (!pointer.startsWith("/")) return false;
   let cur: unknown = doc;
@@ -520,7 +529,9 @@ function docPointerResolves(doc: unknown, pointer: string): boolean {
       if (idx < 0 || idx >= cur.length) return false;
       cur = cur[idx];
     } else if (typeof cur === "object" && cur !== null) {
-      if (!(tok in (cur as Record<string, unknown>))) return false;
+      // Own property only: a JSON Pointer token such as "constructor" must
+      // address the document's own data, never a JS object's prototype chain.
+      if (!Object.hasOwn(cur as Record<string, unknown>, tok)) return false;
       cur = (cur as Record<string, unknown>)[tok];
     } else {
       return false;
@@ -571,6 +582,15 @@ function walkSchema(errs: string[], prefix: string, schema: unknown, doc?: unkno
     validateURIRef(errs, `${prefix}.$ref`, s.$ref);
     if (!s.$ref.startsWith("#") && !referenceIsAbsolute(s.$ref)) {
       errs.push(`${prefix}.$ref: "${s.$ref}" must be a same-document fragment or an absolute URI, not a relative reference (OBI-D-05)`);
+    } else if (s.$ref.startsWith("#") && !inID && s.$ref.includes("%")) {
+      // Literal form (§7): same-document fragments are written with the
+      // pointer's characters unencoded, so every addressable location has
+      // exactly one conformant spelling. A percent-encoded fragment is not
+      // a conformant OBI-defined reference — reported here rather than
+      // silently decoded and resolved. Inside a schema declaring its own
+      // $id the fragment is resource-internal and resolves per JSON Schema
+      // 2020-12, so this gate is OBI-position only (!inID).
+      errs.push(`${prefix}.$ref: "${s.$ref}" is not in literal form; a same-document fragment is written with the pointer's characters unencoded (percent-encoding is not a conformant OBI reference) (OBI-D-05)`);
     } else if (s.$ref.startsWith("#") && s.$ref !== "#" && !s.$ref.startsWith("#/") && !inID) {
       // Inside a schema declaring its own $id, fragments resolve against
       // that resource's base per JSON Schema — the same scope carve-out

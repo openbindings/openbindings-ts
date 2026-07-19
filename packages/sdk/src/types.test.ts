@@ -62,4 +62,22 @@ describe("resolveTransform", () => {
   it("returns undefined for non-string, non-ref values", () => {
     expect(resolveTransform(42 as unknown as TransformOrRef, transforms)).toBeUndefined();
   });
+
+  // Prototype-chain hardening: a named-transform ref whose name collides with
+  // a built-in object property must resolve against the document's own
+  // transforms map only, never a Function inherited from Object.prototype.
+  it.each(["constructor", "toString", "hasOwnProperty", "valueOf", "__proto__"])(
+    "returns undefined for the built-in property name %s when no such transform exists",
+    (name) => {
+      expect(
+        resolveTransform({ $ref: `#/transforms/${name}` }, transforms),
+      ).toBeUndefined();
+    },
+  );
+
+  it("still resolves a transform genuinely named constructor", () => {
+    expect(
+      resolveTransform({ $ref: "#/transforms/constructor" }, { constructor: "$.x" }),
+    ).toBe("$.x");
+  });
 });

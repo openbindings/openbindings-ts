@@ -2,7 +2,7 @@
  * OBI-D-02 (validate document against openbindings.schema.json) and
  * OBI-D-11 (validate every example.input/output against its operation's
  * input/output schema). Also exposes helpers used by OperationInvoker
- * for OBI-T-07/T-08 runtime validation.
+ * for OBI-T-16 runtime validation.
  *
  * Validator backend: json-schema-library. Pure ES, tree-walking, no
  * `eval` / `new Function()`. Works across the SDK's target runtimes
@@ -283,7 +283,7 @@ function schemaHasExternalRef(value: unknown): boolean {
  * Compiles a single operation schema with the document's schemas
  * exposed under $defs (so `$ref: "#/schemas/X"` references resolve).
  * Used by validateExamplesAgainstOpSchemas (OBI-D-11) and by
- * OperationInvoker (OBI-T-07 / OBI-T-08).
+ * OperationInvoker (OBI-T-16).
  *
  * Enforcement at compile time, per the spec's boundary rules:
  * - the schema must conform to JSON Schema 2020-12 (meta-validation; a
@@ -433,7 +433,7 @@ function resolveRefTarget(
   idResources: Map<string, Record<string, unknown>>,
 ): RefTarget {
   const fail = (): never => {
-    throw new Error(`unresolvable $ref ${JSON.stringify(ref)} (fully-resolved validation, OBI-T-07/T-08; external schemas are not fetched)`);
+    throw new Error(`unresolvable $ref ${JSON.stringify(ref)} (fully-resolved validation, OBI-T-16; external schemas are not fetched)`);
   };
   if (ref.startsWith("#")) {
     const fragment = ref.slice(1);

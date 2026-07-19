@@ -105,7 +105,7 @@ A hook declines by returning the `USE_DEFAULT` sentinel, falling through the cha
 
 ## Transforms (invoking tools only)
 
-OpenBindings 0.2.0 mandates JSONata 2.0 as the transform language for tools that evaluate `inputTransform`/`outputTransform` (OBI-T-10). This SDK does not bundle a JSONata runtime; tools that only parse, validate, inspect, or generate code do not need one, and shipping it as a hard dependency would tax those callers. To evaluate transforms when invoking, install `jsonata` separately and pass an adapter implementing the `TransformEvaluator` interface:
+OpenBindings 0.2.0 mandates JSONata 2.1 as the transform language for tools that evaluate `inputTransform`/`outputTransform` (OBI-T-10). Document validation bundles the pinned `jsonata` 2.1 library to parse-check every transform expression for syntactic validity (OBI-D-18) — a validate-time check only. The SDK does **not** configure a transform *evaluation* path for you: to actually evaluate a transform when invoking, pass an adapter implementing the `TransformEvaluator` interface (the bundled `jsonata` serves both roles here — it parse-checks during validation, and you wire it to evaluate):
 
 ```typescript
 import jsonata from "jsonata";

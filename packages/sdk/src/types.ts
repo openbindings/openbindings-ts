@@ -149,5 +149,9 @@ export function resolveTransform(
   if (!ref.startsWith(prefix)) return undefined;
   const name = ref.slice(prefix.length);
   if (!name || !transforms) return undefined;
+  // Own property only: a named-transform key such as "constructor" must
+  // resolve against the document's own transforms map, never a Function
+  // inherited from the map object's prototype chain.
+  if (!Object.hasOwn(transforms, name)) return undefined;
   return transforms[name];
 }
