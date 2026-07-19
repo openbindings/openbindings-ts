@@ -109,6 +109,12 @@ export async function dereference<T = unknown>(
   const baseUrl = options?.baseUrl;
   const signal = options?.signal;
 
+  // The single working tree. Internal refs resolve against THIS clone, never
+  // the caller's `doc`: resolving against the original both mutates the
+  // caller's document in place (walkAsync rewrites nodes) and aliases resolved
+  // output nodes back to the input, contradicting the no-mutate contract above.
+  const cloned = structuredClone(doc);
+
   // Cache of fetched + dereferenced external documents.
   const externalCache = new Map<string, Record<string, unknown>>();
 
@@ -151,7 +157,7 @@ export async function dereference<T = unknown>(
         targetDoc = await resolveExternal(fullUrl);
         resolvedBase = fullUrl;
       } else {
-        targetDoc = doc;
+        targetDoc = cloned;
       }
 
       const target = fragment
@@ -177,5 +183,5 @@ export async function dereference<T = unknown>(
     return obj;
   }
 
-  return await walkAsync(structuredClone(doc), baseUrl) as T;
+  return await walkAsync(cloned, baseUrl) as T;
 }

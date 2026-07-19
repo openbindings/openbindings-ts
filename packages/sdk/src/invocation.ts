@@ -524,7 +524,12 @@ export class InvocationImpl<I = unknown, O = unknown>
             // controller; abort is idempotent so this does not re-fire the signal.
             this.controller.abort(opts.signal!.reason);
           },
-          { once: true },
+          // `once` handles the abort-fires-first case; `signal` handles the
+          // completes-without-abort case: the internal controller aborts on
+          // EVERY terminal (closeOutput/fireError), so this unregisters the
+          // listener from the (possibly long-lived) external signal at terminal
+          // — no per-invocation listener leak on a reused shared signal.
+          { once: true, signal: this.controller.signal },
         );
       }
     }
