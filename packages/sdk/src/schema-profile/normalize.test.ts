@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import canonicalize from "canonicalize";
 import { Normalizer } from "./normalize.js";
 import { OutsideProfileError, RefError, SchemaError } from "./errors.js";
 
@@ -259,5 +260,145 @@ describe("Normalizer.outputCompatible", () => {
     const n = new Normalizer();
     expect((await n.outputCompatible({ type: "string" }, {})).compatible).toBe(false);
     expect((await n.outputCompatible({}, {})).compatible).toBe(true);
+  });
+});
+
+// --- allOf soundness: mirrored unit tests ------------------------------------
+//
+// These pin the defect family of the allOf unsoundness (sibling keywords,
+// nested allOf, $ref in overlapping-property merges, $ref-carried
+// out-of-profile keywords) plus the sibling-union refusal, mirrored with
+// schemaprofile/schemaprofile_test.go in the Go SDK: same shapes, same
+// expected canonical forms, byte-identical error and reason strings. The
+// SchemaError lane is pinned HERE because it is not corpus-expressible:
+// comparison fixture format 1.0 has no error verdict
+// (compatible|incompatible|indeterminate only).
+
+describe("Normalizer allOf soundness", () => {
+  it("sibling keywords merge as one additional branch", async () => {
+    const n = new Normalizer({ root: {} });
+    const target = {
+      type: "object",
+      required: ["id"],
+      allOf: [{ properties: { id: { type: "string" } } }],
+    };
+
+    const out = await n.normalize(target);
+    expect(canonicalize(out)).toBe(
+      '{"properties":{"id":{"type":["string"]}},"required":["id"],"type":["object"]}',
+    );
+
+    // The false-compatible polarity of the original defect: a candidate that
+    // omits the sibling-carried required must be output-incompatible.
+    const result = await n.outputCompatible(target, {
+      type: "object",
+      properties: { id: { type: "string" } },
+    });
+    expect(result.compatible).toBe(false);
+    expect(result.reason).toBe('required: target requires "id" but candidate does not');
+  });
+
+  it("sibling enum intersects in sibling-first order", async () => {
+    const n = new Normalizer({ root: {} });
+    const out = await n.normalize({
+      type: "string",
+      enum: ["a", "b", "c"],
+      allOf: [{ enum: ["c", "b", "d"] }],
+    });
+    // The sibling branch merges first, and enum intersection preserves the
+    // first branch's value order: ["b","c"], not ["c","b"].
+    expect(canonicalize(out)).toBe('{"enum":["b","c"],"type":["string"]}');
+  });
+
+  it("nested allOf flattens recursively", async () => {
+    const n = new Normalizer({ root: {} });
+    const target = { allOf: [{ allOf: [{ type: "string", minLength: 3 }] }] };
+
+    const out = await n.normalize(target);
+    expect(canonicalize(out)).toBe('{"minLength":3,"type":["string"]}');
+
+    // Previously this normalized to Top and reported any candidate compatible.
+    const result = await n.outputCompatible(target, { type: "number" });
+    expect(result.compatible).toBe(false);
+    expect(result.reason).toBe('type: candidate allows "number" but target does not');
+  });
+
+  it("ref-carried oneOf inside allOf is refused", async () => {
+    const n = new Normalizer({
+      root: { $defs: { U: { oneOf: [{ type: "string" }, { type: "number" }] } } },
+    });
+    const err = await n
+      .normalize({ allOf: [{ $ref: "#/$defs/U" }, { type: "string" }] })
+      .then(() => undefined)
+      .catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(OutsideProfileError);
+    expect((err as Error).message).toBe(
+      'outside profile at allOf[0]: keyword "oneOf inside allOf"',
+    );
+  });
+
+  it("ref-carried out-of-profile keyword inside allOf is refused", async () => {
+    const n = new Normalizer({
+      root: { $defs: { P: { type: "string", pattern: "^a+$" } } },
+    });
+    const err = await n
+      .normalize({ allOf: [{ $ref: "#/$defs/P" }] })
+      .then(() => undefined)
+      .catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(OutsideProfileError);
+    expect((err as Error).message).toBe('outside profile at allOf[0]: keyword "pattern"');
+  });
+
+  it("ref in overlapping-property merge is inlined and preserved", async () => {
+    const n = new Normalizer({
+      root: { schemas: { ShortString: { type: "string", minLength: 2 } } },
+    });
+    const out = await n.normalize({
+      allOf: [
+        { type: "object", properties: { p: { type: "string", maxLength: 10 } } },
+        { properties: { p: { $ref: "#/schemas/ShortString" } } },
+      ],
+    });
+    expect(canonicalize(out)).toBe(
+      '{"properties":{"p":{"maxLength":10,"minLength":2,"type":["string"]}},"type":["object"]}',
+    );
+  });
+
+  it("unsatisfiable ref-carried property merge is a SchemaError", async () => {
+    // The schema-error lane of the ref-in-overlapping-property-merge shape:
+    // not corpus-expressible (fixture format 1.0 has no error verdict), so
+    // the pin lives here, mirrored in the Go SDK's schemaprofile_test.go.
+    const n = new Normalizer({ root: { schemas: { S: { type: "string" } } } });
+    const err = await n
+      .normalize({
+        allOf: [
+          { properties: { p: { type: "number" } } },
+          { properties: { p: { $ref: "#/schemas/S" } } },
+        ],
+      })
+      .then(() => undefined)
+      .catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(SchemaError);
+    expect((err as Error).message).toBe(
+      'schema error at allOf[1].properties["p"]: allOf type intersection is empty',
+    );
+  });
+
+  it("union alongside allOf is refused", async () => {
+    const n = new Normalizer({ root: {} });
+
+    const oneOfErr = await n
+      .normalize({ oneOf: [{ type: "string" }], allOf: [{ minLength: 1 }] })
+      .then(() => undefined)
+      .catch((e: unknown) => e);
+    expect(oneOfErr).toBeInstanceOf(OutsideProfileError);
+    expect((oneOfErr as Error).message).toBe('outside profile: keyword "oneOf alongside allOf"');
+
+    const anyOfErr = await n
+      .normalize({ anyOf: [{ type: "string" }], allOf: [{ minLength: 1 }] })
+      .then(() => undefined)
+      .catch((e: unknown) => e);
+    expect(anyOfErr).toBeInstanceOf(OutsideProfileError);
+    expect((anyOfErr as Error).message).toBe('outside profile: keyword "anyOf alongside allOf"');
   });
 });
