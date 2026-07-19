@@ -22,5 +22,10 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm run build
       - run: pnpm run lint
+      # Absolute: `pnpm -r` runs each package from its own directory, so a
+      # relative corpus path would resolve to nothing and silently skip the
+      # corpus-backed suites instead of running them.
       - run: pnpm test
+        env:
+          OB_SPEC_CORPUS: ${{ github.workspace }}/spec/conformance
       - run: pnpm conformance -- --corpus=spec/conformance
