@@ -303,6 +303,8 @@
 
 ## 0.1.0 — 2026-03-31
 
+*This date reflects the content freeze; the `v0.1.0` tag was created 2026-04-15. From 0.2.0 on, entry dates are tag dates.*
+
 Initial public release.
 
 ### @openbindings/sdk
