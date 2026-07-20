@@ -351,7 +351,11 @@ export class OperationInvoker {
     let bindingKey: string;
     let binding: BindingEntry;
     if (pinnedBindingKey) {
-      const b = iface.bindings?.[pinnedBindingKey];
+      const bindings = iface.bindings;
+      const b =
+        bindings && Object.hasOwn(bindings, pinnedBindingKey)
+          ? bindings[pinnedBindingKey]
+          : undefined;
       if (!b) throw new BindingNotFoundError(pinnedBindingKey);
       // The explicit binding must name a binding FOR the resolved operation.
       // Otherwise a caller could invoke any binding under the guise of any
@@ -380,7 +384,11 @@ export class OperationInvoker {
       }
     }
 
-    const source = iface.sources?.[binding.source];
+    const sources = iface.sources;
+    const source =
+      sources && Object.hasOwn(sources, binding.source)
+        ? sources[binding.source]
+        : undefined;
     if (!source) throw new UnknownSourceError(bindingKey, binding.source);
 
     return { op, opKey, bindingKey, binding, source };

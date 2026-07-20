@@ -607,7 +607,7 @@ function buildCompoundSchema(
     ) {
       const merged = existing as Record<string, unknown>;
       for (const [k, v] of Object.entries(defs)) {
-        if (!(k in merged)) merged[k] = v;
+        if (!Object.hasOwn(merged, k)) merged[k] = v;
       }
     } else {
       obj.$defs = defs;
