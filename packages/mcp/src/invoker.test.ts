@@ -39,9 +39,10 @@ describe("MCPInvoker tools", () => {
     expect(calls[0].arguments).toEqual({ city: "Oslo" });
   });
 
-  it("joins multiple text content blocks verbatim, never JSON-sniffed, even when one looks like JSON", async () => {
-    // Exercises the real wiring's parseContent lane (reached because there
-    // are two content items, not one) end to end, per the de-sniff ruling.
+  it("passes multiple text content blocks through as the content array, verbatim (MCP-P-05), never a joined string", async () => {
+    // Two content items reach the parseContent lane end to end; §9.3 says any
+    // shape other than a single text block passes through as the content
+    // array, verbatim in MCP's block shapes — never a "\n"-joined string.
     const server = mcpServer(
       () => ({ result: { content: [{ type: "text", text: "note:" }, { type: "text", text: '{"a":1}' }] } }),
       { tools: ["multi"] },
@@ -49,7 +50,10 @@ describe("MCPInvoker tools", () => {
     const call = new MCPInvoker().invokeBinding({ source, ref: "tools/multi", fetch: server.fn });
 
     await call.write({});
-    await expect(single(call.outputs)).resolves.toBe('note:\n{"a":1}');
+    await expect(single(call.outputs)).resolves.toEqual([
+      { type: "text", text: "note:" },
+      { type: "text", text: '{"a":1}' },
+    ]);
   });
 
   it("prefers structuredContent over the content array", async () => {

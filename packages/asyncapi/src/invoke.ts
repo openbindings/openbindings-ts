@@ -684,7 +684,12 @@ async function runUnaryPublish(
     return;
   }
 
-  if (resp.status >= 400) {
+  // Classification (§9.4, ASYNC-P-06): a unary publish succeeds IFF the final
+  // status, after any redirects, is 2xx. Mirrors the SSE establishment path's
+  // strict-2xx test in this same file — a 3xx final (304, or a Location-less
+  // redirect fetch does not follow) is a publish the server plausibly did not
+  // accept, never a success.
+  if (resp.status < 200 || resp.status >= 300) {
     const errBody = await readErrorBody(resp);
     h.fireError(
       new InvocationError(
@@ -1378,6 +1383,11 @@ async function readResponseText(resp: Response, maxBytes: number): Promise<strin
       if (done) break;
       total += value.byteLength;
       if (total > maxBytes) {
+        // Cancel the body stream before bailing; releasing the lock alone
+        // leaves the response socket pinned on the remaining bytes (the
+        // pattern openapi's readResponseBytes and this package's own sse.ts
+        // already follow).
+        await reader.cancel().catch(() => {});
         throw new Error(`response exceeds ${maxBytes} byte limit`);
       }
       chunks.push(decoder.decode(value, { stream: true }));

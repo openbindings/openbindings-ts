@@ -1,5 +1,5 @@
 import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { InvocationError, ERR_REF_NOT_FOUND } from "@openbindings/sdk";
+import { InvocationError, ERR_REF_NOT_FOUND, ERR_PROTOCOL } from "@openbindings/sdk";
 
 /**
  * A listing is this family's artifact (openbindings.mcp@1 §3): the aggregate
@@ -105,15 +105,39 @@ function pinEntityIdentities(raw: unknown, member: string, idKey: string): strin
  * interface synthesis (discover), whose artifact is the same
  * pagination-exhausted aggregate (§3).
  */
+// MAX_LIST_PAGES is a defensive backstop: MCP-P-02 mandates exhaustion, not
+// unbounded trust. A server returning an always-new nextCursor forever would
+// otherwise loop until the caller's AbortSignal. The ceiling is absurdly high
+// — 10_000 pages × a typical page ≈ millions of entities, no real MCP server —
+// so it fires only on a non-terminating server, refusing with the same
+// ERR_PROTOCOL the Go SDK's item bound uses.
+const MAX_LIST_PAGES = 10_000;
+
 export async function exhaustPages<P extends { nextCursor?: string }>(
   fetchPage: (cursor: string | undefined) => Promise<P>,
   collect: (page: P) => void,
 ): Promise<void> {
   let cursor: string | undefined;
+  let pages = 0;
   do {
     const page = await fetchPage(cursor);
     collect(page);
-    cursor = page.nextCursor || undefined;
+    const next = page.nextCursor || undefined;
+    // A repeated cursor is the common non-terminating bug; refuse immediately
+    // rather than loop forever.
+    if (next !== undefined && next === cursor) {
+      throw new InvocationError(
+        ERR_PROTOCOL,
+        `MCP server did not terminate pagination: nextCursor repeated (${next}) (openbindings.mcp@1 MCP-P-02)`,
+      );
+    }
+    if (++pages > MAX_LIST_PAGES) {
+      throw new InvocationError(
+        ERR_PROTOCOL,
+        `MCP server did not terminate pagination: exceeded ${MAX_LIST_PAGES} pages (openbindings.mcp@1 MCP-P-02)`,
+      );
+    }
+    cursor = next;
   } while (cursor !== undefined);
 }
 
