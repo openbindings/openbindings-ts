@@ -4,6 +4,7 @@
  * Cardinality tags: U unary, SS server-streaming, CS client-streaming,
  * BD bidi, NI no-input.
  */
+import { getEventListeners } from "node:events";
 import { describe, it, expect } from "vitest";
 import {
   InvocationImpl,
@@ -347,6 +348,34 @@ describe("cancellation & close", () => {
     ctrl.abort();
     const inv = new InvocationImpl<never, never>({ signal: ctrl.signal });
     await expect(inv.closed).rejects.toMatchObject({ code: ERR_CANCELLED });
+  });
+
+  it("removes its external-signal listener on every terminal — no per-invocation leak on a shared signal", () => {
+    // A long-lived shared signal (the documented server-shutdown / session
+    // controller reused across calls) must not accumulate one retained abort
+    // listener — each pinning a whole InvocationImpl and its buffers — per
+    // completed invocation. The internal controller aborts on every terminal
+    // and the external listener is registered against it, so terminal tears
+    // the listener down even when the external signal never fires.
+    const shared = new AbortController();
+    const N = 50;
+    for (let i = 0; i < N; i++) {
+      const inv = new InvocationImpl<never, number>({ signal: shared.signal });
+      inv.closeOutput(); // normal completion: `shared` never aborts
+    }
+    expect(getEventListeners(shared.signal, "abort").length).toBe(0);
+
+    // The listener also unregisters on the error terminal.
+    const errored = new InvocationImpl<never, number>({ signal: shared.signal });
+    errored.fireError(new InvocationError("ERR_RUNTIME", "boom"));
+    expect(getEventListeners(shared.signal, "abort").length).toBe(0);
+
+    // And a live external abort still reaches a not-yet-terminal invocation.
+    const live = new InvocationImpl<never, number>({ signal: shared.signal });
+    expect(getEventListeners(shared.signal, "abort").length).toBe(1);
+    shared.abort();
+    expect(live.signal.aborted).toBe(true);
+    expect(getEventListeners(shared.signal, "abort").length).toBe(0);
   });
 
   // --- Deadline vs. cancel classification (parity with Go invocation_test.go) ---
