@@ -334,7 +334,11 @@
   args exactly where `fetch` is stamped (args that already carry a value win).
   The SDK exports `DEFAULT_MAX_DELIVERY_UNIT_BYTES` (10485760 — equal to the
   Go SDK's default) and `resolveDeliveryUnitLimit(args)`, the single semantics
-  point format packages call. Wired lanes: openapi response body, graphql
+  point format packages call. Wired lanes: openapi response body, openapi
+  SSE per-event (each event is one delivery unit, bounded per emission —
+  never cumulatively — with the same `SSE event exceeds N byte limit`
+  identity as asyncapi's; previously the lane had no per-event bound, only
+  the fixed line-scanner guard), graphql
   response body (introspection loads included — one bounded reader), graphql
   subscription WebSocket messages (graphql-transport-ws frames; previously
   unbounded), asyncapi unary reply, asyncapi SSE per-event, and asyncapi

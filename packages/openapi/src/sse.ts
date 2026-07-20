@@ -1,7 +1,9 @@
 import {
   InvocationError,
+  ERR_RESPONSE_ERROR,
   ERR_STREAM_ERROR,
   decodeThroughHooks,
+  resolveDeliveryUnitLimit,
   type BindingHandle,
   type BindingInvocationArgs,
   type InvokeSite,
@@ -17,7 +19,9 @@ import { errorMessage } from "./util.js";
  * misbehaving server. The WHATWG SSE spec does not impose a line limit, but
  * a single 16 MB line is generous in practice (Go parity: sseMaxLineBytes).
  * STAYS FIXED under the delivery-unit knob: this is a line-framing scan
- * guard on unterminated text, not a bound on a delivery unit.
+ * guard on unterminated text, not a bound on a delivery unit (the
+ * per-event cap below is the delivery-unit bound and is
+ * consumer-configurable).
  */
 const SSE_MAX_LINE_BYTES = 16 * 1024 * 1024;
 
@@ -77,9 +81,15 @@ export async function streamSSE(
   let lastEventID = "";
   let dataLines: string[] = [];
   let retryMs = 0;
+  let eventBytes = 0;
   let firstLine = true;
 
   const status = resp.status;
+  const byteLength = new TextEncoder();
+  // Per-event size cap — each event is one delivery unit, so the
+  // consumer-configurable delivery-unit bound applies
+  // (args.maxDeliveryUnitBytes, default 10MB; Go parity).
+  const maxEventBytes = resolveDeliveryUnitLimit(args);
 
   // dispatch decodes and emits the accumulated event. It returns false when
   // the invocation terminated (decode error fired, or the emit rejected
@@ -127,6 +137,7 @@ export async function streamSSE(
   };
 
   // processLine handles one complete SSE line (terminator already removed).
+  // Returns false to stop reading (invocation terminal or cap tripped).
   const processLine = async (line: string): Promise<boolean> => {
     if (firstLine) {
       // One leading U+FEFF BOM is ignored per the WHATWG stream grammar.
@@ -134,7 +145,19 @@ export async function streamSSE(
       firstLine = false;
     }
 
+    // The size cap is PER EVENT, not cumulative: a long-lived stream
+    // legitimately delivers more than one delivery unit in total (the same
+    // choice asyncapi's streamSSE documents for its per-event cap).
+    eventBytes += byteLength.encode(line).length + 1; // +1 for the newline
+    if (eventBytes > maxEventBytes) {
+      inv.fireError(
+        new InvocationError(ERR_RESPONSE_ERROR, `SSE event exceeds ${maxEventBytes} byte limit`),
+      );
+      return false;
+    }
+
     if (line === "") {
+      eventBytes = 0;
       return dispatch();
     }
     if (line.startsWith(":")) {
