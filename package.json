@@ -5,7 +5,7 @@
     "build": "pnpm -r build",
     "test": "vitest run",
     "conformance": "pnpm --filter @openbindings/sdk conformance",
-    "lint": "pnpm -r --filter './packages/*' exec tsc --noEmit"
+    "lint": "pnpm -r --filter './packages/*' run lint"
   },
   "devDependencies": {
     "@types/json-schema": "^7.0.15",
