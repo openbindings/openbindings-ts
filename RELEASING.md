@@ -20,12 +20,11 @@ covers every package.
    git push origin vX.Y.Z
    ```
 
-4. Build and publish:
-
-   ```bash
-   pnpm -r build
-   pnpm -r publish --access public
-   ```
+4. Push the annotated tag. `.github/workflows/publish.yml` takes it from
+   there: full build, lint, and the test suite in corpus-required mode,
+   then `pnpm -r publish --access public --provenance` over npm trusted
+   publishing (OIDC) — no long-lived token exists anywhere. Every
+   published tarball carries an npm build-provenance attestation.
 
    `--access public` is also persisted in each package's
    `publishConfig.access`, and each package's `prepack` script reruns its
@@ -33,8 +32,12 @@ covers every package.
    publishes in topological order, so `@openbindings/sdk` lands on the
    registry before the format packages that depend on it.
 
-Publishing is currently manual; a CI publish workflow is planned but not
-yet built.
+One-time setup before the first tagged publish: on npmjs.com, each
+`@openbindings/*` package must list this repository and
+`.github/workflows/publish.yml` as its trusted publisher. If the OIDC
+exchange is ever unavailable, the documented fallback is a manual
+`pnpm -r build && pnpm -r publish --access public` from a clean tag
+checkout — but the workflow is the canonical path.
 
 ## Spec compatibility
 
