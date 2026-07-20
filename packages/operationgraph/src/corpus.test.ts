@@ -229,6 +229,17 @@ const jsonataEvaluator: TransformEvaluatorWithBindings = {
 // ---------------------------------------------------------------------------
 
 const dir = corpusDir();
+
+// OB_CORPUS_REQUIRED (set in CI) turns a missing corpus into a hard failure
+// so a mis-wired path or missing checkout turns CI red instead of silently
+// green; unset (local dev) the suites still skip.
+if (!dir && process.env.OB_CORPUS_REQUIRED) {
+  throw new Error(
+    "operation-graph conformance corpus required (OB_CORPUS_REQUIRED is set) but not located; " +
+      "set OB_SPEC_CORPUS to the spec repo's conformance dir",
+  );
+}
+
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 describe.skipIf(!dir)("conformance corpus: execution", () => {

@@ -59,6 +59,16 @@ interface CorpusFixture {
 
 const root = corpusRoot();
 
+// OB_CORPUS_REQUIRED (set in CI) turns a missing corpus into a hard failure
+// so a mis-wired path or missing checkout turns CI red instead of silently
+// green; unset (local dev) the suite still skips.
+if (!root && process.env.OB_CORPUS_REQUIRED) {
+  throw new Error(
+    "binding-specs conformance corpus required (OB_CORPUS_REQUIRED is set) but not located; " +
+      "set OB_SPEC_CORPUS to the spec repo's conformance dir",
+  );
+}
+
 describe.skipIf(!root)("binding-specs subcorpus, core-level checks", () => {
   // skipIf marks the tests skipped, but this callback still RUNS at
   // collection time — without the corpus checkout (CI) the filesystem

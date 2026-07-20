@@ -34,8 +34,9 @@ import type { InvokeSite } from "./hooks.js";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 function corpusDir(): string | null {
-  if (process.env.OB_INTERFACES_CORPUS) return process.env.OB_INTERFACES_CORPUS;
-  const dir = resolve(__dirname, "..", "..", "..", "..", "interfaces", "conformance");
+  const dir =
+    process.env.OB_INTERFACES_CORPUS ??
+    resolve(__dirname, "..", "..", "..", "..", "interfaces", "conformance");
   return existsSync(dir) ? dir : null;
 }
 
@@ -94,6 +95,16 @@ class SelectionSpecStub implements BindingInvoker {
 // ---------------------------------------------------------------------------
 
 const dir = corpusDir();
+
+// OB_CORPUS_REQUIRED (set in CI) turns a missing corpus into a hard failure
+// so a mis-wired path or missing checkout turns CI red instead of silently
+// green; unset (local dev) the suite still skips.
+if (!dir && process.env.OB_CORPUS_REQUIRED) {
+  throw new Error(
+    "interfaces conformance corpus required (OB_CORPUS_REQUIRED is set) but not located; " +
+      "set OB_INTERFACES_CORPUS to the interfaces repo's conformance dir",
+  );
+}
 
 describe.skipIf(!dir)("conformance corpus: operation-invoker binding selection", () => {
   if (!dir) return;

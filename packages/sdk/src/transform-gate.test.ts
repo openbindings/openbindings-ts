@@ -46,6 +46,16 @@ async function evalOutcome(expr: string, input: unknown): Promise<Outcome> {
 
 const dir = corpusDir();
 
+// OB_CORPUS_REQUIRED (set in CI) turns a missing corpus into a hard failure
+// so a mis-wired path or missing checkout turns CI red instead of silently
+// green; unset (local dev) the suite still skips.
+if (dir === null && process.env.OB_CORPUS_REQUIRED) {
+  throw new Error(
+    "transforms conformance corpus required (OB_CORPUS_REQUIRED is set) but not located; " +
+      "set OB_SPEC_CORPUS to the spec repo's conformance dir",
+  );
+}
+
 describe.skipIf(dir === null)("transform differential-conformance gate (agree)", () => {
   // skipIf marks the tests skipped, but this callback still RUNS at
   // collection time — without the corpus checkout the filesystem reads
