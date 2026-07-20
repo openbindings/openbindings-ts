@@ -53,12 +53,15 @@ describe("parseContent", () => {
     expect(result).toBe('{"tempC":20}');
   });
 
-  it("joins multiple text blocks verbatim, never JSON-parsed, even when one block looks like JSON", () => {
-    const result = parseContent([
+  it("passes multiple text blocks through as the content array, verbatim (MCP-P-05), never a joined string", () => {
+    // §9.3: a single text block is the string above; ANY OTHER content shape
+    // — two or more text blocks included — passes through as the content
+    // array, verbatim in MCP's block shapes, never a "\n"-joined string.
+    const content = [
       { type: "text", text: "prefix" },
       { type: "text", text: '{"a":1}' },
-    ]);
-    expect(result).toBe('prefix\n{"a":1}');
+    ];
+    expect(parseContent(content)).toBe(content);
   });
 
   it("passes mixed content types through as an array", () => {

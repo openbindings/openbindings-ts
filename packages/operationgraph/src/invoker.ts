@@ -108,14 +108,17 @@ export class OperationGraphInvoker implements BindingInvoker {
       }
     }
 
-    // OG-T-01: validate before acting; fail the binding rather than execute
-    // an invalid graph. When `interface` is absent (direct binding
-    // invocation) the OG-V-11 reference check is skipped; bad references
-    // fail at runtime.
-    let opKeys: Set<string> | undefined;
-    if (args.interface) {
-      opKeys = new Set(Object.keys(args.interface.operations));
-    }
+    // OG-T-01 / OG-V-11: validate before acting; fail the binding rather than
+    // execute an invalid graph. When `interface` is absent (direct binding
+    // invocation) no operations map is supplied, so operation and each nodes
+    // — which resolve ONLY against the containing OBI's operations map
+    // (OG-V-11, §281) — cannot resolve; validate against an EMPTY set so such
+    // a graph is refused pre-execution rather than passing an undefined
+    // interface downstream. A graph with no operation/each nodes validates
+    // vacuously and runs.
+    const opKeys: Set<string> = args.interface
+      ? new Set(Object.keys(args.interface.operations))
+      : new Set();
     try {
       validate(graph, opKeys);
     } catch (err) {

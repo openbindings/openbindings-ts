@@ -733,17 +733,16 @@ function extractContent(content: unknown): string {
 export function parseContent(content: unknown): unknown {
   if (!Array.isArray(content) || content.length === 0) return content;
 
-  // Check if all items are text. If so, join them verbatim (a single-item
-  // array collapses to that one item's text; no separator is added).
-  const allText = content.every(
-    (c: { type?: string }) => c.type === "text",
-  );
-  if (allText) {
-    return content
-      .map((c: { text?: string }) => c.text ?? "")
-      .join("\n");
+  // MCP-P-05 / §9.3: a single text block decodes to that text, verbatim as a
+  // string (runTool's fast path handles the live single-text-string case;
+  // this keeps parseContent consistent for a direct call and matches the Go
+  // SDK's extractContent).
+  if (content.length === 1 && (content[0] as { type?: string }).type === "text") {
+    return (content[0] as { text?: string }).text ?? "";
   }
 
-  // Mixed content types: return as array of structured items.
+  // ANY OTHER content shape — two or more text blocks included — passes
+  // through as the content array, verbatim in MCP's block shapes. Never a
+  // "\n"-joined string with an invented separator.
   return content;
 }
