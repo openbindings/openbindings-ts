@@ -172,7 +172,7 @@ export class GraphQLInvoker implements BindingInvoker {
       // the first emit — so a caller awaiting `header` resolves at
       // subscription start rather than blocking until the first event.
       inv.setHeader({});
-      for await (const ev of subscribeGraphQL(url, query, variables, headers, inv.signal)) {
+      for await (const ev of subscribeGraphQL(url, query, variables, headers, maxResponseBytes, inv.signal)) {
         // Always await: a rejection means the invocation terminated, and the
         // for-await teardown closes the WebSocket via the generator's finally.
         await inv.emitOutput(ev);

@@ -310,8 +310,10 @@
   The SDK exports `DEFAULT_MAX_DELIVERY_UNIT_BYTES` (10485760 — equal to the
   Go SDK's default) and `resolveDeliveryUnitLimit(args)`, the single semantics
   point format packages call. Wired lanes: openapi response body, graphql
-  response body (introspection loads included — one bounded reader), asyncapi
-  unary reply, asyncapi SSE per-event, and asyncapi WebSocket messages. The
+  response body (introspection loads included — one bounded reader), graphql
+  subscription WebSocket messages (graphql-transport-ws frames; previously
+  unbounded), asyncapi unary reply, asyncapi SSE per-event, and asyncapi
+  WebSocket messages. The
   WebSocket lane enforces the bound **post-receive** — the browser/undici
   WebSocket API has no pre-delivery read-limit seam (Go uses the socket
   library's connection-level `SetReadLimit`), so each message's byte size is

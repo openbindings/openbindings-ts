@@ -422,6 +422,8 @@ function httpToWS(url: string): string {
  */
 const MAX_QUEUED_EVENTS = 1024;
 
+const byteEncoder = new TextEncoder();
+
 /**
  * Subscribe to a GraphQL subscription via the graphql-transport-ws protocol.
  * Yields each event's bare data payload until the subscription completes
@@ -436,6 +438,7 @@ export async function* subscribeGraphQL(
   query: string,
   variables: Record<string, unknown> | undefined,
   headers: Record<string, string>,
+  maxUnitBytes: number,
   signal?: AbortSignal,
 ): AsyncGenerator<unknown> {
   const wsURL = httpToWS(url);
@@ -481,9 +484,18 @@ export async function* subscribeGraphQL(
   };
 
   ws.onmessage = (ev) => {
+    // Delivery-unit bound, enforced post-receive: the browser/undici
+    // WebSocket API exposes no pre-delivery read-limit seam (Go's
+    // SetReadLimit), so the check runs on the received frame before decode
+    // — same bound, same error identity, platform enforcement point.
+    const raw = String(ev.data);
+    if (byteEncoder.encode(raw).length > maxUnitBytes) {
+      finish({ error: new InvocationError(ERR_STREAM_ERROR, `WebSocket message exceeds ${maxUnitBytes} byte limit`) });
+      return;
+    }
     let msg: { type: string; payload?: unknown };
     try {
-      msg = JSON.parse(String(ev.data)) as { type: string; payload?: unknown };
+      msg = JSON.parse(raw) as { type: string; payload?: unknown };
     } catch (e: unknown) {
       finish({ error: new InvocationError(ERR_RESPONSE_ERROR, `parse ws message: ${e instanceof Error ? e.message : String(e)}`) });
       return;
