@@ -4,6 +4,26 @@
 
 ### Changed
 
+- **OBI-D-05 literal form is enforced** (percent-encoded same-document
+  fragments fail validation; the resolver no longer percent-decodes) and
+  **`validateInterface` accepts leading-digit identifiers** (`2fa.verify`) per
+  the committed OBI-D-03 grammar.
+
+- **One endpoint-key derivation.** `normalizeContextKey` strips URL userinfo
+  and case-folds the host, unifying the SDK's two normalizers; derived
+  context-store keys now match the Go SDK byte-for-byte.
+
+- **`@openbindings/mcp`: multi-block tool content returns the verbatim content
+  array (MCP-P-05)** instead of a `"\n"`-joined string.
+  **`@openbindings/asyncapi`: unary publish success is strict 2xx
+  (ASYNC-P-06)** — a 3xx final status is now a failure, matching the SSE path.
+
+- **Format packages declare `@openbindings/sdk` as a `^0.2.0` peer
+  dependency** (workspace devDependency for development), so a consumer
+  install dedupes to one SDK copy (`instanceof` safety across the invoker
+  boundary). Exports maps carry per-condition `types` (`.d.cts` for
+  `require`), and every package is `sideEffects: false`.
+
 - **A mid-stream deadline is now classified `ERR_TIMEOUT` (transient / effects:
   possible), deterministically and uniformly across formats, rather than
   `ERR_CANCELLED` — restoring the retry-safety signal.** An explicit caller
@@ -216,6 +236,35 @@
   `inputCompatible`/`outputCompatible` helpers are now openbindings
   reference tooling, not spec primitives.
 
+### Fixed
+
+- **Schema-comparison `allOf` normalization is sound** (mirrors the Go
+  engine): branches normalize fully before merging, sibling keywords merge as
+  one additional branch, union spellings are refused inline, ref-carried, or
+  alongside `allOf`. False-`compatible` verdicts on these shapes are gone;
+  red-proven against the seven new comparison-corpus fixture families.
+
+- **`redactContext` redacts scheme-scoped `apiKeys`.** Redaction and scoping
+  single-source the (now exported) `CREDENTIAL_FIELDS` registry, pinned by a
+  per-field sentinel drift-guard test.
+
+- **Document-keyed lookups are own-property-safe** (`Object.hasOwn`): a
+  document using `"constructor"` as an operation/source/transform key
+  validates and resolves correctly (OBI-D-08/09/10 corpus fixtures pin it).
+
+- **The invocation handle removes its external-`AbortSignal` listener on
+  terminal** (`{ once, signal }` registration), so completed invocations are
+  no longer retained by a long-lived shared signal.
+
+- **`dereference()` no longer mutates its input**: internal refs resolve
+  against the clone, and the output never aliases the input document.
+
+- **`@openbindings/asyncapi`: the response reader is cancelled when the size
+  cap trips** (no pinned body stream). **`@openbindings/mcp`: pagination is
+  bounded** — repeated/endless `nextCursor` refuses with `ERR_PROTOCOL`.
+  **`@openbindings/operationgraph`: OG-V-11 pre-execution refusal** for an
+  operation-node graph invoked without an interface.
+
 ### Removed
 
 - **The `security` surface, per spec 0.2.0**: the OBI `security` section,
@@ -251,6 +300,14 @@
   dropped per YAGNI. `parseDocument(input)` takes no options.
 
 ### Added
+
+- **CI corpus gating (`OB_CORPUS_REQUIRED`)**: CI checks out both corpus roots
+  (spec + interfaces; the interface corpora previously ran in no TS CI) and
+  corpus suites fail loudly when required-and-absent; local skip-if-absent
+  behavior is unchanged.
+
+- **README**: the SDK bundles the `jsonata` parser (2.1) for OBI-D-18
+  parse-checks — the "no bundled runtime" claim was stale.
 
 - **`Invocation.inputClosed`** in `@openbindings/sdk` — a promise resolved
   once the invocation's input side has closed: by the caller's `close()`, by
