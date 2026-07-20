@@ -617,7 +617,7 @@ export class OperationInvoker {
               break;
             }
           }
-          // OBI-T-08: an invalid output is not emitted; the invocation
+          // OBI-T-16: an invalid output is not emitted; the invocation
           // terminates. Per-item for streaming bindings.
           if (outputValidator) {
             const r = safeValidate(outputValidator, data);

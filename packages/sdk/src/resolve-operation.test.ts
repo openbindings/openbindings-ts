@@ -46,4 +46,23 @@ describe("resolveOperation (OBI-T-12)", () => {
       "tasks.create",
     ]);
   });
+
+  // Prototype-chain hardening: a name that collides with a built-in object
+  // property must resolve against the document's own operations map only,
+  // never a Function inherited from Object.prototype. These names are valid
+  // OBI-D-03 identifiers, so they reach the lookup.
+  it.each(["constructor", "toString", "hasOwnProperty", "valueOf", "__proto__"])(
+    "returns undefined for the built-in property name %s when no such operation exists",
+    (name) => {
+      const i = iface({ createTask: {} });
+      expect(resolveOperation(i, name)).toBeUndefined();
+    },
+  );
+
+  it("still resolves an operation genuinely named constructor", () => {
+    const i = iface({ constructor: { description: "a real operation" } });
+    const r = resolveOperation(i, "constructor");
+    expect(r?.key).toBe("constructor");
+    expect(r?.operation.description).toBe("a real operation");
+  });
 });
