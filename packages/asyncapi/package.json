@@ -46,7 +46,7 @@
   },
   "homepage": "https://openbindings.com",
   "engines": {
-    "node": ">=18"
+    "node": ">=22"
   },
   "dependencies": {
     "js-yaml": "^4.2.0"
