@@ -7,7 +7,10 @@ covers every package.
 
 ## Flow
 
-1. Bump the `version` field in every `packages/*/package.json` to `X.Y.Z`.
+1. Verify the `version` field in every `packages/*/package.json` reads
+   `X.Y.Z` (in practice the fields are bumped when the working-draft
+   changelog section opens, so this is a check that all seven agree, not
+   an edit).
 2. Retitle the `## X.Y.Z (working draft)` section in `CHANGELOG.md` to
    `## X.Y.Z — YYYY-MM-DD`, where the date is the tag date.
 3. Tag (annotated, never lightweight) and push the tag:
@@ -46,3 +49,9 @@ adds support for the new version.
 Minor versions may include breaking changes; patch versions are for bug
 fixes and non-breaking changes. Breaking changes are documented in
 `CHANGELOG.md` under **Changed** or **Removed**.
+
+## Historical note
+
+These conventions apply from 0.2.0 on. The v0.1.0 release predates them:
+its tag is lightweight, and its changelog heading is dated 2026-03-31
+while the tag commit is dated 2026-04-15. Both stand as released.
