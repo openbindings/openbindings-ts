@@ -97,8 +97,16 @@ export class Normalizer {
       out[k] = v;
     }
 
+    // Flatten allOf before anything else. The schema's own sibling keywords
+    // (everything beside allOf that survives stripping) are constraints that
+    // apply conjunctively with the branches, so they merge as one additional
+    // branch (profile normalization step 5).
     if ("allOf" in out) {
-      const merged = await this.flattenAllOf(out["allOf"], path);
+      const siblings: JSONObject = {};
+      for (const [k, v] of Object.entries(out)) {
+        if (k !== "allOf") siblings[k] = v;
+      }
+      const merged = await this.flattenAllOf(out["allOf"], siblings, path);
       return this.normalizeAt(merged, path);
     }
 
@@ -204,33 +212,45 @@ export class Normalizer {
     return { value, cleanup };
   }
 
-  private async flattenAllOf(allOf: JSONValue, path: string): Promise<JSONObject> {
+  /**
+   * Merges all branches of an allOf into a single schema.
+   *
+   * Each branch is normalized in full BEFORE merging (profile normalization
+   * step 5): a `$ref` branch is resolved and profile-checked exactly as
+   * step 3 requires, a nested allOf inside a branch flattens recursively,
+   * and out-of-profile keywords anywhere in a branch fail closed. The
+   * schema's own sibling keywords merge as one additional branch, first —
+   * the order is observable because enum intersection preserves the first
+   * branch's value order. oneOf/anyOf in a normalized branch fails closed,
+   * whether written inline, carried by a resolved `$ref`, or among the
+   * sibling keywords.
+   */
+  private async flattenAllOf(allOf: JSONValue, siblings: JSONObject, path: string): Promise<JSONObject> {
     const arr = asSlice(allOf);
     if (!arr) throw new Error(`${pathOrRoot(path)}.allOf: must be array`);
-    if (arr.length === 0) return {};
 
     const merged: JSONObject = {};
+
+    if (Object.keys(siblings).length > 0) {
+      const nb = await this.normalizeAt(siblings, path);
+      if ("oneOf" in nb) throw new OutsideProfileError(path, "oneOf alongside allOf");
+      if ("anyOf" in nb) throw new OutsideProfileError(path, "anyOf alongside allOf");
+      mergeAllOfBranch(merged, nb, path);
+    }
+
     for (let i = 0; i < arr.length; i++) {
-      let branch = asMap(arr[i]);
+      const branch = asMap(arr[i]);
       if (!branch) throw new Error(`${pathOrRoot(path)}.allOf[${i}]: must be object`);
 
       const branchPath = ptrJoin(path, `allOf[${i}]`);
-      branch = applyNullable(branch);
-      assertProfileKeywords(branch, branchPath);
 
-      if ("oneOf" in branch) throw new OutsideProfileError(branchPath, "oneOf inside allOf");
-      if ("anyOf" in branch) throw new OutsideProfileError(branchPath, "anyOf inside allOf");
+      // Normalize the branch in full before merging: resolves $ref (and
+      // profile-checks the resolved target), flattens nested allOf, and
+      // applies nullable. The union refusal lives in mergeAllOfBranch, so
+      // ref-carried oneOf/anyOf are refused exactly like inline spellings.
+      const nb = await this.normalizeAt(branch, branchPath);
 
-      const ref = branch["$ref"];
-      if (typeof ref === "string" && ref.trim()) {
-        const { value, cleanup } = await this.resolveRef(ref, branchPath);
-        cleanup();
-        const rm = asMap(value);
-        if (!rm) throw new RefError(branchPath, ref, "resolved $ref is not an object");
-        branch = rm;
-      }
-
-      mergeAllOfBranch(merged, branch, branchPath);
+      mergeAllOfBranch(merged, nb, branchPath);
     }
 
     return merged;
@@ -326,6 +346,17 @@ function resolveJSONPointer(doc: JSONValue, fragment: string, ref: string, path:
 }
 
 function mergeAllOfBranch(acc: JSONObject, branch: JSONObject, path: string): void {
+  // A union cannot be merged conjunctively by this profile: any oneOf/anyOf
+  // reaching an allOf merge — a branch's top level or either side of an
+  // overlapping-key merge — fails closed. Branches are normalized before
+  // merging ($ref inlined, nested allOf flattened, $defs/annotations
+  // stripped, out-of-profile keywords refused), so together with this guard
+  // the arms below cover every keyword a normalized schema can carry.
+  for (const k of ["oneOf", "anyOf"] as const) {
+    if (k in branch) throw new OutsideProfileError(path, `${k} inside allOf`);
+    if (k in acc) throw new OutsideProfileError(path, `${k} inside allOf`);
+  }
+
   if ("type" in branch) {
     const bTypes = normalizeType(branch["type"], path);
     if ("type" in acc) {
