@@ -8,6 +8,7 @@ import {
   NoSourcesError,
   MultipleSourcesError,
   buildAuthHeaders,
+  resolveDeliveryUnitLimit,
   type BindingInvocationArgs,
   type BindingInvoker,
   type SynthesizeInput,
@@ -95,6 +96,10 @@ export class GraphQLInvoker implements BindingInvoker {
     const url = args.source.location;
     const headers = buildAuthHeaders(args.context);
     const fetchFn = args.fetch ?? fetch;
+    // One resolved delivery-unit bound for every body this invocation reads
+    // (the response, and an introspection load when the plan needs one —
+    // both flow through doGraphQLHTTP, the lane's single bounded reader).
+    const maxResponseBytes = resolveDeliveryUnitLimit(args);
 
     // Resolve the query plan. A prebuilt _query const from the operation's
     // input schema dispatches without loading the schema; otherwise the
@@ -116,7 +121,7 @@ export class GraphQLInvoker implements BindingInvoker {
         }
       } else {
         try {
-          schema = await this.cachedIntrospect(url, headers, fetchFn, inv.signal);
+          schema = await this.cachedIntrospect(url, headers, fetchFn, inv.signal, maxResponseBytes);
         } catch (e: unknown) {
           // A cancelled introspection fetch rejects with an AbortError, not
           // an InvocationError: cancellation is already terminal (the handle
@@ -178,7 +183,7 @@ export class GraphQLInvoker implements BindingInvoker {
 
     // Queries and mutations dispatch one HTTP POST.
     const { data, headers: responseHeaders } = await invokeGraphQL(
-      url, query, variables, fieldName, headers, fetchFn, inv.signal,
+      url, query, variables, fieldName, headers, fetchFn, inv.signal, maxResponseBytes,
     );
     inv.setHeader(responseHeaders);
     await inv.emitOutput(data);
@@ -190,11 +195,12 @@ export class GraphQLInvoker implements BindingInvoker {
     headers: Record<string, string>,
     fetchFn: typeof globalThis.fetch,
     signal?: AbortSignal,
+    maxResponseBytes?: number,
   ): Promise<IntrospectionSchema> {
     const key = introspectionCacheKey(url);
     const cached = this.schemaCache.get(key);
     if (cached) return cached;
-    const schema = await introspect(url, headers, fetchFn, signal);
+    const schema = await introspect(url, headers, fetchFn, signal, maxResponseBytes);
     this.schemaCache.set(key, schema);
     return schema;
   }

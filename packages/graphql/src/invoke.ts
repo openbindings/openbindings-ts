@@ -1,5 +1,6 @@
 import type { JSONSchema, Metadata } from "@openbindings/sdk";
 import {
+  DEFAULT_MAX_DELIVERY_UNIT_BYTES,
   ERR_AUTH_REQUIRED,
   ERR_CONNECT_FAILED,
   ERR_EXECUTION_FAILED,
@@ -42,8 +43,9 @@ export async function introspect(
   headers: Record<string, string>,
   fetchFn: typeof globalThis.fetch = fetch,
   signal?: AbortSignal,
+  maxResponseBytes: number = DEFAULT_MAX_DELIVERY_UNIT_BYTES,
 ): Promise<IntrospectionSchema> {
-  const { body } = await doGraphQLHTTP(url, INTROSPECTION_QUERY, undefined, headers, fetchFn, signal);
+  const { body } = await doGraphQLHTTP(url, INTROSPECTION_QUERY, undefined, headers, fetchFn, signal, maxResponseBytes);
   if (body.errors?.length) {
     throw new Error(`introspection errors: ${body.errors.map((e) => e.message).join("; ")}`);
   }
@@ -233,13 +235,6 @@ interface GraphQLHTTPResult {
 }
 
 /**
- * Response body cap, matching the Go invoker's maxResponseBytes: an
- * unbounded GraphQL response (a single overlarge field, a runaway
- * introspection dump) must not be buffered without limit.
- */
-const MAX_RESPONSE_BYTES = 10 * 1024 * 1024;
-
-/**
  * Reads a Response body as text, refusing past maxBytes. Cancels the body
  * stream before bailing so the connection doesn't sit pinned on the
  * remaining bytes.
@@ -275,8 +270,11 @@ async function readResponseText(resp: Response, maxBytes: number): Promise<strin
  * Send a GraphQL query over HTTP POST. Non-2xx statuses throw an
  * InvocationError coded via httpErrorCode with `{ status, body }` details;
  * network and parse failures propagate as-is. The body is read under the
- * 10MB cap BEFORE the status check (Go parity: the cap applies to every
- * response, success or failure alike).
+ * delivery-unit bound BEFORE the status check (Go parity: the cap applies
+ * to every response, success or failure alike). An unbounded GraphQL
+ * response (a single overlarge field, a runaway introspection dump) must
+ * not be buffered without limit; the bound is consumer-configurable via
+ * `BindingInvocationArgs.maxDeliveryUnitBytes` (default 10MB).
  */
 async function doGraphQLHTTP(
   url: string,
@@ -285,6 +283,7 @@ async function doGraphQLHTTP(
   headers: Record<string, string>,
   fetchFn: typeof globalThis.fetch = fetch,
   signal?: AbortSignal,
+  maxResponseBytes: number = DEFAULT_MAX_DELIVERY_UNIT_BYTES,
 ): Promise<GraphQLHTTPResult> {
   const body: Record<string, unknown> = { query };
   if (variables) body.variables = variables;
@@ -302,7 +301,7 @@ async function doGraphQLHTTP(
     signal,
   });
 
-  const text = await readResponseText(resp, MAX_RESPONSE_BYTES);
+  const text = await readResponseText(resp, maxResponseBytes);
 
   if (!resp.ok) {
     throw new InvocationError(
@@ -337,10 +336,11 @@ export async function invokeGraphQL(
   headers: Record<string, string>,
   fetchFn: typeof globalThis.fetch = fetch,
   signal?: AbortSignal,
+  maxResponseBytes: number = DEFAULT_MAX_DELIVERY_UNIT_BYTES,
 ): Promise<GraphQLInvokeResult> {
   let res: GraphQLHTTPResult;
   try {
-    res = await doGraphQLHTTP(url, query, variables, headers, fetchFn, signal);
+    res = await doGraphQLHTTP(url, query, variables, headers, fetchFn, signal, maxResponseBytes);
   } catch (e: unknown) {
     if (e instanceof InvocationError) throw e;
     throw new InvocationError(ERR_EXECUTION_FAILED, e instanceof Error ? e.message : String(e));

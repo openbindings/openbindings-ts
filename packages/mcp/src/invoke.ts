@@ -261,6 +261,10 @@ export async function runMCPBinding(
     return response;
   };
 
+  // NAMED EXCLUSION (delivery-unit bound, 2026-07-20 ruling): response
+  // reading is delegated to the official MCP SDK, whose transport exposes
+  // no read-limit seam, so args.maxDeliveryUnitBytes is NOT enforced on
+  // this lane — see "Response size" in this package's README.
   const transport = new StreamableHTTPClientTransport(new URL(location), {
     fetch: captureFetch,
     ...(Object.keys(authHeaders).length > 0 ? { requestInit: { headers: authHeaders } } : {}),

@@ -34,7 +34,11 @@ import { SEMVER_RE, checkVersion, validate } from "./validate.js";
 
 /**
  * Bounds a graph document fetched from a remote location. Matches the Go
- * SDK's maxGraphDocBytes (8 MiB).
+ * SDK's maxGraphDocBytes (8 MiB). STAYS FIXED under the delivery-unit knob
+ * (a named exclusion of the 2026-07-20 ruling): an artifact-fetch guard on
+ * the graph DOCUMENT, not a response/delivery-unit bound — this package has
+ * no transport reads of its own beyond this; sub-operation responses are
+ * read (and bounded) by the format invokers behind the OperationInvoker.
  */
 const MAX_GRAPH_DOC_BYTES = 8 << 20; // 8 MiB
 

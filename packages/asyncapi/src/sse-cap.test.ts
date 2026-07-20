@@ -84,4 +84,35 @@ describe("SSE receive size cap is per-event, not cumulative", () => {
 
     await expect(call.closed).rejects.toMatchObject({ code: "ERR_RESPONSE_ERROR" });
   });
+
+  it("honors a caller-tuned per-event delivery-unit bound (identity unchanged)", async () => {
+    // The ruled knob (sdk-review ruling 4(a), 2026-07-20): a tiny
+    // args.maxDeliveryUnitBytes trips the SAME ERR_RESPONSE_ERROR with the
+    // SAME message template as the default per-event cap.
+    const payload = "x".repeat(4096);
+
+    await new Promise<void>((resolve) => {
+      server = createServer((_req: IncomingMessage, res: ServerResponse) => {
+        res.writeHead(200, { "Content-Type": "text/event-stream" });
+        res.end(`data: ${payload}\n\n`);
+      });
+      server.listen(0, "127.0.0.1", () => {
+        const addr = server.address();
+        port = typeof addr === "object" && addr ? addr.port : 0;
+        resolve();
+      });
+    });
+
+    const invoker = new AsyncAPIInvoker();
+    const call = invoker.invokeBinding({
+      source: { bindingSpec: BINDING_SPEC, content: spec("/") },
+      ref: "#/operations/receiveCaps",
+      maxDeliveryUnitBytes: 1024,
+    });
+
+    await expect(call.closed).rejects.toMatchObject({
+      code: "ERR_RESPONSE_ERROR",
+      message: expect.stringContaining("SSE event exceeds 1024 byte limit"),
+    });
+  });
 });

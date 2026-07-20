@@ -71,6 +71,16 @@ export interface OperationInvokerOptions {
   contextResolver?: ContextResolver;
   fetch?: typeof globalThis.fetch;
   /**
+   * Bounds ONE DELIVERY UNIT — the bytes materialized to produce one
+   * emitted output value — for every invocation this invoker drives.
+   * Undefined or `<= 0` selects the default
+   * (`DEFAULT_MAX_DELIVERY_UNIT_BYTES`). Effectively-unlimited = set
+   * explicitly huge (no magic sentinel). Stamped into per-invocation
+   * `BindingInvocationArgs` exactly where `fetch` is; args that already
+   * carry a value win.
+   */
+  maxDeliveryUnitBytes?: number;
+  /**
    * Invoker-level consumer hooks (specification + configuration = complete
    * invocation): consulted after any per-invocation hook declines, before
    * the format built-in. Site-guard your hook bodies (site.operation,
@@ -117,6 +127,7 @@ export class OperationInvoker {
   readonly transformEvaluator?: TransformEvaluator;
   readonly contextResolver?: ContextResolver;
   readonly fetch?: typeof globalThis.fetch;
+  readonly maxDeliveryUnitBytes?: number;
   /**
    * Invoker-level consumer hooks — mutable public fields (the Go SDK's
    * house style): an embedder installs its standing table here after
@@ -134,6 +145,7 @@ export class OperationInvoker {
     this.transformEvaluator = opts?.transformEvaluator;
     this.contextResolver = opts?.contextResolver;
     this.fetch = opts?.fetch;
+    this.maxDeliveryUnitBytes = opts?.maxDeliveryUnitBytes;
     this.outputDecoder = opts?.outputDecoder;
     this.resultClassifier = opts?.resultClassifier;
     this.fieldRouter = opts?.fieldRouter;
@@ -162,6 +174,7 @@ export class OperationInvoker {
       transformEvaluator: this.transformEvaluator,
       contextResolver: resolver ?? this.contextResolver,
       fetch: fetchFn ?? this.fetch,
+      maxDeliveryUnitBytes: this.maxDeliveryUnitBytes,
       // Hook fields ride the copy (the Go SDK's struct-copy semantics).
       outputDecoder: this.outputDecoder,
       resultClassifier: this.resultClassifier,
@@ -721,12 +734,20 @@ export class OperationInvoker {
   }
 
   /**
-   * Returns a copy of args with fetch filled from the invoker when the args
-   * don't already carry one. Never mutates the caller's args.
+   * Returns a copy of args with the invoker-level runtime policy filled in
+   * where the args don't already carry it: `fetch`, and the delivery-unit
+   * bound (`maxDeliveryUnitBytes`) stamped the same way. Never mutates the
+   * caller's args.
    */
   private withFetch(args: BindingInvocationArgs): BindingInvocationArgs {
-    if (args.fetch || !this.fetch) return args;
-    return { ...args, fetch: this.fetch };
+    const needFetch = !args.fetch && this.fetch !== undefined;
+    const needLimit =
+      args.maxDeliveryUnitBytes === undefined && this.maxDeliveryUnitBytes !== undefined;
+    if (!needFetch && !needLimit) return args;
+    const filled = { ...args };
+    if (needFetch) filled.fetch = this.fetch;
+    if (needLimit) filled.maxDeliveryUnitBytes = this.maxDeliveryUnitBytes;
+    return filled;
   }
 }
 

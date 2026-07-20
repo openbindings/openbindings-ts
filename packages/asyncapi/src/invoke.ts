@@ -57,6 +57,7 @@ import {
   type Metadata,
   isJSONContentType,
   decodeThroughHooks,
+  resolveDeliveryUnitLimit,
   type InvokeHooks,
   type InvokeSite,
   type OutputDecoder,
@@ -95,6 +96,11 @@ import {
 import { parseRef, errorMessage } from "./util.js";
 import type { PooledWS, WSPool } from "./ws-pool.js";
 
+/**
+ * STAYS FIXED under the delivery-unit knob: this constant now caps only the
+ * DIAGNOSTICS-side failure-body capture (readErrorBody) — error details,
+ * never an emitted output value, so the consumer bound does not apply.
+ */
 const MAX_RESPONSE_BYTES = 10 * 1024 * 1024;
 
 type Handle = BindingHandle<unknown, unknown>;
@@ -706,7 +712,9 @@ async function runUnaryPublish(
 
   let respText: string;
   try {
-    respText = await readResponseText(resp, MAX_RESPONSE_BYTES);
+    // The unary reply body is one delivery unit: the consumer-configurable
+    // delivery-unit bound applies (args.maxDeliveryUnitBytes, default 10MB).
+    respText = await readResponseText(resp, resolveDeliveryUnitLimit(args));
   } catch (e: unknown) {
     h.fireError(new InvocationError(ERR_RESPONSE_ERROR, errorMessage(e)));
     return;
@@ -1020,9 +1028,28 @@ async function runWSSubscribe(
   const notify = () => wake?.();
   const byteEncoder = new TextEncoder();
 
+  // The delivery-unit bound for this subscription's frames (each frame is
+  // one delivery unit). Enforcement point differs from Go BY PLATFORM
+  // IDIOM, not behavior: nhooyr/coder websocket exposes SetReadLimit (a
+  // pre-delivery connection-level read limit), while the browser/undici
+  // WebSocket API has no read-limit seam, so the TS lane checks each
+  // message's byte size POST-RECEIVE, before decode — same bound, same
+  // ERR_STREAM_ERROR terminal. Per-subscription, so an oversized frame
+  // never tears down the shared pooled socket under sibling subscriptions.
+  const maxUnitBytes = resolveDeliveryUnitLimit(args);
+
   const removeMsg = pooled.onMessage((data) => {
     if (overflowed) return;
     const frameBytes = byteEncoder.encode(data).length;
+    if (frameBytes > maxUnitBytes) {
+      // Refuse loudly: mark terminal (the output pump drains what was
+      // already buffered, then fails the stream) and drop this and every
+      // subsequent frame.
+      overflowed = true;
+      overflowMessage = `WebSocket message exceeds ${maxUnitBytes} byte limit`;
+      notify();
+      return;
+    }
     if (frames.length >= MAX_BUFFERED_FRAMES) {
       overflowed = true;
       overflowMessage = `backpressure overflow: more than ${MAX_BUFFERED_FRAMES} undelivered frames`;

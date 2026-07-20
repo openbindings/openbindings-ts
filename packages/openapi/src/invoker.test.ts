@@ -603,6 +603,26 @@ describe("invokeBinding — responses", () => {
     expect(bodyCancelled).toBe(true);
   });
 
+  it("honors a caller-tuned delivery-unit bound with the unchanged error identity", async () => {
+    // The ruled knob (sdk-review ruling 4(a), 2026-07-20): a tiny
+    // args.maxDeliveryUnitBytes trips the SAME ERR_RESPONSE_ERROR with the
+    // SAME message template as the default cap — only the value is dynamic.
+    const { fetch } = mockFetch(
+      () => new Response("x".repeat(4096), { status: 200, headers: { "Content-Type": "text/plain" } }),
+    );
+    const call = new OpenAPIInvoker().invokeBinding({
+      source: SOURCE,
+      ref: REF_PING,
+      fetch,
+      maxDeliveryUnitBytes: 1024,
+    });
+
+    await expect(call.closed).rejects.toMatchObject({
+      code: ERR_RESPONSE_ERROR,
+      message: expect.stringContaining("response exceeds 1024 byte limit"),
+    });
+  });
+
   it("aborts the in-flight request and terminates ERR_CANCELLED on cancel", async () => {
     const { fetch, requests } = mockFetch(
       (req) =>

@@ -320,6 +320,25 @@ describe("GraphQLInvoker unary", () => {
     expect(bodyCancelled).toBe(true);
   });
 
+  it("honors a caller-tuned delivery-unit bound with the unchanged error identity", async () => {
+    // The ruled knob (sdk-review ruling 4(a), 2026-07-20): a tiny
+    // args.maxDeliveryUnitBytes trips the SAME lane identity as the default
+    // cap — graphql's deliberate ERR_EXECUTION_FAILED mapping, same message
+    // template, only the value dynamic.
+    const fn: typeof fetch = async () => new Response("x".repeat(4096), { status: 200 });
+    const call = new GraphQLInvoker().invokeBinding({
+      source,
+      ref: "Query/ping",
+      fetch: fn,
+      maxDeliveryUnitBytes: 1024,
+    });
+
+    await expect(call.closed).rejects.toMatchObject({
+      code: ERR_EXECUTION_FAILED,
+      message: expect.stringContaining("response exceeds 1024 byte limit"),
+    });
+  });
+
   it("fails a malformed ref pre-dispatch without any I/O", async () => {
     const { fn, calls } = mockFetch(() => jsonResponse({ data: {} }));
     const call = new GraphQLInvoker().invokeBinding({ source, ref: "bogus", fetch: fn });
