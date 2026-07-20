@@ -16,6 +16,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import canonicalize from "canonicalize";
 import { Normalizer } from "./normalize.js";
+import { inputCompatible, outputCompatible } from "./compat.js";
 import { OutsideProfileError } from "./errors.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -134,6 +135,7 @@ async function compareOperation(
   leftOp: OBOperation,
   rightOp: OBOperation,
   leftInterface: OBInterface,
+  rightInterface: OBInterface,
 ): Promise<OpVerdict> {
   const leftRaw = directionSchema(direction, leftOp);
   const rightRaw = directionSchema(direction, rightOp);
@@ -148,17 +150,21 @@ async function compareOperation(
   expect(leftSchema, "left schema must be an object or boolean").toBeDefined();
   expect(rightSchema, "right schema must be an object or boolean").toBeDefined();
 
-  // Each schema resolves $ref against its own interface document.
-  // inputCompatible/outputCompatible normalize both schemas internally, so
-  // we use the left document as root; corpus fixtures only carry $refs that
-  // resolve against the left document.
-  const n = new Normalizer({ root: leftInterface as unknown as Record<string, unknown> });
+  // Each schema resolves $ref against its OWN interface document: the left
+  // schema normalizes against the left document root, the right schema
+  // against the right document root, and the pre-normalized pair runs the
+  // package-level directional check — the same per-side rooting
+  // checkInterfaceCompatibility applies.
+  const nLeft = new Normalizer({ root: leftInterface as unknown as Record<string, unknown> });
+  const nRight = new Normalizer({ root: rightInterface as unknown as Record<string, unknown> });
 
   try {
+    const leftNorm = await nLeft.normalize(leftSchema!);
+    const rightNorm = await nRight.normalize(rightSchema!);
     const result =
       direction === "input"
-        ? await n.inputCompatible(leftSchema!, rightSchema!)
-        : await n.outputCompatible(leftSchema!, rightSchema!);
+        ? inputCompatible(leftNorm, rightNorm)
+        : outputCompatible(leftNorm, rightNorm);
     return result.compatible ? "compatible" : "incompatible";
   } catch (err) {
     if (err instanceof OutsideProfileError) {
@@ -197,7 +203,7 @@ async function runSubsumeFixture(
     }
     pairedRight.add(pair.rightKey);
 
-    const verdict = await compareOperation(entry.direction, leftOp, pair.rightOp, fix.left);
+    const verdict = await compareOperation(entry.direction, leftOp, pair.rightOp, fix.left, fix.right);
     verdicts.push(verdict);
   }
 
