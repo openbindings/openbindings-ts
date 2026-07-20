@@ -16,8 +16,12 @@
   "files": [
     "dist"
   ],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "tsup",
+    "prepack": "tsup",
     "test": "vitest run",
     "lint": "tsc --noEmit"
   },
