@@ -62,6 +62,26 @@ describe("Normalizer.normalize", () => {
     await expect(n.normalize({ $ref: "#/schemas/Self" })).rejects.toThrow(RefError);
   });
 
+  it("fails a relative $ref with no base", async () => {
+    // A path-carrying relative ref cannot resolve without a base; it must
+    // fail closed, never silently fall back to root-fragment resolution.
+    // Mirrors the Go SDK's TestNormalize_RefResolutionRelativeWithoutBase;
+    // the full message is the parity-pinned RefError rendering.
+    const n = new Normalizer({ root: { schemas: { Foo: { type: "string" } } } });
+    await expect(n.normalize({ $ref: "schemas.json#/schemas/Foo" })).rejects.toThrow(RefError);
+    await expect(n.normalize({ $ref: "schemas.json#/schemas/Foo" })).rejects.toThrow(
+      '<root>.$ref "schemas.json#/schemas/Foo": relative $ref with no base',
+    );
+  });
+
+  it("fails an external $ref without a fetcher", async () => {
+    // Mirrors the Go SDK's TestNormalize_RefResolutionExternalWithoutFetcher.
+    const n = new Normalizer({ root: {} });
+    await expect(
+      n.normalize({ $ref: "https://example.com/schema.json#/schemas/Foo" }),
+    ).rejects.toThrow("external $ref unsupported (no fetcher)");
+  });
+
   it("rejects out-of-profile keywords", async () => {
     const n = new Normalizer();
     await expect(
