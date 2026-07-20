@@ -159,33 +159,48 @@ function scalarToJSONSchema(name: string): Record<string, unknown> {
 function objectToJSONSchema(name: string, tm: TypeMap, visited: Set<string>): Record<string, unknown> {
   if (visited.has(name)) return { type: "object" };
   visited.add(name);
-  const ft = tm.get(name);
-  if (!ft?.fields?.length) return { type: "object" };
-  const properties: Record<string, unknown> = {};
-  for (const f of ft.fields) {
-    if (!f.name.startsWith("__")) {
-      properties[f.name] = graphqlTypeToJSONSchema(f.type, tm, visited);
+  // Delete on unwind so `visited` tracks only the types on the current
+  // recursion stack (a genuine cycle), never every type seen anywhere in the
+  // walk. Left set, it would truncate a type reused in sibling (non-cyclic)
+  // positions to a bare { type: "object" }. Mirrors the Go graphql module's
+  // delete-on-unwind and this SDK's own query builder in invoke.ts.
+  try {
+    const ft = tm.get(name);
+    if (!ft?.fields?.length) return { type: "object" };
+    const properties: Record<string, unknown> = {};
+    for (const f of ft.fields) {
+      if (!f.name.startsWith("__")) {
+        properties[f.name] = graphqlTypeToJSONSchema(f.type, tm, visited);
+      }
     }
+    return Object.keys(properties).length ? { type: "object", properties } : { type: "object" };
+  } finally {
+    visited.delete(name);
   }
-  return Object.keys(properties).length ? { type: "object", properties } : { type: "object" };
 }
 
 function inputObjectToJSONSchema(name: string, tm: TypeMap, visited: Set<string>): Record<string, unknown> {
   if (visited.has(name)) return { type: "object" };
   visited.add(name);
-  const ft = tm.get(name);
-  if (!ft?.inputFields?.length) return { type: "object" };
-  const properties: Record<string, unknown> = {};
-  const required: string[] = [];
-  for (const f of ft.inputFields) {
-    const isRequired = f.type.kind === "NON_NULL";
-    const argType = isRequired && f.type.ofType ? f.type.ofType : f.type;
-    properties[f.name] = graphqlTypeToJSONSchema(argType, tm, visited);
-    if (isRequired) required.push(f.name);
+  // Delete on unwind (see objectToJSONSchema): so an input type reused across
+  // sibling input fields keeps its full schema in every position.
+  try {
+    const ft = tm.get(name);
+    if (!ft?.inputFields?.length) return { type: "object" };
+    const properties: Record<string, unknown> = {};
+    const required: string[] = [];
+    for (const f of ft.inputFields) {
+      const isRequired = f.type.kind === "NON_NULL";
+      const argType = isRequired && f.type.ofType ? f.type.ofType : f.type;
+      properties[f.name] = graphqlTypeToJSONSchema(argType, tm, visited);
+      if (isRequired) required.push(f.name);
+    }
+    const schema: Record<string, unknown> = { type: "object", properties };
+    if (required.length > 0) schema.required = required.sort();
+    return schema;
+  } finally {
+    visited.delete(name);
   }
-  const schema: Record<string, unknown> = { type: "object", properties };
-  if (required.length > 0) schema.required = required.sort();
-  return schema;
 }
 
 function unionToJSONSchema(name: string, tm: TypeMap, visited: Set<string>): Record<string, unknown> {

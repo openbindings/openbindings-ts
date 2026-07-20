@@ -143,3 +143,147 @@ describe("convertToInterface", () => {
     expect(output.enum).toEqual(["ACTIVE", "INACTIVE"]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Shared-type (DAG reuse) synthesis — C8f
+//
+// A type reused in sibling (non-cyclic) positions must carry the full schema in
+// EVERY position, not collapse to a bare {"type":"object"} after the first. A
+// true cycle must still terminate as a bare placeholder. These mirror the Go
+// graphql module's synthesize_shared_test.go, and the object case is pinned to
+// the same canonical literal so Go≡TS output is asserted on both sides.
+// ---------------------------------------------------------------------------
+
+// Canonical (recursively sorted-key) JSON, comparable byte-for-byte with Go's
+// encoding/json (which sorts map keys by default).
+function sortKeys(v: unknown): unknown {
+  if (Array.isArray(v)) return v.map(sortKeys);
+  if (v && typeof v === "object") {
+    const out: Record<string, unknown> = {};
+    for (const k of Object.keys(v as Record<string, unknown>).sort()) {
+      out[k] = sortKeys((v as Record<string, unknown>)[k]);
+    }
+    return out;
+  }
+  return v;
+}
+function canonicalize(v: unknown): string {
+  return JSON.stringify(sortKeys(v));
+}
+
+// The exact canonical schema both SDKs must emit for `User { id: ID, name:
+// String }` in a shared position. The Go test asserts against this same
+// literal (parityPinnedUserSchema).
+const PARITY_PINNED_USER_SCHEMA =
+  '{"properties":{"id":{"type":"string"},"name":{"type":"string"}},"type":"object"}';
+
+describe("convertToInterface — shared-type synthesis (C8f)", () => {
+  it("does not truncate an object type reused in sibling positions", () => {
+    const schema: IntrospectionSchema = {
+      queryType: { kind: "OBJECT", name: "Query", ofType: null },
+      mutationType: null,
+      subscriptionType: null,
+      types: [
+        {
+          kind: "OBJECT", name: "Query",
+          fields: [{ name: "search", args: [], type: { kind: "OBJECT", name: "SearchPayload", ofType: null }, isDeprecated: false }],
+        },
+        {
+          kind: "OBJECT", name: "SearchPayload",
+          fields: [
+            { name: "primary", args: [], type: { kind: "OBJECT", name: "User", ofType: null }, isDeprecated: false },
+            { name: "secondary", args: [], type: { kind: "OBJECT", name: "User", ofType: null }, isDeprecated: false },
+          ],
+        },
+        {
+          kind: "OBJECT", name: "User",
+          fields: [
+            { name: "id", args: [], type: { kind: "SCALAR", name: "ID", ofType: null }, isDeprecated: false },
+            { name: "name", args: [], type: { kind: "SCALAR", name: "String", ofType: null }, isDeprecated: false },
+          ],
+        },
+      ],
+    };
+
+    const iface = convertToInterface(schema);
+    const output = iface.operations.search.output as Record<string, unknown>;
+    const props = output.properties as Record<string, Record<string, unknown>>;
+
+    for (const fieldName of ["primary", "secondary"]) {
+      const f = props[fieldName];
+      expect(f.properties, `field ${fieldName} truncated to a bare object`).toBeDefined();
+      expect((f.properties as Record<string, unknown>).name).toBeDefined();
+      // Parity pin: the same canonical literal the Go test asserts.
+      expect(canonicalize(f)).toBe(PARITY_PINNED_USER_SCHEMA);
+    }
+  });
+
+  it("does not truncate an input-object type reused in sibling input positions", () => {
+    const schema: IntrospectionSchema = {
+      queryType: { kind: "OBJECT", name: "Query", ofType: null },
+      mutationType: { kind: "OBJECT", name: "Mutation", ofType: null },
+      subscriptionType: null,
+      types: [
+        { kind: "OBJECT", name: "Query", fields: [] },
+        {
+          kind: "OBJECT", name: "Mutation",
+          fields: [{
+            name: "createPair",
+            args: [{ name: "input", type: { kind: "INPUT_OBJECT", name: "Pair", ofType: null } }],
+            type: { kind: "SCALAR", name: "Boolean", ofType: null },
+            isDeprecated: false,
+          }],
+        },
+        {
+          kind: "INPUT_OBJECT", name: "Pair",
+          inputFields: [
+            { name: "a", type: { kind: "INPUT_OBJECT", name: "Point", ofType: null } },
+            { name: "b", type: { kind: "INPUT_OBJECT", name: "Point", ofType: null } },
+          ],
+        },
+        {
+          kind: "INPUT_OBJECT", name: "Point",
+          inputFields: [{ name: "label", type: { kind: "SCALAR", name: "String", ofType: null } }],
+        },
+      ],
+    };
+
+    const iface = convertToInterface(schema);
+    const input = iface.operations.createPair.input as Record<string, unknown>;
+    const pair = (input.properties as Record<string, Record<string, unknown>>).input;
+    const pairProps = pair.properties as Record<string, Record<string, unknown>>;
+
+    for (const fieldName of ["a", "b"]) {
+      const f = pairProps[fieldName];
+      expect(f.properties, `input field ${fieldName} truncated to a bare object`).toBeDefined();
+      expect((f.properties as Record<string, unknown>).label).toBeDefined();
+    }
+  });
+
+  it("preserves the bare placeholder for a true cycle", () => {
+    const schema: IntrospectionSchema = {
+      queryType: { kind: "OBJECT", name: "Query", ofType: null },
+      mutationType: null,
+      subscriptionType: null,
+      types: [
+        {
+          kind: "OBJECT", name: "Query",
+          fields: [{ name: "node", args: [], type: { kind: "OBJECT", name: "Node", ofType: null }, isDeprecated: false }],
+        },
+        {
+          kind: "OBJECT", name: "Node",
+          fields: [
+            { name: "id", args: [], type: { kind: "SCALAR", name: "ID", ofType: null }, isDeprecated: false },
+            { name: "parent", args: [], type: { kind: "OBJECT", name: "Node", ofType: null }, isDeprecated: false },
+          ],
+        },
+      ],
+    };
+
+    const iface = convertToInterface(schema);
+    const output = iface.operations.node.output as Record<string, unknown>;
+    const parent = (output.properties as Record<string, Record<string, unknown>>).parent;
+    expect(parent.type).toBe("object");
+    expect(parent.properties).toBeUndefined();
+  });
+});
