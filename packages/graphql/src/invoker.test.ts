@@ -320,6 +320,25 @@ describe("GraphQLInvoker unary", () => {
     expect(bodyCancelled).toBe(true);
   });
 
+  it("honors a caller-tuned delivery-unit bound with the unchanged error identity", async () => {
+    // The ruled knob (sdk-review ruling 4(a), 2026-07-20): a tiny
+    // args.maxDeliveryUnitBytes trips the SAME lane identity as the default
+    // cap — graphql's deliberate ERR_EXECUTION_FAILED mapping, same message
+    // template, only the value dynamic.
+    const fn: typeof fetch = async () => new Response("x".repeat(4096), { status: 200 });
+    const call = new GraphQLInvoker().invokeBinding({
+      source,
+      ref: "Query/ping",
+      fetch: fn,
+      maxDeliveryUnitBytes: 1024,
+    });
+
+    await expect(call.closed).rejects.toMatchObject({
+      code: ERR_EXECUTION_FAILED,
+      message: expect.stringContaining("response exceeds 1024 byte limit"),
+    });
+  });
+
   it("fails a malformed ref pre-dispatch without any I/O", async () => {
     const { fn, calls } = mockFetch(() => jsonResponse({ data: {} }));
     const call = new GraphQLInvoker().invokeBinding({ source, ref: "bogus", fetch: fn });
@@ -442,8 +461,8 @@ describe("GraphQLInvoker subscriptions", () => {
     vi.unstubAllGlobals();
   });
 
-  async function start(ref: string, opts?: { context?: Record<string, unknown>; write?: Record<string, unknown> }) {
-    const call = new GraphQLInvoker().invokeBinding({ source, ref, context: opts?.context });
+  async function start(ref: string, opts?: { context?: Record<string, unknown>; write?: Record<string, unknown>; maxDeliveryUnitBytes?: number }) {
+    const call = new GraphQLInvoker().invokeBinding({ source, ref, context: opts?.context, maxDeliveryUnitBytes: opts?.maxDeliveryUnitBytes });
     if (opts?.write) await call.write(opts.write);
     await vi.waitFor(() => { expect(FakeWebSocket.instances.length).toBeGreaterThan(0); });
     const ws = FakeWebSocket.instances[FakeWebSocket.instances.length - 1];
@@ -490,6 +509,29 @@ describe("GraphQLInvoker subscriptions", () => {
     ws.receive({ type: "error", payload: [{ message: "subscribe failed" }] });
     await expect(call.closed).rejects.toMatchObject({ code: ERR_EXECUTION_FAILED });
     await vi.waitFor(() => { expect(ws.readyState).toBe(FakeWebSocket.CLOSED); });
+  });
+
+  it("refuses an oversized frame at the delivery-unit bound", async () => {
+    const { call, ws } = await start("Subscription/onOrder", { maxDeliveryUnitBytes: 1024 });
+
+    ws.receive({ type: "next", payload: { data: { onOrder: { blob: "x".repeat(2000) } } } });
+    await expect(call.closed).rejects.toMatchObject({
+      code: ERR_STREAM_ERROR,
+      message: expect.stringContaining("exceeds 1024 byte limit"),
+    });
+  });
+
+  it("passes a frame above the old accidental 32KiB level at the default bound", async () => {
+    const { call, ws } = await start("Subscription/onOrder");
+
+    const blob = "x".repeat(64 * 1024 + 1);
+    ws.receive({ type: "next", payload: { data: { onOrder: { blob } } } });
+    ws.receive({ type: "complete" });
+
+    const events: unknown[] = [];
+    for await (const ev of call.outputs) events.push(ev);
+    expect(events).toEqual([{ onOrder: { blob } }]);
+    await expect(call.closed).resolves.toBeUndefined();
   });
 
   it("maps a mid-stream socket failure to ERR_STREAM_ERROR", async () => {

@@ -301,6 +301,32 @@
 
 ### Added
 
+- **Configurable delivery-unit bound.** `BindingInvocationArgs.maxDeliveryUnitBytes`
+  bounds ONE DELIVERY UNIT — the bytes materialized to produce one emitted
+  output value; undefined or `<= 0` selects the default, and
+  effectively-unlimited is an explicitly huge value (no magic sentinel).
+  `OperationInvokerOptions.maxDeliveryUnitBytes` stamps it into per-invocation
+  args exactly where `fetch` is stamped (args that already carry a value win).
+  The SDK exports `DEFAULT_MAX_DELIVERY_UNIT_BYTES` (10485760 — equal to the
+  Go SDK's default) and `resolveDeliveryUnitLimit(args)`, the single semantics
+  point format packages call. Wired lanes: openapi response body, graphql
+  response body (introspection loads included — one bounded reader), graphql
+  subscription WebSocket messages (graphql-transport-ws frames; previously
+  unbounded), asyncapi unary reply, asyncapi SSE per-event, and asyncapi
+  WebSocket messages. The
+  WebSocket lane enforces the bound **post-receive** — the browser/undici
+  WebSocket API has no pre-delivery read-limit seam (Go uses the socket
+  library's connection-level `SetReadLimit`), so each message's byte size is
+  checked against the resolved bound before decode; a language-platform
+  idiom, not a behavioral divergence: same bound, same `ERR_STREAM_ERROR`.
+  Overflow error identity is unchanged per lane (`ERR_RESPONSE_ERROR`,
+  graphql's `ERR_EXECUTION_FAILED`, WS `ERR_STREAM_ERROR`); only the value in
+  the message is now dynamic. Named exclusion: `@openbindings/mcp` delegates
+  response reading to the official MCP SDK, which exposes no read-limit seam
+  — the bound is not enforced on that lane (see the package README);
+  operationgraph's 8 MiB graph-document guard is an artifact-fetch bound, not
+  a delivery-unit bound, and stays fixed.
+
 - **CI corpus gating (`OB_CORPUS_REQUIRED`)**: CI checks out both corpus roots
   (spec + interfaces; the interface corpora previously ran in no TS CI) and
   corpus suites fail loudly when required-and-absent; local skip-if-absent

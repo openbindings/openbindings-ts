@@ -27,6 +27,14 @@ export interface BindingInvocationArgs {
   /** The selected binding entry. Populated by the operation invoker; optional for direct calls. */
   binding?: BindingEntry;
   context?: Record<string, unknown>;
+  /**
+   * Bounds ONE DELIVERY UNIT — the bytes materialized to produce one
+   * emitted output value. Undefined or `<= 0` selects the default
+   * ({@link DEFAULT_MAX_DELIVERY_UNIT_BYTES}). Effectively-unlimited = set
+   * explicitly huge (no magic sentinel). Format packages resolve it through
+   * {@link resolveDeliveryUnitLimit}, never re-derive.
+   */
+  maxDeliveryUnitBytes?: number;
   /** The containing OBI. Most invokers do not need this; it is used by invokers that invoke sub-operations (e.g., operation graphs). */
   interface?: OBInterface;
   /** Operation input schema, populated by the operation invoker. Enables format-specific invokers to read schema metadata (e.g., const values). */
@@ -47,6 +55,28 @@ export interface BindingInvocationArgs {
    * target where they know it.
    */
   site?: InvokeSite;
+}
+
+/**
+ * The default delivery-unit bound: 10 MB per delivery unit (cross-SDK
+ * parity: equals the Go SDK's `DefaultMaxDeliveryUnitBytes`, `10 << 20`).
+ */
+export const DEFAULT_MAX_DELIVERY_UNIT_BYTES = 10 * 1024 * 1024;
+
+/**
+ * Resolves the delivery-unit bound for one invocation: the args'
+ * `maxDeliveryUnitBytes` when it is a positive finite number, else
+ * {@link DEFAULT_MAX_DELIVERY_UNIT_BYTES}. The single semantics point for
+ * the knob — format packages call this, never re-derive the rule.
+ */
+export function resolveDeliveryUnitLimit(
+  args: Pick<BindingInvocationArgs, "maxDeliveryUnitBytes">,
+): number {
+  const v = args.maxDeliveryUnitBytes;
+  // Undefined or <= 0 selects the default; non-finite values (NaN,
+  // Infinity) do too — effectively-unlimited is an explicit huge number,
+  // never a sentinel.
+  return v !== undefined && Number.isFinite(v) && v > 0 ? v : DEFAULT_MAX_DELIVERY_UNIT_BYTES;
 }
 
 /**

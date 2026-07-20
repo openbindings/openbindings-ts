@@ -39,6 +39,10 @@ export type {
   BindableTarget,
   SourceInspection,
 } from "./invoker-types.js";
+export {
+  DEFAULT_MAX_DELIVERY_UNIT_BYTES,
+  resolveDeliveryUnitLimit,
+} from "./invoker-types.js";
 
 export type {
   ContextStore,

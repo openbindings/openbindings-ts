@@ -16,6 +16,8 @@ import { errorMessage } from "./util.js";
  * Bounds individual SSE line length to prevent runaway memory use from a
  * misbehaving server. The WHATWG SSE spec does not impose a line limit, but
  * a single 16 MB line is generous in practice (Go parity: sseMaxLineBytes).
+ * STAYS FIXED under the delivery-unit knob: this is a line-framing scan
+ * guard on unterminated text, not a bound on a delivery unit.
  */
 const SSE_MAX_LINE_BYTES = 16 * 1024 * 1024;
 

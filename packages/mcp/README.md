@@ -151,6 +151,10 @@ Default **off**: no `progressToken` rides `tools/call` and the output stream is 
 
 The entity call's HTTP response headers surface as the invocation's leading metadata (`header`). Errors map to terminal invocation errors: JSON-RPC errors → `ERR_EXECUTION_FAILED` with the `{code, data}` in details, HTTP 401/403 → `ERR_AUTH_REQUIRED`/`ERR_PERMISSION_DENIED`, connection failures → `ERR_CONNECT_FAILED`. MCP servers declare no security schemes, so the binding raises no upfront `CONTEXT_REQUIRED` challenge — credential resolution happens above the binding (see the `OperationInvoker`'s `contextResolver`).
 
+### Response size (named exclusion)
+
+The SDK-wide delivery-unit bound (`BindingInvocationArgs.maxDeliveryUnitBytes`, default `DEFAULT_MAX_DELIVERY_UNIT_BYTES`) is **not enforced on this lane**. Response reading is delegated entirely to `@modelcontextprotocol/sdk`, whose `Client`/`StreamableHTTPClientTransport` API exposes no read-limit seam (its options are `authProvider`, `requestInit`, `fetch`, `reconnectionOptions`, `sessionId` — nothing bounds body or SSE-message reads, and truncating bodies in an injected `fetch` would surface as SDK-internal parse errors with the wrong identity, not a clean refusal). Until the upstream SDK grows such a seam, MCP responses are read unbounded; setting `maxDeliveryUnitBytes` has no effect here. This is a named exclusion recorded the day the knob landed (2026-07-20), like grpc message sizing on the Go side.
+
 ### Credential application
 
 MCP has no native security scheme declarations (MCP-P-07). Headers are passed to the underlying HTTP transport via `RequestInit.headers`, derived from the binding context in this fallback order:

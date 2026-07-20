@@ -57,4 +57,28 @@ describe("AsyncAPI readResponseText cap (C6f)", () => {
     await expect(call.closed).rejects.toMatchObject({ code: "ERR_RESPONSE_ERROR" });
     expect(cancelled).toBe(true);
   });
+
+  it("honors a caller-tuned delivery-unit bound on the unary reply (identity unchanged)", async () => {
+    // The ruled knob (sdk-review ruling 4(a), 2026-07-20): a tiny
+    // args.maxDeliveryUnitBytes trips the SAME ERR_RESPONSE_ERROR with the
+    // SAME message template as the default cap — only the value is dynamic.
+    const customFetch = async () =>
+      new Response(JSON.stringify({ pad: "x".repeat(4096) }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+
+    const invoker = new AsyncAPIInvoker();
+    const call = invoker.invokeBinding({
+      source: source(),
+      ref: "#/operations/sendOpenMessage",
+      fetch: customFetch as unknown as typeof fetch,
+      maxDeliveryUnitBytes: 1024,
+    });
+    await call.write({ text: "hi" });
+    await expect(call.closed).rejects.toMatchObject({
+      code: "ERR_RESPONSE_ERROR",
+      message: expect.stringContaining("response exceeds 1024 byte limit"),
+    });
+  });
 });

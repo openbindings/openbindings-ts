@@ -1,5 +1,6 @@
 import type { JSONSchema, Metadata } from "@openbindings/sdk";
 import {
+  DEFAULT_MAX_DELIVERY_UNIT_BYTES,
   ERR_AUTH_REQUIRED,
   ERR_CONNECT_FAILED,
   ERR_EXECUTION_FAILED,
@@ -42,8 +43,9 @@ export async function introspect(
   headers: Record<string, string>,
   fetchFn: typeof globalThis.fetch = fetch,
   signal?: AbortSignal,
+  maxResponseBytes: number = DEFAULT_MAX_DELIVERY_UNIT_BYTES,
 ): Promise<IntrospectionSchema> {
-  const { body } = await doGraphQLHTTP(url, INTROSPECTION_QUERY, undefined, headers, fetchFn, signal);
+  const { body } = await doGraphQLHTTP(url, INTROSPECTION_QUERY, undefined, headers, fetchFn, signal, maxResponseBytes);
   if (body.errors?.length) {
     throw new Error(`introspection errors: ${body.errors.map((e) => e.message).join("; ")}`);
   }
@@ -233,13 +235,6 @@ interface GraphQLHTTPResult {
 }
 
 /**
- * Response body cap, matching the Go invoker's maxResponseBytes: an
- * unbounded GraphQL response (a single overlarge field, a runaway
- * introspection dump) must not be buffered without limit.
- */
-const MAX_RESPONSE_BYTES = 10 * 1024 * 1024;
-
-/**
  * Reads a Response body as text, refusing past maxBytes. Cancels the body
  * stream before bailing so the connection doesn't sit pinned on the
  * remaining bytes.
@@ -275,8 +270,11 @@ async function readResponseText(resp: Response, maxBytes: number): Promise<strin
  * Send a GraphQL query over HTTP POST. Non-2xx statuses throw an
  * InvocationError coded via httpErrorCode with `{ status, body }` details;
  * network and parse failures propagate as-is. The body is read under the
- * 10MB cap BEFORE the status check (Go parity: the cap applies to every
- * response, success or failure alike).
+ * delivery-unit bound BEFORE the status check (Go parity: the cap applies
+ * to every response, success or failure alike). An unbounded GraphQL
+ * response (a single overlarge field, a runaway introspection dump) must
+ * not be buffered without limit; the bound is consumer-configurable via
+ * `BindingInvocationArgs.maxDeliveryUnitBytes` (default 10MB).
  */
 async function doGraphQLHTTP(
   url: string,
@@ -285,6 +283,7 @@ async function doGraphQLHTTP(
   headers: Record<string, string>,
   fetchFn: typeof globalThis.fetch = fetch,
   signal?: AbortSignal,
+  maxResponseBytes: number = DEFAULT_MAX_DELIVERY_UNIT_BYTES,
 ): Promise<GraphQLHTTPResult> {
   const body: Record<string, unknown> = { query };
   if (variables) body.variables = variables;
@@ -302,7 +301,7 @@ async function doGraphQLHTTP(
     signal,
   });
 
-  const text = await readResponseText(resp, MAX_RESPONSE_BYTES);
+  const text = await readResponseText(resp, maxResponseBytes);
 
   if (!resp.ok) {
     throw new InvocationError(
@@ -337,10 +336,11 @@ export async function invokeGraphQL(
   headers: Record<string, string>,
   fetchFn: typeof globalThis.fetch = fetch,
   signal?: AbortSignal,
+  maxResponseBytes: number = DEFAULT_MAX_DELIVERY_UNIT_BYTES,
 ): Promise<GraphQLInvokeResult> {
   let res: GraphQLHTTPResult;
   try {
-    res = await doGraphQLHTTP(url, query, variables, headers, fetchFn, signal);
+    res = await doGraphQLHTTP(url, query, variables, headers, fetchFn, signal, maxResponseBytes);
   } catch (e: unknown) {
     if (e instanceof InvocationError) throw e;
     throw new InvocationError(ERR_EXECUTION_FAILED, e instanceof Error ? e.message : String(e));
@@ -422,6 +422,8 @@ function httpToWS(url: string): string {
  */
 const MAX_QUEUED_EVENTS = 1024;
 
+const byteEncoder = new TextEncoder();
+
 /**
  * Subscribe to a GraphQL subscription via the graphql-transport-ws protocol.
  * Yields each event's bare data payload until the subscription completes
@@ -436,6 +438,7 @@ export async function* subscribeGraphQL(
   query: string,
   variables: Record<string, unknown> | undefined,
   headers: Record<string, string>,
+  maxUnitBytes: number,
   signal?: AbortSignal,
 ): AsyncGenerator<unknown> {
   const wsURL = httpToWS(url);
@@ -481,9 +484,18 @@ export async function* subscribeGraphQL(
   };
 
   ws.onmessage = (ev) => {
+    // Delivery-unit bound, enforced post-receive: the browser/undici
+    // WebSocket API exposes no pre-delivery read-limit seam (Go's
+    // SetReadLimit), so the check runs on the received frame before decode
+    // — same bound, same error identity, platform enforcement point.
+    const raw = String(ev.data);
+    if (byteEncoder.encode(raw).length > maxUnitBytes) {
+      finish({ error: new InvocationError(ERR_STREAM_ERROR, `WebSocket message exceeds ${maxUnitBytes} byte limit`) });
+      return;
+    }
     let msg: { type: string; payload?: unknown };
     try {
-      msg = JSON.parse(String(ev.data)) as { type: string; payload?: unknown };
+      msg = JSON.parse(raw) as { type: string; payload?: unknown };
     } catch (e: unknown) {
       finish({ error: new InvocationError(ERR_RESPONSE_ERROR, `parse ws message: ${e instanceof Error ? e.message : String(e)}`) });
       return;

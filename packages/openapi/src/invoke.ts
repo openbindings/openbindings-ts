@@ -32,6 +32,7 @@ import {
   type ContextRequirement,
   type ContextRequiredDetails,
   type Metadata,
+  resolveDeliveryUnitLimit,
 } from "@openbindings/sdk";
 import type {
   OpenAPIDocument,
@@ -61,8 +62,6 @@ import {
 } from "./media.js";
 import { resolveServer } from "./servers.js";
 import { isSSEContentType, streamSSE } from "./sse.js";
-
-const MAX_RESPONSE_BYTES = 10 * 1024 * 1024;
 
 /**
  * Drives one OpenAPI binding invocation over the binding-facing handle: one
@@ -341,7 +340,9 @@ export async function runBinding(
 
   let bodyBytes: Uint8Array;
   try {
-    bodyBytes = await readResponseBytes(resp, MAX_RESPONSE_BYTES);
+    // The unary body is one delivery unit: the consumer-configurable
+    // delivery-unit bound applies (args.maxDeliveryUnitBytes, default 10MB).
+    bodyBytes = await readResponseBytes(resp, resolveDeliveryUnitLimit(args));
   } catch (e: unknown) {
     if (inv.signal.aborted) return;
     inv.fireError(new InvocationError(ERR_RESPONSE_ERROR, errorMessage(e)));

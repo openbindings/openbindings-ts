@@ -34,6 +34,7 @@ import {
   ERR_RESPONSE_ERROR,
   ERR_STREAM_ERROR,
   decodeThroughHooks,
+  resolveDeliveryUnitLimit,
   type BindingHandle,
   type BindingInvocationArgs,
   type InvokeSite,
@@ -43,12 +44,12 @@ import {
 } from "@openbindings/sdk";
 import { errorMessage } from "./util.js";
 
-/** Per-event size cap (10 MiB per delivery unit; Go parity: maxResponseBytes). */
-const MAX_EVENT_BYTES = 10 * 1024 * 1024;
-
 /**
  * Bounds buffered not-yet-terminated line length to prevent runaway memory
- * use from a misbehaving server (Go parity: sseMaxLineBytes).
+ * use from a misbehaving server (Go parity: sseMaxLineBytes). STAYS FIXED
+ * under the delivery-unit knob: a line-framing scan guard on unterminated
+ * text, not a bound on a delivery unit (the per-event cap below is the
+ * delivery-unit bound and is consumer-configurable).
  */
 const SSE_MAX_LINE_BYTES = 16 * 1024 * 1024;
 
@@ -69,6 +70,10 @@ export async function streamSSE(
 
   const status = resp.status;
   const byteLength = new TextEncoder();
+  // Per-event size cap — each event is one delivery unit, so the
+  // consumer-configurable delivery-unit bound applies
+  // (args.maxDeliveryUnitBytes, default 10MB; Go parity).
+  const maxEventBytes = resolveDeliveryUnitLimit(args);
 
   // dispatch decodes and emits the accumulated event. It returns false when
   // the invocation terminated (decode error fired, or the emit rejected
@@ -125,9 +130,9 @@ export async function streamSSE(
     // The size cap is PER EVENT, not cumulative (the same choice the Go
     // SDK's streamSSE documents for its per-event cap).
     eventBytes += byteLength.encode(line).length + 1; // +1 for the newline
-    if (eventBytes > MAX_EVENT_BYTES) {
+    if (eventBytes > maxEventBytes) {
       h.fireError(
-        new InvocationError(ERR_RESPONSE_ERROR, `SSE event exceeds ${MAX_EVENT_BYTES} byte limit`),
+        new InvocationError(ERR_RESPONSE_ERROR, `SSE event exceeds ${maxEventBytes} byte limit`),
       );
       return false;
     }
