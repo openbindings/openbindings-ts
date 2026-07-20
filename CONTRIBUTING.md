@@ -36,30 +36,8 @@ non-mirrors.
 
 ## Releasing
 
-This is a pnpm workspace monorepo. All packages currently version in lockstep
-(a single `vX.Y.Z` tag covers every package under `packages/`).
-
-```bash
-# From the workspace root, bump each package.json to the new version, then:
-git tag vX.Y.Z
-git push origin vX.Y.Z
-pnpm -r build
-pnpm -r publish --access public
-```
-
-npm publish is currently manual; a release GitHub Action is planned. Pre-1.0,
-minor versions may include breaking changes; document under **Changed** or
-**Removed** in `CHANGELOG.md`.
-
-## Spec compatibility
-
-`@openbindings/sdk` declares which spec versions it supports via:
-
-- `MIN_SUPPORTED_VERSION` / `MAX_TESTED_VERSION` (exported constants)
-- `supportedRange()` / `isSupportedVersion(v)`
-
-Located in `packages/sdk/src/version.ts`. When the spec bumps, update these
-constants in the same PR that adds support for the new version.
+See [RELEASING.md](RELEASING.md) for the release flow, spec-compatibility
+rule, and pre-1.0 policy.
 
 ## Broader context
 
