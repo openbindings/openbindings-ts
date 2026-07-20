@@ -4,6 +4,11 @@
 
 ### Changed
 
+- **`engines.node >= 22` on `@openbindings/asyncapi` and `@openbindings/graphql`**
+  (honest floors: their WebSocket lanes construct the global `WebSocket`,
+  unflagged in Node 22+; Node 18/20 are EOL). Other packages stay `>= 18`;
+  browsers and edge runtimes are unaffected.
+
 - **OBI-D-05 literal form is enforced** (percent-encoded same-document
   fragments fail validation; the resolver no longer percent-decodes) and
   **`validateInterface` accepts leading-digit identifiers** (`2fa.verify`) per

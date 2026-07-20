@@ -123,3 +123,7 @@ Converts a GraphQL schema (via introspection) into an OBI by:
 ## License
 
 Apache-2.0
+
+## Runtime support
+
+On Node, the WebSocket lane constructs the global `WebSocket`, which ships unflagged in Node 22+ — hence `engines.node >= 22`. The HTTP and SSE lanes have no such dependency; browsers and edge runtimes are unaffected.
