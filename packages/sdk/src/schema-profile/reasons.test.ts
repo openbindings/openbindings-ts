@@ -14,10 +14,17 @@
  *   - exclusive bounds are marked ("exclusive 0");
  *   - unions carry the real union key and the failing variant index;
  *   - multi-member faults (types, enum values, required, properties) name
- *     the lexicographically FIRST failing member.
+ *     the lexicographically FIRST failing member;
+ *   - property/required member names interpolate in the same JCS rendering
+ *     as values (quoted, JSON-string escaping) — visible only for names
+ *     carrying quotes, backslashes, or control characters; plain names
+ *     render exactly as before;
+ *   - tell-tale non-normalized inputs (scalar type, unresolved $ref,
+ *     unflattened allOf) are refused loudly — see refusalCases below.
  */
 import { describe, it, expect } from "vitest";
 import { inputCompatible, outputCompatible } from "./compat.js";
+import { NotNormalizedError } from "./errors.js";
 import type { JSONObject } from "./helpers.js";
 
 interface ReasonCase {
@@ -297,6 +304,29 @@ const reasonCases: ReasonCase[] = [
     reason: `maxItems: target has maxItems 5 but candidate has none`,
   },
 
+  // --- member-name escaping (JCS) ---
+  {
+    name: "property name with quote and backslash escapes as JCS",
+    direction: "input",
+    target: String.raw`{"type":["object"],"properties":{"wei\"rd\\name":{"type":["integer"]}}}`,
+    candidate: String.raw`{"type":["object"],"properties":{"wei\"rd\\name":{"type":["string"]}}}`,
+    reason: String.raw`properties["wei\"rd\\name"]: type: candidate does not allow "integer"`,
+  },
+  {
+    name: "property name with control character escapes as JCS",
+    direction: "input",
+    target: String.raw`{"type":["object"],"properties":{"bad\u0001name":{"type":["integer"]}}}`,
+    candidate: String.raw`{"type":["object"],"properties":{"bad\u0001name":{"type":["string"]}}}`,
+    reason: String.raw`properties["bad\u0001name"]: type: candidate does not allow "integer"`,
+  },
+  {
+    name: "required name with quote escapes as JCS",
+    direction: "input",
+    target: `{"type":["object"]}`,
+    candidate: String.raw`{"type":["object"],"required":["say\"cheese"]}`,
+    reason: String.raw`required: candidate requires "say\"cheese" but target does not`,
+  },
+
   // --- unions ---
   {
     name: "input union real key and index",
@@ -341,6 +371,71 @@ describe("reason-string alignment (mirrors Go schemaprofile/reasons_test.go)", (
       }
       expect(r.compatible).toBe(false);
       expect(r.reason).toBe(tc.reason);
+    });
+  }
+});
+
+/**
+ * Non-normalized-input refusal table: pins the EXACT error each directional
+ * check raises when handed a schema the Normalizer never emits (the inputs
+ * MUST be pre-normalized contract). Byte-identical with the Go SDK's table
+ * in reasons_test.go. The target is checked before the candidate; nested
+ * walks visit properties (sorted), additionalProperties, items, then
+ * oneOf/anyOf variants.
+ */
+interface RefusalCase {
+  name: string;
+  direction: "input" | "output";
+  target: string; // schema JSON
+  candidate: string;
+  error: string; // expected exact error message
+}
+
+const refusalCases: RefusalCase[] = [
+  {
+    name: "scalar type target refused",
+    direction: "input",
+    target: `{"type":"string"}`,
+    candidate: `{"type":["string"]}`,
+    error: `not normalized at target: keyword "type" must be an array`,
+  },
+  {
+    name: "scalar type candidate refused",
+    direction: "output",
+    target: `{"type":["string"]}`,
+    candidate: `{"type":"string"}`,
+    error: `not normalized at candidate: keyword "type" must be an array`,
+  },
+  {
+    name: "unresolved nested $ref refused",
+    direction: "input",
+    target: `{"type":["object"],"properties":{"a":{"$ref":"#/schemas/A"}}}`,
+    candidate: `{"type":["object"]}`,
+    error: `not normalized at target.properties["a"]: keyword "$ref" must be resolved`,
+  },
+  {
+    name: "unflattened allOf refused",
+    direction: "output",
+    target: `{"type":["object"]}`,
+    candidate: `{"allOf":[{"type":["object"]}]}`,
+    error: `not normalized at candidate: keyword "allOf" must be flattened`,
+  },
+];
+
+describe("non-normalized refusal alignment (mirrors Go schemaprofile/reasons_test.go)", () => {
+  for (const tc of refusalCases) {
+    it(tc.name, () => {
+      const tgt = JSON.parse(tc.target) as JSONObject;
+      const cand = JSON.parse(tc.candidate) as JSONObject;
+      let thrown: unknown;
+      try {
+        if (tc.direction === "input") inputCompatible(tgt, cand);
+        else outputCompatible(tgt, cand);
+      } catch (e: unknown) {
+        thrown = e;
+      }
+      expect(thrown).toBeInstanceOf(NotNormalizedError);
+      expect((thrown as Error).message).toBe(tc.error);
     });
   }
 });

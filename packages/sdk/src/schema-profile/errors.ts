@@ -15,6 +15,28 @@ export class OutsideProfileError extends Error {
   }
 }
 
+/**
+ * Indicates a schema handed to a free directional check (inputCompatible /
+ * outputCompatible) was not pre-normalized: the check found a shape the
+ * Normalizer never emits. `path` names the offending location ("target" or
+ * "candidate", then the nested path), `keyword` the offending keyword, and
+ * `requirement` the normalization invariant it violates. The message is
+ * byte-identical with the Go SDK's NotNormalizedError.
+ */
+export class NotNormalizedError extends Error {
+  path: string;
+  keyword: string;
+  requirement: string;
+
+  constructor(path: string, keyword: string, requirement: string) {
+    super(`not normalized at ${path}: keyword "${keyword}" must be ${requirement}`);
+    this.name = "NotNormalizedError";
+    this.path = path;
+    this.keyword = keyword;
+    this.requirement = requirement;
+  }
+}
+
 export class RefError extends Error {
   path: string;
   ref: string;

@@ -25,6 +25,9 @@ export type CompatibilityIssue = {
  *   - Input schemas must be compatible (required input satisfies provided input)
  *
  * Returns an empty array when the provided interface is fully compatible.
+ * Issues appear in sorted required-operation-key order (never document
+ * order), with the output issue before the input issue within an operation
+ * — the same order the Go SDK's CheckInterfaceCompatibility emits.
  */
 export async function checkInterfaceCompatibility(
   required: OBInterface,
@@ -36,7 +39,10 @@ export async function checkInterfaceCompatibility(
   const reqNorm = new Normalizer({ root: required as unknown as Record<string, unknown> });
   const provNorm = new Normalizer({ root: provided as unknown as Record<string, unknown> });
 
-  for (const [opKey, requiredOp] of Object.entries(required.operations)) {
+  // Sorted like the Go SDK's lane: issue order must never leak the
+  // document's declaration order.
+  for (const opKey of Object.keys(required.operations).sort()) {
+    const requiredOp = required.operations[opKey];
     const providedOp = resolveOperation(provided, opKey)?.operation;
     if (!providedOp) {
       issues.push({ operation: opKey, kind: "missing" });
