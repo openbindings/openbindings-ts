@@ -179,7 +179,21 @@ export class Normalizer {
       throw new RefError(pathOrRoot(path), ref, e instanceof Error ? e : String(e));
     }
 
-    const isFragmentOnly = ref.startsWith("#") || u.protocol === "resolve:";
+    // "resolve:" is the placeholder scheme, so it survives parsing only
+    // when no real base was supplied and the ref itself is not absolute —
+    // i.e. the ref is relative. A relative ref carrying a path component
+    // cannot resolve without a base: it fails closed (the placeholder
+    // would otherwise silently misroute it to root-fragment resolution).
+    // Same rule and same diagnostic as the Go SDK's resolveRef.
+    const isRelative = u.protocol === "resolve:";
+    if (isRelative && !ref.startsWith("#")) {
+      const pathPart = ref.split("#")[0].split("?")[0];
+      if (pathPart !== "") {
+        throw new RefError(pathOrRoot(path), ref, "relative $ref with no base");
+      }
+    }
+
+    const isFragmentOnly = ref.startsWith("#") || (isRelative && u.hash !== "");
     const key = isFragmentOnly ? `#${u.hash.slice(1) || ""}` : u.href;
 
     if (this.refStack.has(key)) {
