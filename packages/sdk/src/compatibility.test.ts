@@ -100,4 +100,32 @@ describe("checkInterfaceCompatibility", () => {
       expect(issues[0].kind).toBe("input_incompatible");
     });
   });
+
+  describe("issue ordering", () => {
+    it("orders issues by sorted operation key, output before input within an operation", async () => {
+      // Pins the issue-ordering contract, mirrored byte-for-byte in the Go
+      // SDK's TestCheckInterfaceCompatibility_IssueOrderSortedByOperationKey:
+      // issues appear in sorted operation-key order (never declaration or
+      // map order), with the output issue before the input issue within an
+      // operation. The fixture's keys are deliberately declared out of
+      // sorted order.
+      const required = makeInterface({
+        zulu: { input: { type: ["string"] }, output: { type: ["string"] } },
+        alpha: {},
+        mike: { input: { type: ["string"] }, output: { type: ["string"] } },
+      });
+      const provided = makeInterface({
+        zulu: { input: { type: ["number"] }, output: { type: ["number"] } },
+        mike: { input: { type: ["number"] }, output: { type: ["number"] } },
+      });
+      const issues = await checkInterfaceCompatibility(required, provided);
+      expect(issues.map((i) => [i.operation, i.kind])).toEqual([
+        ["alpha", "missing"],
+        ["mike", "output_incompatible"],
+        ["mike", "input_incompatible"],
+        ["zulu", "output_incompatible"],
+        ["zulu", "input_incompatible"],
+      ]);
+    });
+  });
 });

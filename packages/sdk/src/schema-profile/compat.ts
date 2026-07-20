@@ -1,5 +1,6 @@
 import type { JSONObject, JSONValue } from "./helpers.js";
-import { asMap, asSlice, canonicalKey, toFloat64 } from "./helpers.js";
+import { asMap, asSlice, canonicalKey, ptrJoin, toFloat64 } from "./helpers.js";
+import { NotNormalizedError } from "./errors.js";
 
 export interface CompatResult {
   compatible: boolean;
@@ -17,20 +18,82 @@ function prefixed(prefix: string, r: CompatResult): CompatResult {
   return fail(r.reason ? `${prefix}: ${r.reason}` : prefix);
 }
 
-/** Checks whether `cand` is a compatible input schema for `tgt` (i.e. `cand` accepts at least everything `tgt` accepts). */
+/**
+ * Checks whether `cand` is a compatible input schema for `tgt` (i.e. `cand`
+ * accepts at least everything `tgt` accepts). Both schemas MUST already be
+ * normalized (see Normalizer.normalize): $refs are not resolved here.
+ * Tell-tale non-normalized shapes (a scalar type, an unresolved $ref, an
+ * unflattened allOf) are refused with a NotNormalizedError rather than
+ * risking a silently divergent verdict.
+ */
 export function inputCompatible(tgt: JSONObject, cand: JSONObject): CompatResult {
+  assertNormalizedPair(tgt, cand);
   if (Object.keys(cand).length === 0) return COMPATIBLE;
   return compat(tgt, cand, true);
 }
 
-/** Checks whether `cand` is a compatible output schema for `tgt` (i.e. `cand` only produces values that `tgt` allows). */
+/**
+ * Checks whether `cand` is a compatible output schema for `tgt` (i.e. `cand`
+ * only produces values that `tgt` allows). Both schemas MUST already be
+ * normalized; see inputCompatible, including the loud NotNormalizedError
+ * refusal of tell-tale non-normalized shapes.
+ */
 export function outputCompatible(tgt: JSONObject, cand: JSONObject): CompatResult {
+  assertNormalizedPair(tgt, cand);
   if (Object.keys(cand).length === 0) {
     return Object.keys(tgt).length === 0
       ? COMPATIBLE
       : fail("candidate is unconstrained but target is not");
   }
   return compat(tgt, cand, false);
+}
+
+/**
+ * Guards the pre-normalization contract of the two free directional checks:
+ * the target is checked first, then the candidate, so a violation on both
+ * sides reports deterministically.
+ */
+function assertNormalizedPair(tgt: JSONObject, cand: JSONObject): void {
+  assertNormalized(tgt, "target");
+  assertNormalized(cand, "candidate");
+}
+
+/**
+ * Refuses the cheap, unambiguous shapes the Normalizer can never emit: an
+ * unresolved $ref (always inlined), an unflattened allOf (always merged
+ * away), and a non-array type (always canonicalized to a sorted array).
+ * These are exactly the shapes that would otherwise decide verdicts
+ * silently — most notably a raw scalar type, which the two reference SDKs
+ * historically read differently. This is NOT a full normalized-form
+ * validator; anything subtler stays the caller's contract. Nested walks
+ * visit properties (sorted), additionalProperties, items, then oneOf/anyOf
+ * variants — mirrored in the Go SDK's assertNormalized.
+ */
+function assertNormalized(schema: JSONObject, path: string): void {
+  if ("$ref" in schema) throw new NotNormalizedError(path, "$ref", "resolved");
+  if ("allOf" in schema) throw new NotNormalizedError(path, "allOf", "flattened");
+  if ("type" in schema && !Array.isArray(schema["type"])) {
+    throw new NotNormalizedError(path, "type", "an array");
+  }
+  const props = asMap(schema["properties"]);
+  if (props) {
+    for (const k of Object.keys(props).sort()) {
+      const vm = asMap(props[k]);
+      if (vm) assertNormalized(vm, ptrJoin(path, `properties[${canonicalKey(k)}]`));
+    }
+  }
+  const ap = asMap(schema["additionalProperties"]);
+  if (ap) assertNormalized(ap, ptrJoin(path, "additionalProperties"));
+  const items = asMap(schema["items"]);
+  if (items) assertNormalized(items, ptrJoin(path, "items"));
+  for (const key of ["oneOf", "anyOf"] as const) {
+    const arr = asSlice(schema[key]);
+    if (!arr) continue;
+    for (let i = 0; i < arr.length; i++) {
+      const vm = asMap(arr[i]);
+      if (vm) assertNormalized(vm, ptrJoin(path, `${key}[${i}]`));
+    }
+  }
 }
 
 function compat(tgt: JSONObject, cand: JSONObject, isInput: boolean): CompatResult {
@@ -257,7 +320,11 @@ function sortedSetValues(set: Set<string>): string[] {
 /**
  * Applies the object rules. Set and property iteration is SORTED so the
  * first-failing member named in the reason is deterministic (and
- * byte-identical with the Go SDK) when several members fail.
+ * byte-identical with the Go SDK) when several members fail. Property and
+ * required member names interpolate via canonicalKey — the same JCS
+ * rendering values get — so names carrying quotes, backslashes, or control
+ * characters escape identically across the reference SDKs (plain names
+ * render exactly as a bare quoted spelling).
  */
 function compatObject(tgt: JSONObject, cand: JSONObject, isInput: boolean): CompatResult {
   const tgtReq = stringSetOf(tgt["required"]);
@@ -267,7 +334,7 @@ function compatObject(tgt: JSONObject, cand: JSONObject, isInput: boolean): Comp
 
   if (isInput) {
     for (const k of sortedSetValues(candReq)) {
-      if (!tgtReq.has(k)) return fail(`required: candidate requires "${k}" but target does not`);
+      if (!tgtReq.has(k)) return fail(`required: candidate requires ${canonicalKey(k)} but target does not`);
     }
     for (const p of Object.keys(tgtProps).sort()) {
       const tvm = asMap(tgtProps[p]);
@@ -276,14 +343,14 @@ function compatObject(tgt: JSONObject, cand: JSONObject, isInput: boolean): Comp
         const cvm = asMap(candProps[p]);
         if (!cvm) continue;
         const r = compat(tvm, cvm, true);
-        if (!r.compatible) return prefixed(`properties["${p}"]`, r);
+        if (!r.compatible) return prefixed(`properties[${canonicalKey(p)}]`, r);
       }
     }
     return COMPATIBLE;
   }
 
   for (const k of sortedSetValues(tgtReq)) {
-    if (!candReq.has(k)) return fail(`required: target requires "${k}" but candidate does not`);
+    if (!candReq.has(k)) return fail(`required: target requires ${canonicalKey(k)} but candidate does not`);
   }
 
   const tgtAP = tgt["additionalProperties"];
@@ -293,14 +360,14 @@ function compatObject(tgt: JSONObject, cand: JSONObject, isInput: boolean): Comp
     if (!(p in tgtProps)) {
       // The extra-property fault names the property's own path (the same
       // properties["..."] site every other property-level failure uses).
-      if (tgtAP === false) return fail(`properties["${p}"]: target forbids additional properties`);
+      if (tgtAP === false) return fail(`properties[${canonicalKey(p)}]: target forbids additional properties`);
     }
     if (p in tgtProps) {
       const tvm = asMap(tgtProps[p]);
       const cvm = asMap(cv);
       if (tvm && cvm) {
         const r = compat(tvm, cvm, false);
-        if (!r.compatible) return prefixed(`properties["${p}"]`, r);
+        if (!r.compatible) return prefixed(`properties[${canonicalKey(p)}]`, r);
       }
     }
   }

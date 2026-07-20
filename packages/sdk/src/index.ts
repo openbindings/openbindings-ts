@@ -212,6 +212,7 @@ export { dereference } from "./deref.js";
 export { Normalizer, inputCompatible, outputCompatible } from "./schema-profile/index.js";
 export type { Fetcher, JSONValue, JSONObject, CompatResult } from "./schema-profile/index.js";
 export {
+  NotNormalizedError,
   OutsideProfileError,
   RefError,
   SchemaError,

@@ -4,6 +4,26 @@
 
 ### Changed
 
+- **Comparison-engine cross-SDK canon (three rulings, 2026-07-20).**
+  (1) `checkInterfaceCompatibility` now emits issues in sorted
+  required-operation-key order (output before input within an operation)
+  instead of the document's declaration order, matching the Go SDK's
+  pinned contract. (2) Property/`required` member names in reason strings
+  now interpolate in JCS (RFC 8785) rendering — the same rendering values
+  already get — instead of raw interpolation; visible only for names
+  carrying quotes, backslashes, or control characters; plain names render
+  byte-identically to before. (3) The free `inputCompatible` /
+  `outputCompatible` now throw the new `NotNormalizedError` (`not
+  normalized at <path>: keyword "<kw>" must be <requirement>`) on
+  tell-tale non-normalized inputs instead of risking silently divergent
+  verdicts: a scalar `type` (previously read as constraining where the Go
+  SDK read it as unconstrained), an unresolved `$ref`, or an unflattened
+  `allOf`, anywhere the comparison would recurse. Normalized-path callers
+  (`Normalizer` methods, `checkInterfaceCompatibility`) are unaffected.
+  All three are pinned byte-for-byte against the Go SDK in the mirrored
+  alignment tables (`packages/sdk/src/schema-profile/reasons.test.ts` ↔
+  `schemaprofile/reasons_test.go`).
+
 - **`engines.node >= 22` on `@openbindings/asyncapi` and `@openbindings/graphql`**
   (honest floors: their WebSocket lanes construct the global `WebSocket`,
   unflagged in Node 22+; Node 18/20 are EOL). Other packages stay `>= 18`;
