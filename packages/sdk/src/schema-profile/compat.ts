@@ -193,21 +193,26 @@ function subsetTypes(a: Set<string> | null, b: Set<string> | null): boolean {
 }
 
 /**
- * Returns a quoted comma-separated list of types in `a` that are not in `b`,
- * sorted lexicographically so the reason string is deterministic. Mirrors the
- * Go SDK's missingTypes byte for byte ("all types" when `a` is untyped).
+ * Returns a comma-separated list of the types in `a` that are not in `b`,
+ * each rendered via canonicalKey — the same JCS (JSON-string escaping)
+ * rendering member names get — and sorted lexicographically so the reason
+ * string is deterministic. Legitimate lowercase type names render
+ * byte-identically to the previous literal quoting; the difference is
+ * visible only for pathological names carrying quotes, backslashes, or
+ * control characters. Mirrors the Go SDK's missingTypes byte for byte
+ * ("all types" when `a` is untyped).
  */
 function missingTypes(a: Set<string> | null, b: Set<string> | null): string {
   if (a === null) return "all types";
   const missing: string[] = [];
   for (const k of a) {
     if (b === null) {
-      missing.push(`"${k}"`);
+      missing.push(canonicalKey(k));
       continue;
     }
     if (b.has(k)) continue;
     if (k === "integer" && b.has("number")) continue;
-    missing.push(`"${k}"`);
+    missing.push(canonicalKey(k));
   }
   missing.sort();
   return missing.join(", ");

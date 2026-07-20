@@ -24,6 +24,16 @@
   alignment tables (`packages/sdk/src/schema-profile/reasons.test.ts` ↔
   `schemaprofile/reasons_test.go`).
 
+- **Type names in compatibility reason strings join the JCS canon**
+  (direct extension of the 2026-07-20 member-name escaping ruling). The
+  `type: candidate does not allow …` / `type: candidate allows … but target
+  does not` reasons now render each type name in the same JCS (RFC 8785)
+  string rendering member names and values get, instead of raw interpolation
+  inside literal quotes. For legitimate lowercase type names the output is
+  byte-identical to before; the difference is visible only for pathological
+  names carrying quotes, backslashes, or control characters. Pinned
+  byte-for-byte against the Go SDK in the mirrored alignment tables.
+
 - **`engines.node >= 22` on `@openbindings/asyncapi` and `@openbindings/graphql`**
   (honest floors: their WebSocket lanes construct the global `WebSocket`,
   unflagged in Node 22+; Node 18/20 are EOL). Other packages stay `>= 18`;
