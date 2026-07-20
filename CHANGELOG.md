@@ -361,6 +361,14 @@
   corpus suites fail loudly when required-and-absent; local skip-if-absent
   behavior is unchanged.
 
+- **Conformance-runner `requiresSupports` gate**: the corpus test annotation
+  `requiresSupports: "X.Y.Z"` administers a fixture test only to tools whose
+  OBI-T-04 version-acceptance predicate accepts X.Y.Z — for this SDK,
+  `isSupportedVersion` — and otherwise reports the test as skipped, separately
+  from pass/fail (skips are never failures). Joins the existing
+  `requiresMaxTested`/`requiresMinSupported` annotations with the same skip
+  mechanism and reporting.
+
 - **README**: the SDK bundles the `jsonata` parser (2.1) for OBI-D-18
   parse-checks — the "no bundled runtime" claim was stale.
 
