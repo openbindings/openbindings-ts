@@ -189,24 +189,54 @@ export function contextString(ctx: Record<string, unknown> | null | undefined, k
   return typeof v === "string" ? v : "";
 }
 
-const REDACTED_KEYS = new Set(["bearerToken", "apiKey", "refreshToken", "accessToken", "clientSecret"]);
-
 /**
  * Returns a shallow copy of ctx with well-known credential fields replaced
  * by "[REDACTED]". Safe for logging and error messages.
  * Returns null for null/undefined input.
+ *
+ * The context-confidentiality invariant: no context value the credential
+ * taxonomy classifies as secret survives, in cleartext, to any diagnostic
+ * surface. The secret set is single-sourced on {@link CREDENTIAL_FIELDS} —
+ * the one registry {@link scopeContext} consumes — so redaction and scoping
+ * can never disagree about what is secret (a second hand-maintained list is
+ * exactly what let scheme-scoped `apiKeys` leak here before). The
+ * credential-field list itself is owned by the binding-invoker interface's
+ * context table (its confidentiality clause); this SDK implements that
+ * contract. Flat credential fields redact to "[REDACTED]"; nested credential
+ * fields keep their non-secret structure (basic keeps its username, apiKeys
+ * keeps its scheme names) and redact only the secret values. (Store KEYS are
+ * the one surface this cannot reach — see {@link normalizeContextKey}, which
+ * strips userinfo so no secret rides into a key.)
  */
 export function redactContext(ctx: Record<string, unknown> | null | undefined): Record<string, unknown> | null {
   if (!ctx) return null;
   const redacted: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(ctx)) {
-    if (REDACTED_KEYS.has(k)) {
-      redacted[k] = "[REDACTED]";
-    } else if (k === "basic" && typeof v === "object" && v !== null) {
-      const b = v as Record<string, unknown>;
-      redacted[k] = { ...b, ...("password" in b ? { password: "[REDACTED]" } : {}) };
-    } else {
+    if (!CREDENTIAL_FIELDS.has(k)) {
+      // Non-secret configuration (headers, cookies, ...) passes through.
       redacted[k] = v;
+    } else if (k === "basic") {
+      if (typeof v === "object" && v !== null && !Array.isArray(v)) {
+        const b = v as Record<string, unknown>;
+        redacted[k] = { ...b, ...("password" in b ? { password: "[REDACTED]" } : {}) };
+      } else {
+        redacted[k] = v;
+      }
+    } else if (k === "apiKeys") {
+      // Scheme-scoped API keys: every named entry is credential material,
+      // same as the single 'apiKey' field. Scheme names stay; values redact.
+      if (typeof v === "object" && v !== null && !Array.isArray(v)) {
+        const m = v as Record<string, unknown>;
+        const rc: Record<string, unknown> = {};
+        for (const name of Object.keys(m)) rc[name] = "[REDACTED]";
+        redacted[k] = rc;
+      } else {
+        redacted[k] = v;
+      }
+    } else {
+      // Flat credential fields: bearerToken, apiKey, accessToken,
+      // refreshToken, clientSecret.
+      redacted[k] = "[REDACTED]";
     }
   }
   return redacted;
@@ -220,13 +250,22 @@ export function redactContext(ctx: Record<string, unknown> | null | undefined): 
  * Normalizes a URL to a stable context store key. The key is host[:port]
  * (scheme, path, query, and fragment are stripped) so that http:// and
  * https://, and per-path variations, share credentials for the same origin.
- * When the input carries a scheme, an explicit port matching that scheme's
- * default (443 for https/wss, 80 for http/ws) is elided, so a key written
- * with the default port and one written without it collide; any other
- * explicit port is kept as-is. Strings without a scheme (e.g. a gRPC
- * "host:port" format-defined address) are returned as-is: with no scheme
- * there is no known default, and eliding a port there would corrupt a
- * format-defined address.
+ * The host is lowercased and any userinfo (user[:password]@) is stripped: DNS
+ * hosts are case-insensitive and userinfo is not part of a host (RFC 3986
+ * §3.2.2/§6.2.2.1), and a secret in a store key is the one confidentiality
+ * leak {@link redactContext} cannot reach. When the input carries a scheme,
+ * an explicit port matching that scheme's default (443 for https/wss, 80 for
+ * http/ws) is elided, so a key written with the default port and one written
+ * without it collide; any other explicit port is kept as-is. Strings without
+ * a scheme (e.g. a gRPC "host:port" format-defined address) are returned
+ * as-is: with no scheme there is no known default, and eliding a port there
+ * would corrupt a format-defined address.
+ *
+ * The keying rule (normalize to the host — lowercased, userinfo excluded) is
+ * owned by the binding-invoker interface's context table; this is its
+ * implementation, shared with {@link normalizeEndpoint} (the read path) so
+ * write and read derive identical keys, and pinned byte-for-byte to the Go
+ * SDK's NormalizeContextKey.
  */
 export function normalizeContextKey(raw: string): string {
   raw = raw.trim();
@@ -247,6 +286,18 @@ export function normalizeContextKey(raw: string): string {
   if (hIdx >= 0) host = host.slice(0, hIdx);
   const slashIdx = host.indexOf("/");
   if (slashIdx >= 0) host = host.slice(0, slashIdx);
+
+  // Strip userinfo (user[:password]@): not part of a host, and a password
+  // must never ride into a store key. At most one '@' in a conformant
+  // authority.
+  const at = host.lastIndexOf("@");
+  if (at >= 0) host = host.slice(at + 1);
+
+  // Case-fold the host: DNS hostnames are case-insensitive, so
+  // API.example.com and api.example.com are one origin and derive one key.
+  // The port is numeric, so lowercasing the whole authority leaves it
+  // unchanged; an IPv6 literal folds to its canonical lowercase form.
+  host = host.toLowerCase();
 
   return elideDefaultPort(scheme, host);
 }
@@ -390,7 +441,15 @@ const REQUIREMENT_FAMILY_FIELDS: Record<string, string[]> = {
   "auth.oauth2": ["accessToken", "refreshToken", "clientSecret"],
 };
 
-const CREDENTIAL_FIELDS = new Set(Object.values(REQUIREMENT_FAMILY_FIELDS).flat());
+/**
+ * The set of context fields the credential taxonomy classifies as secret,
+ * derived from REQUIREMENT_FAMILY_FIELDS so there is ONE source of "what is
+ * secret". Both {@link scopeContext} (which withholds these from non-secret
+ * passthrough) and {@link redactContext} (which scrubs their values) consume
+ * it, so the two can never disagree. Exported for the drift-guard test that
+ * asserts redaction covers every registered field.
+ */
+export const CREDENTIAL_FIELDS = new Set(Object.values(REQUIREMENT_FAMILY_FIELDS).flat());
 
 /**
  * Admits the API key credential for one `auth.apiKey` requirement into the

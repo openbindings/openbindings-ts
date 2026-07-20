@@ -102,6 +102,48 @@ describe("normalizeContextKey", () => {
   ])("%s and %s are equivalent (same key)", (withPort, withoutPort) => {
     expect(normalizeContextKey(withPort)).toBe(normalizeContextKey(withoutPort));
   });
+
+  // The keying rule the binding-invoker README owns: normalize to the host —
+  // lowercased, userinfo excluded (RFC 3986). A password in userinfo must
+  // never ride into a store key (the one surface redactContext cannot reach),
+  // and a case-variant host must derive the same key (DNS is case-insensitive)
+  // so a credential is not silently fragmented across casings.
+  it.each([
+    ["https://API.example.com/v1/users", "api.example.com"],
+    ["https://alice:hunter2@API.example.com/v1", "api.example.com"],
+    ["https://alice:hunter2@api.example.com", "api.example.com"],
+    ["https://u:p@Host.Example.COM:8443/x", "host.example.com:8443"],
+    ["https://user@API.example.com:443", "api.example.com"],
+    ["https://u:p@[2001:DB8::1]:8080", "[2001:db8::1]:8080"],
+  ])("strips userinfo and folds case: %s → %s", (input, expected) => {
+    const got = normalizeContextKey(input);
+    expect(got).toBe(expected);
+    expect(got).not.toContain("hunter2"); // userinfo password never in the key
+  });
+});
+
+// ---------------------------------------------------------------------------
+// write/read key agreement + cross-SDK contract
+// ---------------------------------------------------------------------------
+
+// The write helper (normalizeContextKey) and the read/resolver helper
+// (normalizeEndpoint) must derive the IDENTICAL key for the same input across
+// mixed-case hosts, userinfo-bearing URLs, and port variants — otherwise a
+// credential written one way is silently never resolved. The expected VALUES
+// are also the cross-SDK contract, pinned identically in the Go SDK's
+// TestNormalizeKey_WriteReadAgree.
+describe("normalizeContextKey / normalizeEndpoint agreement (cross-SDK)", () => {
+  it.each([
+    ["https://API.example.com/v1", "api.example.com"],
+    ["https://alice:hunter2@API.example.com/v1", "api.example.com"],
+    ["https://API.example.com:443", "api.example.com"],
+    ["https://API.example.com:8443/x", "api.example.com:8443"],
+    ["http://User@Host.EXAMPLE.com:80", "host.example.com"],
+  ])("%s → %s from both normalizers", (input, expected) => {
+    expect(normalizeContextKey(input)).toBe(expected);
+    expect(normalizeEndpoint(input)).toBe(expected);
+    expect(normalizeContextKey(input)).toBe(normalizeEndpoint(input));
+  });
 });
 
 // ---------------------------------------------------------------------------
