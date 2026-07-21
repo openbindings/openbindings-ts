@@ -9,7 +9,10 @@ import tseslint from "typescript-eslint";
 // stay out.
 export default tseslint.config(
   {
-    ignores: ["**/dist/**", "**/node_modules/**"],
+    ignores: ["**/dist/**", "**/node_modules/**", // CI checks out the sibling spec and interfaces repos INSIDE the
+    // workspace (ci.yml `path: spec` / `path: interfaces`) for the
+    // conformance corpora; their scripts are not ours to lint.
+    "spec/**", "interfaces/**"],
   },
   eslint.configs.recommended,
   tseslint.configs.recommendedTypeChecked,
