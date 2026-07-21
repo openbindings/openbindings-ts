@@ -1,5 +1,5 @@
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from "node:http";
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, afterAll } from "vitest";
 import { AsyncAPIInvoker } from "./invoker.js";
 import { BINDING_SPEC } from "./constants.js";
 

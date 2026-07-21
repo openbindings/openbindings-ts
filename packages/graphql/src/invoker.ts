@@ -68,15 +68,15 @@ export class GraphQLInvoker implements BindingInvoker {
 
   invokeBinding<I = unknown, O = unknown>(args: BindingInvocationArgs): Invocation<I, O> {
     const inv = new InvocationImpl<unknown, unknown>({ signal: args.signal });
-    queueMicrotask(() =>
-      this.run(args, inv).catch((err: unknown) => {
+    queueMicrotask(() => {
+      void this.run(args, inv).catch((err: unknown) => {
         inv.fireError(
           err instanceof InvocationError
             ? err
             : new InvocationError(ERR_RUNTIME, errMsg(err)),
         );
-      }),
-    );
+      });
+    });
     return inv as Invocation<I, O>;
   }
 

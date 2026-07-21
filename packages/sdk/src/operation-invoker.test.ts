@@ -365,7 +365,7 @@ describe("OperationInvoker wiring", () => {
       sources: { svc: { bindingSpec: "grpc@1.0" } },
       bindings: { "doThing.svc": { operation: "doThing", source: "svc", ref: "x" } },
     };
-    let msg = "";
+    let msg: string;
     try {
       defaultBindingSelector(iface, "doThing", new Set(["openapi@3.1.0"]));
       throw new Error("expected BindingNotFoundError");
@@ -395,7 +395,7 @@ describe("OperationInvoker wiring", () => {
 
   it("surfaces a missing invoker as terminal ERR_BINDING_NOT_FOUND on the handle", async () => {
     const iface = testInterface();
-    iface.sources!["mock"]!.bindingSpec = "absent@1.0";
+    iface.sources!["mock"].bindingSpec = "absent@1.0";
     // The default selector skips unavailable binding specs and throws; pin the
     // binding to force the wiring error onto the handle path.
     const op = makeInvoker();
@@ -463,7 +463,7 @@ describe("cardinalities", () => {
     await call.write({ text: "hello" });
     await call.cancel();
     await expect(call.closed).rejects.toMatchObject({ code: ERR_CANCELLED });
-    expect(mock.signals[0]!.aborted).toBe(true);
+    expect(mock.signals[0].aborted).toBe(true);
   });
 });
 
@@ -533,7 +533,7 @@ describe("OBI-T-07 — input validation", () => {
 
   it("validates BEFORE the input transform; the binding receives the transformed message", async () => {
     const iface = testInterface();
-    iface.operations["echo"]!.input = {
+    iface.operations["echo"].input = {
       type: "object",
       properties: { id: { type: "string" } },
       required: ["id"],
@@ -548,7 +548,7 @@ describe("OBI-T-07 — input validation", () => {
 
   it("a failing input transform is terminal ERR_TRANSFORM_ERROR", async () => {
     const iface = testInterface();
-    iface.bindings!["echo.transformed"]!.inputTransform = "boom";
+    iface.bindings!["echo.transformed"].inputTransform = "boom";
     const op = makeInvoker();
     const call = op.invoke(iface, operationSignature("echo"));
     await call.write({ id: "u1" });
@@ -594,7 +594,7 @@ describe("OBI-T-08 — output validation", () => {
 
   it("validates AFTER the output transform", async () => {
     const iface = testInterface();
-    iface.bindings!["watchTyped.main"]!.outputTransform = "breakShape";
+    iface.bindings!["watchTyped.main"].outputTransform = "breakShape";
     const op = makeInvoker();
     const call = op.invoke(iface, operationSignature("watchTyped"));
     const seen: unknown[] = [];
@@ -720,7 +720,7 @@ describe("CONTEXT_REQUIRED", () => {
     // Give teardown propagation a few macrotasks.
     await new Promise((r) => setTimeout(r, 20));
     expect(mock.signals).toHaveLength(1);
-    expect(mock.signals[0]!.aborted).toBe(true);
+    expect(mock.signals[0].aborted).toBe(true);
   });
 
   it("surfaces when the resolver declines", async () => {

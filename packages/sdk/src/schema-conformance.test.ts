@@ -145,7 +145,7 @@ describe("boundary validation conformance", () => {
     };
     expect(() => compileExampleSchema(withAnchor, undefined)).not.toThrow();
     const badAnchor = structuredClone(withAnchor);
-    (badAnchor.$defs.Task.properties.kind as { $ref: string }).$ref = "#nope";
+    (badAnchor.$defs.Task.properties.kind).$ref = "#nope";
     expect(() => compileExampleSchema(badAnchor, undefined)).toThrow("unresolvable $ref");
   });
 

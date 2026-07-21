@@ -297,7 +297,7 @@ function applyNullable(schema: JSONObject): JSONObject {
     out["type"] = t === "null" ? ["null"] : ["null", t];
   } else if (Array.isArray(t)) {
     if (!t.includes("null")) {
-      out["type"] = ["null", ...t];
+      out["type"] = ["null", ...(t as unknown[])];
     }
   }
   return out;

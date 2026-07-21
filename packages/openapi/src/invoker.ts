@@ -192,7 +192,7 @@ export class OpenAPISynthesizer implements InterfaceSynthesizer, SourceInspector
     source: Source,
     options?: { signal?: AbortSignal },
   ): Promise<SourceInspection> {
-    const doc = await loadOpenAPIDocument(source.location, source.content, options) as OpenAPIDocument;
+    const doc = await loadOpenAPIDocument(source.location, source.content, options);
     const targets: SourceInspection["targets"] = [];
 
     if (!doc.paths) return { targets, exhaustive: true };

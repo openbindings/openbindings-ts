@@ -37,7 +37,7 @@ export function newEvent(partial: Partial<GraphEvent> = {}): GraphEvent {
     data: partial.data,
     source: partial.source ?? "",
     root: partial.root ?? NO_ROOT,
-    lineage: partial.lineage ?? new Map(),
+    lineage: partial.lineage ?? new Map<string, number>(),
     complete: partial.complete ?? false,
     errorDepth: partial.errorDepth ?? 0,
   };

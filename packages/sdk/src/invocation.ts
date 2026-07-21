@@ -592,6 +592,7 @@ export class InvocationImpl<I = unknown, O = unknown>
     }
   }
 
+  // eslint-disable-next-line @typescript-eslint/require-await -- the Invocation contract is Promise-returning; this implementation settles synchronously
   async close(): Promise<void> {
     if (this.inputSideClosed) return;
     this.inputSideClosed = true;
@@ -609,6 +610,7 @@ export class InvocationImpl<I = unknown, O = unknown>
     }
   }
 
+  // eslint-disable-next-line @typescript-eslint/require-await -- the Invocation contract is Promise-returning; this implementation settles synchronously
   async cancel(): Promise<void> {
     // No-op once terminal: cancelling after completion or after a real
     // terminal error must not overwrite that error with ERR_CANCELLED.
@@ -661,7 +663,9 @@ export class InvocationImpl<I = unknown, O = unknown>
       }
       return { value, done: false };
     }
-    if (this.state === "errored") throw this.terminalError;
+    // terminalError is set iff the state moved to "errored" (fireError is
+    // the only transition), so the assertion cannot fire on undefined.
+    if (this.state === "errored") throw this.terminalError!;
     if (this.state === "closed") return { value: undefined, done: true };
 
     const r = await new Promise<IteratorResult<O, void>>((resolve) => {
@@ -695,7 +699,9 @@ export class InvocationImpl<I = unknown, O = unknown>
             // Terminal failure surfaces to the binding as a thrown error;
             // inputs are not drained past it (the binding must stop).
             if (this.state === "errored") {
-              reject(this.terminalError);
+              // terminalError is set iff the state moved to "errored" (see
+              // read()); the assertion cannot fire on undefined.
+              reject(this.terminalError!);
               return;
             }
             if (this.inputBuf.length > 0) {

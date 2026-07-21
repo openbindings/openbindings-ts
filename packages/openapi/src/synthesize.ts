@@ -1,7 +1,6 @@
 import type { OBInterface, Operation, BindingEntry, JSONSchema, Source, SynthesizerWarning } from "@openbindings/sdk";
 import { MAX_TESTED_VERSION } from "@openbindings/sdk";
 import type {
-  OpenAPIDocument,
   OpenAPIMediaType,
   OpenAPIOperation,
   OpenAPIParameter,
@@ -178,7 +177,10 @@ function buildInputSchema(
           properties[k] = v;
         }
         if (Array.isArray(bodySchema.required)) {
-          required.push(...bodySchema.required);
+          // OAS contract: `required` members are strings. A malformed member
+          // passes through unchanged (same as before typing) and surfaces in
+          // downstream OBI validation rather than being silently dropped.
+          required.push(...(bodySchema.required as string[]));
         }
       } else if (isObjectTypedSchema(bodySchema)) {
         // A free-form object body (type object, no named properties): the

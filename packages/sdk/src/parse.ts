@@ -40,7 +40,7 @@ export function parseDocument(input: string | Uint8Array): OBInterface {
     }
   }
   rejectDuplicateObjectKeys(text);
-  const parsed = JSON.parse(text);
+  const parsed: unknown = JSON.parse(text);
 
   const errs: string[] = [];
   validateAgainstOBISchema(errs, parsed);

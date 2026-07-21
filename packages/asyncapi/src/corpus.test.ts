@@ -138,10 +138,10 @@ describe.skipIf(!dir)("binding-spec conformance corpus (asyncapi)", () => {
   // collection time — without the corpus checkout (CI) the filesystem
   // reads below would crash the suite instead of skipping it.
   if (!dir) return;
-  const files = readdirSync(dir!).filter((f) => f.endsWith(".json"));
+  const files = readdirSync(dir).filter((f) => f.endsWith(".json"));
   expect(files.length).toBeGreaterThan(0);
   for (const file of files) {
-    const fixture = JSON.parse(readFileSync(path.join(dir!, file), "utf8")) as CorpusFixture;
+    const fixture = JSON.parse(readFileSync(path.join(dir, file), "utf8")) as CorpusFixture;
     expect(fixture.bindingSpec).toBe(BINDING_SPEC);
     describe(fixture.rule, () => {
       for (const t of fixture.tests) {

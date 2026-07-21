@@ -123,7 +123,7 @@ export async function loadOpenAPIDocument(
     try {
       text = await resp.text();
     } catch (e: unknown) {
-      throw new Error(`failed to read response body from ${location}: ${errorMessage(e)}`);
+      throw new Error(`failed to read response body from ${location}: ${errorMessage(e)}`, { cause: e });
     }
 
     try {
@@ -197,9 +197,9 @@ function checkAcceptedOpenAPIVersion(raw: unknown): void {
  * parse side-effect-free (Go parity: `prepareBinding`'s content path never
  * touches the network — internal `#/...` refs still resolve locally).
  */
-const blockExternalRefFetch: typeof globalThis.fetch = (() => {
+const blockExternalRefFetch: typeof globalThis.fetch = () => {
   throw new Error("external $ref resolution is disabled for this load");
-}) as unknown as typeof globalThis.fetch;
+};
 
 /**
  * Allows absolute http(s) reference targets (they resolve without a base)
@@ -216,7 +216,7 @@ function selfContainedRefFetch(real: typeof globalThis.fetch): typeof globalThis
     throw new Error(
       `reference "${url}" cannot resolve: embedded content with no co-present location has no base URI and must be self-contained (bundle the document before embedding, or set the source's location)`,
     );
-  }) as typeof globalThis.fetch;
+  });
 }
 
 /** Merges path-level and operation-level parameters, with operation parameters taking precedence. */

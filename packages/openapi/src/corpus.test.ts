@@ -74,9 +74,9 @@ async function judgeDocument(doc: CorpusDocument): Promise<string | undefined> {
     let parsed: Record<string, unknown> | undefined;
     if (src.content !== undefined) {
       try {
-        parsed = (await loadOpenAPIDocument(undefined, src.content, {
+        parsed = await loadOpenAPIDocument(undefined, src.content, {
           allowExternalRefs: false,
-        })) as unknown as Record<string, unknown>;
+        });
       } catch (e: unknown) {
         return errorMessage(e);
       }
@@ -133,10 +133,10 @@ describe.skipIf(!dir)("binding-spec conformance corpus (openapi)", () => {
   // collection time — without the corpus checkout (CI) the filesystem
   // reads below would crash the suite instead of skipping it.
   if (!dir) return;
-  const files = readdirSync(dir!).filter((f) => f.endsWith(".json"));
+  const files = readdirSync(dir).filter((f) => f.endsWith(".json"));
   expect(files.length).toBeGreaterThan(0);
   for (const file of files) {
-    const fixture = JSON.parse(readFileSync(path.join(dir!, file), "utf8")) as CorpusFixture;
+    const fixture = JSON.parse(readFileSync(path.join(dir, file), "utf8")) as CorpusFixture;
     expect(fixture.bindingSpec).toBe(BINDING_SPEC);
     describe(fixture.rule, () => {
       for (const t of fixture.tests) {

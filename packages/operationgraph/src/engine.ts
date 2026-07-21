@@ -91,7 +91,7 @@ export class AsyncQueue<T> {
     if (this.closed) return;
     this.closed = true;
     while (this.waiters.length > 0) {
-      this.waiters.shift()!({ value: undefined as unknown as T, done: true });
+      this.waiters.shift()!({ value: undefined, done: true });
     }
   }
 

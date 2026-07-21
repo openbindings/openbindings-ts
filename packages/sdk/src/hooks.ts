@@ -81,6 +81,9 @@ export const USE_DEFAULT: unique symbol = Symbol("openbindings: use default");
 export type OutputDecoder = (
   site: InvokeSite,
   raw: RawResult,
+  // `unknown` absorbs `typeof USE_DEFAULT`; the union deliberately documents
+  // the decline sentinel in the signature consumers read.
+  // eslint-disable-next-line @typescript-eslint/no-redundant-type-constituents
 ) => unknown | typeof USE_DEFAULT | Promise<unknown | typeof USE_DEFAULT>;
 
 /**
@@ -118,7 +121,6 @@ function slotsEmpty(s: HookSlots): boolean {
 
 const TIER_PER_INVOCATION = "per-invocation hook";
 const TIER_INVOKER_LEVEL = "invoker-level hook";
-const TIER_BUILTIN = "format builtin";
 
 /** Wraps a hook's thrown error per the seam's three failure channels. */
 function hookTerminal(tier: string, nativeCode: string, err: unknown): InvocationError {
@@ -197,6 +199,7 @@ export class InvokeHooks {
     ];
     for (const [tier, fn] of tiers) {
       if (!fn) continue;
+      // eslint-disable-next-line @typescript-eslint/no-redundant-type-constituents -- documents the decline sentinel (see OutputDecoder)
       let v: unknown | typeof USE_DEFAULT;
       try {
         v = await fn(site, raw);
@@ -350,7 +353,7 @@ async function runBuiltinClassify(
  */
 export function floorStamped(schema: JSONSchema | undefined | null): boolean {
   if (!schema || typeof schema !== "object") return false;
-  const xob = (schema as Record<string, unknown>)["x-ob"];
+  const xob = (schema)["x-ob"];
   if (!xob || typeof xob !== "object" || Array.isArray(xob)) return false;
   return "floor" in (xob as Record<string, unknown>);
 }
@@ -368,7 +371,7 @@ export function nonDiscriminatingOutput(schema: JSONSchema | undefined | null): 
     return schema;
   }
   if (!schema || typeof schema !== "object") return true;
-  const m = schema as Record<string, unknown>;
+  const m = schema;
   if (Object.keys(m).length === 0) return true;
   if (floorStamped(schema)) return true;
   const t = m["type"];

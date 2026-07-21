@@ -30,7 +30,7 @@
     "prepack": "tsup",
     "test": "vitest run",
     "conformance": "node --import tsx scripts/run-conformance.ts",
-    "lint": "tsc --noEmit && tsc -p tsconfig.test.json"
+    "lint": "tsc --noEmit && tsc -p tsconfig.test.json && eslint ."
   },
   "keywords": [
     "openbindings",

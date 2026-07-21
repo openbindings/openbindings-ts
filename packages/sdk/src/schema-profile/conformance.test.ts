@@ -271,7 +271,7 @@ if (!fixturesAvailable && process.env.OB_CORPUS_REQUIRED) {
 
 describe.skipIf(!fixturesAvailable)("comparison conformance", () => {
   const manifest: Manifest = fixturesAvailable
-    ? JSON.parse(readFileSync(manifestPath!, "utf-8"))
+    ? JSON.parse(readFileSync(manifestPath, "utf-8"))
     : { conventionVersion: "", profile: "", files: [] };
 
   for (const entry of manifest.files) {

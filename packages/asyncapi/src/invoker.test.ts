@@ -32,7 +32,7 @@ function mockFetch(
     requests.push(req);
     return respond(req);
   };
-  return { fetch: fn as typeof globalThis.fetch, requests };
+  return { fetch: fn, requests };
 }
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -89,7 +89,7 @@ describe("AsyncAPIInvoker.prepareBinding", () => {
     vi.stubGlobal("fetch", (async () => {
       fetchCount++;
       return new Response("{}", { status: 200 });
-    }) as typeof globalThis.fetch);
+    }));
 
     const spec = {
       asyncapi: "3.0.0",

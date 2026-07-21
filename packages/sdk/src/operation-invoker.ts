@@ -1,4 +1,4 @@
-import type { OBInterface, BindingEntry, Operation, Source, Transform, TransformOrRef, JSONSchema } from "./types.js";
+import type { OBInterface, BindingEntry, Operation, Source, Transform, TransformOrRef } from "./types.js";
 import { resolveTransform } from "./types.js";
 import type {
   BindingInvocationArgs,
@@ -869,7 +869,7 @@ function selectionOverride(
 function contextSelectionOverride(ctx: Record<string, unknown> | null | undefined): string[] {
   const raw = contextConfiguration(ctx)["selection"];
   if (!Array.isArray(raw) || !raw.every((e) => typeof e === "string")) return [];
-  return raw as string[];
+  return raw;
 }
 
 /**

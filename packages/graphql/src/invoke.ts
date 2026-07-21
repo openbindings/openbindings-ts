@@ -312,7 +312,7 @@ async function doGraphQLHTTP(
     );
   }
 
-  const respBody: GraphQLResponse = JSON.parse(text);
+  const respBody = JSON.parse(text) as GraphQLResponse;
   return { body: respBody, headers: metadataFromHeaders(resp.headers) };
 }
 
