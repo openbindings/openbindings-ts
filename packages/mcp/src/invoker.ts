@@ -132,13 +132,14 @@ export class MCPSynthesizer implements InterfaceSynthesizer, SourceInspector {
     input: SynthesizeInput,
     options?: { signal?: AbortSignal },
   ): Promise<OBInterface> {
-    if (!input.sources?.length) {
+    const sources = input.sources ?? [];
+    const src = sources.at(0);
+    if (src === undefined) {
       throw new NoSourcesError();
     }
-    if (input.sources.length > 1) {
+    if (sources.length > 1) {
       throw new MultipleSourcesError();
     }
-    const src = input.sources[0];
 
     let disc: MCPDiscovery;
     if (src.content !== undefined) {

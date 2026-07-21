@@ -158,7 +158,8 @@ function stringifyScalar(v: unknown): string | undefined {
 export function mergeQuery(address: string, q: Record<string, string> | undefined): string {
   if (!q || Object.keys(q).length === 0) return address;
   const params = new URLSearchParams();
-  for (const key of Object.keys(q).sort()) params.set(key, q[key]);
+  const sorted = Object.entries(q).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+  for (const [key, value] of sorted) params.set(key, value);
   const sep = address.includes("?") ? "&" : "?";
   return address + sep + params.toString();
 }

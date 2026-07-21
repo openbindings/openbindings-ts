@@ -363,6 +363,7 @@ export function validateGraph(
     let hasBoundedEach = false;
     for (const key of cycle) {
       const node = g.nodes[key];
+      if (!node) continue; // unreachable: findCycles only emits keys of g.nodes
       if (node.type === "each" && node.maxIterations !== undefined) hasBoundedEach = true;
       if (node.type === "operation") {
         issues.push({
@@ -499,10 +500,11 @@ export function validateGraph(
 export function validate(g: Graph | null | undefined, operationKeys?: Set<string>): void {
   const issues = validateGraph(g, operationKeys);
   if (issues.length === 0) return;
-  if (issues.length === 1 && issues[0].nodeKeys === undefined && issues[0].rule === undefined) {
+  const only = issues.length === 1 ? issues[0] : undefined;
+  if (only !== undefined && only.nodeKeys === undefined && only.rule === undefined) {
     // Shape preconditions ("graph is nil", "graph has no nodes") throw bare,
     // matching the historical behavior.
-    throw new Error(issues[0].message);
+    throw new Error(only.message);
   }
   throw new Error(`validation errors:\n  ${issues.map(formatIssue).join("\n  ")}`);
 }
@@ -544,8 +546,9 @@ function findCycles(nodes: Record<string, Node>, succ: Map<string, string[]>): s
     };
     init(start);
 
-    while (frames.length > 0) {
-      const frame = frames[frames.length - 1];
+    for (;;) {
+      const frame = frames.at(-1);
+      if (frame === undefined) break; // stack exhausted
       const next = frame.iter.next();
       if (!next.done) {
         const w = next.value;
@@ -571,17 +574,16 @@ function findCycles(nodes: Record<string, Node>, succ: Map<string, string[]>): s
         }
         if (scc.length > 1) {
           result.push(scc);
-        } else if (scc.length === 1) {
-          for (const to of succ.get(scc[0]) ?? []) {
-            if (to === scc[0]) {
-              result.push(scc);
-              break;
-            }
+        } else {
+          // A single-node SCC cycles only via a self-loop.
+          const sole = scc.at(0);
+          if (sole !== undefined && (succ.get(sole) ?? []).includes(sole)) {
+            result.push(scc);
           }
         }
       }
-      if (frames.length > 0) {
-        const parent = frames[frames.length - 1];
+      const parent = frames.at(-1);
+      if (parent !== undefined) {
         const childLow = lowlinks.get(frame.v)!;
         if (childLow < lowlinks.get(parent.v)!) lowlinks.set(parent.v, childLow);
       }

@@ -25,7 +25,7 @@ describe("exhaustPages pagination bound (C7f)", () => {
     let i = 0;
     let collected = 0;
     await exhaustPages(
-      async () => pages[i++],
+      async () => pages[i++] ?? {}, // three pages; the {} page terminates before overrun
       () => {
         collected++;
       },

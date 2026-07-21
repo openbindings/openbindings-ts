@@ -63,9 +63,9 @@ function isResolvedMessage(m: AsyncAPIMessage): boolean {
  */
 function channelMessages(ch: AsyncAPIChannel): AsyncAPIMessage[] {
   const messages = ch.messages ?? {};
-  return Object.keys(messages)
-    .sort()
-    .map((name) => messages[name]);
+  return Object.entries(messages)
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+    .map(([, m]) => m);
 }
 
 /**
@@ -104,8 +104,8 @@ export function distinctEffectiveTypes(
  */
 export function decodeContentType(doc: AsyncAPIDocument, msgs: AsyncAPIMessage[]): string {
   const types = distinctEffectiveTypes(doc, msgs);
-  if (types.length === 1) return types[0];
-  return "";
+  const only = types.length === 1 ? types[0] : undefined;
+  return only ?? "";
 }
 
 /**
@@ -137,7 +137,8 @@ export function resolveInputCodec(doc: AsyncAPIDocument, msgs: AsyncAPIMessage[]
   if (types.length > 1) {
     return { json: false, contentType: "" }; // ambiguous → the text lane
   }
-  const t = types.length === 1 ? types[0] : "";
+  // Zero or one distinct type after the ambiguity return above; absent is "".
+  const t = types[0] ?? "";
   if (t === "") {
     // No declaration at all: JSON, the specification's default.
     return { json: true, contentType: "application/json" };

@@ -336,6 +336,16 @@
   document using `"constructor"` as an operation/source/transform key
   validates and resolves correctly (OBI-D-08/09/10 corpus fixtures pin it).
 
+- **`@openbindings/asyncapi`: the effective server set resolves by own-key
+  lookup** (`Object.hasOwn`, Go-map parity). A malformed artifact carrying
+  an inline (non-`$ref`) channel `servers` entry whose name tag matched an
+  `Object.prototype` member (`"constructor"`, `"toString"`, ...) surfaced
+  that prototype member as a "server", and default selection then crashed
+  with a `TypeError` instead of refusing. Such an entry now contributes
+  nothing to the effective set, leaving the structured
+  `no resolvable server` pre-dispatch refusal (red-proven in
+  `target.test.ts`).
+
 - **The invocation handle removes its external-`AbortSignal` listener on
   terminal** (`{ once, signal }` registration), so completed invocations are
   no longer retained by a long-lived shared signal.

@@ -85,15 +85,20 @@ export function effectiveServers(
     const out: NamedServer[] = [];
     for (const entry of subset) {
       const name = serverNameOf(entry);
-      if (name !== "" && name in docServers) {
-        out.push({ name, server: docServers[name] });
+      // Own-key lookup only (Go-map parity): a forged inline entry whose
+      // name tag matches an Object.prototype member ("constructor", ...)
+      // must contribute nothing, not surface a prototype member as a
+      // server (which would TypeError in default selection).
+      const server = name !== "" && Object.hasOwn(docServers, name) ? docServers[name] : undefined;
+      if (server !== undefined) {
+        out.push({ name, server });
       }
     }
     return out;
   }
-  return Object.keys(docServers)
-    .sort()
-    .map((name) => ({ name, server: docServers[name] }));
+  return Object.entries(docServers)
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+    .map(([name, server]) => ({ name, server }));
 }
 
 /**
@@ -326,14 +331,14 @@ function assembleServer(
   }
 
   if (supplied) {
-    for (const name of Object.keys(supplied).sort()) {
+    const sorted = Object.entries(supplied).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+    for (const [name, val] of sorted) {
       const declared = srv.variables?.[name];
       if (!declared) {
         throw new Error(
           `configuration.server.variables[${JSON.stringify(name)}] names no declared variable of server ${JSON.stringify(member.name)}`,
         );
       }
-      const val = supplied[name];
       if (declared.enum && declared.enum.length > 0 && !declared.enum.includes(val)) {
         throw new Error(
           `server ${JSON.stringify(member.name)}: variable ${JSON.stringify(name)} value ${JSON.stringify(val)} is not in the declared enum [${declared.enum.join(", ")}]`,

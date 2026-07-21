@@ -301,7 +301,8 @@ describe("context requirements — oauth2 flows (R2.b ruling)", () => {
       ref: "#/operations/publish",
     });
     const req = (details as { alternatives: Array<{ requirements: Array<Record<string, unknown>> }> })
-      .alternatives[0].requirements[0];
+      .alternatives.at(0)?.requirements.at(0);
+    if (!req) throw new Error("expected a requirement in the first alternative");
     expect(req).not.toHaveProperty("grantType");
   });
 });
@@ -365,8 +366,11 @@ describe("context requirements — unmapped schemes surfaced (R2.c ruling)", () 
     // Both declared inline (no $ref): no addressable name.
     const alts = (details as { alternatives: Array<{ requirements: Array<Record<string, unknown>> }> })
       .alternatives;
-    expect(alts[0].requirements[0]).not.toHaveProperty("name");
-    expect(alts[1].requirements[0]).not.toHaveProperty("name");
+    const req0 = alts.at(0)?.requirements.at(0);
+    const req1 = alts.at(1)?.requirements.at(0);
+    if (!req0 || !req1) throw new Error("expected a requirement in each alternative");
+    expect(req0).not.toHaveProperty("name");
+    expect(req1).not.toHaveProperty("name");
   });
 
   it("a document whose EVERY alternative is unmappable challenges CONTEXT_REQUIRED before dispatch, instead of a blind 401", async () => {
@@ -482,8 +486,8 @@ describe("context requirements — conjunctive server + operation security (ASYN
       ref: "#/operations/publish",
     });
     expect(details?.alternatives).toHaveLength(1);
-    expect(details?.alternatives[0].requirements).toHaveLength(1);
-    expect(details?.alternatives[0].requirements[0]).toMatchObject({ type: "auth.bearer" });
+    expect(details?.alternatives[0]!.requirements).toHaveLength(1);
+    expect(details?.alternatives[0]!.requirements[0]).toMatchObject({ type: "auth.bearer" });
   });
 });
 
@@ -526,7 +530,7 @@ describe("credential application — apiKeys keyed lookup (R2.d ruling)", () => 
     });
     await call.write({});
     await single(call.outputs);
-    expect(requests[0].headers.get("X-Header-Key")).toBe("hk-1");
-    expect(requests[0].url).toBe("https://api.example.com/pub?api_key=qk-1");
+    expect(requests.at(0)?.headers.get("X-Header-Key")).toBe("hk-1");
+    expect(requests.at(0)?.url).toBe("https://api.example.com/pub?api_key=qk-1");
   });
 });

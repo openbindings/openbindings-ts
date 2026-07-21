@@ -98,9 +98,9 @@ function resolveOperationPayload(
   op: AsyncAPIOperation,
 ): Record<string, unknown> | undefined {
   // Try operation-level messages first (after dereference these are resolved objects)
-  const opMsgs = op.messages;
-  if (opMsgs && opMsgs.length > 0) {
-    const payload = opMsgs[0].payload;
+  const firstOpMsg = op.messages?.[0];
+  if (firstOpMsg) {
+    const payload = firstOpMsg.payload;
     if (payload) return stripParserExtensions(payload);
   }
 
@@ -120,9 +120,9 @@ function resolveOperationPayload(
 function resolveReplyPayload(
   reply: AsyncAPIOperationReply,
 ): Record<string, unknown> | undefined {
-  const replyMsgs = reply.messages;
-  if (replyMsgs && replyMsgs.length > 0) {
-    const payload = replyMsgs[0].payload;
+  const firstReplyMsg = reply.messages?.[0];
+  if (firstReplyMsg) {
+    const payload = firstReplyMsg.payload;
     if (payload) return stripParserExtensions(payload);
   }
   return undefined;
