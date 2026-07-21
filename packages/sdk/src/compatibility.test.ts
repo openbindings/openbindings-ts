@@ -50,7 +50,7 @@ describe("checkInterfaceCompatibility", () => {
       });
       const issues = await checkInterfaceCompatibility(required, provided);
       expect(issues).toHaveLength(1);
-      expect(issues[0].kind).toBe("output_incompatible");
+      expect(issues[0]?.kind).toBe("output_incompatible");
     });
   });
 
@@ -97,7 +97,7 @@ describe("checkInterfaceCompatibility", () => {
       });
       const issues = await checkInterfaceCompatibility(required, provided);
       expect(issues).toHaveLength(1);
-      expect(issues[0].kind).toBe("input_incompatible");
+      expect(issues[0]?.kind).toBe("input_incompatible");
     });
   });
 

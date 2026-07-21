@@ -39,9 +39,11 @@ export async function checkInterfaceCompatibility(
   const provNorm = new Normalizer({ root: provided as unknown as Record<string, unknown> });
 
   // Sorted like the Go SDK's lane: issue order must never leak the
-  // document's declaration order.
-  for (const opKey of Object.keys(required.operations).sort()) {
-    const requiredOp = required.operations[opKey];
+  // document's declaration order. Code-unit comparator matches
+  // Object.keys(...).sort(); iterating entries types each value as present.
+  const opEntries = Object.entries(required.operations)
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+  for (const [opKey, requiredOp] of opEntries) {
     const providedOp = resolveOperation(provided, opKey)?.operation;
     if (!providedOp) {
       issues.push({ operation: opKey, kind: "missing" });

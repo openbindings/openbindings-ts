@@ -17,7 +17,7 @@ import type {
   TransformEvaluator,
 } from "./invokers.js";
 import type { BindingInvocationArgs } from "./invoker-types.js";
-import type { OBInterface } from "./types.js";
+import type { BindingEntry, OBInterface, Operation } from "./types.js";
 import {
   BindingNotFoundError,
   NoInvokerError,
@@ -249,7 +249,16 @@ const evaluator: TransformEvaluator = {
 // Fixtures
 // ---------------------------------------------------------------------------
 
-function testInterface(): OBInterface {
+// The fixture with the members tests mutate typed as present, so tests can
+// reach into them without per-site narrowing. Still a plain OBInterface to
+// every consumer. `sources` keeps its plain Record shape because one test
+// deletes the "mock" entry (delete needs an optional operand).
+type TestInterface = OBInterface & {
+  operations: { getUser: Operation; echo: Operation; watchTyped: Operation };
+  bindings?: { "echo.transformed": BindingEntry; "watchTyped.main": BindingEntry };
+};
+
+function testInterface(): TestInterface {
   return {
     openbindings: "0.2.0",
     schemas: {
@@ -395,7 +404,9 @@ describe("OperationInvoker wiring", () => {
 
   it("surfaces a missing invoker as terminal ERR_BINDING_NOT_FOUND on the handle", async () => {
     const iface = testInterface();
-    iface.sources!["mock"].bindingSpec = "absent@1.0";
+    const mockSource = iface.sources?.["mock"];
+    if (!mockSource) throw new Error("testInterface() always defines sources.mock");
+    mockSource.bindingSpec = "absent@1.0";
     // The default selector skips unavailable binding specs and throws; pin the
     // binding to force the wiring error onto the handle path.
     const op = makeInvoker();
@@ -463,7 +474,7 @@ describe("cardinalities", () => {
     await call.write({ text: "hello" });
     await call.cancel();
     await expect(call.closed).rejects.toMatchObject({ code: ERR_CANCELLED });
-    expect(mock.signals[0].aborted).toBe(true);
+    expect(mock.signals[0]?.aborted).toBe(true);
   });
 });
 
@@ -720,7 +731,7 @@ describe("CONTEXT_REQUIRED", () => {
     // Give teardown propagation a few macrotasks.
     await new Promise((r) => setTimeout(r, 20));
     expect(mock.signals).toHaveLength(1);
-    expect(mock.signals[0].aborted).toBe(true);
+    expect(mock.signals[0]?.aborted).toBe(true);
   });
 
   it("surfaces when the resolver declines", async () => {

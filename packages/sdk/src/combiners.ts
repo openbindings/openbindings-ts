@@ -85,9 +85,10 @@ export function combineSynthesizers(...synthesizers: InterfaceSynthesizer[]): In
       input: SynthesizeInput,
       options?: { signal?: AbortSignal },
     ): Promise<OBInterface> {
-      if (!input.sources?.length) throw new NoSourcesError();
-      const synthesizer = bySpec.get(input.sources[0].bindingSpec);
-      if (!synthesizer) throw new NoSynthesizerError(input.sources[0].bindingSpec);
+      const [firstSource] = input.sources ?? [];
+      if (!firstSource) throw new NoSourcesError();
+      const synthesizer = bySpec.get(firstSource.bindingSpec);
+      if (!synthesizer) throw new NoSynthesizerError(firstSource.bindingSpec);
       return synthesizer.synthesizeInterface(input, options);
     },
   };

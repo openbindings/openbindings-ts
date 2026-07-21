@@ -423,16 +423,16 @@ function compatUnion(tgt: JSONObject, cand: JSONObject, isInput: boolean): Compa
   const unionKey = "anyOf" in tgt ? "anyOf" : "oneOf";
 
   if (isInput) {
-    for (let i = 0; i < tgtVars.length; i++) {
-      if (!candVars.some((w) => compat(tgtVars[i], w, true).compatible)) {
+    for (const [i, tv] of tgtVars.entries()) {
+      if (!candVars.some((w) => compat(tv, w, true).compatible)) {
         return fail(`${unionKey}: target variant ${i} has no compatible candidate variant`);
       }
     }
     return COMPATIBLE;
   }
 
-  for (let i = 0; i < candVars.length; i++) {
-    if (!tgtVars.some((v) => compat(v, candVars[i], false).compatible)) {
+  for (const [i, cv] of candVars.entries()) {
+    if (!tgtVars.some((v) => compat(v, cv, false).compatible)) {
       return fail(`${unionKey}: candidate variant ${i} has no compatible target variant`);
     }
   }

@@ -1,9 +1,18 @@
 import { describe, it, expect } from "vitest";
 import { validateInterface } from "./validate.js";
-import type { OBInterface } from "./index.js";
+import type { BindingEntry, OBInterface, Operation, Source } from "./index.js";
 import { ValidationError } from "./index.js";
 
-function minimalInterface(): OBInterface {
+// The fixture with its known members typed as present, so tests can reach
+// into them without per-site narrowing. Still a plain OBInterface to every
+// consumer; `sources`/`bindings` stay optional so tests may delete them.
+type MinimalInterface = OBInterface & {
+  operations: { getUser: Operation };
+  sources?: { main: Source };
+  bindings?: { "getUser.main": BindingEntry };
+};
+
+function minimalInterface(): MinimalInterface {
   return {
     openbindings: "0.2.0",
     operations: {
@@ -674,7 +683,7 @@ describe("boolean schema round-trip", () => {
     const iface = JSON.parse(raw) as OBInterface;
     expect(() => validateInterface(iface)).not.toThrow();
     const round = JSON.parse(JSON.stringify(iface)) as Record<string, unknown>;
-    const op = (round.operations as Record<string, Record<string, unknown>>).op;
+    const op = (round.operations as { op: Record<string, unknown> }).op;
     expect(op.input).toBe(true);
     expect(op.output).toBe(false);
     expect((round.schemas as Record<string, unknown>).Anything).toBe(true);
