@@ -62,7 +62,7 @@ export async function discover(url: string, options?: DiscoverOptions): Promise<
             disc.tools.push({
               name: t.name,
               description: t.description,
-              inputSchema: t.inputSchema as Record<string, unknown> | undefined,
+              inputSchema: t.inputSchema,
               outputSchema: (t as { outputSchema?: Record<string, unknown> }).outputSchema,
             });
           }
@@ -244,7 +244,7 @@ function templateInputSchema(template: string): JSONSchema | undefined {
     description: `Variables of RFC 6570 template ${JSON.stringify(template)}`,
     properties,
     additionalProperties: false,
-  } as JSONSchema;
+  };
 }
 
 /**
@@ -274,7 +274,7 @@ function promptOutputSchema(): JSONSchema {
       },
     },
     required: ["messages"],
-  } as JSONSchema;
+  };
 }
 
 /**
@@ -327,8 +327,8 @@ export function convertToInterface(disc: MCPDiscovery, location?: string): OBInt
 
     const op: Operation = {};
     if (tool.description) op.description = tool.description;
-    if (tool.inputSchema) op.input = tool.inputSchema as JSONSchema;
-    if (tool.outputSchema) op.output = tool.outputSchema as JSONSchema;
+    if (tool.inputSchema) op.input = tool.inputSchema;
+    if (tool.outputSchema) op.output = tool.outputSchema;
 
     operations[opKey] = op;
     bindings[`${opKey}.${DEFAULT_SOURCE_NAME}`] = { operation: opKey, source: DEFAULT_SOURCE_NAME, ref };
@@ -386,7 +386,7 @@ export function convertToInterface(disc: MCPDiscovery, location?: string): OBInt
       }
       const input: Record<string, unknown> = { type: "object", properties };
       if (required.length > 0) input.required = required.sort();
-      op.input = input as JSONSchema;
+      op.input = input;
     }
 
     // Standard prompt output schema.

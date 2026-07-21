@@ -125,8 +125,8 @@ export class WorkersRpcInvoker implements BindingInvoker {
    */
   invokeBinding<I = unknown, O = unknown>(args: BindingInvocationArgs): Invocation<I, O> {
     const inv = new InvocationImpl<unknown, unknown>({ signal: args.signal });
-    queueMicrotask(() =>
-      this.run(args, inv).catch((err) => {
+    queueMicrotask(() => {
+      void this.run(args, inv).catch((err) => {
         inv.fireError(
           err instanceof InvocationError
             ? err
@@ -135,8 +135,8 @@ export class WorkersRpcInvoker implements BindingInvoker {
                 err instanceof Error ? err.message : String(err),
               ),
         );
-      }),
-    );
+      });
+    });
     return inv as Invocation<I, O>;
   }
 

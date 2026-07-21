@@ -238,7 +238,7 @@ describe("WorkersRpcInvoker — Cloudflare ServiceStub Proxy compatibility", () 
     // that records the call. If anything tries to enumerate the binding's
     // methods (e.g., spreading, Object.keys, JSON.stringify of the
     // binding itself), the test would surface different behavior.
-    const fakeStub = new Proxy({} as Record<string, unknown>, {
+    const fakeStub = new Proxy({}, {
       get(_target, prop) {
         if (prop === "ping") {
           return (arg: unknown) => {
@@ -260,7 +260,7 @@ describe("WorkersRpcInvoker — Cloudflare ServiceStub Proxy compatibility", () 
     // The invoker's typeof-function check happens via the proxy getter,
     // which returns the function — so the invoker proceeds to invoke.
     const invoker = new WorkersRpcInvoker({
-      binding: fakeStub as unknown as WorkersRpcBinding,
+      binding: fakeStub,
     });
     const out = await callOnce(invoker, "ping", { msg: "hi" });
 
@@ -282,7 +282,7 @@ describe("WorkersRpcInvoker — Cloudflare ServiceStub Proxy compatibility", () 
     // observable because the binding object here is a different
     // identity than what the function captures.
     let observedThis: unknown = "not-set";
-    const fakeStub = new Proxy({} as Record<string, unknown>, {
+    const fakeStub = new Proxy({}, {
       get(_target, prop) {
         if (prop === "checkThis") {
           // A regular (non-arrow) function so `this` is sensitive to
@@ -293,6 +293,7 @@ describe("WorkersRpcInvoker — Cloudflare ServiceStub Proxy compatibility", () 
           // we go through the proxy's getter (which is what production
           // ServiceStubs require).
           return function (this: unknown, _arg: unknown) {
+            // eslint-disable-next-line @typescript-eslint/no-this-alias -- capturing `this` for the assertion is the point of this test
             observedThis = this;
             return { ok: true };
           };
@@ -302,7 +303,7 @@ describe("WorkersRpcInvoker — Cloudflare ServiceStub Proxy compatibility", () 
     });
 
     const invoker = new WorkersRpcInvoker({
-      binding: fakeStub as unknown as WorkersRpcBinding,
+      binding: fakeStub,
     });
     await callOnce(invoker, "checkThis", null);
 

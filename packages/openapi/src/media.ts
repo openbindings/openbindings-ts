@@ -120,7 +120,7 @@ export function planRequestBody(op: OpenAPIOperation): BodyPlan {
   }
 
   let chosen: Candidate | undefined;
-  let family = "";
+  let family: string;
   if (exactJSON) {
     chosen = exactJSON;
     family = FAMILY_JSON;
@@ -186,7 +186,7 @@ function mediaSchema(media: OpenAPIMediaType | null): Record<string, unknown> | 
 function mediaSchemaProps(media: OpenAPIMediaType | null): Set<string> | undefined {
   const props = mediaSchema(media)?.properties;
   if (!props || typeof props !== "object") return undefined;
-  const names = Object.keys(props as Record<string, unknown>);
+  const names = Object.keys(props);
   if (names.length === 0) return undefined;
   return new Set(names);
 }
@@ -557,7 +557,7 @@ export function buildURLEncodedBody(
     try {
       units.push(...serializeQueryValue(name, fields[name], style, explode ?? style === "form", allowReserved));
     } catch (e) {
-      throw new Error(`form field "${name}": ${(e as Error).message}`);
+      throw new Error(`form field "${name}": ${(e as Error).message}`, { cause: e });
     }
   }
   return units.join("&");

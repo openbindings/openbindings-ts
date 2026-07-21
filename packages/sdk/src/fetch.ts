@@ -106,7 +106,7 @@ function defaultFetch(): typeof globalThis.fetch {
   }
   return (() => Promise.reject(new Error(
     "openbindings: fetch is not available — provide a fetch implementation via FetchInterfaceOptions",
-  ))) as typeof globalThis.fetch;
+  )));
 }
 
 /**

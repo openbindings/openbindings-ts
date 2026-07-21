@@ -1,4 +1,4 @@
-import type { OBInterface, Operation, JSONSchema } from "@openbindings/sdk";
+import type { OBInterface, Operation } from "@openbindings/sdk";
 import { MAX_TESTED_VERSION } from "@openbindings/sdk";
 import type { IntrospectionSchema, TypeRef, TypeMap, InputValue } from "./introspection.js";
 import { buildTypeMap, rootTypeName, unwrapTypeName } from "./introspection.js";
@@ -48,7 +48,7 @@ export function convertToInterface(schema: IntrospectionSchema, location?: strin
       // Build output schema.
       const returnType = unwrapTypeName(f.type);
       if (returnType) {
-        op.output = graphqlTypeToJSONSchema(f.type, tm, new Set()) as JSONSchema;
+        op.output = graphqlTypeToJSONSchema(f.type, tm, new Set());
       }
 
       operations[opKey] = op;
@@ -90,7 +90,7 @@ function argsToInputSchema(args: InputValue[], tm: TypeMap): Record<string, unkn
     const argType = isRequired && arg.type.ofType ? arg.type.ofType : arg.type;
 
     const prop = graphqlTypeToJSONSchema(argType, tm, new Set());
-    if (arg.description) (prop as Record<string, unknown>).description = arg.description;
+    if (arg.description) (prop).description = arg.description;
     properties[arg.name] = prop;
     if (isRequired) required.push(arg.name);
   }

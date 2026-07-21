@@ -2,7 +2,6 @@ import type { OBInterface } from "./types.js";
 import { schemaObjectForm } from "./types.js";
 import { resolveOperation } from "./resolve-operation.js";
 import { Normalizer, inputCompatible, outputCompatible } from "./schema-profile/index.js";
-import type { JSONObject } from "./schema-profile/index.js";
 
 export type CompatibilityIssue = {
   operation: string;
@@ -65,8 +64,8 @@ export async function checkInterfaceCompatibility(
         });
       } else {
         try {
-          const reqOutput = await reqNorm.normalize(reqOutObj as JSONObject);
-          const provOutput = await provNorm.normalize(provOutObj as JSONObject);
+          const reqOutput = await reqNorm.normalize(reqOutObj);
+          const provOutput = await provNorm.normalize(provOutObj);
           const outputResult = outputCompatible(reqOutput, provOutput);
           if (!outputResult.compatible) {
             issues.push({
@@ -99,8 +98,8 @@ export async function checkInterfaceCompatibility(
         continue;
       }
       try {
-        const reqInput = await reqNorm.normalize(reqInObj as JSONObject);
-        const provInput = await provNorm.normalize(provInObj as JSONObject);
+        const reqInput = await reqNorm.normalize(reqInObj);
+        const provInput = await provNorm.normalize(provInObj);
         const inputResult = inputCompatible(reqInput, provInput);
         if (!inputResult.compatible) {
           issues.push({

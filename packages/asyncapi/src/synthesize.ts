@@ -8,6 +8,7 @@ import type {
 import { BINDING_SPEC, DEFAULT_SOURCE_NAME } from "./constants.js";
 import { operationRef, sanitizeKey, uniqueKey } from "./util.js";
 
+// eslint-disable-next-line @typescript-eslint/require-await -- the synthesizer contract is Promise-returning; this format synthesizes synchronously
 export async function convertToInterface(
   location?: string,
   content?: AsyncAPIDocument,

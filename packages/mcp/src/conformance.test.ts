@@ -235,7 +235,7 @@ describe("progress solicitation (§9.3 `solicit`, MCP-P-04/MCP-P-05)", () => {
 
     const calls = server.params("tools/call");
     expect(calls).toHaveLength(1);
-    const meta = calls[0]._meta as Record<string, unknown> | undefined;
+    const meta = calls[0]._meta;
     expect(meta !== undefined && "progressToken" in meta).toBe(wantToken);
 
     if (!wantToken) {

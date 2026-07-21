@@ -61,6 +61,7 @@ export function canonicalizeLocation(uri: string): string {
   } catch (e) {
     throw new Error(
       `openbindings: parse URI ${JSON.stringify(uri)}: ${(e as Error).message}`,
+      { cause: e },
     );
   }
 
@@ -109,6 +110,7 @@ export function resolveRef(base: string, ref: string): string {
   } catch (e) {
     throw new Error(
       `openbindings: parse base ${JSON.stringify(base)}: ${(e as Error).message}`,
+      { cause: e },
     );
   }
   if (!baseURL.protocol) {
@@ -120,6 +122,7 @@ export function resolveRef(base: string, ref: string): string {
   } catch (e) {
     throw new Error(
       `openbindings: resolve ${JSON.stringify(ref)} against ${JSON.stringify(base)}: ${(e as Error).message}`,
+      { cause: e },
     );
   }
   return resolved.toString();

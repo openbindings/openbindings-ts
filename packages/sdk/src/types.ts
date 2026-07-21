@@ -21,6 +21,9 @@ export type JSONSchema = Record<string, unknown> | boolean;
  * when v is neither an object nor a boolean — a malformed schema value
  * (an OBI-D-17 violation, reported by validateInterface).
  */
+// `unknown` absorbs `JSONSchema`; the union deliberately documents the type
+// callers normally hold while accepting malformed values for the walk.
+// eslint-disable-next-line @typescript-eslint/no-redundant-type-constituents
 export function schemaObjectForm(v: JSONSchema | unknown): Record<string, unknown> | undefined {
   if (typeof v === "boolean") return v ? {} : { not: {} };
   if (typeof v === "object" && v !== null && !Array.isArray(v)) {
@@ -125,8 +128,8 @@ export function isTransformRef(t: TransformOrRef): t is TransformRef {
   return (
     typeof t === "object" &&
     t !== null &&
-    typeof (t as TransformRef).$ref === "string" &&
-    (t as TransformRef).$ref !== ""
+    typeof (t).$ref === "string" &&
+    (t).$ref !== ""
   );
 }
 

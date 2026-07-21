@@ -86,7 +86,8 @@ function translateObject(input: Record<string, unknown>): Record<string, unknown
     if (typeof type === "string") {
       out.type = [type, "null"];
     } else if (Array.isArray(type)) {
-      out.type = type.includes("null") ? [...type] : [...type, "null"];
+      const members = type as unknown[];
+      out.type = members.includes("null") ? [...members] : [...members, "null"];
     }
   }
 

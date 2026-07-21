@@ -91,6 +91,9 @@ export function mcpServer(respond: (req: RpcRequest) => RpcReply, opts?: MCPServ
   const calls: CapturedCall[] = [];
   let fetchCount = 0;
 
+  // `unknown` absorbs `undefined`; the union deliberately documents the
+  // "not a list method" sentinel next to the reply value.
+  // eslint-disable-next-line @typescript-eslint/no-redundant-type-constituents
   const listReply = (req: RpcRequest): unknown | undefined => {
     const cursor = req.params?.cursor;
     switch (req.method) {
@@ -133,12 +136,13 @@ export function mcpServer(respond: (req: RpcRequest) => RpcReply, opts?: MCPServ
     if (method === "GET") return new Response(null, { status: 405 });
     if (method === "DELETE") return new Response(null, { status: 200 });
 
-    const msg = JSON.parse(String(init?.body)) as Partial<RpcRequest> & { method: string };
+    // The MCP client under test always POSTs a JSON string body.
+    const msg = JSON.parse(init?.body as string) as Partial<RpcRequest> & { method: string };
     const headers: Record<string, string> = {};
     new Headers(init?.headers).forEach((value, key) => {
       headers[key] = value;
     });
-    calls.push({ method: msg.method, params: (msg.params ?? {}) as RpcRequest["params"], headers });
+    calls.push({ method: msg.method, params: (msg.params ?? {}), headers });
 
     if (msg.method === "initialize") {
       if (opts?.initResponse) return opts.initResponse;

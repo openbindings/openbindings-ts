@@ -563,19 +563,15 @@ async function emitToolResult(
   // the decode seam, never a payload sniff.
   let output: unknown;
   let decodeStamp: string;
+  const soleText = soleTextContent(result.content);
   if (result.structuredContent !== undefined && result.structuredContent !== null) {
     output = result.structuredContent;
     decodeStamp = "structuredContent";
-  } else if (
-    Array.isArray(result.content) &&
-    result.content.length === 1 &&
-    result.content[0].type === "text" &&
-    typeof result.content[0].text === "string"
-  ) {
+  } else if (soleText !== undefined) {
     output = await decodeThroughHooks(
       hooks,
       site,
-      { status: null, body: result.content[0].text, meta: {} },
+      { status: null, body: soleText, meta: {} },
       builtinTextDecode,
     );
     decodeStamp = decodeStampFor(hooks, "text");
@@ -587,6 +583,18 @@ async function emitToolResult(
   inv.setTrailer({ "x-ob-decode": [decodeStamp], "x-ob-classify": ["protocol/isError"] });
   await inv.emitOutput(output);
   inv.closeOutput();
+}
+
+/**
+ * Returns the text of a sole `{ type: "text" }` content entry, or undefined
+ * when the completed result's content is not exactly one text block.
+ */
+function soleTextContent(content: unknown): string | undefined {
+  if (!Array.isArray(content) || content.length !== 1) return undefined;
+  const sole: unknown = content[0];
+  if (sole === null || typeof sole !== "object") return undefined;
+  const rec = sole as Record<string, unknown>;
+  return rec.type === "text" && typeof rec.text === "string" ? rec.text : undefined;
 }
 
 /**
@@ -660,7 +668,7 @@ function builtinMimeDecode(mimeType: string): (site: InvokeSite, raw: RawResult)
     const body = typeof raw.body === "string" ? raw.body : String(raw.body);
     if (mt === "application/json" || mt.endsWith("+json")) {
       try {
-        return JSON.parse(body);
+        return JSON.parse(body) as unknown;
       } catch (e) {
         throw new InvocationError(
           ERR_EXECUTION_FAILED,

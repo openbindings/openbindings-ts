@@ -76,7 +76,7 @@ describe.skipIf(!root)("binding-specs subcorpus, core-level checks", () => {
   if (!root) return;
   for (const family of ALL_FAMILIES) {
     describe(family, () => {
-      const dir = path.join(root!, "binding-specs", family);
+      const dir = path.join(root, "binding-specs", family);
       const files = existsSync(dir) ? readdirSync(dir).filter((f) => f.endsWith(".json")) : [];
       expect(files.length).toBeGreaterThan(0);
 

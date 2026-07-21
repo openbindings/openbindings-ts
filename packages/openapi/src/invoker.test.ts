@@ -46,7 +46,7 @@ function mockFetch(
     requests.push(req);
     return respond(req);
   };
-  return { fetch: fn as typeof globalThis.fetch, requests };
+  return { fetch: fn, requests };
 }
 
 function jsonResponse(body: unknown, status = 200, headers?: Record<string, string>): Response {
@@ -1557,7 +1557,7 @@ describe("prepareBinding", () => {
     globalThis.fetch = ((...args: Parameters<typeof fetch>) => {
       fetchCalled = true;
       return originalFetch(...args);
-    }) as typeof fetch;
+    });
     try {
       const details = await new OpenAPIInvoker().prepareBinding({
         source: authSource(spec),

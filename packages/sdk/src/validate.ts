@@ -531,7 +531,7 @@ function docPointerResolves(doc: unknown, pointer: string): boolean {
     } else if (typeof cur === "object" && cur !== null) {
       // Own property only: a JSON Pointer token such as "constructor" must
       // address the document's own data, never a JS object's prototype chain.
-      if (!Object.hasOwn(cur as Record<string, unknown>, tok)) return false;
+      if (!Object.hasOwn(cur, tok)) return false;
       cur = (cur as Record<string, unknown>)[tok];
     } else {
       return false;

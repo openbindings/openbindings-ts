@@ -379,7 +379,7 @@ describe("validateInterface example validation (OBI-D-11)", () => {
     };
     return {
       openbindings: "0.2.0",
-      operations: { createUser: op as any },
+      operations: { createUser: op },
       sources: {
         main: { bindingSpec: "openbindings.openapi@1", location: "https://example.com/api.json" },
       },
@@ -571,7 +571,7 @@ describe("OBI-D-17 schema well-formedness", () => {
   ])("rejects meta-schema violations: %s", (_name, op, prefix) => {
     const iface: OBInterface = {
       openbindings: "0.2.0",
-      operations: { op: op as never },
+      operations: { op: op },
     };
     let msg = "";
     try {

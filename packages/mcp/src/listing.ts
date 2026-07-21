@@ -85,7 +85,7 @@ function pinEntityIdentities(raw: unknown, member: string, idKey: string): strin
   }
   const ids: string[] = [];
   for (let i = 0; i < raw.length; i++) {
-    const entry = raw[i];
+    const entry: unknown = raw[i];
     if (entry === null || typeof entry !== "object" || Array.isArray(entry)) {
       throw new Error(`MCP pinned listing ${member}[${i}] must be an object in the 2025-11-25 result shape (MCP-D-01)`);
     }

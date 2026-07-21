@@ -251,7 +251,7 @@ export function routeParameter(r: RoutedInput, p: OpenAPIParameter, value: unkno
       try {
         expanded = serializePathValue(name, value, style, explode);
       } catch (e) {
-        throw new Error(`path parameter "${name}": ${(e as Error).message}`);
+        throw new Error(`path parameter "${name}": ${(e as Error).message}`, { cause: e });
       }
       r.resolvedPath = r.resolvedPath.replaceAll(`{${name}}`, expanded);
       break;
@@ -261,7 +261,7 @@ export function routeParameter(r: RoutedInput, p: OpenAPIParameter, value: unkno
       try {
         units = serializeQueryValue(name, value, style, explode, allowReserved);
       } catch (e) {
-        throw new Error(`query parameter "${name}": ${(e as Error).message}`);
+        throw new Error(`query parameter "${name}": ${(e as Error).message}`, { cause: e });
       }
       r.queryUnits.push(...units);
       r.populated.query.add(name);
@@ -272,7 +272,7 @@ export function routeParameter(r: RoutedInput, p: OpenAPIParameter, value: unkno
       try {
         v = serializeHeaderValue(value, style, explode);
       } catch (e) {
-        throw new Error(`header parameter "${name}": ${(e as Error).message}`);
+        throw new Error(`header parameter "${name}": ${(e as Error).message}`, { cause: e });
       }
       r.headers.push([name, v]);
       r.populated.header.add(name.toLowerCase());
@@ -283,7 +283,7 @@ export function routeParameter(r: RoutedInput, p: OpenAPIParameter, value: unkno
       try {
         units = serializeCookieValue(name, value, style, explode);
       } catch (e) {
-        throw new Error(`cookie parameter "${name}": ${(e as Error).message}`);
+        throw new Error(`cookie parameter "${name}": ${(e as Error).message}`, { cause: e });
       }
       r.cookieUnits.push(...units);
       r.populated.cookie.add(name);
@@ -560,7 +560,7 @@ function arrayStrings(arr: unknown[]): string[] {
     try {
       return primitiveString(e);
     } catch (err) {
-      throw new Error(`array element ${i}: ${(err as Error).message}`);
+      throw new Error(`array element ${i}: ${(err as Error).message}`, { cause: err });
     }
   });
 }
@@ -577,7 +577,7 @@ function objectPairs(obj: Record<string, unknown>): Array<[string, string]> {
       try {
         return [k, primitiveString(obj[k])] as [string, string];
       } catch (err) {
-        throw new Error(`object member "${k}": ${(err as Error).message}`);
+        throw new Error(`object member "${k}": ${(err as Error).message}`, { cause: err });
       }
     });
 }

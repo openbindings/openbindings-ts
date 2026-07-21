@@ -42,7 +42,7 @@ function mockFetch(
     requests.push(req);
     return respond(req);
   };
-  return { fetch: fn as typeof globalThis.fetch, requests };
+  return { fetch: fn, requests };
 }
 
 function jsonResponse(body: unknown, status = 200): Response {

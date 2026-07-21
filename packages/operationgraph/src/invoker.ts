@@ -182,7 +182,7 @@ export class OperationGraphInvoker implements BindingInvoker {
     try {
       parsed = JSON.parse(text);
     } catch (err) {
-      throw new Error(`parse operation graph document: ${(err as Error).message}`);
+      throw new Error(`parse operation graph document: ${(err as Error).message}`, { cause: err });
     }
 
     if (location) this.docCache.set(location, parsed);
@@ -213,7 +213,7 @@ export class OperationGraphInvoker implements BindingInvoker {
     try {
       resp = await doFetch(location, { signal, headers: { Accept: "application/json" } });
     } catch (err) {
-      throw new Error(`fetch operation graph ${JSON.stringify(location)}: ${(err as Error).message}`);
+      throw new Error(`fetch operation graph ${JSON.stringify(location)}: ${(err as Error).message}`, { cause: err });
     }
     if (resp.status < 200 || resp.status >= 300) {
       throw new Error(`fetch operation graph ${JSON.stringify(location)}: HTTP ${resp.status}`);

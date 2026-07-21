@@ -51,7 +51,7 @@ describe("AsyncAPI readResponseText cap (C6f)", () => {
     const call = invoker.invokeBinding({
       source: source(),
       ref: "#/operations/sendOpenMessage",
-      fetch: customFetch as unknown as typeof fetch,
+      fetch: customFetch,
     });
     await call.write({ text: "hi" });
     await expect(call.closed).rejects.toMatchObject({ code: "ERR_RESPONSE_ERROR" });
@@ -72,7 +72,7 @@ describe("AsyncAPI readResponseText cap (C6f)", () => {
     const call = invoker.invokeBinding({
       source: source(),
       ref: "#/operations/sendOpenMessage",
-      fetch: customFetch as unknown as typeof fetch,
+      fetch: customFetch,
       maxDeliveryUnitBytes: 1024,
     });
     await call.write({ text: "hi" });

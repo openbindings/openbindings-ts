@@ -4,11 +4,11 @@ import type { InterfaceSynthesizer } from "./invokers.js";
 
 /** A fetch that returns reachable non-OBI JSON (an HTML-ish API root stand-in). */
 function nonObiFetch(): typeof globalThis.fetch {
-  return (async () =>
+  return async () =>
     new Response(JSON.stringify({ hello: "world" }), {
       status: 200,
       headers: { "Content-Type": "application/json" },
-    })) as unknown as typeof globalThis.fetch;
+    });
 }
 
 /** A synthesizer that always throws for its one binding specification. */
@@ -29,7 +29,7 @@ describe("fetchInterface resolution trail", () => {
   });
 
   it("carries the whole trail (direct + well-known + per-synthesizer) on total failure", async () => {
-    let msg = "";
+    let msg: string;
     try {
       await fetchInterface("https://api.example.com/", {
         fetch: nonObiFetch(),

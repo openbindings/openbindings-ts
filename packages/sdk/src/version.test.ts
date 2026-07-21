@@ -11,7 +11,6 @@ import {
 import { parseDocument } from "./parse.js";
 import { validateInterface } from "./validate.js";
 import { ValidationError } from "./errors.js";
-import type { OBInterface } from "./types.js";
 
 describe("isSupportedVersion", () => {
   it("accepts the exact min version", () => {
@@ -85,7 +84,7 @@ describe("isSupportedVersion matches validate/parse refusal (no drift)", () => {
 
   const validateVersionRefuses = (v: string): boolean => {
     try {
-      validateInterface({ openbindings: v, operations: {} } as OBInterface);
+      validateInterface({ openbindings: v, operations: {} });
       return false;
     } catch (err) {
       if (err instanceof ValidationError) {

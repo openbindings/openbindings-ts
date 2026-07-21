@@ -132,7 +132,7 @@ describe("Normalizer.normalize", () => {
     const result = await n.normalize({
       type: "string",
       $defs: { Foo: { type: "number" } },
-    } as any);
+    });
     expect("$defs" in result).toBe(false);
   });
 
@@ -165,7 +165,7 @@ describe("Normalizer.normalize", () => {
       type: "string",
       "x-ob": { delegate: "ob" },
       "x-custom": true,
-    } as any);
+    });
     expect(result).toEqual({ type: ["string"] });
     expect("x-ob" in result).toBe(false);
     expect("x-custom" in result).toBe(false);

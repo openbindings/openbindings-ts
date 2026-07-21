@@ -120,7 +120,7 @@ let _documentValidator: CompiledSchema | null = null;
 function documentValidator(): CompiledSchema {
   if (_documentValidator) return _documentValidator;
   _documentValidator = wrapNode(
-    compileSchema(obiSchema as object, { drafts: [OBI_BOUNDARY_DRAFT] }),
+    compileSchema(obiSchema, { drafts: [OBI_BOUNDARY_DRAFT] }),
   );
   return _documentValidator;
 }

@@ -192,7 +192,7 @@ describe("address parameters (ASYNC-P-04)", () => {
       res.end();
     });
     const doc = paramDoc(srv.port);
-    doc.channels.rooms.parameters.roomId = { enum: ["general", "ops"] } as never;
+    doc.channels.rooms.parameters.roomId = { enum: ["general", "ops"] };
 
     const invoker = new AsyncAPIInvoker();
     try {

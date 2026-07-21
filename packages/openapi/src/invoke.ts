@@ -38,7 +38,6 @@ import type {
   OpenAPIDocument,
   OpenAPIOperation,
   OpenAPIParameter,
-  OpenAPIPathItem,
   OpenAPISecurityScheme,
   OpenAPIOAuthFlow,
   OpenAPIOAuthFlows,
@@ -1037,7 +1036,7 @@ export function preflightTarget(
   } catch {
     return null;
   }
-  const pathItem = doc.paths?.[path] as OpenAPIPathItem | undefined;
+  const pathItem = doc.paths?.[path];
   const op = pathItem?.[method] as OpenAPIOperation | undefined;
   if (!pathItem || !op) return null;
   try {

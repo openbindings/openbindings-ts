@@ -121,7 +121,7 @@ function sortKeys(v: unknown): unknown {
   if (Array.isArray(v)) return v.map(sortKeys);
   if (typeof v === "object" && v !== null) {
     const out: Record<string, unknown> = {};
-    for (const k of Object.keys(v as object).sort()) {
+    for (const k of Object.keys(v).sort()) {
       out[k] = sortKeys((v as Record<string, unknown>)[k]);
     }
     return out;
@@ -428,7 +428,7 @@ describe("loadDocument: location-only sources", () => {
       source: { bindingSpec: BINDING_SPEC, location },
       ref: "#/graphs/g",
       interface: iface,
-      fetch: fetch as unknown as typeof globalThis.fetch,
+      fetch: fetch,
     });
     await call.write({ id: "u1" });
     await call.close();
@@ -448,7 +448,7 @@ describe("loadDocument: location-only sources", () => {
       source: { bindingSpec: BINDING_SPEC, location },
       ref: "#/graphs/g",
       interface: iface,
-      fetch: fetch as unknown as typeof globalThis.fetch,
+      fetch: fetch,
     });
 
     const run = async () => {
@@ -469,7 +469,7 @@ describe("loadDocument: location-only sources", () => {
       source: { bindingSpec: BINDING_SPEC, location: "https://graphs.example.com/missing.json" },
       ref: "#/graphs/g",
       interface: iface,
-      fetch: fetch as unknown as typeof globalThis.fetch,
+      fetch: fetch,
     });
     await expect(call.closed).rejects.toMatchObject({ code: ERR_SOURCE_LOAD_FAILED });
   });
@@ -482,7 +482,7 @@ describe("loadDocument: location-only sources", () => {
       source: { bindingSpec: BINDING_SPEC, location: "https://graphs.example.com/huge.json" },
       ref: "#/graphs/g",
       interface: iface,
-      fetch: fetch as unknown as typeof globalThis.fetch,
+      fetch: fetch,
     });
     await expect(call.closed).rejects.toMatchObject({ code: ERR_SOURCE_LOAD_FAILED });
   });
