@@ -35,8 +35,8 @@ describe("MCPInvoker tools", () => {
 
     const calls = server.params("tools/call");
     expect(calls).toHaveLength(1);
-    expect(calls[0].name).toBe("get_weather");
-    expect(calls[0].arguments).toEqual({ city: "Oslo" });
+    expect(calls.at(0)?.name).toBe("get_weather");
+    expect(calls.at(0)?.arguments).toEqual({ city: "Oslo" });
   });
 
   it("passes multiple text content blocks through as the content array, verbatim (MCP-P-05), never a joined string", async () => {
@@ -224,7 +224,7 @@ describe("MCPInvoker resources", () => {
     await expect(single(call.outputs)).resolves.toEqual([{ a: 1 }]);
     const reads = server.params("resources/read");
     expect(reads).toHaveLength(1);
-    expect(reads[0].uri).toBe("file:///data.json");
+    expect(reads.at(0)?.uri).toBe("file:///data.json");
   });
 
   it("a resource with no declared JSON mimeType stays text, whatever its shape", async () => {
@@ -308,9 +308,9 @@ describe("MCPInvoker prompts", () => {
     await expect(call.closed).resolves.toBeUndefined();
     const gets = server.params("prompts/get");
     expect(gets).toHaveLength(1);
-    expect(gets[0].name).toBe("greeting");
+    expect(gets.at(0)?.name).toBe("greeting");
     // The no-input convention also omits the arguments member (§9.1).
-    expect(gets[0]).not.toHaveProperty("arguments");
+    expect(gets.at(0)).not.toHaveProperty("arguments");
   });
 
   it("renders a prompt with string arguments, verbatim", async () => {
@@ -326,8 +326,8 @@ describe("MCPInvoker prompts", () => {
       description: "A summary prompt",
     });
     const gets = server.params("prompts/get");
-    expect(gets[0].name).toBe("summarize");
-    expect(gets[0].arguments).toEqual({ text: "hello", style: "brief" });
+    expect(gets.at(0)?.name).toBe("summarize");
+    expect(gets.at(0)?.arguments).toEqual({ text: "hello", style: "brief" });
   });
 
   it("refuses a non-string prompt argument, never coerced (§9.1, MCP-P-03)", async () => {
@@ -575,13 +575,13 @@ describe("MCPSynthesizer pinned listings", () => {
     });
 
     expect(Object.keys(iface.operations).sort()).toEqual(["file", "get_weather", "greet", "status"]);
-    expect(iface.bindings!["get_weather.mcpServer"].ref).toBe("tools/get_weather");
-    expect(iface.bindings!["status.mcpServer"].ref).toBe("resources/app://status");
-    expect(iface.bindings!["file.mcpServer"].ref).toBe("resources/file:///{path}");
-    expect(iface.bindings!["greet.mcpServer"].ref).toBe("prompts/greet");
-    expect(iface.operations.get_weather.input).toEqual(pin.tools[0].inputSchema);
-    expect((iface.operations.greet.input as { required?: string[] }).required).toEqual(["name"]);
-    expect(iface.sources!.mcpServer.location).toBe(ENDPOINT);
+    expect(iface.bindings!["get_weather.mcpServer"]?.ref).toBe("tools/get_weather");
+    expect(iface.bindings!["status.mcpServer"]?.ref).toBe("resources/app://status");
+    expect(iface.bindings!["file.mcpServer"]?.ref).toBe("resources/file:///{path}");
+    expect(iface.bindings!["greet.mcpServer"]?.ref).toBe("prompts/greet");
+    expect(iface.operations.get_weather?.input).toEqual(pin.tools.at(0)?.inputSchema);
+    expect((iface.operations.greet?.input as { required?: string[] }).required).toEqual(["name"]);
+    expect(iface.sources!.mcpServer?.location).toBe(ENDPOINT);
 
     expect(fetches()).toBe(0); // pin-authoritative: zero network dials
   });

@@ -46,8 +46,8 @@ describe("validateGraph field types", () => {
     );
     const issues = validateGraph(g);
     expect(issues).toHaveLength(1);
-    expect(issues[0].message).toContain('field "transform" must be a string');
-    expect(issues[0].nodeKeys).toEqual(["t"]);
+    expect(issues.at(0)?.message).toContain('field "transform" must be a string');
+    expect(issues.at(0)?.nodeKeys).toEqual(["t"]);
   });
 
   it("rejects wrong types for numeric, boolean, and schema fields", () => {

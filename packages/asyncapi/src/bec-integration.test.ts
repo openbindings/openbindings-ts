@@ -342,8 +342,8 @@ describe("AsyncAPI binding invoker (real HTTP)", () => {
       // R2.a ruling: these schemes are declared INLINE in `security` (no
       // components.securitySchemes, no $ref) — no addressable name exists,
       // so the requirements carry no `name`.
-      expect(details?.alternatives[0].requirements[0]).not.toHaveProperty("name");
-      expect(details?.alternatives[1].requirements[0]).not.toHaveProperty("name");
+      expect(details?.alternatives[0]!.requirements[0]).not.toHaveProperty("name");
+      expect(details?.alternatives[1]!.requirements[0]).not.toHaveProperty("name");
 
       // Satisfying any one alternative suffices.
       const withKey = await invoker.prepareBinding({

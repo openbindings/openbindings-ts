@@ -664,7 +664,8 @@ async function runResource(
  */
 function builtinMimeDecode(mimeType: string): (site: InvokeSite, raw: RawResult) => unknown {
   return (_site, raw) => {
-    const mt = mimeType.split(";", 1)[0].trim();
+    const semi = mimeType.indexOf(";");
+    const mt = (semi >= 0 ? mimeType.slice(0, semi) : mimeType).trim();
     const body = typeof raw.body === "string" ? raw.body : String(raw.body);
     if (mt === "application/json" || mt.endsWith("+json")) {
       try {

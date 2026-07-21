@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { AsyncAPIDocument } from "./asyncapi-types.js";
+import type { AsyncAPIChannel, AsyncAPIDocument, AsyncAPIServer } from "./asyncapi-types.js";
+import { SERVER_NAME_TAG } from "./constants.js";
 import { resolveTarget } from "./target.js";
 
 // Unit coverage for resolveTarget's default selection and the legacy
@@ -41,6 +42,20 @@ describe("resolveTarget", () => {
   it("refuses when the document declares no servers", () => {
     const empty: AsyncAPIDocument = { asyncapi: "3.0.0", info: { title: "t", version: "1" } };
     expect(() => resolveTarget(empty, undefined, undefined)).toThrow(/no resolvable server/);
+  });
+
+  it("a channel-servers entry naming no OWN servers-map key contributes nothing, leaving the structured no-resolvable-server refusal", () => {
+    // A malformed artifact may carry an inline (non-$ref) channel `servers`
+    // entry with a forged name tag. A name like "constructor" matches
+    // Object.prototype under an `in` test, so the effective-set membership
+    // check must be an own-key lookup: the entry contributes nothing (the
+    // structured refusal below), never surfaces a prototype member as a
+    // "server" (which TypeErrors in default selection). Go-map parity:
+    // a Go map lookup never sees anything but its own keys.
+    const d = doc();
+    const forged = { [SERVER_NAME_TAG]: "constructor" } as unknown as AsyncAPIServer;
+    const ch: AsyncAPIChannel = { address: "/x", servers: [forged] };
+    expect(() => resolveTarget(d, ch, undefined)).toThrow(/no resolvable server/);
   });
 });
 

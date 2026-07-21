@@ -62,12 +62,14 @@ describe("convertToInterface", () => {
     const iface = await convertToInterface(undefined, doc);
 
     const sendBinding = iface.bindings!["sendMessage.asyncapi"];
+    if (!sendBinding) throw new Error("missing binding: sendMessage.asyncapi");
     expect(sendBinding).toBeDefined();
     expect(sendBinding.operation).toBe("sendMessage");
     expect(sendBinding.source).toBe("asyncapi");
     expect(sendBinding.ref).toBe("#/operations/sendMessage");
 
     const recvBinding = iface.bindings!["receiveEvents.asyncapi"];
+    if (!recvBinding) throw new Error("missing binding: receiveEvents.asyncapi");
     expect(recvBinding).toBeDefined();
     expect(recvBinding.ref).toBe("#/operations/receiveEvents");
   });
@@ -85,10 +87,10 @@ describe("convertToInterface", () => {
     const doc = await parsedDoc(MINIMAL_DOC);
 
     const withLocation = await convertToInterface("https://example.com/spec.json", doc);
-    expect(withLocation.sources?.["asyncapi"].location).toBe("https://example.com/spec.json");
+    expect(withLocation.sources?.["asyncapi"]!.location).toBe("https://example.com/spec.json");
 
     const withoutLocation = await convertToInterface(undefined, doc);
-    expect(withoutLocation.sources?.["asyncapi"].location).toBeUndefined();
+    expect(withoutLocation.sources?.["asyncapi"]!.location).toBeUndefined();
   });
 
   it("handles doc with no operations", async () => {
@@ -110,6 +112,7 @@ describe("convertToInterface", () => {
     const iface = await convertToInterface(undefined, doc);
 
     const pubOp = iface.operations["sendMessage"];
+    if (!pubOp) throw new Error("missing operation: sendMessage");
     expect(pubOp.input).toBeDefined();
     expect((pubOp.input as Record<string, unknown>).type).toBe("object");
   });
@@ -119,6 +122,7 @@ describe("convertToInterface", () => {
     const iface = await convertToInterface(undefined, doc);
 
     const subOp = iface.operations["receiveEvents"];
+    if (!subOp) throw new Error("missing operation: receiveEvents");
     expect(subOp.output).toBeDefined();
     expect((subOp.output as Record<string, unknown>).type).toBe("object");
   });
@@ -158,6 +162,8 @@ describe("convertToInterface", () => {
     const iface = await convertToInterface(undefined, doc);
 
     expect(Object.keys(iface)).not.toContain("security");
-    expect(Object.keys(iface.bindings!["sendMessage.asyncapi"])).not.toContain("security");
+    const sendBinding = iface.bindings!["sendMessage.asyncapi"];
+    if (!sendBinding) throw new Error("missing binding: sendMessage.asyncapi");
+    expect(Object.keys(sendBinding)).not.toContain("security");
   });
 });

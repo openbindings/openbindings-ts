@@ -210,9 +210,8 @@ export class Engine {
     else handle.signal.addEventListener("abort", () => this.abortController.abort(), { once: true });
     this.abortController.signal.addEventListener("abort", () => this.shutdown(), { once: true });
 
-    for (const key of Object.keys(this.graph.nodes)) {
+    for (const [key, node] of Object.entries(this.graph.nodes)) {
       this.mailboxes.set(key, new AsyncQueue<GraphEvent>());
-      const node = this.graph.nodes[key];
       if (node.type === "buffer") this.bufferStates.set(key, new BufferState(node, this.schemas));
       if (node.type === "combine") this.combineStates.set(key, new CombineState(this.inEdges.get(key) ?? []));
       if ((this.inEdges.get(key) ?? []).length > 0) this.completedSources.set(key, 0);
@@ -352,7 +351,7 @@ export class Engine {
     lineage: Map<string, number>,
   ): void {
     const node = this.graph.nodes[nodeKey];
-    if (!node.onError) return;
+    if (!node?.onError) return;
     if (ev.errorDepth >= MAX_ERROR_DEPTH) return;
     this.sendToNode(
       node.onError,
@@ -376,7 +375,7 @@ export class Engine {
     const consumers = this.outEdges.get(this.inputKey) ?? [];
     if (consumers.length === 0) return;
     for (const k of consumers) {
-      if (this.graph.nodes[k].type !== "operation") return;
+      if (this.graph.nodes[k]?.type !== "operation") return;
       if (this.conduits.get(k)!.accepting) return;
     }
     void this.handle.closeInput();

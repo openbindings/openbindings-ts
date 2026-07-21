@@ -188,7 +188,7 @@ describe("pinned listings (MCP-D-01)", () => {
     expect(server.count("resources/templates/list")).toBe(0);
     const reads = server.params("resources/read");
     expect(reads).toHaveLength(1);
-    expect(reads[0].uri).toBe("file:///logs/2026-07-15");
+    expect(reads.at(0)?.uri).toBe("file:///logs/2026-07-15");
   });
 });
 
@@ -235,7 +235,7 @@ describe("progress solicitation (§9.3 `solicit`, MCP-P-04/MCP-P-05)", () => {
 
     const calls = server.params("tools/call");
     expect(calls).toHaveLength(1);
-    const meta = calls[0]._meta;
+    const meta = calls.at(0)?._meta;
     expect(meta !== undefined && "progressToken" in meta).toBe(wantToken);
 
     if (!wantToken) {
@@ -377,7 +377,7 @@ describe("resource templates (§9.1, MCP-P-03)", () => {
     expect(server.count("resources/templates/list")).toBeGreaterThanOrEqual(1);
     const reads = server.params("resources/read");
     expect(reads).toHaveLength(1);
-    expect(reads[0].uri).toBe("file:///logs/2026-07-15");
+    expect(reads.at(0)?.uri).toBe("file:///logs/2026-07-15");
   });
 
   // A declared variable the input does not supply follows RFC 6570's
@@ -390,7 +390,7 @@ describe("resource templates (§9.1, MCP-P-03)", () => {
     await expect(single(call.outputs)).resolves.toEqual(["file:///logs/"]);
     const reads = server.params("resources/read");
     expect(reads).toHaveLength(1);
-    expect(reads[0].uri).toBe("file:///logs/");
+    expect(reads.at(0)?.uri).toBe("file:///logs/");
   });
 
   // Template-variable refusals fire before resources/read is dispatched: a

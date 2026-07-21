@@ -25,10 +25,11 @@ describe("convertToInterface", () => {
     expect(iface.name).toBe("test-server");
     expect(iface.version).toBe("1.0.0");
     expect(Object.keys(iface.operations)).toEqual(["get_weather"]);
-    expect(iface.operations.get_weather.description).toBe("Get weather for a city");
-    expect(iface.operations.get_weather.input).toBeDefined();
+    expect(iface.operations.get_weather?.description).toBe("Get weather for a city");
+    expect(iface.operations.get_weather?.input).toBeDefined();
 
     const binding = iface.bindings!["get_weather.mcpServer"];
+    if (!binding) throw new Error("missing binding: get_weather.mcpServer");
     expect(binding.ref).toBe("tools/get_weather");
     expect(binding.source).toBe("mcpServer");
   });
@@ -44,7 +45,7 @@ describe("convertToInterface", () => {
     });
 
     expect(Object.keys(iface.operations)).toEqual(["_2fa-check"]);
-    expect(iface.bindings!["_2fa-check.mcpServer"].ref).toBe("tools/2fa-check");
+    expect(iface.bindings!["_2fa-check.mcpServer"]?.ref).toBe("tools/2fa-check");
   });
 
   it("static resources declare no input (openbindings.mcp@1 §8/§9.1)", () => {
@@ -61,10 +62,12 @@ describe("convertToInterface", () => {
     });
 
     const op = iface.operations.config;
+    if (!op) throw new Error("missing operation: config");
     expect(op.description).toBe("Config file");
     expect(op.input).toBeUndefined();
 
     const binding = iface.bindings!["config.mcpServer"];
+    if (!binding) throw new Error("missing binding: config.mcpServer");
     expect(binding.ref).toBe("resources/file:///etc/config.json");
   });
 
@@ -83,6 +86,7 @@ describe("convertToInterface", () => {
     });
 
     const op = iface.operations.user_profile;
+    if (!op) throw new Error("missing operation: user_profile");
     const input = op.input as Record<string, unknown>;
     expect(input).toBeDefined();
 
@@ -100,6 +104,7 @@ describe("convertToInterface", () => {
     expect(input).not.toHaveProperty("required");
 
     const binding = iface.bindings!["user_profile.mcpServer"];
+    if (!binding) throw new Error("missing binding: user_profile.mcpServer");
     expect(binding.ref).toBe("resources/users/{userId}/profile");
   });
 
@@ -121,6 +126,7 @@ describe("convertToInterface", () => {
     });
 
     const op = iface.operations.summarize;
+    if (!op) throw new Error("missing operation: summarize");
     expect(op.description).toBe("Summarize text");
 
     const input = op.input as Record<string, unknown>;
@@ -130,6 +136,7 @@ describe("convertToInterface", () => {
     expect(op.output).toBeDefined();
 
     const binding = iface.bindings!["summarize.mcpServer"];
+    if (!binding) throw new Error("missing binding: summarize.mcpServer");
     expect(binding.ref).toBe("prompts/summarize");
   });
 
@@ -147,7 +154,9 @@ describe("convertToInterface", () => {
       prompts: [{ name: "review", description: "Review code" }],
     });
 
-    const output = iface.operations.review.output as Record<string, unknown>;
+    const reviewOp = iface.operations.review;
+    if (!reviewOp) throw new Error("missing operation: review");
+    const output = reviewOp.output as Record<string, unknown>;
     expect(output.type).toBe("object");
     expect(output.required).toEqual(["messages"]);
 
