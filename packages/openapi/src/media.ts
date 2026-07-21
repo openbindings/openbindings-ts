@@ -79,14 +79,25 @@ function hasRequestBody(op: OpenAPIOperation): boolean {
 }
 
 /**
+ * §9.2's degenerate media/schema combination refusal (OAPI-P-04): the
+ * selected request media type has no OAS-defined wire form for the
+ * declared body schema. A distinct class so synthesis (synthesize.ts) can
+ * surface the same fact as the openapi.media_schema_mismatch warning
+ * without re-deriving the selection. Mirrors the Go SDK's
+ * degenerateMediaError.
+ */
+export class DegenerateMediaError extends Error {}
+
+/**
  * Selects the request media type from the operation's DECLARED
  * requestBody.content per OAPI-P-04's preference order: exact
  * application/json, then the lexicographically least +json type, then
  * multipart/form-data, then application/x-www-form-urlencoded, then
  * text/plain (whose string-value condition is checked after routing, when
- * the body value exists). An operation declaring only media types outside
- * these families is refused loudly before dispatch: its request carriage is
- * undefined in revision 1.
+ * the body value exists). Two refusals are loud and pre-dispatch: an
+ * operation declaring only media types outside these families (its request
+ * carriage is undefined in revision 1), and a degenerate media/schema
+ * combination the OAS defines no wire form for (§9.2).
  */
 export function planRequestBody(op: OpenAPIOperation): BodyPlan {
   if (!hasRequestBody(op)) return { ...NO_BODY_PLAN };
@@ -155,18 +166,36 @@ export function planRequestBody(op: OpenAPIOperation): BodyPlan {
     synthetic: false,
   };
 
-  // Flatten mode. text/plain bodies are scalar by nature: they always ride
-  // the synthetic `body` property. JSON-family bodies route through the
-  // §9.1 determination SHARED with synthesis (bodySchemaFlattens, util.ts):
-  // synthetic exactly when the declared schema neither declares
-  // `properties` nor an explicit object type — a TYPELESS schema included
-  // — so the wire always agrees with the published contract. Multipart and
-  // urlencoded bodies are field maps by construction.
-  if (family === FAMILY_TEXT) {
+  // Flatten mode and the degenerate-combination refusal (§9.2). The
+  // flatten determination is §9.1's, SHARED with synthesis
+  // (bodySchemaFlattens, util.ts): a declared schema flattens iff it
+  // declares `properties` or an explicit object type — a TYPELESS schema
+  // does not — so the wire always agrees with the published contract.
+  //
+  // A combination the OAS defines no wire form for refuses pre-dispatch
+  // rather than inventing one (OAPI-P-04): multipart and form-urlencoded
+  // serialize exclusively over object properties, so a non-flattening
+  // schema gives them nothing to implement; the text lane is a
+  // single-string wire, so a flattening schema's object contract cannot
+  // ride it. Reachable only when no JSON-family media is declared — JSON
+  // is preferred and carries any shape.
+  const schema = mediaSchema(plan.media);
+  const flattens = schema === null ? true : bodySchemaFlattens(schema); // no declared schema: an open object body
+  if (family === FAMILY_JSON) {
+    plan.synthetic = !flattens;
+  } else if (family === FAMILY_MULTIPART || family === FAMILY_URLENCODED) {
+    if (schema !== null && !flattens) {
+      throw new DegenerateMediaError(
+        `request media selection (OAPI-P-04) lands on ${plan.mediaType}, but the declared body schema does not flatten (no properties and no explicit object type): openbindings.openapi@1 defines no request carriage for this combination`,
+      );
+    }
+  } else if (family === FAMILY_TEXT) {
+    if (schema !== null && flattens) {
+      throw new DegenerateMediaError(
+        "request media selection (OAPI-P-04) lands on text/plain, but the declared body schema flattens (an object contract): openbindings.openapi@1 defines no request carriage for this combination",
+      );
+    }
     plan.synthetic = true;
-  } else if (family === FAMILY_JSON) {
-    const schema = mediaSchema(plan.media);
-    if (schema) plan.synthetic = !bodySchemaFlattens(schema);
   }
   if (!plan.synthetic) {
     plan.props = mediaSchemaProps(plan.media);

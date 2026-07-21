@@ -491,6 +491,76 @@ describe("param/body field collision", () => {
   });
 });
 
+// Pins the synthesis half of §9.2's degenerate media/schema combination
+// rule (OAPI-P-04): when the produced contract's only declared request
+// media cannot carry it — multipart or urlencoded selected while the body
+// schema does not flatten, text/plain selected while it does — synthesis
+// emits openapi.media_schema_mismatch, so authors hear it at synthesis
+// time rather than at first dispatch. A co-declared JSON media type is
+// selected instead and silences the warning. Mirrors the Go SDK's
+// TestSynthesize_MediaSchemaMismatchWarns.
+describe("degenerate media/schema combination warning", () => {
+  it("warns for combinations the invoker refuses, stays silent with co-declared JSON", async () => {
+    const spec = {
+      openapi: "3.1.0",
+      info: { title: "t", version: "1" },
+      paths: {
+        "/scalar-multipart": {
+          post: {
+            operationId: "scalarMultipart",
+            requestBody: {
+              required: true,
+              content: { "multipart/form-data": { schema: { type: "string" } } },
+            },
+            responses: { "200": { description: "ok" } },
+          },
+        },
+        "/object-text": {
+          post: {
+            operationId: "objectText",
+            requestBody: {
+              required: true,
+              content: {
+                "text/plain": { schema: { type: "object", properties: { a: { type: "string" } } } },
+              },
+            },
+            responses: { "200": { description: "ok" } },
+          },
+        },
+        "/fine": {
+          post: {
+            operationId: "fine",
+            requestBody: {
+              required: true,
+              content: {
+                "multipart/form-data": { schema: { type: "string" } },
+                "application/json": { schema: { type: "string" } },
+              },
+            },
+            responses: { "200": { description: "ok" } },
+          },
+        },
+      },
+    };
+    const warnings: Array<{ code: string; message: string; path?: string }> = [];
+    await new OpenAPISynthesizer().synthesizeInterface({
+      sources: [{ bindingSpec: "openbindings.openapi@1", content: spec }],
+      onWarning: (w) => warnings.push(w),
+    });
+    const byPath = new Map<string | undefined, { code: string; message: string; path?: string }>();
+    for (const w of warnings) {
+      if (w.code === "openapi.media_schema_mismatch") byPath.set(w.path, w);
+    }
+    expect(byPath.size).toBe(2);
+    expect(byPath.get("operations.scalarMultipart.input")?.message).toBe(
+      "request media selection (OAPI-P-04) lands on multipart/form-data, but the declared body schema does not flatten (no properties and no explicit object type): openbindings.openapi@1 defines no request carriage for this combination; a conformant invoker refuses this operation before dispatch",
+    );
+    expect(byPath.get("operations.objectText.input")?.message).toBe(
+      "request media selection (OAPI-P-04) lands on text/plain, but the declared body schema flattens (an object contract): openbindings.openapi@1 defines no request carriage for this combination; a conformant invoker refuses this operation before dispatch",
+    );
+  });
+});
+
 // Pins the contract half of the §9.1 declaration-only object
 // determination: a TYPELESS request-body schema — neither `properties` nor
 // an explicit object type — is non-object, so the published contract

@@ -662,6 +662,102 @@ describe("OAPI-P-04 — request media on the wire", () => {
     expect(requests).toHaveLength(0);
   });
 
+  // §9.2 (OAPI-P-04): a degenerate media/schema combination — selection
+  // landing on multipart/form-data or application/x-www-form-urlencoded
+  // while the declared body schema does not flatten (§9.1's
+  // declaration-only determination: no properties and no explicit object
+  // type), or on text/plain while it does — has no OAS-defined wire form
+  // and refuses pre-dispatch rather than inventing carriage. Mirrors the
+  // Go SDK's TestInvoke_DegenerateMediaSchemaCombinationRefused.
+  const MULTIPART_DEGENERATE_MSG =
+    "request media selection (OAPI-P-04) lands on multipart/form-data, but the declared body schema does not flatten (no properties and no explicit object type): openbindings.openapi@1 defines no request carriage for this combination";
+  const URLENCODED_DEGENERATE_MSG =
+    "request media selection (OAPI-P-04) lands on application/x-www-form-urlencoded, but the declared body schema does not flatten (no properties and no explicit object type): openbindings.openapi@1 defines no request carriage for this combination";
+  const TEXT_DEGENERATE_MSG =
+    "request media selection (OAPI-P-04) lands on text/plain, but the declared body schema flattens (an object contract): openbindings.openapi@1 defines no request carriage for this combination";
+  const degenerateCases: [string, Record<string, unknown>, string][] = [
+    [
+      "multipart-only with a scalar schema",
+      { "multipart/form-data": { schema: { type: "string" } } },
+      MULTIPART_DEGENERATE_MSG,
+    ],
+    [
+      // §9.1's determination is declaration-only: a TYPELESS schema
+      // (neither `properties` nor an explicit object type) does not
+      // flatten, so the refusal fires for it exactly as for scalars.
+      "multipart-only with a typeless schema",
+      { "multipart/form-data": { schema: { description: "opaque" } } },
+      MULTIPART_DEGENERATE_MSG,
+    ],
+    [
+      "urlencoded-only with a scalar schema",
+      { "application/x-www-form-urlencoded": { schema: { type: "integer" } } },
+      URLENCODED_DEGENERATE_MSG,
+    ],
+    [
+      "text-only with an object schema",
+      { "text/plain": { schema: { type: "object", properties: { a: { type: "string" } } } } },
+      TEXT_DEGENERATE_MSG,
+    ],
+  ];
+  for (const [name, content, message] of degenerateCases) {
+    it(`refuses a degenerate media/schema combination pre-dispatch: ${name}`, async () => {
+      const spec = {
+        openapi: "3.1.0",
+        info: { title: "t", version: "1" },
+        servers: [{ url: BASE }],
+        paths: {
+          "/op": {
+            post: {
+              operationId: "op",
+              requestBody: { required: true, content },
+              responses: { "200": { description: "ok" } },
+            },
+          },
+        },
+      };
+      const { fetch, requests } = mockFetch(() => jsonResponse({}));
+      const call = new OpenAPIInvoker().invokeBinding({ source: src(spec), ref: "#/paths/~1op/post", fetch });
+      await expect(call.closed).rejects.toMatchObject({ code: ERR_SOURCE_CONFIG_ERROR, message });
+      expect(requests).toHaveLength(0);
+    });
+  }
+
+  // The degenerate-combination refusal reaches only artifacts declaring NO
+  // JSON-family request media: a co-declared JSON media type is selected
+  // first (JSON carries any shape), so the same scalar schema dispatches
+  // over JSON with no refusal. Mirrors the Go SDK's
+  // TestInvoke_DegenerateCombinationUnreachableWithJSONCoDeclared.
+  it("selects co-declared JSON over a degenerate multipart combination (no refusal)", async () => {
+    const spec = {
+      openapi: "3.1.0",
+      info: { title: "t", version: "1" },
+      servers: [{ url: BASE }],
+      paths: {
+        "/op": {
+          post: {
+            operationId: "op",
+            requestBody: {
+              required: true,
+              content: {
+                "multipart/form-data": { schema: { type: "string" } },
+                "application/json": { schema: { type: "string" } },
+              },
+            },
+            responses: { "200": { description: "ok" } },
+          },
+        },
+      },
+    };
+    const { fetch, requests } = mockFetch(() => jsonResponse({}));
+    const call = new OpenAPIInvoker().invokeBinding({ source: src(spec), ref: "#/paths/~1op/post", fetch });
+    await call.write({ body: "x" });
+    await single(call.outputs);
+    expect(requests).toHaveLength(1);
+    expect(requests[0].headers.get("Content-Type")).toBe("application/json");
+    expect(requests[0].body).toBe('"x"');
+  });
+
   // urlencoded selection serializes fields per the OAS encoding rules.
   it("serializes a urlencoded body per the encoding rules", async () => {
     const spec = {

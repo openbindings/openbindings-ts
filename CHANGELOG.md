@@ -365,6 +365,25 @@
 
 ### Added
 
+- **`@openbindings/openapi`: degenerate media/schema combinations refuse
+  pre-dispatch** (`openbindings.openapi@1` §9.2, amended 2026-07-21): a
+  request-media selection landing on `multipart/form-data` or
+  `application/x-www-form-urlencoded` while the declared body schema does
+  not flatten (§9.1's declaration-only determination — no `properties` and
+  no explicit `object` type), or on `text/plain` while it does, has no
+  OAS-defined wire form and now refuses loudly before dispatch
+  (`ERR_SOURCE_CONFIG_ERROR`, zero I/O) instead of inventing carriage
+  (previously an invented multipart part or urlencoded field named `body`
+  rode the wire, and the text lane misfired the §9.1 unmatched-field
+  refusal against the contract's own flattened fields). Reachable only for
+  operations declaring no JSON-family request media — a co-declared JSON
+  media type is selected first and carries any shape. Synthesis emits the
+  new **`openapi.media_schema_mismatch`** warning (`onWarning`) when the
+  produced contract's only declared request media cannot carry it, so
+  authors hear at synthesis time what a conformant invoker refuses at
+  dispatch. Mirrors the Go SDK (byte-identical refusal messages and
+  warning).
+
 - **Configurable delivery-unit bound.** `BindingInvocationArgs.maxDeliveryUnitBytes`
   bounds ONE DELIVERY UNIT — the bytes materialized to produce one emitted
   output value; undefined or `<= 0` selects the default, and
