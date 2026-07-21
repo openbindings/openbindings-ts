@@ -212,7 +212,7 @@ describe("address parameters (ASYNC-P-04)", () => {
 // ---------------------------------------------------------------------------
 
 describe("server variables and pathname assembly (ASYNC-P-04)", () => {
-  it("substitutes variables into pathname with exactly one slash at the join; enforces enums; refuses unresolved", async () => {
+  it("substitutes declared defaults into pathname with exactly one slash at the join; refuses the retired variables member and unresolved expressions", async () => {
     const srv = await startHTTP((_req, res) => {
       res.writeHead(202);
       res.end();
@@ -243,17 +243,28 @@ describe("server variables and pathname assembly (ASYNC-P-04)", () => {
       expect(r.err).toBeUndefined();
       expect(srv.lastPath()).toBe("/v1/events");
 
-      // Consumer-supplied variable value via the server configuration point.
+      // The retired `variables` member is refused with the teaching error —
+      // §9.2 pins {"key": ...} xor {"url": ...} and nothing else.
       r = await publish(invoker, doc, "#/operations/post", {
         configuration: { server: { variables: { version: "v2" } } },
       });
-      expect(r.err).toBeUndefined();
-      expect(srv.lastPath()).toBe("/v2/events");
+      expect(codeOf(r.err)).toBe("ERR_SOURCE_CONFIG_ERROR");
+      expect(String(r.err)).toContain('member "variables" is not pinned');
 
-      // A supplied value outside the declared enum is refused.
-      r = await publish(invoker, doc, "#/operations/post", {
-        configuration: { server: { variables: { version: "v3" } } },
-      });
+      // A declared default outside the variable's own declared enum is
+      // refused (the declaration's own constraint, incorporated).
+      const badDefault = {
+        ...doc,
+        servers: {
+          test: {
+            host: `127.0.0.1:${srv.port}`,
+            protocol: "http",
+            pathname: "/{version}",
+            variables: { version: { default: "v9", enum: ["v1", "v2"] } },
+          },
+        },
+      };
+      r = await publish(invoker, badDefault, "#/operations/post");
       expect(codeOf(r.err)).toBe("ERR_SOURCE_CONFIG_ERROR");
 
       // No default and no supplied value: pre-dispatch refusal.
@@ -279,7 +290,7 @@ describe("server variables and pathname assembly (ASYNC-P-04)", () => {
 });
 
 describe("effective server set (ASYNC-P-04)", () => {
-  it("honors channel-subset array order, doc-map lexicographic order with unbound protocols skipped, and selection by name", async () => {
+  it("honors channel-subset array order, doc-map lexicographic order with unbound protocols skipped, and selection by key", async () => {
     const srvA = await startHTTP((_req, res) => {
       res.writeHead(202);
       res.end();
@@ -327,22 +338,75 @@ describe("effective server set (ASYNC-P-04)", () => {
       expect(srvA.requests()).toBe(1);
 
       // Consumer configuration selects another member of the effective set
-      // by name.
+      // by its servers-map key ({"key": ...}, the §9.2 pinned form).
       r = await publish(invoker, mkDoc(), "#/operations/post", {
-        configuration: { server: { name: "zHTTP" } },
+        configuration: { server: { key: "zHTTP" } },
       });
       expect(r.err).toBeUndefined();
       expect(srvB.requests()).toBe(2);
 
-      // A name outside the effective set is a refusal.
+      // A key outside the effective set is a refusal.
       r = await publish(
         invoker,
         mkDoc([{ $ref: "#/servers/zHTTP" }]),
         "#/operations/post",
-        { configuration: { server: { name: "bHTTP" } } },
+        { configuration: { server: { key: "bHTTP" } } },
       );
       expect(codeOf(r.err)).toBe("ERR_SOURCE_CONFIG_ERROR");
       expect(srvA.requests()).toBe(1);
+    } finally {
+      invoker.close();
+    }
+  });
+
+  it("accepts exactly the §9.2 pinned server value shapes, refusing every other spelling pre-dispatch with the teaching error", async () => {
+    const srv = await startHTTP((_req, res) => {
+      res.writeHead(202);
+      res.end();
+    });
+    const doc = {
+      asyncapi: "3.0.0",
+      info: { title: "t", version: "1" },
+      servers: {
+        test: { host: `127.0.0.1:${srv.port}`, protocol: "http" },
+      },
+      channels: { c: { address: "/c" } },
+      operations: { post: { action: "receive" as const, channel: { $ref: "#/channels/c" } } },
+    };
+
+    const invoker = new AsyncAPIInvoker();
+    try {
+      const refused: Array<{ cfg: unknown; teach: string }> = [
+        { cfg: "test", teach: "must be an object" },
+        { cfg: { name: "test" }, teach: 'member "name" is not pinned' },
+        {
+          cfg: { key: "test", url: `http://127.0.0.1:${srv.port}` },
+          teach: 'carries both "key" and "url"',
+        },
+        { cfg: {}, teach: 'carries neither "key" nor "url"' },
+      ];
+      for (const tc of refused) {
+        const before = srv.requests();
+        const r = await publish(invoker, doc, "#/operations/post", {
+          configuration: { server: tc.cfg },
+        });
+        expect(codeOf(r.err)).toBe("ERR_SOURCE_CONFIG_ERROR");
+        expect(String(r.err)).toContain(tc.teach);
+        expect(String(r.err)).toContain('{"key": "<server-name>"}');
+        expect(String(r.err)).toContain('{"url": "<connection-url>"}');
+        expect(srv.requests()).toBe(before);
+      }
+
+      // The two pinned forms dispatch.
+      let r = await publish(invoker, doc, "#/operations/post", {
+        configuration: { server: { key: "test" } },
+      });
+      expect(r.err).toBeUndefined();
+      r = await publish(invoker, doc, "#/operations/post", {
+        configuration: { server: { url: `http://127.0.0.1:${srv.port}` } },
+      });
+      expect(r.err).toBeUndefined();
+      expect(srv.requests()).toBe(2);
     } finally {
       invoker.close();
     }
