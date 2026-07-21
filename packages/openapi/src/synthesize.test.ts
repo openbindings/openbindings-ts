@@ -491,6 +491,63 @@ describe("param/body field collision", () => {
   });
 });
 
+// Pins the contract half of the §9.1 declaration-only object
+// determination: a TYPELESS request-body schema — neither `properties` nor
+// an explicit object type — is non-object, so the published contract
+// carries it under the synthetic `body` property (required when the
+// artifact declares the body required); a schema declaring `properties`
+// WITHOUT a type is object by declaration and flattens by property name.
+// planRequestBody (media.ts) routes the wire with the same predicate
+// (bodySchemaFlattens), so contract and wire cannot disagree. Mirrors the
+// Go SDK's TestSynthesize_TypelessBodyWrapsSynthetic.
+describe("typeless request-body contract", () => {
+  it("wraps a typeless body synthetic and flattens properties-without-type", async () => {
+    const spec = {
+      openapi: "3.1.0",
+      info: { title: "t", version: "1" },
+      paths: {
+        "/opaque": {
+          post: {
+            operationId: "sendOpaque",
+            requestBody: {
+              required: true,
+              content: { "application/json": { schema: { description: "opaque payload" } } },
+            },
+            responses: { "200": { description: "ok" } },
+          },
+        },
+        "/named": {
+          post: {
+            operationId: "sendNamed",
+            requestBody: {
+              required: true,
+              content: {
+                "application/json": { schema: { properties: { name: { type: "string" } } } },
+              },
+            },
+            responses: { "200": { description: "ok" } },
+          },
+        },
+      },
+    };
+    const iface = await new OpenAPISynthesizer().synthesizeInterface({
+      sources: [{ bindingSpec: "openbindings.openapi@1", content: spec }],
+    });
+
+    const opaque = iface.operations.sendOpaque.input as {
+      properties: Record<string, unknown>;
+      required?: string[];
+    };
+    expect(Object.keys(opaque.properties)).toEqual(["body"]);
+    expect(opaque.required).toEqual(["body"]);
+
+    const named = iface.operations.sendNamed.input as {
+      properties: Record<string, unknown>;
+    };
+    expect(Object.keys(named.properties)).toEqual(["name"]);
+  });
+});
+
 // ---------------------------------------------------------------------------
 // InspectSource operationKey (Go parity: list_refs.go's InspectSource calls
 // the SAME deriveOperationKey/httpMethods synthesis uses, so a caller

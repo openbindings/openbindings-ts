@@ -10,6 +10,7 @@ import type {
 import { BINDING_SPEC, DEFAULT_SOURCE_NAME } from "./constants.js";
 import { translateSchemaDialect } from "./translate.js";
 import {
+  bodySchemaFlattens,
   buildJsonPointerRef,
   loadOpenAPIDocument,
   mergeParameters,
@@ -160,7 +161,15 @@ function buildInputSchema(
     const bodySchema = requestBodyToSchema(rb);
     if (bodySchema) {
       const bodyProps = bodySchema.properties as Record<string, unknown> | undefined;
-      if (bodyProps && typeof bodyProps === "object") {
+      if (!bodySchemaFlattens(bodySchema)) {
+        // A non-object body schema — array, scalar, binary, or TYPELESS
+        // (neither `properties` nor an explicit object type; §9.1's
+        // determination is declaration-only): the flattened contract
+        // carries it under the synthetic `body` property, unwrapped at
+        // the wire.
+        properties["body"] = bodySchema;
+        if (rb.required) required.push("body");
+      } else if (bodyProps && typeof bodyProps === "object") {
         for (const [k, v] of Object.entries(bodyProps)) {
           // Field-collision rule: a name declared as a parameter AND a
           // body property flattens to ONE input field (the body's schema
@@ -182,7 +191,7 @@ function buildInputSchema(
           // downstream OBI validation rather than being silently dropped.
           required.push(...(bodySchema.required as string[]));
         }
-      } else if (isObjectTypedSchema(bodySchema)) {
+      } else {
         // A free-form object body (type object, no named properties): the
         // flattened model passes unmatched input fields through into the
         // body (openbindings.openapi@1 §9.1), so the flattened surface
@@ -190,9 +199,6 @@ function buildInputSchema(
         // NON-object body schemas, and wrapping here would describe a
         // field the conformant invoker refuses as unmatched.
         hasOpenBody = true;
-      } else {
-        properties["body"] = bodySchema;
-        if (rb.required) required.push("body");
       }
     }
   }
@@ -207,19 +213,6 @@ function buildInputSchema(
     schema.required = [...required].sort();
   }
   return schema;
-}
-
-/**
- * Reports whether a body schema is explicitly object-typed (3.0 string
- * form or a single-element 3.1 type array): the flattened model's
- * passthrough case, never the synthetic-body wrap. Mirrors the Go SDK's
- * isObjectTypedSchema (formats/openapi/synthesize.go).
- */
-function isObjectTypedSchema(schema: Record<string, unknown>): boolean {
-  const ty = schema["type"];
-  if (typeof ty === "string") return ty === "object";
-  if (Array.isArray(ty)) return ty.length === 1 && ty[0] === "object";
-  return false;
 }
 
 function paramToSchema(param: OpenAPIParameter): Record<string, unknown> | undefined {

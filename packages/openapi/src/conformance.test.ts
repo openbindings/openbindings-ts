@@ -247,6 +247,15 @@ describe("OAPI-P-03 — flattened-model refusals", () => {
         { "application/json": { schema: { type: "string", contentEncoding: "base64" } } },
       ],
       ["text/plain body", { "text/plain": { schema: { type: "string" } } }],
+      // §9.1's object determination is by declaration alone: a TYPELESS
+      // schema — neither `properties` nor an explicit object type — is
+      // non-object, so the refusal fires for it exactly as for arrays
+      // and scalars.
+      ["typeless JSON body (bare schema)", { "application/json": { schema: {} } }],
+      [
+        "typeless JSON body (description-only schema)",
+        { "application/json": { schema: { description: "opaque payload" } } },
+      ],
     ];
     for (const [name, content] of cases) {
       const spec = {
@@ -276,6 +285,85 @@ describe("OAPI-P-03 — flattened-model refusals", () => {
       });
       expect(requests, name).toHaveLength(0);
     }
+  });
+
+  // §9.1 (OAPI-P-03): a TYPELESS request-body schema — declaring neither
+  // `properties` nor an explicit object type; a bare {} or a
+  // description-only schema — is non-object by declaration alone, so the
+  // flattened contract carries the synthetic `body` property and, at the
+  // wire, that property's value IS the request body, unwrapped. The
+  // published contract and the invoker share one determination
+  // (bodySchemaFlattens): a caller following the contract must never see
+  // its value double-wrapped as {"body": X}.
+  it("unwraps a typeless request body from the synthetic body property onto the wire", async () => {
+    const cases: Array<[string, Record<string, unknown>]> = [
+      ["bare schema", {}],
+      ["description-only schema", { description: "opaque payload" }],
+      // A 3.1 two-element type array is not an EXPLICIT object type (only
+      // the single-element form is): synthetic, like typeless.
+      ["nullable object without properties", { type: ["object", "null"] }],
+    ];
+    for (const [name, schema] of cases) {
+      const spec = {
+        openapi: "3.1.0",
+        info: { title: "t", version: "1" },
+        servers: [{ url: BASE }],
+        paths: {
+          "/echo": {
+            post: {
+              operationId: "echo",
+              requestBody: { required: true, content: { "application/json": { schema } } },
+              responses: { "200": { description: "ok" } },
+            },
+          },
+        },
+      };
+      const { fetch, requests } = mockFetch(() => jsonResponse({}));
+      const call = new OpenAPIInvoker().invokeBinding({
+        source: src(spec),
+        ref: "#/paths/~1echo/post",
+        fetch,
+      });
+      await call.write({ body: { k: "v" } });
+      await single(call.outputs);
+      expect(requests[0].body, name).toBe('{"k":"v"}');
+    }
+  });
+
+  // §9.1 (OAPI-P-03): the other half of the declaration-only determination
+  // — a schema declaring `properties` WITHOUT a type is object by
+  // declaration, so it flattens by property name exactly as the
+  // synthesized contract publishes it; the fix for the typeless case must
+  // not overshoot into wrapping properties-carrying schemas.
+  it("keeps flattening a properties-without-type body by name", async () => {
+    const spec = {
+      openapi: "3.1.0",
+      info: { title: "t", version: "1" },
+      servers: [{ url: BASE }],
+      paths: {
+        "/w": {
+          post: {
+            operationId: "makeW",
+            requestBody: {
+              required: true,
+              content: {
+                "application/json": { schema: { properties: { name: { type: "string" } } } },
+              },
+            },
+            responses: { "200": { description: "ok" } },
+          },
+        },
+      },
+    };
+    const { fetch, requests } = mockFetch(() => jsonResponse({}));
+    const call = new OpenAPIInvoker().invokeBinding({
+      source: src(spec),
+      ref: "#/paths/~1w/post",
+      fetch,
+    });
+    await call.write({ name: "x" });
+    await single(call.outputs);
+    expect(requests[0].body).toBe('{"name":"x"}');
   });
 
   // §9.1 (OAPI-P-03): with an OBJECT body, a field matching no declared

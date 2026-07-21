@@ -5,6 +5,7 @@ import type {
   OpenAPIResponse,
 } from "./types.js";
 import { asArray, asObject, primitiveString, serializeQueryValue } from "./params.js";
+import { bodySchemaFlattens } from "./util.js";
 
 // This file implements §9.2 of openbindings.openapi@1 (OAPI-P-04): request
 // media selection with its deterministic tiebreaks and pre-dispatch
@@ -155,18 +156,17 @@ export function planRequestBody(op: OpenAPIOperation): BodyPlan {
   };
 
   // Flatten mode. text/plain bodies are scalar by nature: they always ride
-  // the synthetic `body` property. JSON-family bodies are synthetic when
-  // the declared schema's type is non-object (array or scalar, §9.1);
-  // multipart and urlencoded bodies are field maps by construction.
+  // the synthetic `body` property. JSON-family bodies route through the
+  // §9.1 determination SHARED with synthesis (bodySchemaFlattens, util.ts):
+  // synthetic exactly when the declared schema neither declares
+  // `properties` nor an explicit object type — a TYPELESS schema included
+  // — so the wire always agrees with the published contract. Multipart and
+  // urlencoded bodies are field maps by construction.
   if (family === FAMILY_TEXT) {
     plan.synthetic = true;
   } else if (family === FAMILY_JSON) {
-    const ty = mediaSchema(plan.media)?.type;
-    if (typeof ty === "string" && ty !== "" && ty !== "object") {
-      plan.synthetic = true;
-    } else if (Array.isArray(ty) && ty.length > 0 && !ty.includes("object")) {
-      plan.synthetic = true;
-    }
+    const schema = mediaSchema(plan.media);
+    if (schema) plan.synthetic = !bodySchemaFlattens(schema);
   }
   if (!plan.synthetic) {
     plan.props = mediaSchemaProps(plan.media);

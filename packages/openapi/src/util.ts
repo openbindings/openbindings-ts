@@ -251,3 +251,34 @@ export function errorMessage(e: unknown): string {
 function parseJSONOrYAML(text: string): unknown {
   return yaml.load(text.trim());
 }
+
+/**
+ * THE §9.1 flatten-vs-synthetic determination, in one place for the two
+ * sites that must never disagree: buildInputSchema (synthesize.ts), which
+ * publishes the flattened contract, and planRequestBody (media.ts), which
+ * routes the wire. A declared request-body schema participates in the
+ * flattened model by property name iff it declares `properties` or an
+ * explicit object type; ANY other schema — array, scalar, binary, and the
+ * TYPELESS schema that declares neither — rides the synthetic `body`
+ * property, unwrapped at the wire. The determination is declaration-only:
+ * what the schema might admit at runtime never participates. Mirrors the
+ * Go SDK's bodySchemaFlattens (formats/openapi/synthesize.go).
+ */
+export function bodySchemaFlattens(schema: Record<string, unknown>): boolean {
+  const props = schema["properties"];
+  const hasProperties = props != null && typeof props === "object";
+  return hasProperties || isObjectTypedSchema(schema);
+}
+
+/**
+ * Reports whether a body schema is explicitly object-typed (3.0 string
+ * form or a single-element 3.1 type array): the object half of
+ * bodySchemaFlattens' declaration facts. Mirrors the Go SDK's
+ * isObjectTypedSchema (formats/openapi/synthesize.go).
+ */
+export function isObjectTypedSchema(schema: Record<string, unknown>): boolean {
+  const ty = schema["type"];
+  if (typeof ty === "string") return ty === "object";
+  if (Array.isArray(ty)) return ty.length === 1 && ty[0] === "object";
+  return false;
+}

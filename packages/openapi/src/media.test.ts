@@ -144,6 +144,39 @@ describe("planRequestBody — synthetic modes", () => {
     const plan = planRequestBody(opWithRequestBody({ "text/plain": {} }, false));
     expect(plan.synthetic).toBe(true);
   });
+
+  // §9.1's object determination is declaration-only, one predicate shared
+  // with synthesis (bodySchemaFlattens): a TYPELESS schema — neither
+  // `properties` nor an explicit object type — is non-object, so the plan
+  // is synthetic exactly as the synthesized contract wraps it.
+  it("typeless body schema is synthetic", () => {
+    const plan = planRequestBody(
+      opWithRequestBody({ "application/json": { schema: {} } }, false),
+    );
+    expect(plan.synthetic).toBe(true);
+  });
+
+  // The other half of the declaration: `properties` without a type is
+  // object by declaration — flattened, never synthetic.
+  it("properties-without-type schema is not synthetic and carries property names", () => {
+    const plan = planRequestBody(
+      opWithRequestBody(
+        { "application/json": { schema: { properties: { a: { type: "string" } } } } },
+        false,
+      ),
+    );
+    expect(plan.synthetic).toBe(false);
+    expect(plan.props?.has("a")).toBe(true);
+  });
+
+  // A 3.1 two-element type array is not an EXPLICIT object type (only the
+  // single-element form is): synthetic without properties.
+  it("nullable-object schema without properties is synthetic", () => {
+    const plan = planRequestBody(
+      opWithRequestBody({ "application/json": { schema: { type: ["object", "null"] } } }, false),
+    );
+    expect(plan.synthetic).toBe(true);
+  });
 });
 
 // The remaining-body rule (§9.1): JSON-family selection with every field
