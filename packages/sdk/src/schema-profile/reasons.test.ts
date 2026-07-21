@@ -15,10 +15,10 @@
  *   - unions carry the real union key and the failing variant index;
  *   - multi-member faults (types, enum values, required, properties) name
  *     the lexicographically FIRST failing member;
- *   - property/required member names interpolate in the same JCS rendering
- *     as values (quoted, JSON-string escaping) — visible only for names
- *     carrying quotes, backslashes, or control characters; plain names
- *     render exactly as before;
+ *   - property/required member names and type names interpolate in the same
+ *     JCS rendering as values (quoted, JSON-string escaping) — visible only
+ *     for names carrying quotes, backslashes, or control characters; plain
+ *     names render exactly as before;
  *   - tell-tale non-normalized inputs (scalar type, unresolved $ref,
  *     unflattened allOf) are refused loudly — see refusalCases below.
  */
@@ -325,6 +325,18 @@ const reasonCases: ReasonCase[] = [
     target: `{"type":["object"]}`,
     candidate: String.raw`{"type":["object"],"required":["say\"cheese"]}`,
     reason: String.raw`required: candidate requires "say\"cheese" but target does not`,
+  },
+  {
+    // Type names join the member-name JCS canon (extension of the
+    // 2026-07-20 member-name escaping ruling). The Go table adds this
+    // identical case in parallel (schemaprofile/reasons_test.go) — keep the
+    // two in lockstep. Plain lowercase type names are pinned unchanged by
+    // the type cases at the top of this table.
+    name: "type name with quote escapes as JCS",
+    direction: "input",
+    target: String.raw`{"type":["weird\"type"]}`,
+    candidate: `{"type":["string"]}`,
+    reason: String.raw`type: candidate does not allow "weird\"type"`,
   },
 
   // --- unions ---

@@ -24,6 +24,16 @@
   alignment tables (`packages/sdk/src/schema-profile/reasons.test.ts` ↔
   `schemaprofile/reasons_test.go`).
 
+- **Type names in compatibility reason strings join the JCS canon**
+  (direct extension of the 2026-07-20 member-name escaping ruling). The
+  `type: candidate does not allow …` / `type: candidate allows … but target
+  does not` reasons now render each type name in the same JCS (RFC 8785)
+  string rendering member names and values get, instead of raw interpolation
+  inside literal quotes. For legitimate lowercase type names the output is
+  byte-identical to before; the difference is visible only for pathological
+  names carrying quotes, backslashes, or control characters. Pinned
+  byte-for-byte against the Go SDK in the mirrored alignment tables.
+
 - **`engines.node >= 22` on `@openbindings/asyncapi` and `@openbindings/graphql`**
   (honest floors: their WebSocket lanes construct the global `WebSocket`,
   unflagged in Node 22+; Node 18/20 are EOL). Other packages stay `>= 18`;
@@ -360,6 +370,14 @@
   (spec + interfaces; the interface corpora previously ran in no TS CI) and
   corpus suites fail loudly when required-and-absent; local skip-if-absent
   behavior is unchanged.
+
+- **Conformance-runner `requiresSupports` gate**: the corpus test annotation
+  `requiresSupports: "X.Y.Z"` administers a fixture test only to tools whose
+  OBI-T-04 version-acceptance predicate accepts X.Y.Z — for this SDK,
+  `isSupportedVersion` — and otherwise reports the test as skipped, separately
+  from pass/fail (skips are never failures). Joins the existing
+  `requiresMaxTested`/`requiresMinSupported` annotations with the same skip
+  mechanism and reporting.
 
 - **README**: the SDK bundles the `jsonata` parser (2.1) for OBI-D-18
   parse-checks — the "no bundled runtime" claim was stale.

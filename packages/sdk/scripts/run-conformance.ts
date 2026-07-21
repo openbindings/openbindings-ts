@@ -23,6 +23,7 @@ import {
   validateDocument,
   isHigherMajorOrPre1MinorThanMaxTested,
   isLowerThanMinSupported,
+  isSupportedVersion,
   MAX_TESTED_VERSION,
   MIN_SUPPORTED_VERSION,
 } from "../src/index.js";
@@ -32,6 +33,7 @@ interface FixtureTest {
   document: unknown;
   valid: boolean;
   violates?: string[];
+  requiresSupports?: string;
   requiresMaxTested?: string;
   requiresMinSupported?: string;
 }
@@ -96,6 +98,25 @@ function resolveCorpusDir(input: string): string {
 }
 
 function runOne(rule: string, t: FixtureTest): Result {
+  if (t.requiresSupports !== undefined) {
+    // Administer this test only to tools whose OBI-T-04 version-acceptance
+    // predicate accepts the annotated version; otherwise skip, reported
+    // separately (skips are never failures). For this SDK the predicate is
+    // isSupportedVersion — acceptance, not tested-range membership. It never
+    // throws (a malformed annotation is simply not accepted), so no
+    // fall-through guard is needed.
+    if (!isSupportedVersion(t.requiresSupports)) {
+      return {
+        rule,
+        test: t.description,
+        passed: false,
+        skipped: true,
+        expected: t.valid,
+        actual: false,
+        reason: `requires a tool accepting version ${t.requiresSupports}; this SDK's supported range is ${MIN_SUPPORTED_VERSION}..${MAX_TESTED_VERSION}`,
+      };
+    }
+  }
   if (t.requiresMaxTested) {
     try {
       if (isHigherMajorOrPre1MinorThanMaxTested(t.requiresMaxTested)) {
