@@ -271,8 +271,8 @@ describe("buildMultipartBody", () => {
       desc: "a file",
     });
     const parts = await formDataParts(fd);
-    expect(parts["file"][0]).toEqual(["application/octet-stream", "raw-bytes"]);
-    expect(parts["desc"][0][1]).toBe("a file");
+    expect(parts["file"]?.[0]).toEqual(["application/octet-stream", "raw-bytes"]);
+    expect(parts["desc"]?.[0]?.[1]).toBe("a file");
 
     // An invalid base64 string is a loud error, never silent bytes.
     expect(() => buildMultipartBody(DOC_30, media, { file: "!!not-base64!!" })).toThrow(
@@ -299,7 +299,7 @@ describe("buildMultipartBody", () => {
     const payload = b64([0xff, 0xfe]).replace(/\+/g, "-").replace(/\//g, "_");
     const fd = buildMultipartBody(DOC_31, media, { img: payload });
     const parts = await formDataParts(fd);
-    expect(parts["img"][0][0]).toBe("image/png");
+    expect(parts["img"]?.[0]?.[0]).toBe("image/png");
     // Bytes decoded per contentEncoding base64url (0xff 0xfe is invalid
     // UTF-8, so compare the raw bytes).
     const img = fd.get("img") as File;
@@ -332,10 +332,10 @@ describe("buildMultipartBody", () => {
       note: "# hi",
     });
     const parts = await formDataParts(fd);
-    expect(parts["meta"][0]).toEqual(["application/json", '{"k":"v"}']);
-    expect(parts["count"][0][1]).toBe("42");
-    expect(parts["tags"].map(([, text]) => text)).toEqual(["a", "b"]);
-    expect(parts["note"][0]).toEqual(["text/markdown", "# hi"]);
+    expect(parts["meta"]?.[0]).toEqual(["application/json", '{"k":"v"}']);
+    expect(parts["count"]?.[0]?.[1]).toBe("42");
+    expect(parts["tags"]?.map(([, text]) => text)).toEqual(["a", "b"]);
+    expect(parts["note"]?.[0]).toEqual(["text/markdown", "# hi"]);
   });
 
   // An in-process Uint8Array value passes through raw (it cannot have

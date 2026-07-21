@@ -32,20 +32,20 @@ describe("convertToInterface", () => {
     const iface = convertToInterface(schema, "https://api.example.com/graphql");
 
     expect(Object.keys(iface.operations)).toEqual(["users"]);
-    expect(iface.operations.users.description).toBe("List all users");
+    expect(iface.operations.users?.description).toBe("List all users");
 
     // Should have _query const in input schema.
-    const input = iface.operations.users.input as Record<string, unknown>;
+    const input = iface.operations.users?.input as Record<string, unknown>;
     const props = input.properties as Record<string, unknown>;
     const queryProp = props._query as Record<string, unknown>;
     expect(queryProp.const).toContain("users");
     expect(queryProp.const).toContain("{ id name }");
 
-    const binding = iface.bindings!["users.graphql"];
-    expect(binding.ref).toBe("Query/users");
-    expect(binding.source).toBe("graphql");
+    const binding = iface.bindings?.["users.graphql"];
+    expect(binding?.ref).toBe("Query/users");
+    expect(binding?.source).toBe("graphql");
 
-    expect(iface.sources!.graphql.location).toBe("https://api.example.com/graphql");
+    expect(iface.sources?.graphql?.location).toBe("https://api.example.com/graphql");
   });
 
   it("converts mutations", () => {
@@ -70,12 +70,12 @@ describe("convertToInterface", () => {
 
     const iface = convertToInterface(schema);
     const op = iface.operations.deleteUser;
-    expect(op.deprecated).toBe(true);
+    expect(op?.deprecated).toBe(true);
 
-    const input = op.input as Record<string, unknown>;
+    const input = op?.input as Record<string, unknown>;
     expect((input.required as string[]).includes("id")).toBe(true);
 
-    expect(iface.bindings!["deleteUser.graphql"].ref).toBe("Mutation/deleteUser");
+    expect(iface.bindings?.["deleteUser.graphql"]?.ref).toBe("Mutation/deleteUser");
   });
 
   it("handles key collisions across root types", () => {
@@ -138,7 +138,7 @@ describe("convertToInterface", () => {
     };
 
     const iface = convertToInterface(schema);
-    const output = iface.operations.status.output as Record<string, unknown>;
+    const output = iface.operations.status?.output as Record<string, unknown>;
     expect(output.type).toBe("string");
     expect(output.enum).toEqual(["ACTIVE", "INACTIVE"]);
   });
@@ -206,13 +206,13 @@ describe("convertToInterface — shared-type synthesis (C8f)", () => {
     };
 
     const iface = convertToInterface(schema);
-    const output = iface.operations.search.output as Record<string, unknown>;
+    const output = iface.operations.search?.output as Record<string, unknown>;
     const props = output.properties as Record<string, Record<string, unknown>>;
 
     for (const fieldName of ["primary", "secondary"]) {
       const f = props[fieldName];
-      expect(f.properties, `field ${fieldName} truncated to a bare object`).toBeDefined();
-      expect((f.properties as Record<string, unknown>).name).toBeDefined();
+      expect(f?.properties, `field ${fieldName} truncated to a bare object`).toBeDefined();
+      expect((f?.properties as Record<string, unknown>).name).toBeDefined();
       // Parity pin: the same canonical literal the Go test asserts.
       expect(canonicalize(f)).toBe(PARITY_PINNED_USER_SCHEMA);
     }
@@ -249,14 +249,14 @@ describe("convertToInterface — shared-type synthesis (C8f)", () => {
     };
 
     const iface = convertToInterface(schema);
-    const input = iface.operations.createPair.input as Record<string, unknown>;
+    const input = iface.operations.createPair?.input as Record<string, unknown>;
     const pair = (input.properties as Record<string, Record<string, unknown>>).input;
-    const pairProps = pair.properties as Record<string, Record<string, unknown>>;
+    const pairProps = pair?.properties as Record<string, Record<string, unknown>>;
 
     for (const fieldName of ["a", "b"]) {
       const f = pairProps[fieldName];
-      expect(f.properties, `input field ${fieldName} truncated to a bare object`).toBeDefined();
-      expect((f.properties as Record<string, unknown>).label).toBeDefined();
+      expect(f?.properties, `input field ${fieldName} truncated to a bare object`).toBeDefined();
+      expect((f?.properties as Record<string, unknown>).label).toBeDefined();
     }
   });
 
@@ -281,9 +281,10 @@ describe("convertToInterface — shared-type synthesis (C8f)", () => {
     };
 
     const iface = convertToInterface(schema);
-    const output = iface.operations.node.output as Record<string, unknown>;
+    const output = iface.operations.node?.output as Record<string, unknown>;
     const parent = (output.properties as Record<string, Record<string, unknown>>).parent;
-    expect(parent.type).toBe("object");
-    expect(parent.properties).toBeUndefined();
+    expect(parent).toBeDefined();
+    expect(parent?.type).toBe("object");
+    expect(parent?.properties).toBeUndefined();
   });
 });

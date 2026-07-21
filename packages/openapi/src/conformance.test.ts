@@ -130,7 +130,7 @@ describe("OAPI-D-03 — ref shape", () => {
       fetch,
     });
     await expect(single(call.outputs)).resolves.toEqual({ ok: true });
-    expect(requests[0].url).toBe(`${BASE}/shared`);
+    expect(requests[0]?.url).toBe(`${BASE}/shared`);
   });
 });
 
@@ -326,7 +326,7 @@ describe("OAPI-P-03 — flattened-model refusals", () => {
       });
       await call.write({ body: { k: "v" } });
       await single(call.outputs);
-      expect(requests[0].body, name).toBe('{"k":"v"}');
+      expect(requests[0]?.body, name).toBe('{"k":"v"}');
     }
   });
 
@@ -363,7 +363,7 @@ describe("OAPI-P-03 — flattened-model refusals", () => {
     });
     await call.write({ name: "x" });
     await single(call.outputs);
-    expect(requests[0].body).toBe('{"name":"x"}');
+    expect(requests[0]?.body).toBe('{"name":"x"}');
   });
 
   // §9.1 (OAPI-P-03): with an OBJECT body, a field matching no declared
@@ -396,8 +396,8 @@ describe("OAPI-P-03 — flattened-model refusals", () => {
     const call = new OpenAPIInvoker().invokeBinding({ source: src(spec), ref: "#/paths/~1w/post", fetch });
     await call.write({ name: "x", extra: "y" });
     await single(call.outputs);
-    expect(requests[0].headers.get("Content-Type")).toBe("application/json");
-    expect(requests[0].body).toBe('{"extra":"y","name":"x"}');
+    expect(requests[0]?.headers.get("Content-Type")).toBe("application/json");
+    expect(requests[0]?.body).toBe('{"extra":"y","name":"x"}');
   });
 
   // §9.1 (OAPI-P-03): passthrough rides the body's encoding — multipart
@@ -434,7 +434,7 @@ describe("OAPI-P-03 — flattened-model refusals", () => {
     });
     await call.write({ description: "d", note: "urgent", meta: { k: "v" } });
     await single(call.outputs);
-    const fd = requests[0].body as FormData;
+    const fd = requests[0]?.body as FormData;
     expect(fd).toBeInstanceOf(FormData);
     expect(fd.get("description")).toBe("d");
     expect(fd.get("note")).toBe("urgent");
@@ -477,8 +477,8 @@ describe("OAPI-P-03 — flattened-model refusals", () => {
     });
     await call.write({ name: "a b", extra: "y" });
     await single(call.outputs);
-    expect(requests[0].headers.get("Content-Type")).toBe("application/x-www-form-urlencoded");
-    expect(requests[0].body).toBe("extra=y&name=a%20b");
+    expect(requests[0]?.headers.get("Content-Type")).toBe("application/x-www-form-urlencoded");
+    expect(requests[0]?.body).toBe("extra=y&name=a%20b");
   });
 
   // A supplied input missing a declared path parameter always refuses
@@ -524,7 +524,7 @@ describe("OAPI-P-03 — flattened-model refusals", () => {
     await call2.write({ id: "7" });
     await expect(single(call2.outputs)).resolves.toEqual({ ok: true });
     expect(requests).toHaveLength(1);
-    expect(requests[0].body == null).toBe(true);
+    expect(requests[0]?.body == null).toBe(true);
   });
 
   // Style/explode serialization over the wire: an exploded form array
@@ -559,7 +559,7 @@ describe("OAPI-P-03 — flattened-model refusals", () => {
     await call.write({ tags: ["a", "b"], flat: ["x", "y"], filter: { kind: "big", size: 2 } });
     await single(call.outputs);
     // Declaration order: tags (form explode default), flat, filter.
-    expect(requests[0].url).toBe(`${BASE}/search?tags=a&tags=b&flat=x,y&filter[kind]=big&filter[size]=2`);
+    expect(requests[0]?.url).toBe(`${BASE}/search?tags=a&tags=b&flat=x,y&filter[kind]=big&filter[size]=2`);
   });
 
   // Matrix/label path styles substitute their full expansions into the
@@ -596,7 +596,7 @@ describe("OAPI-P-03 — flattened-model refusals", () => {
     });
     await call.write({ coords: [50.4, 4.32] });
     await single(call.outputs);
-    expect(requests[0].url).toBe(`${BASE}/map/;coords=50.4,4.32`);
+    expect(requests[0]?.url).toBe(`${BASE}/map/;coords=50.4,4.32`);
   });
 });
 
@@ -632,8 +632,8 @@ describe("OAPI-P-04 — request media on the wire", () => {
     const call = new OpenAPIInvoker().invokeBinding({ source: src(spec), ref: "#/paths/~1things/post", fetch });
     await call.write({ k: "v" });
     await single(call.outputs);
-    expect(requests[0].headers.get("Content-Type")).toBe("application/vnd.a+json");
-    expect(requests[0].body).toBe('{"k":"v"}');
+    expect(requests[0]?.headers.get("Content-Type")).toBe("application/vnd.a+json");
+    expect(requests[0]?.body).toBe('{"k":"v"}');
   });
 
   // An operation declaring only out-of-family request media refuses
@@ -754,8 +754,8 @@ describe("OAPI-P-04 — request media on the wire", () => {
     await call.write({ body: "x" });
     await single(call.outputs);
     expect(requests).toHaveLength(1);
-    expect(requests[0].headers.get("Content-Type")).toBe("application/json");
-    expect(requests[0].body).toBe('"x"');
+    expect(requests[0]?.headers.get("Content-Type")).toBe("application/json");
+    expect(requests[0]?.body).toBe('"x"');
   });
 
   // urlencoded selection serializes fields per the OAS encoding rules.
@@ -791,8 +791,8 @@ describe("OAPI-P-04 — request media on the wire", () => {
     const call = new OpenAPIInvoker().invokeBinding({ source: src(spec), ref: "#/paths/~1form/post", fetch });
     await call.write({ name: "a b", ids: [1, 2] });
     await single(call.outputs);
-    expect(requests[0].headers.get("Content-Type")).toBe("application/x-www-form-urlencoded");
-    expect(requests[0].body).toBe("ids=1&ids=2&name=a%20b");
+    expect(requests[0]?.headers.get("Content-Type")).toBe("application/x-www-form-urlencoded");
+    expect(requests[0]?.body).toBe("ids=1&ids=2&name=a%20b");
   });
 
   // Synthetic body unwrap on the wire: with an array body schema, the
@@ -819,7 +819,7 @@ describe("OAPI-P-04 — request media on the wire", () => {
     const call = new OpenAPIInvoker().invokeBinding({ source: src(spec), ref: "#/paths/~1batch/post", fetch });
     await call.write({ body: [1, 2] });
     await single(call.outputs);
-    expect(requests[0].body).toBe("[1,2]");
+    expect(requests[0]?.body).toBe("[1,2]");
   });
 
   // text/plain selection: a string body rides verbatim; the response
@@ -848,8 +848,8 @@ describe("OAPI-P-04 — request media on the wire", () => {
     const call = inv.invokeBinding({ source: src(spec), ref: "#/paths/~1echo/post", fetch });
     await call.write({ body: "ping" });
     await expect(single(call.outputs)).resolves.toBe("pong");
-    expect(requests[0].headers.get("Content-Type")).toBe("text/plain");
-    expect(requests[0].body).toBe("ping");
+    expect(requests[0]?.headers.get("Content-Type")).toBe("text/plain");
+    expect(requests[0]?.body).toBe("ping");
 
     // The selection condition: a non-string body value refuses pre-dispatch.
     const call2 = inv.invokeBinding({ source: src(spec), ref: "#/paths/~1echo/post", fetch });
@@ -880,7 +880,7 @@ describe("OAPI-P-04 — request media on the wire", () => {
     const { fetch, requests } = mockFetch(() => jsonResponse({}));
     const call = new OpenAPIInvoker().invokeBinding({ source: src(spec), ref: "#/paths/~1csvjson/get", fetch });
     await single(call.outputs);
-    const accept = requests[0].headers.get("Accept") ?? "";
+    const accept = requests[0]?.headers.get("Accept") ?? "";
     expect(accept).toContain("application/json");
     expect(accept).toContain("text/csv");
     expect(accept).not.toContain("problem+json");
@@ -1120,7 +1120,7 @@ describe("OAPI-P-10 — channel assembly", () => {
     await single(call.outputs);
     // ONE header: declared params in declaration order (zeta before alpha),
     // the credential appended after.
-    expect(requests[0].headers.get("Cookie")).toBe("zeta=z; alpha=a; auth_token=secret");
+    expect(requests[0]?.headers.get("Cookie")).toBe("zeta=z; alpha=a; auth_token=secret");
   });
 
   // A name collision between a credential and a caller-populated declared
@@ -1193,6 +1193,6 @@ describe("OAPI-P-05 — the server configuration point end to end", () => {
     });
     await expect(single(call.outputs)).resolves.toEqual({ ok: true });
     expect(requests).toHaveLength(1);
-    expect(requests[0].url).toBe("https://real.example.test/ping");
+    expect(requests[0]?.url).toBe("https://real.example.test/ping");
   });
 });

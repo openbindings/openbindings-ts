@@ -106,8 +106,8 @@ describe("GraphQLInvoker unary", () => {
     await expect(call.closed).resolves.toBeUndefined();
 
     expect(calls).toHaveLength(1);
-    expect(calls[0].body.query).toBe("query($id: ID!) { user(id: $id) { id name } }");
-    expect(calls[0].body.variables).toEqual({ id: "123" });
+    expect(calls[0]?.body.query).toBe("query($id: ID!) { user(id: $id) { id name } }");
+    expect(calls[0]?.body.variables).toEqual({ id: "123" });
   });
 
   it("dispatches a no-argument field without any input (no-input recipe)", async () => {
@@ -116,7 +116,8 @@ describe("GraphQLInvoker unary", () => {
 
     // No write, no close: the binding closes input on entry.
     await expect(single(call.outputs)).resolves.toBe("pong");
-    expect(calls[0].body.variables).toBeUndefined();
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.body.variables).toBeUndefined();
   });
 
   it("treats close-without-write as empty variables", async () => {
@@ -125,7 +126,8 @@ describe("GraphQLInvoker unary", () => {
 
     await call.close();
     await expect(single(call.outputs)).resolves.toBeNull();
-    expect(calls[0].body.variables).toBeUndefined();
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.body.variables).toBeUndefined();
   });
 
   it("honors the operation-layer no-input convention even when the field takes GraphQL arguments", async () => {
@@ -145,7 +147,8 @@ describe("GraphQLInvoker unary", () => {
 
     // No write, no close: the binding must close input on entry.
     await expect(single(call.outputs)).resolves.toBeNull();
-    expect(calls[0].body.variables).toBeUndefined();
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.body.variables).toBeUndefined();
   }, 2000);
 
   it("exposes HTTP response headers as leading metadata", async () => {
@@ -167,7 +170,7 @@ describe("GraphQLInvoker unary", () => {
     });
 
     await expect(single(call.outputs)).resolves.toBe("pong");
-    expect(calls[0].headers["Authorization"]).toBe("Bearer tok_123");
+    expect(calls[0]?.headers["Authorization"]).toBe("Bearer tok_123");
   });
 
   it("uses a prebuilt _query const and skips schema loading", async () => {
@@ -190,8 +193,8 @@ describe("GraphQLInvoker unary", () => {
 
     // Exactly one request: no introspection round-trip.
     expect(calls).toHaveLength(1);
-    expect(calls[0].body.query).toBe("query($limit: Int) { users(limit: $limit) { id } }");
-    expect(calls[0].body.variables).toEqual({ limit: 10 });
+    expect(calls[0]?.body.query).toBe("query($limit: Int) { users(limit: $limit) { id } }");
+    expect(calls[0]?.body.variables).toEqual({ limit: 10 });
   });
 
   it("dispatches a prebuilt _query with no variable properties without input", async () => {
@@ -207,7 +210,8 @@ describe("GraphQLInvoker unary", () => {
     });
 
     await expect(single(call.outputs)).resolves.toEqual([]);
-    expect(calls[0].body.variables).toBeUndefined();
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.body.variables).toBeUndefined();
   });
 
   it("introspects once per endpoint when no inline content is given", async () => {
@@ -465,7 +469,8 @@ describe("GraphQLInvoker subscriptions", () => {
     const call = new GraphQLInvoker().invokeBinding({ source, ref, context: opts?.context, maxDeliveryUnitBytes: opts?.maxDeliveryUnitBytes });
     if (opts?.write) await call.write(opts.write);
     await vi.waitFor(() => { expect(FakeWebSocket.instances.length).toBeGreaterThan(0); });
-    const ws = FakeWebSocket.instances[FakeWebSocket.instances.length - 1];
+    const ws = FakeWebSocket.instances.at(-1);
+    if (ws === undefined) throw new Error("no FakeWebSocket instance despite waitFor");
     ws.open();
     await vi.waitFor(() => { expect(ws.sent.some((m) => m.type === "subscribe")).toBe(true); });
     return { call, ws };
@@ -507,6 +512,20 @@ describe("GraphQLInvoker subscriptions", () => {
     const { call, ws } = await start("Subscription/onOrder");
 
     ws.receive({ type: "error", payload: [{ message: "subscribe failed" }] });
+    await expect(call.closed).rejects.toMatchObject({ code: ERR_EXECUTION_FAILED });
+    await vi.waitFor(() => { expect(ws.readyState).toBe(FakeWebSocket.CLOSED); });
+  });
+
+  it("maps a next frame carrying GraphQL errors to ERR_EXECUTION_FAILED even when an element is malformed", async () => {
+    // A broken or hostile server can send `next` with an errors array whose
+    // first element is not an object (JSON `null` here). That must surface
+    // as the same structured ERR_EXECUTION_FAILED a well-formed element
+    // gets (Go parity: a null element unmarshals to the zero graphqlError),
+    // never as a TypeError inside the message handler, which would strand
+    // the invocation with no settled error.
+    const { call, ws } = await start("Subscription/onOrder");
+
+    ws.receive({ type: "next", payload: { errors: [null] } });
     await expect(call.closed).rejects.toMatchObject({ code: ERR_EXECUTION_FAILED });
     await vi.waitFor(() => { expect(ws.readyState).toBe(FakeWebSocket.CLOSED); });
   });

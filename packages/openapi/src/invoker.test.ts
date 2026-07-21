@@ -153,10 +153,10 @@ describe("invokeBinding — request construction", () => {
 
     expect(out).toEqual({ pong: true });
     expect(requests).toHaveLength(1);
-    expect(requests[0].url).toBe("https://api.example.com/v1/ping");
-    expect(requests[0].method).toBe("GET");
+    expect(requests[0]?.url).toBe("https://api.example.com/v1/ping");
+    expect(requests[0]?.method).toBe("GET");
     // §9.2: absent any declared success media, Accept is application/json.
-    expect(requests[0].headers.get("Accept")).toBe("application/json");
+    expect(requests[0]?.headers.get("Accept")).toBe("application/json");
     await expect(call.closed).resolves.toBeUndefined();
   });
 
@@ -168,8 +168,8 @@ describe("invokeBinding — request construction", () => {
     const out = await single(call.outputs);
 
     expect(out).toEqual({ id: "42" });
-    expect(requests[0].url).toBe("https://api.example.com/v1/users/42?verbose=true");
-    expect(requests[0].headers.get("X-Trace")).toBe("abc");
+    expect(requests[0]?.url).toBe("https://api.example.com/v1/users/42?verbose=true");
+    expect(requests[0]?.headers.get("X-Trace")).toBe("abc");
   });
 
   it("serializes unclassified fields into the JSON request body", async () => {
@@ -180,9 +180,9 @@ describe("invokeBinding — request construction", () => {
     const out = await single(call.outputs);
 
     expect(out).toEqual({ id: "u1" });
-    expect(requests[0].method).toBe("POST");
-    expect(requests[0].headers.get("Content-Type")).toBe("application/json");
-    expect(JSON.parse(requests[0].body as string)).toEqual({
+    expect(requests[0]?.method).toBe("POST");
+    expect(requests[0]?.headers.get("Content-Type")).toBe("application/json");
+    expect(JSON.parse(requests[0]?.body as string)).toEqual({
       name: "Ada",
       email: "ada@example.com",
     });
@@ -227,8 +227,8 @@ describe("invokeBinding — request construction", () => {
     await call.write({ id: "u1", name: "Ada" });
     await single(call.outputs);
 
-    expect(requests[0].url).toBe("https://api.example.com/v1/users/u1");
-    expect(JSON.parse(requests[0].body as string)).toEqual({ id: "u1", name: "Ada" });
+    expect(requests[0]?.url).toBe("https://api.example.com/v1/users/u1");
+    expect(JSON.parse(requests[0]?.body as string)).toEqual({ id: "u1", name: "Ada" });
   });
 
   it("errors ERR_MISSING_INPUT when input closes bare on a required-input operation", async () => {
@@ -249,7 +249,7 @@ describe("invokeBinding — request construction", () => {
     const out = await single(call.outputs);
 
     expect(out).toEqual([]);
-    expect(requests[0].url).toBe("https://api.example.com/v1/search");
+    expect(requests[0]?.url).toBe("https://api.example.com/v1/search");
   });
 
   it("percent-encodes path parameter values so reserved characters cannot corrupt the URL", async () => {
@@ -259,7 +259,7 @@ describe("invokeBinding — request construction", () => {
     await call.write({ id: "a/b?c#d" });
     await single(call.outputs);
 
-    expect(requests[0].url).toBe("https://api.example.com/v1/users/a%2Fb%3Fc%23d");
+    expect(requests[0]?.url).toBe("https://api.example.com/v1/users/a%2Fb%3Fc%23d");
   });
 
   // Pins byte-for-byte parity with Go's encodePathValue (TestEncodePathValue_
@@ -274,7 +274,7 @@ describe("invokeBinding — request construction", () => {
     await call.write({ id: "héllo" });
     await single(call.outputs);
 
-    expect(requests[0].url).toBe("https://api.example.com/v1/users/h%C3%A9llo");
+    expect(requests[0]?.url).toBe("https://api.example.com/v1/users/h%C3%A9llo");
   });
 
   // Tier 1: the invoke.ts comment claiming "the document is dereferenced at
@@ -315,11 +315,11 @@ describe("invokeBinding — request construction", () => {
     await call.write({ id: "u1", verbose: true });
     await single(call.outputs);
 
-    expect(requests[0].url).toBe("https://api.example.com/v1/users/u1?verbose=true");
+    expect(requests[0]?.url).toBe("https://api.example.com/v1/users/u1?verbose=true");
     // A GET with no requestBody has nowhere for a body-routed field to go —
     // unresolved $ref params previously vanished silently instead of
     // routing to the path/query.
-    expect(requests[0].body == null).toBe(true);
+    expect(requests[0]?.body == null).toBe(true);
   });
 
   // OAPI-P-10: declared cookie parameters join ONE Cookie header in
@@ -352,8 +352,8 @@ describe("invokeBinding — request construction", () => {
     await call.write({ session_id: "s-1", csrf: "c-2" });
     await single(call.outputs);
 
-    expect(requests[0].headers.get("Cookie")).toBe("session_id=s-1; csrf=c-2");
-    expect(requests[0].body == null).toBe(true);
+    expect(requests[0]?.headers.get("Cookie")).toBe("session_id=s-1; csrf=c-2");
+    expect(requests[0]?.body == null).toBe(true);
   });
 
   // Verify item: media-type parameters ("; charset=utf-8") must never change
@@ -399,8 +399,8 @@ describe("invokeBinding — request construction", () => {
 
     // The collision rule only fires when bodyPropertyNames sees through the
     // "; charset=utf-8" parameter: id must ride both the path AND the body.
-    expect(requests[0].url).toBe("https://api.example.com/v1/users/u1");
-    expect(JSON.parse(requests[0].body as string)).toEqual({ id: "u1", name: "Ada" });
+    expect(requests[0]?.url).toBe("https://api.example.com/v1/users/u1");
+    expect(JSON.parse(requests[0]?.body as string)).toEqual({ id: "u1", name: "Ada" });
   });
 
   it("dispatches immediately with empty input under the operation-layer no-input convention", async () => {
@@ -418,7 +418,7 @@ describe("invokeBinding — request construction", () => {
     await expect(single(call.outputs)).resolves.toEqual({ id: "u1" });
     await expect(call.closed).resolves.toBeUndefined();
     expect(requests).toHaveLength(1);
-    expect(JSON.parse(requests[0].body as string)).toEqual({});
+    expect(JSON.parse(requests[0]?.body as string)).toEqual({});
   });
 });
 
@@ -640,7 +640,7 @@ describe("invokeBinding — responses", () => {
     await call.cancel();
 
     await expect(call.closed).rejects.toMatchObject({ code: ERR_CANCELLED });
-    expect(requests[0].signal?.aborted).toBe(true);
+    expect(requests[0]?.signal?.aborted).toBe(true);
   });
 });
 
@@ -694,7 +694,7 @@ describe("invokeBinding — SSE responses", () => {
     const { fetch, requests } = mockFetch(() => jsonResponse({ pong: true }));
     const call = new OpenAPIInvoker().invokeBinding({ source: SSE_SOURCE, ref: REF_EVENTS, fetch });
     await single(call.outputs);
-    expect(requests[0].headers.get("Accept")).toBe("application/json, text/event-stream");
+    expect(requests[0]?.headers.get("Accept")).toBe("application/json, text/event-stream");
   });
 
   it("streams one output per SSE event and closes cleanly at stream end", async () => {
@@ -823,7 +823,7 @@ describe("invokeBinding — context negotiation", () => {
     });
 
     await expect(single(call.outputs)).resolves.toEqual({ ok: true });
-    expect(requests[0].headers.get("Authorization")).toBe("Bearer tok_123");
+    expect(requests[0]?.headers.get("Authorization")).toBe("Bearer tok_123");
   });
 
   it("applies basic credentials from context", async () => {
@@ -840,7 +840,7 @@ describe("invokeBinding — context negotiation", () => {
     });
 
     await single(call.outputs);
-    expect(requests[0].headers.get("Authorization")).toBe(`Basic ${btoa("u:p")}`);
+    expect(requests[0]?.headers.get("Authorization")).toBe(`Basic ${btoa("u:p")}`);
   });
 
   it("challenges auth.basic when basic credentials are missing", async () => {
@@ -875,7 +875,7 @@ describe("invokeBinding — context negotiation", () => {
     });
 
     await single(call.outputs);
-    expect(requests[0].headers.get("X-API-Key")).toBe("k1");
+    expect(requests[0]?.headers.get("X-API-Key")).toBe("k1");
   });
 
   it("carries the requirement's addressable name — the securitySchemes key, distinct from the apiKey's wire-placement name", async () => {
@@ -935,8 +935,8 @@ describe("invokeBinding — context negotiation", () => {
       fetch: f2,
     });
     await single(call.outputs);
-    expect(r2[0].headers.get("X-Header-Key")).toBe("hk-1");
-    expect(r2[0].url).toBe("https://api.example.com/data?api_key=qk-1");
+    expect(r2[0]?.headers.get("X-Header-Key")).toBe("hk-1");
+    expect(r2[0]?.url).toBe("https://api.example.com/data?api_key=qk-1");
   });
 
   it("places an apiKey in its declared query parameter", async () => {
@@ -953,7 +953,7 @@ describe("invokeBinding — context negotiation", () => {
     });
 
     await single(call.outputs);
-    expect(requests[0].url).toBe("https://api.example.com/data?api_key=k1");
+    expect(requests[0]?.url).toBe("https://api.example.com/data?api_key=k1");
   });
 
   it("places an apiKey in its declared cookie", async () => {
@@ -970,7 +970,7 @@ describe("invokeBinding — context negotiation", () => {
     });
 
     await single(call.outputs);
-    expect(requests[0].headers.get("Cookie")).toBe("sid=k1");
+    expect(requests[0]?.headers.get("Cookie")).toBe("sid=k1");
   });
 
   it("challenges auth.oauth2 and applies an accessToken as a bearer", async () => {
@@ -1025,7 +1025,7 @@ describe("invokeBinding — context negotiation", () => {
       fetch: f2,
     });
     await single(call.outputs);
-    expect(r2[0].headers.get("Authorization")).toBe("Bearer at_1");
+    expect(r2[0]?.headers.get("Authorization")).toBe("Bearer at_1");
   });
 
   it("carries the oauth2 authorization-code flow endpoints into the challenge", async () => {
@@ -1116,7 +1116,8 @@ describe("invokeBinding — context negotiation", () => {
       .closed.catch((e: unknown) => e);
     const req = (
       err as { details: { alternatives: Array<{ requirements: Array<Record<string, unknown>> }> } }
-    ).details.alternatives[0].requirements[0];
+    ).details.alternatives[0]?.requirements[0];
+    expect(req).toBeDefined();
     expect(req).not.toHaveProperty("grantType");
   });
 
@@ -1149,7 +1150,7 @@ describe("invokeBinding — context negotiation", () => {
       fetch: f2,
     });
     await single(call.outputs);
-    expect(r2[0].headers.get("Authorization")).toBe("Bearer at_2");
+    expect(r2[0]?.headers.get("Authorization")).toBe("Bearer at_2");
   });
 
   it("prefers the password flow over clientCredentials by fixed priority, not declaration order", async () => {
@@ -1303,7 +1304,7 @@ describe("invokeBinding — context negotiation", () => {
       fetch: f2,
     });
     await single(call.outputs);
-    expect(r2[0].headers.get("X-API-Key")).toBe("k1");
+    expect(r2[0]?.headers.get("X-API-Key")).toBe("k1");
   });
 
   it("treats schemes within one requirement object as conjunctive (AND)", async () => {
@@ -1343,8 +1344,8 @@ describe("invokeBinding — context negotiation", () => {
       fetch: f2,
     });
     await single(call.outputs);
-    expect(r2[0].headers.get("Authorization")).toBe("Bearer tok");
-    expect(r2[0].headers.get("X-API-Key")).toBe("k1");
+    expect(r2[0]?.headers.get("Authorization")).toBe("Bearer tok");
+    expect(r2[0]?.headers.get("X-API-Key")).toBe("k1");
   });
 
   it("lets operation-level security remove document-level requirements", async () => {
@@ -1362,7 +1363,7 @@ describe("invokeBinding — context negotiation", () => {
 
     await single(call.outputs);
     expect(requests).toHaveLength(1);
-    expect(requests[0].headers.get("Authorization")).toBeNull();
+    expect(requests[0]?.headers.get("Authorization")).toBeNull();
   });
 
   it("requires no context when an empty requirement object allows anonymous access", async () => {
@@ -1464,7 +1465,7 @@ describe("invokeBinding — context negotiation", () => {
       fetch,
     });
     await single(call.outputs);
-    expect(requests[0].headers.get("Authorization")).toBe("Bearer tok");
+    expect(requests[0]?.headers.get("Authorization")).toBe("Bearer tok");
   });
 
   it("a document whose EVERY alternative is unmappable challenges CONTEXT_REQUIRED instead of dispatching unauthenticated", async () => {
@@ -1500,8 +1501,8 @@ describe("invokeBinding — context negotiation", () => {
     });
 
     await single(call.outputs);
-    expect(requests[0].headers.get("X-Custom")).toBe("v");
-    expect(requests[0].headers.get("Cookie")).toBe("session=s1");
+    expect(requests[0]?.headers.get("X-Custom")).toBe("v");
+    expect(requests[0]?.headers.get("Cookie")).toBe("session=s1");
   });
 
   it("falls back to bearer placement when the document declares no schemes", async () => {
@@ -1514,7 +1515,7 @@ describe("invokeBinding — context negotiation", () => {
     });
 
     await single(call.outputs);
-    expect(requests[0].headers.get("Authorization")).toBe("Bearer tok");
+    expect(requests[0]?.headers.get("Authorization")).toBe("Bearer tok");
   });
 });
 

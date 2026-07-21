@@ -131,14 +131,18 @@ export function planRequestBody(op: OpenAPIOperation): BodyPlan {
     else if (n === "text/plain") textPlain = c;
   }
 
+  // Deterministic +json pick: first in normalized order (inert when the
+  // exact-JSON branch wins or the list is empty).
+  plusJSON.sort((a, b) => (a.normalized < b.normalized ? -1 : 1));
+  const firstPlusJSON = plusJSON[0];
+
   let chosen: Candidate | undefined;
   let family: string;
   if (exactJSON) {
     chosen = exactJSON;
     family = FAMILY_JSON;
-  } else if (plusJSON.length > 0) {
-    plusJSON.sort((a, b) => (a.normalized < b.normalized ? -1 : 1));
-    chosen = plusJSON[0];
+  } else if (firstPlusJSON !== undefined) {
+    chosen = firstPlusJSON;
     family = FAMILY_JSON;
   } else if (multipartFD) {
     chosen = multipartFD;
@@ -537,7 +541,7 @@ function decodeQuotedPrintable(name: string, s: string): Uint8Array {
   const withoutSoftBreaks = s.replace(/=\r?\n/g, "");
   const out: number[] = [];
   for (let i = 0; i < withoutSoftBreaks.length; i++) {
-    const c = withoutSoftBreaks[i];
+    const c = withoutSoftBreaks.charAt(i);
     if (c === "=") {
       const hex = withoutSoftBreaks.slice(i + 1, i + 3);
       if (!/^[0-9a-fA-F]{2}$/.test(hex)) {

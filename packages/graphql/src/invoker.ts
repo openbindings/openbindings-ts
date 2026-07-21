@@ -239,9 +239,10 @@ export class GraphQLSynthesizer implements InterfaceSynthesizer, SourceInspector
     input: SynthesizeInput,
     options?: { signal?: AbortSignal },
   ): Promise<OBInterface> {
-    if (!input.sources?.length) throw new NoSourcesError();
-    if (input.sources.length > 1) throw new MultipleSourcesError();
-    const src = input.sources[0];
+    const sources = input.sources ?? [];
+    const src = sources[0];
+    if (src === undefined) throw new NoSourcesError();
+    if (sources.length > 1) throw new MultipleSourcesError();
     if (!src.location) throw new Error("GraphQL source requires a location (endpoint URL)");
 
     const schema = await introspect(src.location, {}, fetch, options?.signal);

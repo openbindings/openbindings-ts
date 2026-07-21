@@ -36,8 +36,8 @@ describe("WorkersRpcInvoker.bindingSpecs", () => {
     const invoker = new WorkersRpcInvoker({ binding: {} });
     const specs = invoker.bindingSpecs();
     expect(specs).toHaveLength(1);
-    expect(specs[0].bindingSpec).toBe(BINDING_SPEC);
-    expect(specs[0].description).toBeTypeOf("string");
+    expect(specs[0]?.bindingSpec).toBe(BINDING_SPEC);
+    expect(specs[0]?.description).toBeTypeOf("string");
   });
 });
 

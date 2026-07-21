@@ -195,9 +195,10 @@ export class WorkersRpcInvoker implements BindingInvoker {
       // Object.keys(stub) returns [] because the Proxy hides the method
       // names -- `typeof method === "function"` above still works
       // because Proxy's get trap returns the dispatch function.
+      // `?.()` spans the re-access with the typeof guard already proven.
       result = first.done
-        ? await this.binding[methodName]()
-        : await this.binding[methodName](first.value);
+        ? await this.binding[methodName]?.()
+        : await this.binding[methodName]?.(first.value);
     } catch (err: unknown) {
       inv.fireError(
         new InvocationError(

@@ -74,19 +74,25 @@ export function resolveServer(
 /**
  * The OAS effective server list: operation servers, else path-item servers,
  * else document servers, else the OAS-defined implied server of url "/".
+ * The implied fallback makes the list never empty, which the return type
+ * carries.
  */
 export function effectiveServers(
   doc: OpenAPIDocument,
   pathItem: OpenAPIPathItem | null,
   op: OpenAPIOperation | null,
-): ServerEntry[] {
+): [ServerEntry, ...ServerEntry[]] {
   const opServers = asServerList(op?.servers);
-  if (opServers.length > 0) return opServers;
+  if (isNonEmpty(opServers)) return opServers;
   const pathServers = asServerList(pathItem?.servers);
-  if (pathServers.length > 0) return pathServers;
+  if (isNonEmpty(pathServers)) return pathServers;
   const docServers = asServerList(doc?.servers);
-  if (docServers.length > 0) return docServers;
+  if (isNonEmpty(docServers)) return docServers;
   return [{ url: "/" }];
+}
+
+function isNonEmpty<T>(list: T[]): list is [T, ...T[]] {
+  return list.length > 0;
 }
 
 function asServerList(raw: unknown): ServerEntry[] {
@@ -104,7 +110,7 @@ function asServerList(raw: unknown): ServerEntry[] {
  * Applies one configured `server` value against the effective list,
  * returning the (possibly still relative) server URL.
  */
-function resolveServerConfig(raw: unknown, servers: ServerEntry[]): string {
+function resolveServerConfig(raw: unknown, servers: [ServerEntry, ...ServerEntry[]]): string {
   if (typeof raw === "string") {
     const srv = serverByURL(servers, raw);
     if (srv) return substituteServerVariables(srv, undefined);
@@ -122,7 +128,7 @@ function resolveServerConfig(raw: unknown, servers: ServerEntry[]): string {
       }
       return base;
     }
-    let srv = servers[0];
+    let srv: ServerEntry = servers[0];
     const entryURL = v["url"];
     if (typeof entryURL === "string" && entryURL !== "") {
       const found = serverByURL(servers, entryURL);
@@ -131,13 +137,16 @@ function resolveServerConfig(raw: unknown, servers: ServerEntry[]): string {
       }
       srv = found;
     } else if ("index" in v) {
+      // The in-list existence check IS the bounds check: a non-integer, a
+      // negative, or an index past the end all leave `chosen` undefined.
       const idx = configIndex(v["index"]);
-      if (idx === null || idx < 0 || idx >= servers.length) {
+      const chosen = idx !== null && idx >= 0 ? servers[idx] : undefined;
+      if (chosen === undefined) {
         throw new Error(
           `configuration.server.index ${JSON.stringify(v["index"])} is not a valid index into the effective server list (${servers.length} entries)`,
         );
       }
-      srv = servers[idx];
+      srv = chosen;
     }
     let vars: Record<string, string> | undefined;
     const rawVars = v["variables"];
@@ -185,7 +194,7 @@ function substituteServerVariables(
     const v = variables[name];
     if (!v || typeof v !== "object") continue;
     const declaredDefault = typeof v.default === "string" ? v.default : "";
-    const val = supplied && name in supplied ? supplied[name] : declaredDefault;
+    const val = supplied?.[name] ?? declaredDefault;
     if (val === "" && declaredDefault === "") {
       throw new Error(`server "${srv.url}": variable "${name}" has no supplied value and no declared default`);
     }
