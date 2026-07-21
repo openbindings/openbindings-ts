@@ -273,6 +273,21 @@
 
 ### Fixed
 
+- **`@openbindings/openapi`: a typeless request-body schema rides the
+  synthetic `body` property on the wire, matching the published contract**
+  (`openbindings.openapi@1` §9.1's declaration-only object determination:
+  a body schema is object iff it declares `properties` or an explicit
+  `object` type). The synthesizer wrapped a typeless body (a bare `{}` or
+  a description-only schema) under the synthetic `body` property while the
+  invoker treated it as flattened, so a caller following the published
+  contract got `{"body": X}` on the wire instead of `X` — and the §9.1
+  unmatched-field refusal for non-object bodies did not fire. Both sites
+  now route through one shared predicate (`bodySchemaFlattens`), so the
+  contract and the wire cannot diverge; a 3.1 two-element
+  `type: ["object", "null"]` body (not an *explicit* object type) is
+  likewise synthetic on both sides. Red-proven in the mirrored §9.1
+  conformance tests; behavior matches the Go SDK.
+
 - **Schema-comparison `allOf` normalization is sound** (mirrors the Go
   engine): branches normalize fully before merging, sibling keywords merge as
   one additional branch, union spellings are refused inline, ref-carried, or
