@@ -212,7 +212,7 @@ describe("address parameters (ASYNC-P-04)", () => {
 // ---------------------------------------------------------------------------
 
 describe("server variables and pathname assembly (ASYNC-P-04)", () => {
-  it("substitutes declared defaults into pathname with exactly one slash at the join; refuses the retired variables member and unresolved expressions", async () => {
+  it("substitutes supplied-else-default into pathname with exactly one slash at the join; refuses supplied out-of-enum values and unresolved expressions", async () => {
     const srv = await startHTTP((_req, res) => {
       res.writeHead(202);
       res.end();
@@ -243,13 +243,24 @@ describe("server variables and pathname assembly (ASYNC-P-04)", () => {
       expect(r.err).toBeUndefined();
       expect(srv.lastPath()).toBe("/v1/events");
 
-      // The retired `variables` member is refused with the teaching error —
-      // §9.2 pins {"key": ...} xor {"url": ...} and nothing else.
+      // A supplied value at the key form's `variables` member wins over
+      // the declared default (§9.2's supplied-else-default substitution).
       r = await publish(invoker, doc, "#/operations/post", {
-        configuration: { server: { variables: { version: "v2" } } },
+        configuration: { server: { key: "test", variables: { version: "v2" } } },
+      });
+      expect(r.err).toBeUndefined();
+      expect(srv.lastPath()).toBe("/v2/events");
+
+      // A supplied value outside the variable's declared enum is a
+      // pre-dispatch refusal (upstream SHOULD, hardened to a refusal —
+      // the specification's own pin).
+      const beforeEnum = srv.requests();
+      r = await publish(invoker, doc, "#/operations/post", {
+        configuration: { server: { key: "test", variables: { version: "v9" } } },
       });
       expect(codeOf(r.err)).toBe("ERR_SOURCE_CONFIG_ERROR");
-      expect(String(r.err)).toContain('member "variables" is not pinned');
+      expect(String(r.err)).toContain("is not in the declared enum");
+      expect(srv.requests()).toBe(beforeEnum);
 
       // A declared default outside the variable's own declared enum is
       // refused (the declaration's own constraint, incorporated).
@@ -283,6 +294,16 @@ describe("server variables and pathname assembly (ASYNC-P-04)", () => {
       r = await publish(invoker, noDefault, "#/operations/post");
       expect(codeOf(r.err)).toBe("ERR_SOURCE_CONFIG_ERROR");
       expect(srv.requests()).toBe(before);
+
+      // The same undefaulted variable IS satisfiable by supply — AsyncAPI
+      // declares Server Variable defaults OPTIONAL, so consumer supply is
+      // the only way to satisfy it (the carriage §9.2's assembly rule
+      // presupposes).
+      r = await publish(invoker, noDefault, "#/operations/post", {
+        configuration: { server: { key: "test", variables: { version: "v7" } } },
+      });
+      expect(r.err).toBeUndefined();
+      expect(srv.lastPath()).toBe("/v7/events");
     } finally {
       invoker.close();
     }
@@ -384,6 +405,10 @@ describe("effective server set (ASYNC-P-04)", () => {
           teach: 'carries both "key" and "url"',
         },
         { cfg: {}, teach: 'carries neither "key" nor "url"' },
+        {
+          cfg: { url: `http://127.0.0.1:${srv.port}`, variables: { env: "staging" } },
+          teach: 'carries "variables" with "url"',
+        },
       ];
       for (const tc of refused) {
         const before = srv.requests();
@@ -391,8 +416,10 @@ describe("effective server set (ASYNC-P-04)", () => {
           configuration: { server: tc.cfg },
         });
         expect(codeOf(r.err)).toBe("ERR_SOURCE_CONFIG_ERROR");
+        expect(String(r.err)).toContain(
+          '{"key": "<server-name>", "variables": {"<variable-name>": "<string-value>"}?}',
+        );
         expect(String(r.err)).toContain(tc.teach);
-        expect(String(r.err)).toContain('{"key": "<server-name>"}');
         expect(String(r.err)).toContain('{"url": "<connection-url>"}');
         expect(srv.requests()).toBe(before);
       }

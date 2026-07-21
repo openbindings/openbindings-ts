@@ -109,8 +109,12 @@ const iface = await synth.synthesizeInterface({
 2. Resolves the operation by ref (`#/operations/<id>` is the only accepted
    spelling), determines server URL and protocol (consumer
    `configuration.server` carries one of the two §9.2-pinned value shapes —
-   `{"key": "<server-name>"}` selects a member of the effective server set,
-   xor `{"url": "<connection-url>"}` supplies a complete connection URL; any
+   `{"key": "<server-name>", "variables": {"<variable-name>":
+   "<string-value>"}?}` selects a member of the effective server set, the
+   optional `variables` member supplying values for its declared server
+   variables (substitution is supplied-else-default; an undeclared supplied
+   name and a supplied out-of-enum value are refused), xor
+   `{"url": "<connection-url>"}` supplies a complete connection URL; any
    other spelling is refused with a teaching error)
 3. Checks declared security against the provided context — conjunctive
    (ASYNC-P-07): the targeted server's `security` applies and the operation's

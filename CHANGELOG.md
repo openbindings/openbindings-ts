@@ -5,17 +5,25 @@
 ### Changed
 
 - **BREAKING: `@openbindings/asyncapi`: `configuration.server` accepts
-  exactly the §9.2-pinned value shapes** — `{"key": "<server-name>"}`
-  selecting a member of the effective server set, xor
+  exactly the §9.2-pinned value shapes** — `{"key": "<server-name>",
+  "variables": {"<variable-name>": "<string-value>"}?}` selecting a member
+  of the effective server set, the optional `variables` member supplying
+  values for the selected server's own declared variables, xor
   `{"url": "<connection-url>"}` overriding with a complete connection URL;
-  the two mutually exclusive. The previously tolerated spellings — a bare
-  string (member name or URL), `{"name": ...}`, and `{"variables": {...}}` —
-  are now refused loudly with a teaching error naming the two pinned forms
-  (byte-identical to the Go SDK's; the pin exists so two implementations
-  carry the value identically, and silent tolerance of extra spellings
-  defeats it). Server variables consequently substitute from their declared
-  defaults only; a consumer needing a non-default server variable supplies
-  the complete connection URL via the `url` form. The below-the-point
+  the two mutually exclusive, `variables` composing only with `key`. The
+  previously tolerated spellings — a bare string (member name or URL) and
+  `{"name": ...}` — are refused loudly with a teaching error naming the two
+  pinned forms (byte-identical to the Go SDK's; the pin exists so two
+  implementations carry the value identically, and silent tolerance of
+  extra spellings defeats it). Server variables substitute
+  supplied-else-default-else-refusal: an undeclared supplied name is
+  refused, never ignored, and a supplied value outside the variable's
+  declared `enum` is refused (upstream SHOULD, hardened per the spec's
+  2026-07-21 §9.2 amendment). The `variables` member restores the
+  pre-alignment capability the 2026-07-20 pin briefly removed — it rode the
+  unpinned `{"name", "variables"}` spelling — now under the sanctioned
+  spelling; AsyncAPI declares Server Variable defaults OPTIONAL, so an
+  undefaulted variable is satisfiable only by supply. The below-the-point
   `metadata.baseURL` legacy override is unchanged.
 
 - **Comparison-engine cross-SDK canon (three rulings, 2026-07-20).**

@@ -122,15 +122,19 @@ const NO_RESOLVABLE_SERVER =
  * shapes") so two implementations carry it identically — an object, exactly
  * one of two mutually exclusive forms:
  *
- *   {"key": "<server-name>"}       // select a member of the effective server set
+ *   {"key": "<server-name>", "variables": {"<variable-name>": "<string-value>"}?}
+ *                                  // select a member of the effective server set,
+ *                                  // optionally supplying its declared server variables
  *   {"url": "<connection-url>"}    // override with a complete connection URL
  *
- * Every other spelling (a bare string, the retired `name`/`variables`
- * members, key+url together) is refused loudly with a teaching error naming
- * the two pinned forms. The pin carries no consumer-supplied server-variable
- * values: under {"key": ...} selection, server variables substitute from
- * their declared defaults, and full control over the connection URL is the
- * {"url": ...} form.
+ * Every other spelling (a bare string, the retired `name` member, key+url
+ * together, variables riding the url form) is refused loudly with a
+ * teaching error naming the two pinned forms. Under {"key": ...} selection,
+ * server variables substitute supplied-else-default-else-refusal: names are
+ * the selected server's own declared variable names (an undeclared supplied
+ * name is refused, never ignored), values are strings, and a supplied value
+ * outside the variable's declared enum is refused (upstream SHOULD,
+ * hardened to a refusal — the specification's own pin).
  *
  * The legacy context.metadata.baseURL override is honored below the
  * configuration point (the configuration point is the contract surface).
@@ -165,13 +169,13 @@ export function resolveTarget(
  * pin.
  */
 const SERVER_CONFIG_PINNED_SHAPES =
-  'the pinned shapes (openbindings.asyncapi@1 §9.2) are {"key": "<server-name>"} (select a member of the effective server set) xor {"url": "<connection-url>"} (override with a complete connection URL); the two forms are mutually exclusive';
+  'the pinned shapes (openbindings.asyncapi@1 §9.2) are {"key": "<server-name>", "variables": {"<variable-name>": "<string-value>"}?} (select a member of the effective server set, "variables" optionally supplying its declared server variables) xor {"url": "<connection-url>"} (override with a complete connection URL); the two forms are mutually exclusive and "variables" composes only with "key"';
 
 /**
  * Applies one configured `server` value against the effective set,
- * accepting exactly §9.2's pinned value shapes: {"key": "<server-name>"}
- * xor {"url": "<connection-url>"}. Every other form is a loud refusal
- * carrying SERVER_CONFIG_PINNED_SHAPES.
+ * accepting exactly §9.2's pinned value shapes: {"key": "<server-name>",
+ * "variables": {...}?} xor {"url": "<connection-url>"}. Every other form
+ * is a loud refusal carrying SERVER_CONFIG_PINNED_SHAPES.
  */
 function resolveServerConfig(
   raw: unknown,
@@ -184,7 +188,7 @@ function resolveServerConfig(
   const v = raw as Record<string, unknown>;
 
   const unpinned = Object.keys(v)
-    .filter((member) => member !== "key" && member !== "url")
+    .filter((member) => member !== "key" && member !== "url" && member !== "variables")
     .sort();
   if (unpinned.length > 0) {
     const quoted = unpinned.map((m) => JSON.stringify(m)).join(", ");
@@ -197,6 +201,7 @@ function resolveServerConfig(
 
   const hasKey = "key" in v;
   const hasURL = "url" in v;
+  const hasVars = "variables" in v;
   if (hasKey && hasURL) {
     throw new Error(
       `configuration.server carries both "key" and "url": ${SERVER_CONFIG_PINNED_SHAPES}`,
@@ -207,6 +212,11 @@ function resolveServerConfig(
       `configuration.server carries neither "key" nor "url": ${SERVER_CONFIG_PINNED_SHAPES}`,
     );
   }
+  if (hasVars && hasURL) {
+    throw new Error(
+      `configuration.server carries "variables" with "url": ${SERVER_CONFIG_PINNED_SHAPES}`,
+    );
+  }
   if (hasKey) {
     const key = v.key;
     if (typeof key !== "string" || key === "") {
@@ -214,13 +224,14 @@ function resolveServerConfig(
         `configuration.server.key must be a non-empty string: ${SERVER_CONFIG_PINNED_SHAPES}`,
       );
     }
+    const supplied = suppliedServerVariables(v);
     const member = serverByKey(candidates, key);
     if (!member) {
       throw new Error(
         `configuration.server.key ${JSON.stringify(key)} names no member of the effective server set`,
       );
     }
-    return assembleServer(member);
+    return assembleServer(member, supplied);
   }
   const full = v.url;
   if (typeof full !== "string" || full === "") {
@@ -229,6 +240,34 @@ function resolveServerConfig(
     );
   }
   return fullURLOverride(full, def);
+}
+
+/**
+ * Decodes the key form's optional `variables` member: an object of string
+ * values (§9.2 — upstream's Server Variable value space), any other shape
+ * a loud refusal carrying SERVER_CONFIG_PINNED_SHAPES. Which NAMES are
+ * admissible is the selected server's business, checked in assembleServer.
+ */
+function suppliedServerVariables(v: Record<string, unknown>): Record<string, string> | undefined {
+  if (!("variables" in v)) return undefined;
+  const rawVars = v.variables;
+  if (rawVars === null || typeof rawVars !== "object" || Array.isArray(rawVars)) {
+    throw new Error(
+      `configuration.server.variables must be an object of string values: ${SERVER_CONFIG_PINNED_SHAPES}`,
+    );
+  }
+  const entries = rawVars as Record<string, unknown>;
+  const supplied: Record<string, string> = {};
+  for (const name of Object.keys(entries).sort()) {
+    const val = entries[name];
+    if (typeof val !== "string") {
+      throw new Error(
+        `configuration.server.variables[${JSON.stringify(name)}] must be a string value: ${SERVER_CONFIG_PINNED_SHAPES}`,
+      );
+    }
+    supplied[name] = val;
+  }
+  return supplied;
 }
 
 /** Selects the effective-set member with the given servers-map key. */
@@ -268,9 +307,16 @@ function fullURLOverride(full: string, def: NamedServer | undefined): ResolvedTa
  * substituted; path from its `pathname` (variables substituted the same
  * way). A member the consumer selects by key must still speak a bound
  * protocol — out-of-revision protocols are refused pre-dispatch, never
- * dialed.
+ * dialed. Supplied server-variable values apply only to the server's own
+ * declared variable names: an undeclared supplied name is refused, never
+ * ignored (no-guess), and a supplied value outside the variable's declared
+ * enum is refused (upstream SHOULD, hardened to a refusal — the
+ * specification's own pin).
  */
-function assembleServer(member: NamedServer): ResolvedTarget {
+function assembleServer(
+  member: NamedServer,
+  supplied?: Record<string, string>,
+): ResolvedTarget {
   const srv = member.server;
   const proto = srv.protocol.toLowerCase();
   if (!isBoundProtocol(proto)) {
@@ -279,8 +325,25 @@ function assembleServer(member: NamedServer): ResolvedTarget {
     );
   }
 
-  const host = substituteServerVariables(member, srv.host);
-  const pathname = substituteServerVariables(member, srv.pathname ?? "");
+  if (supplied) {
+    for (const name of Object.keys(supplied).sort()) {
+      const declared = srv.variables?.[name];
+      if (!declared) {
+        throw new Error(
+          `configuration.server.variables[${JSON.stringify(name)}] names no declared variable of server ${JSON.stringify(member.name)}`,
+        );
+      }
+      const val = supplied[name];
+      if (declared.enum && declared.enum.length > 0 && !declared.enum.includes(val)) {
+        throw new Error(
+          `server ${JSON.stringify(member.name)}: variable ${JSON.stringify(name)} value ${JSON.stringify(val)} is not in the declared enum [${declared.enum.join(", ")}]`,
+        );
+      }
+    }
+  }
+
+  const host = substituteServerVariables(member, srv.host, supplied);
+  const pathname = substituteServerVariables(member, srv.pathname ?? "", supplied);
 
   let base = `${proto}://${host}`;
   if (pathname !== "") base = joinURL(base, pathname);
@@ -293,23 +356,31 @@ function assembleServer(member: NamedServer): ResolvedTarget {
 
 /**
  * Expands every `{name}` expression in a server host or pathname template
- * from the variable's declared default (ASYNC-P-04). §9.2's pin carries no
- * consumer-supplied server-variable values — a consumer needing a
- * non-default connection supplies the complete URL at the server point's
- * {"url": ...} form. An unsubstitutable variable is a pre-dispatch refusal,
- * and literal braces never reach the wire. A default outside its own
- * declared non-empty enum is refused loudly (the declaration's own
- * constraint, incorporated).
+ * from the consumer-supplied value (the key form's `variables` member),
+ * else the variable's declared default (ASYNC-P-04). AsyncAPI declares a
+ * Server Variable's default OPTIONAL, so an undefaulted variable is
+ * satisfiable only by supply; unsupplied and undefaulted is a pre-dispatch
+ * refusal, and literal braces never reach the wire. A value outside the
+ * variable's declared non-empty enum is refused loudly — supplied values
+ * per §9.2's hardened pin, declared defaults per the declaration's own
+ * constraint, incorporated.
  */
-function substituteServerVariables(member: NamedServer, template: string): string {
+function substituteServerVariables(
+  member: NamedServer,
+  template: string,
+  supplied?: Record<string, string>,
+): string {
   let out = template;
   for (const name of templateExpressions(template)) {
     const declared = member.server.variables?.[name];
-    const val = declared?.default;
-    if (val === undefined || val === "") {
-      throw new Error(
-        `server ${JSON.stringify(member.name)}: variable ${JSON.stringify(name)} has no declared default (§9.2 pins no per-variable carriage; supply a complete connection URL at the server configuration point instead)`,
-      );
+    let val = supplied?.[name];
+    if (val === undefined) {
+      val = declared?.default;
+      if (val === undefined || val === "") {
+        throw new Error(
+          `server ${JSON.stringify(member.name)}: variable ${JSON.stringify(name)} has no supplied value and no declared default (supply one at the server configuration point's "variables" member)`,
+        );
+      }
     }
     if (declared?.enum && declared.enum.length > 0 && !declared.enum.includes(val)) {
       throw new Error(
