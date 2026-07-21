@@ -29,7 +29,7 @@
     "build": "tsup",
     "prepack": "tsup",
     "test": "vitest run",
-    "lint": "tsc --noEmit && eslint ."
+    "lint": "tsc --noEmit && tsc -p tsconfig.test.json && eslint ."
   },
   "keywords": [
     "openbindings",
