@@ -198,11 +198,9 @@ function substituteServerVariables(
     if (val === "" && declaredDefault === "") {
       throw new Error(`server "${srv.url}": variable "${name}" has no supplied value and no declared default`);
     }
-    if (Array.isArray(v.enum) && v.enum.length > 0 && !v.enum.includes(val)) {
-      throw new Error(
-        `server "${srv.url}": variable "${name}" value "${val}" is not in the declared enum [${v.enum.join(", ")}]`,
-      );
-    }
+    // A declared enum does not gate the value (§9.3, R1): it is the author's
+    // expectation, not a boundary; a full base-URL override bypasses the
+    // declaration anyway. The OAS does not mandate enum enforcement.
     u = u.replaceAll(`{${name}}`, val);
   }
   for (const name of Object.keys(supplied ?? {})) {

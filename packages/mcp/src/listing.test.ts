@@ -65,7 +65,7 @@ describe("resolveRef (§7, MCP-D-03, MCP-P-02)", () => {
     expect(resolveRef(listing({ tools: ["t"] }), "tools", "t")).toBe("tool");
     expect(resolveRef(listing({ prompts: ["p"] }), "prompts", "p")).toBe("prompt");
     expect(resolveRef(listing({ resources: ["app://x"] }), "resources", "app://x")).toBe("staticResource");
-    expect(resolveRef(listing({ templates: ["app://{id}"] }), "resources", "app://{id}")).toBe("templateResource");
+    expect(resolveRef(listing({ templates: ["app://{id}"] }), "resourceTemplates", "app://{id}")).toBe("templateResource");
   });
 
   it("matches byte-exactly, never by prefix, case fold, or template match", () => {
@@ -77,11 +77,13 @@ describe("resolveRef (§7, MCP-D-03, MCP-P-02)", () => {
     expect(() => resolveRef(listing({ tools: ["tool"] }), "tools", "too")).toThrow(/matches no/);
   });
 
-  it("matches resources before templates when both carry the same identity", () => {
-    // §7: a resources remainder matches first against declared resource
-    // URIs, then against template strings.
+  it("keeps resources and resourceTemplates in separate namespaces (§7, R5): a byte-identical URI and template never collide", () => {
+    // R5: no ordered fall-through. A resource URI and a byte-identical
+    // template uriTemplate coexist; each is reached by its own entity token,
+    // so neither is ambiguous.
     const l = listing({ resources: ["file:///x/{id}"], templates: ["file:///x/{id}"] });
     expect(resolveRef(l, "resources", "file:///x/{id}")).toBe("staticResource");
+    expect(resolveRef(l, "resourceTemplates", "file:///x/{id}")).toBe("templateResource");
   });
 
   it("refuses an ambiguous match loudly, never first-match", () => {
@@ -89,7 +91,7 @@ describe("resolveRef (§7, MCP-D-03, MCP-P-02)", () => {
       [listing({ tools: ["dup", "dup"] }), "tools", "dup", "2 tools"],
       [listing({ prompts: ["dup", "dup", "dup"] }), "prompts", "dup", "3 prompts"],
       [listing({ resources: ["app://d", "app://d"] }), "resources", "app://d", "2 resources"],
-      [listing({ templates: ["a{v}", "a{v}"] }), "resources", "a{v}", "2 resource templates"],
+      [listing({ templates: ["a{v}", "a{v}"] }), "resourceTemplates", "a{v}", "2 resource templates"],
     ] as const) {
       let thrown: unknown;
       try {

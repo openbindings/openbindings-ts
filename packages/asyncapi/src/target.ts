@@ -339,11 +339,10 @@ function assembleServer(
           `configuration.server.variables[${JSON.stringify(name)}] names no declared variable of server ${JSON.stringify(member.name)}`,
         );
       }
-      if (declared.enum && declared.enum.length > 0 && !declared.enum.includes(val)) {
-        throw new Error(
-          `server ${JSON.stringify(member.name)}: variable ${JSON.stringify(name)} value ${JSON.stringify(val)} is not in the declared enum [${declared.enum.join(", ")}]`,
-        );
-      }
+      // A declared enum does not gate the supplied value (§9.2): it is the
+      // author's expectation, not a boundary, and the same point admits a
+      // full-URL override that bypasses the declaration. Undeclared names
+      // still refuse (above); enum values do not.
     }
   }
 
@@ -387,11 +386,8 @@ function substituteServerVariables(
         );
       }
     }
-    if (declared?.enum && declared.enum.length > 0 && !declared.enum.includes(val)) {
-      throw new Error(
-        `server ${JSON.stringify(member.name)}: variable ${JSON.stringify(name)} value ${JSON.stringify(val)} is not in the declared enum [${declared.enum.join(", ")}]`,
-      );
-    }
+    // A declared enum does not gate the value (§9.2): author's expectation,
+    // not a boundary, consistent with the config-server-variables path.
     out = out.replaceAll(`{${name}}`, val);
   }
   if (/[{}]/.test(out)) {
@@ -511,12 +507,8 @@ function expandAddress(
         );
       }
     }
-    const declared = ch.parameters?.[name];
-    if (declared?.enum && declared.enum.length > 0 && !declared.enum.includes(val)) {
-      throw new Error(
-        `channel ${JSON.stringify(channelName)}: address parameter ${JSON.stringify(name)} value ${JSON.stringify(val)} is not in the declared enum [${declared.enum.join(", ")}]`,
-      );
-    }
+    // A declared enum does not gate the value (§9.2): author's expectation,
+    // not a boundary, consistent with the server-variable point.
     out = out.replaceAll(`{${name}}`, val);
   }
   if (/[{}]/.test(out)) {

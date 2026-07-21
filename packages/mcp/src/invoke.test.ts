@@ -12,9 +12,9 @@ describe("parseRef", () => {
     expect(result).toEqual({ entityType: "resources", name: "file:///data.csv" });
   });
 
-  it("parses resource template ref", () => {
-    const result = parseRef("resources/users/{id}");
-    expect(result).toEqual({ entityType: "resources", name: "users/{id}" });
+  it("parses resource template ref under its own entity (R5)", () => {
+    const result = parseRef("resourceTemplates/users/{id}");
+    expect(result).toEqual({ entityType: "resourceTemplates", name: "users/{id}" });
   });
 
   it("parses prompt ref", () => {

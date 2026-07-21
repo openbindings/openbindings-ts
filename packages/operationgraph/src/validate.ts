@@ -1,8 +1,10 @@
 /**
  * Enforces the format spec's validation rules OG-V-01 through OG-V-17 on one
- * graph definition, plus the per-type field whitelists the format's JSON
- * Schema expresses structurally (which is how OG-V-17 and the each/operation
- * field split are caught without a separate schema pass).
+ * graph definition, plus required-field presence and field types. Field
+ * PLACEMENT has one failure only — OG-V-17 (onError on a boundary node),
+ * enforced here as a rule (R3 opened the format's schema, so it no longer
+ * closes objects); any other unknown or misplaced field is tolerated, not
+ * rejected, mirroring core OBI-T-02.
  *
  * `validateGraph` returns structured issues (rule id + offending node keys)
  * so callers like graph editors can attribute failures to nodes; `validate`
@@ -382,8 +384,8 @@ export function validateGraph(
     }
   }
 
-  // Per-node rules: OG-V-11 .. OG-V-15, OG-V-17, plus per-type field
-  // whitelists (the schema's structural enforcement).
+  // Per-node rules: OG-V-11 .. OG-V-15, OG-V-17, plus field types and
+  // required fields.
   for (const [key, node] of Object.entries(g.nodes)) {
     const fields = NODE_FIELD_RULES[node.type];
     if (!fields) {
@@ -397,13 +399,20 @@ export function validateGraph(
 
     for (const f of presentFields(node)) {
       if (!fields.allowed.has(f)) {
-        const isBoundaryOnError =
-          f === "onError" && (node.type === "input" || node.type === "output");
-        issues.push({
-          rule: isBoundaryOnError ? "OG-V-17" : undefined,
-          message: `node "${key}" (${node.type}) does not permit field "${f}"`,
-          nodeKeys: [key],
-        });
+        // The only field-placement failure is the explicit prohibition
+        // OG-V-17 (onError on a boundary node), enforced here as a rule (R10 —
+        // the format's schema no longer closes objects). Any OTHER field the
+        // node type does not define is tolerated, not a failure: per R3 (§20)
+        // an unknown or misplaced field is ignored the way core OBI-T-02
+        // treats one — a defined field on the wrong node type (maxIterations
+        // on operation) included. A diagnostic MAY be surfaced; never a refusal.
+        if (f === "onError" && (node.type === "input" || node.type === "output")) {
+          issues.push({
+            rule: "OG-V-17",
+            message: `node "${key}" (${node.type} node) must not declare onError`,
+            nodeKeys: [key],
+          });
+        }
         continue;
       }
       const ft = FIELD_TYPES[f];

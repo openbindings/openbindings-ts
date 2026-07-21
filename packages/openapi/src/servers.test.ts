@@ -109,13 +109,15 @@ describe("resolveServer — the configuration point", () => {
     );
   });
 
-  it("substitutes supplied variables against the default entry, enum-validated", () => {
+  it("substitutes supplied variables against the default entry; enum informs, does not gate", () => {
     expect(resolveServer(doc, null, null, ctxWith({ variables: { env: "staging" } }), "")).toBe(
       "https://staging.example.com",
     );
-    expect(() =>
-      resolveServer(doc, null, null, ctxWith({ variables: { env: "prod" } }), ""),
-    ).toThrow("enum");
+    // An out-of-enum value is NOT refused (§9.3, R1): the enum is the author's
+    // expectation, not a boundary; a full base-URL override bypasses it anyway.
+    expect(resolveServer(doc, null, null, ctxWith({ variables: { env: "prod" } }), "")).toBe(
+      "https://prod.example.com",
+    );
     expect(() =>
       resolveServer(doc, null, null, ctxWith({ variables: { nope: "x" } }), ""),
     ).toThrow('declares no variable "nope"');

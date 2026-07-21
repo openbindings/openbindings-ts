@@ -141,7 +141,7 @@ describe("pinned listings (MCP-D-01)", () => {
     ["ambiguous tool name", "tools/dup", { tools: [{ name: "dup" }, { name: "dup" }] }, /ambiguous/],
     [
       "ambiguous template",
-      "resources/file:///x/{id}",
+      "resourceTemplates/file:///x/{id}",
       { resourceTemplates: [{ uriTemplate: "file:///x/{id}" }, { uriTemplate: "file:///x/{id}" }] },
       /ambiguous/,
     ],
@@ -180,7 +180,7 @@ describe("pinned listings (MCP-D-01)", () => {
     const pin = { resourceTemplates: [{ uriTemplate: "file:///logs/{date}" }] };
     const call = new MCPInvoker().invokeBinding({
       source: { ...source, content: pin },
-      ref: "resources/file:///logs/{date}",
+      ref: "resourceTemplates/file:///logs/{date}",
       fetch: server.fn,
     });
     await call.write({ date: "2026-07-15" });
@@ -370,7 +370,7 @@ describe("input mapping (§9.1, MCP-P-03)", () => {
 describe("resource templates (§9.1, MCP-P-03)", () => {
   it("expands a live-resolved template per RFC 6570 before resources/read", async () => {
     const server = conformanceServer();
-    const call = new MCPInvoker().invokeBinding({ source, ref: "resources/file:///logs/{date}", fetch: server.fn });
+    const call = new MCPInvoker().invokeBinding({ source, ref: "resourceTemplates/file:///logs/{date}", fetch: server.fn });
     await call.write({ date: "2026-07-15" });
     await expect(single(call.outputs)).resolves.toEqual(["file:///logs/2026-07-15"]);
     // The template was resolved against the live, exhausted template listing.
@@ -385,7 +385,7 @@ describe("resource templates (§9.1, MCP-P-03)", () => {
   // undefined.
   it("expands an absent input with all variables undefined", async () => {
     const server = conformanceServer();
-    const call = new MCPInvoker().invokeBinding({ source, ref: "resources/file:///logs/{date}", fetch: server.fn });
+    const call = new MCPInvoker().invokeBinding({ source, ref: "resourceTemplates/file:///logs/{date}", fetch: server.fn });
     await call.close(); // absent input
     await expect(single(call.outputs)).resolves.toEqual(["file:///logs/"]);
     const reads = server.params("resources/read");
@@ -402,7 +402,7 @@ describe("resource templates (§9.1, MCP-P-03)", () => {
     ["non-object input", "2026-07-15"],
   ])("refuses template input pre-dispatch: %s", async (_name, input) => {
     const server = conformanceServer();
-    const call = new MCPInvoker().invokeBinding({ source, ref: "resources/file:///logs/{date}", fetch: server.fn });
+    const call = new MCPInvoker().invokeBinding({ source, ref: "resourceTemplates/file:///logs/{date}", fetch: server.fn });
     await call.write(input);
     const { vals, err } = await drain(call);
     expect(vals).toEqual([]);

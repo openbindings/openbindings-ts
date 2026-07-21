@@ -186,7 +186,7 @@ describe("address parameters (ASYNC-P-04)", () => {
     }
   });
 
-  it("refuses a supplied parameter value outside the declared enum", async () => {
+  it("does not gate a supplied parameter value on the declared enum (§9.2, R1)", async () => {
     const srv = await startHTTP((_req, res) => {
       res.writeHead(202);
       res.end();
@@ -196,11 +196,13 @@ describe("address parameters (ASYNC-P-04)", () => {
 
     const invoker = new AsyncAPIInvoker();
     try {
+      // The enum is the author's expectation, not a boundary: the value is
+      // substituted and the invocation dispatches.
       const r = await publish(invoker, doc, "#/operations/post", {
         configuration: { address: { parameters: { roomId: "backstage" } } },
       });
-      expect(codeOf(r.err)).toBe("ERR_SOURCE_CONFIG_ERROR");
-      expect(srv.requests()).toBe(0);
+      expect(r.err).toBeUndefined();
+      expect(srv.requests()).toBe(1);
     } finally {
       invoker.close();
     }
@@ -251,19 +253,17 @@ describe("server variables and pathname assembly (ASYNC-P-04)", () => {
       expect(r.err).toBeUndefined();
       expect(srv.lastPath()).toBe("/v2/events");
 
-      // A supplied value outside the variable's declared enum is a
-      // pre-dispatch refusal (upstream SHOULD, hardened to a refusal —
-      // the specification's own pin).
-      const beforeEnum = srv.requests();
+      // A supplied value outside the variable's declared enum is NOT refused
+      // (§9.2, R1): the enum is the author's expectation, not a boundary. The
+      // value substitutes and the invocation dispatches.
       r = await publish(invoker, doc, "#/operations/post", {
         configuration: { server: { key: "test", variables: { version: "v9" } } },
       });
-      expect(codeOf(r.err)).toBe("ERR_SOURCE_CONFIG_ERROR");
-      expect(String(r.err)).toContain("is not in the declared enum");
-      expect(srv.requests()).toBe(beforeEnum);
+      expect(r.err).toBeUndefined();
+      expect(srv.lastPath()).toBe("/v9/events");
 
       // A declared default outside the variable's own declared enum is
-      // refused (the declaration's own constraint, incorporated).
+      // likewise not refused — enum gates neither supplied values nor defaults.
       const badDefault = {
         ...doc,
         servers: {
@@ -276,7 +276,7 @@ describe("server variables and pathname assembly (ASYNC-P-04)", () => {
         },
       };
       r = await publish(invoker, badDefault, "#/operations/post");
-      expect(codeOf(r.err)).toBe("ERR_SOURCE_CONFIG_ERROR");
+      expect(r.err).toBeUndefined();
 
       // No default and no supplied value: pre-dispatch refusal.
       const noDefault = {
