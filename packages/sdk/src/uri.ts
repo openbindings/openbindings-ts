@@ -137,14 +137,17 @@ export function resolveRef(base: string, ref: string): string {
 function normalizePercentEncoding(s: string): string {
   let out = "";
   for (let i = 0; i < s.length; i++) {
-    if (s[i] !== "%" || i + 2 >= s.length) {
-      out += s[i];
+    const c = s.charAt(i);
+    if (c !== "%" || i + 2 >= s.length) {
+      out += c;
       continue;
     }
-    const hi = hexNibble(s[i + 1]);
-    const lo = hexNibble(s[i + 2]);
+    const h1 = s.charAt(i + 1);
+    const h2 = s.charAt(i + 2);
+    const hi = hexNibble(h1);
+    const lo = hexNibble(h2);
     if (hi < 0 || lo < 0) {
-      out += s[i];
+      out += c;
       continue;
     }
     const code = (hi << 4) | lo;
@@ -152,7 +155,7 @@ function normalizePercentEncoding(s: string): string {
     if (UNRESERVED.test(ch)) {
       out += ch;
     } else {
-      out += "%" + s[i + 1].toUpperCase() + s[i + 2].toUpperCase();
+      out += "%" + h1.toUpperCase() + h2.toUpperCase();
     }
     i += 2;
   }

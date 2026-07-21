@@ -187,7 +187,10 @@ export class Normalizer {
     // Same rule and same diagnostic as the Go SDK's resolveRef.
     const isRelative = u.protocol === "resolve:";
     if (isRelative && !ref.startsWith("#")) {
-      const pathPart = ref.split("#")[0].split("?")[0];
+      // split() always yields at least one element, so the defaults never
+      // fire; they exist to type the destructured elements as present.
+      const [beforeHash = ""] = ref.split("#");
+      const [pathPart = ""] = beforeHash.split("?");
       if (pathPart !== "") {
         throw new RefError(pathOrRoot(path), ref, "relative $ref with no base");
       }

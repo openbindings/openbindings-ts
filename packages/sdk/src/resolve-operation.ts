@@ -32,11 +32,11 @@ export function resolveOperation(
   // irrelevant to the result. Own property only: a name such as "constructor"
   // must match an operation the document actually defines, never a Function
   // inherited from the map object's prototype chain.
-  if (Object.hasOwn(ops, name)) return { key: name, operation: ops[name] };
+  const direct = Object.hasOwn(ops, name) ? ops[name] : undefined;
+  if (direct) return { key: name, operation: direct };
 
   // Alias match across the flat namespace.
-  for (const key of Object.keys(ops)) {
-    const op = ops[key];
+  for (const [key, op] of Object.entries(ops)) {
     if (op.aliases?.includes(name)) return { key, operation: op };
   }
 
@@ -49,9 +49,9 @@ export function resolveOperation(
  */
 export function allOperationIdentifiers(iface: OBInterface): string[] {
   const names = new Set<string>();
-  for (const key of Object.keys(iface.operations)) {
+  for (const [key, op] of Object.entries(iface.operations)) {
     names.add(key);
-    for (const a of iface.operations[key].aliases ?? []) names.add(a);
+    for (const a of op.aliases ?? []) names.add(a);
   }
   return [...names].sort();
 }

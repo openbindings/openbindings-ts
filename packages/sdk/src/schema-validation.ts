@@ -201,15 +201,13 @@ export function validateExamplesAgainstOpSchemas(
   errs: string[],
   iface: OBInterface,
 ): void {
-  const operations = iface.operations ?? {};
-  const opKeys = Object.keys(operations);
-  if (opKeys.length === 0) return;
+  const opEntries = Object.entries(iface.operations ?? {});
+  if (opEntries.length === 0) return;
   const defs = buildSchemaDefs(iface.schemas);
   // If any document schema carries an external $ref, the compound schema
   // space is not fully resolvable locally; abstain across the board.
   const defsExternal = schemaHasExternalRef(defs);
-  for (const opKey of opKeys) {
-    const op = operations[opKey];
+  for (const [opKey, op] of opEntries) {
     if (!op.examples) continue;
 
     let inputValidator: CompiledSchema | undefined;
@@ -232,8 +230,7 @@ export function validateExamplesAgainstOpSchemas(
         );
       }
     }
-    for (const exKey of Object.keys(op.examples)) {
-      const ex = op.examples[exKey];
+    for (const [exKey, ex] of Object.entries(op.examples)) {
       if (ex.input !== undefined && inputValidator) {
         const r = safeValidate(inputValidator, ex.input);
         if (!r.valid) {
@@ -302,7 +299,10 @@ export function compileExampleSchema(
   if (typeof root === "object" && root !== null) {
     const meta = metaValidator().validate(root);
     if (!meta.valid) {
-      const first = meta.failures[0];
+      // An invalid result normally carries at least one failure; if the
+      // backend ever reports invalid without details, fall back to the
+      // same generic diagnostic wrapNode uses.
+      const first = meta.failures[0] ?? { path: "", message: "schema violation" };
       throw new Error(
         `schema does not conform to JSON Schema 2020-12: ${first.path ? first.path + ": " : ""}${first.message}`,
       );
@@ -451,7 +451,9 @@ function resolveRefTarget(
   } catch {
     return fail();
   }
-  const [resourceUri, fragment = ""] = uri.split("#", 2);
+  // split() always yields at least one element, so resourceUri's default
+  // never fires; it exists to type the destructured element as present.
+  const [resourceUri = "", fragment = ""] = uri.split("#", 2);
   const resource = idResources.get(resourceUri);
   if (!resource) return fail();
   const target = resolveFragment(fragment, resource, resourceUri);

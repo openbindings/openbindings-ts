@@ -27,7 +27,9 @@ const runner = join(pkgRoot, "scripts", "run-conformance.ts");
 // SDK's own constants so the fixture cannot rot when the range moves.
 // MAX_TESTED_VERSION is 0.x: acceptance is patch-lenient within the tested
 // minor line and refuses any other pre-1.0 minor, in both directions.
-const [major, minor] = MAX_TESTED_VERSION.split(".").map(Number);
+// MAX_TESTED_VERSION is a SemVer constant, so both components always exist;
+// the NaN defaults would only fire (and fail the fixtures loudly) if it rotted.
+const [major = NaN, minor = NaN] = MAX_TESTED_VERSION.split(".").map(Number);
 const acceptedExact = MAX_TESTED_VERSION; // accepted: the tested version itself
 const acceptedPatchAbove = `${major}.${minor}.99`; // accepted: higher patch, same minor
 const refusedMinorAbove = `${major}.${minor + 1}.0`; // refused: higher pre-1.0 minor

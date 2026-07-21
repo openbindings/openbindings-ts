@@ -39,6 +39,14 @@ const IDENT_PATTERN = /^[A-Za-z0-9_][A-Za-z0-9_.-]*$/;
 
 const DRAFT_2020_12_URI = "https://json-schema.org/draft/2020-12/schema";
 
+// Entries of a possibly-absent map in ascending key order. The comparator is
+// code-unit `<`/`>` — the same ordering as Object.keys(map).sort() — so error
+// output is byte-identical to the keys-then-index form this replaces, while
+// iterating entries keeps each value typed as present.
+function sortedEntries<T>(map: Record<string, T> | undefined): [string, T][] {
+  return Object.entries(map ?? {}).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+}
+
 // JSON Schema 2020-12 keywords whose values are { name -> schema } maps.
 const SCHEMA_MAP_KEYWORDS = new Set([
   "properties", "patternProperties", "$defs", "definitions", "dependentSchemas",
@@ -105,25 +113,21 @@ export function validateInterface(
   // checked for well-formedness against the 2020-12 meta-schemas (OBI-D-17)
   // and walked for OBI-D-05 ($ref URI), OBI-D-06 ($schema dialect), OBI-D-07
   // (no $vocabulary).
-  if (iface.schemas) {
-    for (const k of Object.keys(iface.schemas).sort()) {
-      validateIdent(errs, "schemas key", k);
-      validateSchemaWellFormedness(errs, `schemas["${k}"]`, iface.schemas[k]);
-      walkSchema(errs, `schemas["${k}"]`, iface.schemas[k], iface, false);
-    }
+  for (const [k, schema] of sortedEntries(iface.schemas)) {
+    validateIdent(errs, "schemas key", k);
+    validateSchemaWellFormedness(errs, `schemas["${k}"]`, schema);
+    walkSchema(errs, `schemas["${k}"]`, schema, iface, false);
   }
 
   if (!iface.operations) {
     errs.push("operations: required");
   }
 
-  const opKeys = Object.keys(iface.operations ?? {}).sort();
+  const opEntries = sortedEntries(iface.operations);
   const aliasOwner = new Map<string, string>();
-  const opKeySet = new Set(opKeys);
+  const opKeySet = new Set(opEntries.map(([k]) => k));
 
-  for (const k of opKeys) {
-    const op = iface.operations[k];
-
+  for (const [k, op] of opEntries) {
     // OBI-D-03: operation keys must match the identifier pattern.
     validateIdent(errs, "operations key", k);
 
@@ -182,10 +186,9 @@ export function validateInterface(
     }
   }
 
-  for (const k of Object.keys(iface.sources ?? {}).sort()) {
+  for (const [k, src] of sortedEntries(iface.sources)) {
     // OBI-D-03: source keys must match the identifier pattern.
     validateIdent(errs, "sources key", k);
-    const src = iface.sources![k];
     // The spec requires bindingSpec to be a non-empty string but
     // deliberately does not constrain its syntax; identifiers are exact and
     // opaque (core §6), and rejecting unrecognized spellings at document
@@ -213,16 +216,15 @@ export function validateInterface(
   // jsonata-js 2.1.1 parse-acceptance tiebreak). Parse-only: evaluation
   // failures (undefined results, dynamic errors) remain invoke-time
   // outcomes per OBI-T-10 / ERR_TRANSFORM_ERROR.
-  for (const k of Object.keys(iface.transforms ?? {}).sort()) {
+  for (const [k, transform] of sortedEntries(iface.transforms)) {
     // OBI-D-03: transform keys must match the identifier pattern.
     validateIdent(errs, "transforms key", k);
-    validateInlineTransform(errs, `transforms["${k}"]`, iface.transforms![k]);
+    validateInlineTransform(errs, `transforms["${k}"]`, transform);
   }
 
-  for (const k of Object.keys(iface.bindings ?? {}).sort()) {
+  for (const [k, b] of sortedEntries(iface.bindings)) {
     // OBI-D-03: binding keys must match the identifier pattern.
     validateIdent(errs, "bindings key", k);
-    const b = iface.bindings![k];
     // OBI-D-08: bindings[*].operation must reference an existing operation.
     // The lookup is own-property only: document-supplied keys such as
     // "constructor"/"toString" must resolve against the document's own map,

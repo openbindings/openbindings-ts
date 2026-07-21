@@ -117,8 +117,9 @@ function findPairedOp(
   rightOps: Record<string, OBOperation>,
   leftAliasIndex: Map<string, string>,
 ): { rightKey: string; rightOp: OBOperation } | null {
-  if (leftKey in rightOps) {
-    return { rightKey: leftKey, rightOp: rightOps[leftKey] };
+  const direct = rightOps[leftKey];
+  if (direct) {
+    return { rightKey: leftKey, rightOp: direct };
   }
   for (const [rk, op] of Object.entries(rightOps)) {
     const lk = leftAliasIndex.get(rk);
@@ -224,7 +225,7 @@ async function runIdenticalFixture(
 ): Promise<string> {
   for (const [opKey, leftOp] of Object.entries(fix.left.operations)) {
     const rightOp = fix.right.operations[opKey];
-    expect(rightOp, `operation "${opKey}" in left but not in right`).toBeDefined();
+    if (!rightOp) throw new Error(`operation "${opKey}" in left but not in right`);
 
     const leftSchema = fixtureSchemaObjectForm(directionSchema(entry.direction, leftOp)) ?? {};
     const rightSchema = fixtureSchemaObjectForm(directionSchema(entry.direction, rightOp)) ?? {};

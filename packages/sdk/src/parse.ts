@@ -206,7 +206,7 @@ class JSONDuplicateKeyScanner {
 
   private parseNumber(): void {
     const start = this.pos;
-    while (this.pos < this.text.length && /[0-9eE+\-.]/.test(this.text[this.pos])) {
+    while (this.pos < this.text.length && /[0-9eE+\-.]/.test(this.text.charAt(this.pos))) {
       this.pos++;
     }
     if (start === this.pos) {
@@ -233,7 +233,7 @@ class JSONDuplicateKeyScanner {
   }
 
   private skipWhitespace(): void {
-    while (this.pos < this.text.length && /\s/.test(this.text[this.pos])) {
+    while (this.pos < this.text.length && /\s/.test(this.text.charAt(this.pos))) {
       this.pos++;
     }
   }

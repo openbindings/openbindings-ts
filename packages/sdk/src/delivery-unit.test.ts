@@ -78,7 +78,7 @@ describe("OperationInvoker delivery-unit stamping", () => {
     const call = op.invokeBinding({ source: { bindingSpec: "test.spec@1" }, ref: "" });
     await call.closed;
     expect(seen).toHaveLength(1);
-    expect(seen[0].maxDeliveryUnitBytes).toBe(2048);
+    expect(seen[0]?.maxDeliveryUnitBytes).toBe(2048);
   });
 
   it("never overrides args that already carry a bound", async () => {
@@ -90,7 +90,8 @@ describe("OperationInvoker delivery-unit stamping", () => {
       maxDeliveryUnitBytes: 512,
     });
     await call.closed;
-    expect(seen[0].maxDeliveryUnitBytes).toBe(512);
+    expect(seen).toHaveLength(1);
+    expect(seen[0]?.maxDeliveryUnitBytes).toBe(512);
   });
 
   it("leaves the field absent when the invoker has no bound (formats then default)", async () => {
@@ -98,7 +99,9 @@ describe("OperationInvoker delivery-unit stamping", () => {
     const op = new OperationInvoker([invoker]);
     const call = op.invokeBinding({ source: { bindingSpec: "test.spec@1" }, ref: "" });
     await call.closed;
-    expect(seen[0].maxDeliveryUnitBytes).toBeUndefined();
+    // Length asserted first so the optional chain cannot mask an empty array.
+    expect(seen).toHaveLength(1);
+    expect(seen[0]?.maxDeliveryUnitBytes).toBeUndefined();
   });
 
   it("rides withRuntime copies", async () => {
@@ -106,6 +109,7 @@ describe("OperationInvoker delivery-unit stamping", () => {
     const op = new OperationInvoker([invoker], { maxDeliveryUnitBytes: 4096 }).withRuntime();
     const call = op.invokeBinding({ source: { bindingSpec: "test.spec@1" }, ref: "" });
     await call.closed;
-    expect(seen[0].maxDeliveryUnitBytes).toBe(4096);
+    expect(seen).toHaveLength(1);
+    expect(seen[0]?.maxDeliveryUnitBytes).toBe(4096);
   });
 });

@@ -166,8 +166,11 @@ function compareSemver(a: Semver, b: Semver): number {
   // Both have pre-release: compare identifiers left-to-right.
   const len = Math.min(a.preRelease.length, b.preRelease.length);
   for (let i = 0; i < len; i++) {
-    const ai = a.preRelease[i];
-    const bi = b.preRelease[i];
+    const ai = a.preRelease.at(i);
+    const bi = b.preRelease.at(i);
+    // i < min(a.preRelease.length, b.preRelease.length): both reads are in
+    // bounds; the guard exists for the type system.
+    if (ai === undefined || bi === undefined) break;
     const aNum = isNumericIdent(ai);
     const bNum = isNumericIdent(bi);
     if (aNum && bNum) {
