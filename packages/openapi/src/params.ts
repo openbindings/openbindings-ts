@@ -302,7 +302,10 @@ export function routeParameter(r: RoutedInput, p: OpenAPIParameter, value: unkno
  */
 export function serializeParamContent(p: OpenAPIParameter, value: unknown): string {
   const content = p.content as Record<string, unknown>;
-  const mediaKey = Object.keys(content)[0]; // the OAS requires exactly one entry
+  // The OAS requires exactly one entry; a malformed empty map yields the
+  // zero-value key and falls to the loud no-carriage refusal below (Go
+  // parity: the zero mediaKey takes the same path).
+  const mediaKey = Object.keys(content)[0] ?? "";
   const mt = normalizeMediaType(mediaKey);
   if (isJSONMediaType(mt)) {
     return JSON.stringify(value);
@@ -611,7 +614,8 @@ const RESERVED_ESCAPES: Record<string, string> = {
 export function queryEscape(s: string, allowReserved: boolean): string {
   const escaped = encodeURIComponent(s);
   if (!allowReserved) return escaped;
-  return escaped.replace(/%(3A|2F|3F|23|5B|5D|40|24|26|2B|2C|3B|3D)/g, (m) => RESERVED_ESCAPES[m]);
+  // Every alternative the regex admits has a table entry; the fallback is inert.
+  return escaped.replace(/%(3A|2F|3F|23|5B|5D|40|24|26|2B|2C|3B|3D)/g, (m) => RESERVED_ESCAPES[m] ?? m);
 }
 
 /**

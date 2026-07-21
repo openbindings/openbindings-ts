@@ -46,7 +46,10 @@ export function parseRef(ref: string): { path: string; method: string } {
       `ref "${ref}" must be a JSON Pointer of the form #/paths/<escaped-path>/<method>: the path segment carries RFC 6901 escaping ("/" → "~1") (OAPI-D-03)`,
     );
   }
-  const [escapedPath, method] = parts;
+  // parts.length === 2 was just checked, so both segments exist; the ""
+  // fallbacks are unreachable (and "" would refuse at the method check).
+  const escapedPath = parts[0] ?? "";
+  const method = parts[1] ?? "";
   if (!VALID_METHODS.has(method)) {
     if (VALID_METHODS.has(method.toLowerCase())) {
       throw new Error(

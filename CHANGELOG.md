@@ -295,6 +295,18 @@
 
 ### Fixed
 
+- **`@openbindings/graphql`: a subscription `next` frame whose `errors`
+  array carries a malformed element settles as a structured error, never a
+  TypeError.** A broken or hostile graphql-transport-ws server sending
+  `{"type": "next", "payload": {"errors": [null]}}` (any non-object first
+  element) crashed the WebSocket message handler with an uncaught
+  `TypeError: Cannot read properties of null (reading 'message')`, stranding
+  the invocation with no settled error until the socket happened to close.
+  The frame now surfaces as the same `ERR_EXECUTION_FAILED` a well-formed
+  errors array gets, with an empty message and the raw `errors` carried in
+  the error details (Go parity: a `null` element unmarshals to the zero
+  `graphqlError`). Red-proven in the subscription suite.
+
 - **`@openbindings/openapi`: a typeless request-body schema rides the
   synthetic `body` property on the wire, matching the published contract**
   (`openbindings.openapi@1` §9.1's declaration-only object determination:

@@ -163,13 +163,14 @@ export class OpenAPISynthesizer implements InterfaceSynthesizer, SourceInspector
     input: SynthesizeInput,
     options?: { signal?: AbortSignal },
   ): Promise<OBInterface> {
-    if (!input.sources?.length) {
+    const sources = input.sources ?? [];
+    const src = sources[0];
+    if (src === undefined) {
       throw new NoSourcesError();
     }
-    if (input.sources.length > 1) {
+    if (sources.length > 1) {
       throw new MultipleSourcesError();
     }
-    const src = input.sources[0];
     const iface = await convertToInterface(src.location, src.content, options, input.onWarning);
     // Content-fed synthesis: the emitted source must stay invocable. A
     // source needs location or content; with no location, dropping the

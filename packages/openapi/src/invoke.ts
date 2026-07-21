@@ -521,8 +521,8 @@ export function decodeTextLane(contentType: string | null, bytes: Uint8Array): s
       }
     case "us-ascii":
     case "ascii": {
-      for (let i = 0; i < bytes.length; i++) {
-        if (bytes[i] >= 0x80) {
+      for (const [i, b] of bytes.entries()) {
+        if (b >= 0x80) {
           throw new InvocationError(
             ERR_RESPONSE_ERROR,
             `response body byte ${i} is not valid US-ASCII (the declared charset)`,
@@ -549,8 +549,8 @@ export function decodeTextLane(contentType: string | null, bytes: Uint8Array): s
 
 function latin1String(bytes: Uint8Array): string {
   let out = "";
-  for (let i = 0; i < bytes.length; i++) {
-    out += String.fromCharCode(bytes[i]);
+  for (const b of bytes) {
+    out += String.fromCharCode(b);
   }
   return out;
 }

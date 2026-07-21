@@ -517,7 +517,10 @@ export async function* subscribeGraphQL(
       case "next": {
         const p = msg.payload as { data?: unknown; errors?: Array<{ message: string }> } | undefined;
         if (p?.errors?.length) {
-          finish({ error: new InvocationError(ERR_EXECUTION_FAILED, p.errors[0].message, { errors: p.errors }) });
+          // A malformed first element (e.g. JSON null) still surfaces as
+          // the structured error with an empty message — Go parity: a null
+          // element unmarshals to the zero graphqlError — never a TypeError.
+          finish({ error: new InvocationError(ERR_EXECUTION_FAILED, p.errors[0]?.message ?? "", { errors: p.errors }) });
         } else if (queue.length >= MAX_QUEUED_EVENTS) {
           // The consumer is not draining; fail the stream rather than
           // buffer without bound, and stop the inflow at the socket.

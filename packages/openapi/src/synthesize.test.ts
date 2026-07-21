@@ -94,13 +94,13 @@ describe("convertToInterface", () => {
     expect(iface.operations["createUser"]).toBeDefined();
     expect(iface.operations["getUser"]).toBeDefined();
     expect(iface.operations["deleteUser"]).toBeDefined();
-    expect(iface.operations["deleteUser"].deprecated).toBe(true);
+    expect(iface.operations["deleteUser"]?.deprecated).toBe(true);
   });
 
   it("generates input schemas from parameters", async () => {
     const iface = await convertToInterface(undefined, MINIMAL_SPEC);
 
-    const listInput = iface.operations["listUsers"].input as Record<string, unknown>;
+    const listInput = iface.operations["listUsers"]?.input as Record<string, unknown>;
     expect(listInput).toBeDefined();
     expect(listInput.type).toBe("object");
     const props = listInput.properties as Record<string, unknown>;
@@ -110,7 +110,7 @@ describe("convertToInterface", () => {
   it("generates input schemas from request body", async () => {
     const iface = await convertToInterface(undefined, MINIMAL_SPEC);
 
-    const synthesizeInput = iface.operations["createUser"].input as Record<string, unknown>;
+    const synthesizeInput = iface.operations["createUser"]?.input as Record<string, unknown>;
     expect(synthesizeInput).toBeDefined();
     const props = synthesizeInput.properties as Record<string, unknown>;
     expect(props["name"]).toEqual({ type: "string" });
@@ -122,10 +122,10 @@ describe("convertToInterface", () => {
   it("generates output schemas from 200/201 responses", async () => {
     const iface = await convertToInterface(undefined, MINIMAL_SPEC);
 
-    expect(iface.operations["listUsers"].output).toEqual({
+    expect(iface.operations["listUsers"]?.output).toEqual({
       type: "array", items: { type: "object" },
     });
-    expect(iface.operations["createUser"].output).toEqual({
+    expect(iface.operations["createUser"]?.output).toEqual({
       type: "object", properties: { id: { type: "string" } },
     });
   });
@@ -133,7 +133,7 @@ describe("convertToInterface", () => {
   it("merges path-level parameters into operation", async () => {
     const iface = await convertToInterface(undefined, MINIMAL_SPEC);
 
-    const getInput = iface.operations["getUser"].input as Record<string, unknown>;
+    const getInput = iface.operations["getUser"]?.input as Record<string, unknown>;
     expect(getInput).toBeDefined();
     const props = getInput.properties as Record<string, unknown>;
     expect(props["id"]).toBeDefined();
@@ -143,18 +143,18 @@ describe("convertToInterface", () => {
   it("creates bindings with JSON pointer refs", async () => {
     const iface = await convertToInterface(undefined, MINIMAL_SPEC);
 
-    const binding = iface.bindings!["listUsers.openapi"];
+    const binding = iface.bindings?.["listUsers.openapi"];
     expect(binding).toBeDefined();
-    expect(binding.operation).toBe("listUsers");
-    expect(binding.source).toBe("openapi");
-    expect(binding.ref).toBe("#/paths/~1users/get");
+    expect(binding?.operation).toBe("listUsers");
+    expect(binding?.source).toBe("openapi");
+    expect(binding?.ref).toBe("#/paths/~1users/get");
   });
 
   it("creates source entries", async () => {
     const iface = await convertToInterface(undefined, MINIMAL_SPEC);
 
     expect(iface.sources?.["openapi"]).toBeDefined();
-    expect(iface.sources?.["openapi"].bindingSpec).toBe("openbindings.openapi@1");
+    expect(iface.sources?.["openapi"]?.bindingSpec).toBe("openbindings.openapi@1");
   });
 
   it("handles specs with no paths", async () => {
@@ -203,7 +203,7 @@ describe("convertToInterface", () => {
       "https://example.com/api.json",
       { openapi: "3.0.0", info: { title: "Located" }, paths: {} },
     );
-    expect(iface.sources?.["openapi"].location).toBe("https://example.com/api.json");
+    expect(iface.sources?.["openapi"]?.location).toBe("https://example.com/api.json");
   });
 
   it("does not emit a security section (auth is negotiated at invoke time)", async () => {
@@ -230,7 +230,9 @@ describe("convertToInterface", () => {
     // Security schemes stay in the OpenAPI source; the binding invoker
     // derives requirements from them at invoke time (CONTEXT_REQUIRED).
     expect(iface.security).toBeUndefined();
-    expect(iface.bindings!["listItems.openapi"].security).toBeUndefined();
+    const listItems = iface.bindings?.["listItems.openapi"];
+    expect(listItems).toBeDefined();
+    expect(listItems?.security).toBeUndefined();
   });
 });
 
@@ -267,7 +269,7 @@ describe("convertToInterface — OpenAPI 3.0 dialect translation", () => {
 
   it("translates nullable: true in 3.0 documents to type arrays with 'null'", async () => {
     const iface = await convertToInterface(undefined, SPEC_30_NULLABLE);
-    const output = iface.operations["abilityList"].output as Record<string, unknown>;
+    const output = iface.operations["abilityList"]?.output as Record<string, unknown>;
     const props = output.properties as Record<string, Record<string, unknown>>;
     expect(props["next"]).toEqual({ type: ["string", "null"], format: "uri" });
     expect(props["previous"]).toEqual({ type: ["string", "null"], format: "uri" });
@@ -276,7 +278,7 @@ describe("convertToInterface — OpenAPI 3.0 dialect translation", () => {
 
   it("stamps the exact identifier for 3.0.x sources (the artifact version drives dialect only)", async () => {
     const iface = await convertToInterface(undefined, SPEC_30_NULLABLE);
-    expect(iface.sources?.["openapi"].bindingSpec).toBe("openbindings.openapi@1");
+    expect(iface.sources?.["openapi"]?.bindingSpec).toBe("openbindings.openapi@1");
   });
 
   it("preserves 3.1 schemas verbatim (already 2020-12)", async () => {
@@ -309,7 +311,7 @@ describe("convertToInterface — OpenAPI 3.0 dialect translation", () => {
       },
     };
     const iface = await convertToInterface(undefined, spec31);
-    const output = iface.operations["x"].output as Record<string, unknown>;
+    const output = iface.operations["x"]?.output as Record<string, unknown>;
     const props = output.properties as Record<string, Record<string, unknown>>;
     expect(props["next"]).toEqual({ type: ["string", "null"], format: "uri" });
     // The inert nullable: true survives untouched in 3.1 — we don't second-guess.
@@ -343,7 +345,7 @@ describe("convertToInterface — OpenAPI 3.0 dialect translation", () => {
       },
     };
     const iface = await convertToInterface(undefined, spec30);
-    const input = iface.operations["q"].input as Record<string, unknown>;
+    const input = iface.operations["q"]?.input as Record<string, unknown>;
     const props = input.properties as Record<string, Record<string, unknown>>;
     expect(props["page"]).toEqual({
       type: "integer",
@@ -409,7 +411,7 @@ describe("free-form object bodies", () => {
     const iface = await convertToInterface(undefined, specWithBody({ type: "object" }));
     // No parameters and no named properties: the flattened surface is the
     // open object itself — never a synthetic `body` wrap, never absent.
-    expect(iface.operations["makeThing"].input).toEqual({ type: "object" });
+    expect(iface.operations["makeThing"]?.input).toEqual({ type: "object" });
   });
 
   it("still wraps a NON-object body schema under the synthetic body property", async () => {
@@ -417,7 +419,7 @@ describe("free-form object bodies", () => {
       undefined,
       specWithBody({ type: "array", items: { type: "integer" } }),
     );
-    const input = iface.operations["makeThing"].input as Record<string, unknown>;
+    const input = iface.operations["makeThing"]?.input as Record<string, unknown>;
     const props = input.properties as Record<string, unknown>;
     expect(props["body"]).toMatchObject({ type: "array" });
     expect(input.required).toEqual(["body"]);
@@ -425,7 +427,7 @@ describe("free-form object bodies", () => {
 
   it("treats a single-element 3.1 type array [\"object\"] as object-typed", async () => {
     const iface = await convertToInterface(undefined, specWithBody({ type: ["object"] }));
-    expect(iface.operations["makeThing"].input).toEqual({ type: "object" });
+    expect(iface.operations["makeThing"]?.input).toEqual({ type: "object" });
   });
 
   // The round trip the wrap used to break: the synthesized open surface's
@@ -483,9 +485,9 @@ describe("param/body field collision", () => {
       onWarning: (w) => warnings.push(w),
     });
     expect(warnings).toHaveLength(1);
-    expect(warnings[0].code).toBe("openapi.param_body_collision");
-    expect(warnings[0].path).toBe("operations.updateUser.input.properties.id");
-    const props = (iface.operations.updateUser.input as { properties: Record<string, unknown> })
+    expect(warnings[0]?.code).toBe("openapi.param_body_collision");
+    expect(warnings[0]?.path).toBe("operations.updateUser.input.properties.id");
+    const props = (iface.operations.updateUser?.input as { properties: Record<string, unknown> })
       .properties;
     expect(Object.keys(props).sort()).toEqual(["id", "name"]);
   });
@@ -604,14 +606,14 @@ describe("typeless request-body contract", () => {
       sources: [{ bindingSpec: "openbindings.openapi@1", content: spec }],
     });
 
-    const opaque = iface.operations.sendOpaque.input as {
+    const opaque = iface.operations.sendOpaque?.input as {
       properties: Record<string, unknown>;
       required?: string[];
     };
     expect(Object.keys(opaque.properties)).toEqual(["body"]);
     expect(opaque.required).toEqual(["body"]);
 
-    const named = iface.operations.sendNamed.input as {
+    const named = iface.operations.sendNamed?.input as {
       properties: Record<string, unknown>;
     };
     expect(Object.keys(named.properties)).toEqual(["name"]);

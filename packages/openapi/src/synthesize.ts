@@ -277,7 +277,8 @@ function preferJsonMediaType(content: Record<string, OpenAPIMediaType>): OpenAPI
   for (const k of keys) {
     if (k.includes("json")) return content[k];
   }
-  return keys.length > 0 ? content[keys[0]] : undefined;
+  const first = keys[0];
+  return first !== undefined ? content[first] : undefined;
 }
 
 function sortedEntries(obj: Record<string, unknown>): [string, unknown][] {
