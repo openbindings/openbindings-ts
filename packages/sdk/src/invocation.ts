@@ -164,6 +164,33 @@ export function contextRequiredError(
   return new InvocationError(CONTEXT_REQUIRED, message, details);
 }
 
+/**
+ * Builds a `config.value` {@link ContextRequirement} — the binding-invoker
+ * family for a non-secret configuration value a binding needs but the artifact
+ * does not supply (a server variable with no default, a channel address a
+ * service generates at runtime). `point` names the binding-specification
+ * configuration point ("server", "address", …); `key` names the specific
+ * value within it (a server-variable name, or "address" for a whole channel
+ * address); `choices` carries the artifact's declared allowed values when it
+ * enumerates them (advisory picker metadata, never a gate). `durable` defaults
+ * to true; pass `false` for a per-invocation value (a runtime-generated
+ * address). The resolved value is carried in the `configuration` context field
+ * under `point`; its shape there is the invoker's own, so this requirement
+ * names what is needed, not the resolved structure.
+ */
+export function configValueRequirement(
+  point: string,
+  key: string,
+  description: string,
+  choices?: string[],
+  durable?: boolean,
+): ContextRequirement {
+  const req: ContextRequirement = { type: "config.value", point, key, description };
+  if (choices && choices.length > 0) req.choices = choices;
+  if (durable !== undefined) req.durable = durable;
+  return req;
+}
+
 /** Narrows a terminal error to a CONTEXT_REQUIRED challenge with usable details. */
 export function isContextRequired(
   err: unknown,

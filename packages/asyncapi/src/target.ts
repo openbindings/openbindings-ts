@@ -114,6 +114,27 @@ const NO_RESOLVABLE_SERVER =
   "no resolvable server: the effective server set declares no server with a supported protocol (http, https, ws, wss)";
 
 /**
+ * The typed signal a resolution helper throws when a named configuration point
+ * cannot resolve because a value is absent (no default, no supplied value) — a
+ * resolvable-missing value, not a malformed one. The invoke path turns it into
+ * a config.value CONTEXT_REQUIRED challenge (retryable after resolution, R1a)
+ * rather than a terminal ERR_SOURCE_CONFIG_ERROR. config values are non-secret,
+ * so no credential-grade target keying is needed.
+ */
+export class ConfigRequired extends Error {
+  constructor(
+    readonly point: string,
+    readonly key: string,
+    message: string,
+    readonly choices?: string[],
+    readonly durable?: boolean,
+  ) {
+    super(message);
+    this.name = "ConfigRequired";
+  }
+}
+
+/**
  * Resolves the server configuration point for the operation's channel
  * (ASYNC-P-04): consumer configuration may select another member of the
  * effective set or supply a complete connection URL outright; the default
@@ -163,7 +184,12 @@ export function resolveTarget(
     return fullURLOverride(base, def);
   }
 
-  if (!def) throw new Error(NO_RESOLVABLE_SERVER);
+  if (!def)
+    throw new ConfigRequired(
+      "server",
+      "url",
+      `${NO_RESOLVABLE_SERVER}; supply a connection URL at the server configuration point`,
+    );
   return assembleServer(def);
 }
 
@@ -381,8 +407,11 @@ function substituteServerVariables(
     if (val === undefined) {
       val = declared?.default;
       if (val === undefined || val === "") {
-        throw new Error(
+        throw new ConfigRequired(
+          "server",
+          name,
           `server ${JSON.stringify(member.name)}: variable ${JSON.stringify(name)} has no supplied value and no declared default (supply one at the server configuration point's "variables" member)`,
+          declared?.enum,
         );
       }
     }
@@ -474,8 +503,14 @@ export function resolveAddress(
     return cfg.address;
   }
   if (!ch || !ch.address) {
-    throw new Error(
-      `channel ${JSON.stringify(channelName)} declares no address and none was supplied at the address configuration point: an absent address is a refusal, never a guess`,
+    // AsyncAPI's address:null "generated dynamically at runtime" case:
+    // resolvable by consumer supply, and per-invocation (not persisted).
+    throw new ConfigRequired(
+      "address",
+      "address",
+      `channel ${JSON.stringify(channelName)} declares no address and none was supplied at the address configuration point (AsyncAPI's runtime-generated address); supply one`,
+      undefined,
+      false,
     );
   }
   return expandAddress(ch, ch.address, channelName, cfg.parameters);
@@ -502,8 +537,11 @@ function expandAddress(
       if (declared?.default) {
         val = declared.default;
       } else {
-        throw new Error(
+        throw new ConfigRequired(
+          "address",
+          name,
           `channel ${JSON.stringify(channelName)}: address parameter ${JSON.stringify(name)} has no supplied value and no declared default`,
+          declared?.enum,
         );
       }
     }

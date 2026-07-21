@@ -109,6 +109,18 @@ function codeOf(err: Error | undefined): string | undefined {
   return (err as { code?: string } | undefined)?.code;
 }
 
+/** Narrows a CONTEXT_REQUIRED terminal to its single config.value requirement. */
+function configReq(err: Error | undefined): { type: string; point?: string; key?: string; durable?: boolean } {
+  const details = (err as { details?: { alternatives?: { requirements?: unknown[] }[] } } | undefined)?.details;
+  const req = details?.alternatives?.[0]?.requirements?.[0] as
+    | { type: string; point?: string; key?: string; durable?: boolean }
+    | undefined;
+  if (!req || req.type !== "config.value") {
+    throw new Error(`expected a config.value requirement, got ${JSON.stringify(req)}`);
+  }
+  return req;
+}
+
 /** One publish round-trip: write one value, close input, drain. Writes are
  * tolerant of a pre-dispatch refusal landing first (the refusal is the
  * asserted surface, via the returned terminal). */
@@ -176,10 +188,13 @@ describe("address parameters (ASYNC-P-04)", () => {
       expect(r.err).toBeUndefined();
       expect(srv.lastPath()).toBe("/rooms/ops/audit");
 
-      // Unresolved after defaults: pre-dispatch refusal, braces never dialed.
+      // Unresolved after defaults: braces never dialed. R1a: a resolvable-
+      // missing address parameter is a config.value CONTEXT_REQUIRED, not a
+      // terminal ERR_SOURCE_CONFIG_ERROR.
       const before = srv.requests();
       r = await publish(invoker, paramDoc(srv.port), "#/operations/post");
-      expect(codeOf(r.err)).toBe("ERR_SOURCE_CONFIG_ERROR");
+      expect(codeOf(r.err)).toBe("CONTEXT_REQUIRED");
+      expect(configReq(r.err).point).toBe("address");
       expect(srv.requests()).toBe(before);
     } finally {
       invoker.close();
@@ -292,7 +307,11 @@ describe("server variables and pathname assembly (ASYNC-P-04)", () => {
       };
       const before = srv.requests();
       r = await publish(invoker, noDefault, "#/operations/post");
-      expect(codeOf(r.err)).toBe("ERR_SOURCE_CONFIG_ERROR");
+      // R1a: an undefaulted, unsupplied server variable is a config.value
+      // CONTEXT_REQUIRED, not a terminal ERR_SOURCE_CONFIG_ERROR.
+      expect(codeOf(r.err)).toBe("CONTEXT_REQUIRED");
+      expect(configReq(r.err).point).toBe("server");
+      expect(configReq(r.err).key).toBe("version");
       expect(srv.requests()).toBe(before);
 
       // The same undefaulted variable IS satisfiable by supply — AsyncAPI
@@ -456,7 +475,11 @@ describe("effective server set (ASYNC-P-04)", () => {
         ref: "#/operations/post",
       });
       const { err } = await drainOutputs(call);
-      expect(codeOf(err)).toBe("ERR_SOURCE_CONFIG_ERROR");
+      // R1a: no server with a supported protocol is resolvable by supplying a
+      // connection URL — a config.value CONTEXT_REQUIRED, not a terminal error.
+      expect(codeOf(err)).toBe("CONTEXT_REQUIRED");
+      expect(configReq(err).point).toBe("server");
+      expect(configReq(err).key).toBe("url");
     } finally {
       invoker.close();
     }

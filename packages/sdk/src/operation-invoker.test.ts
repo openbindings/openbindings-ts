@@ -8,6 +8,7 @@ import {
   InvocationImpl,
   InvocationError,
   contextRequiredError,
+  configValueRequirement,
   single,
   type ContextRequiredDetails,
   type Invocation,
@@ -50,6 +51,8 @@ interface MockOpts {
   requireBearer?: boolean;
   /** getUser challenges unconditionally, even with context (tests the retry cap). */
   challengeAlways?: boolean;
+  /** getUser challenges config.value until context.configuration.server is present. */
+  requireServerConfig?: boolean;
   /** Expose prepareBinding reporting the bearer requirement when missing. */
   preflight?: boolean;
 }
@@ -126,6 +129,20 @@ class MockBindingInvoker implements BindingInvoker {
             (this.opts.requireBearer && !args.context?.["bearerToken"])) {
           h.fireError(contextRequiredError("bearer token required", BEARER_DETAILS));
           return;
+        }
+        if (this.opts.requireServerConfig) {
+          const cfg = args.context?.["configuration"] as Record<string, unknown> | undefined;
+          if (!cfg?.["server"]) {
+            h.fireError(
+              contextRequiredError("server address required", {
+                target: "https://api.example.com",
+                alternatives: [
+                  { requirements: [configValueRequirement("server", "url", "supply a connection URL")] },
+                ],
+              }),
+            );
+            return;
+          }
         }
         void h.closeInput();
         const id = (first as Record<string, unknown>)["id"];
@@ -680,6 +697,28 @@ describe("CONTEXT_REQUIRED", () => {
       code: CONTEXT_REQUIRED,
       details: BEARER_DETAILS,
     });
+  });
+
+  it("resolve-and-retry carries a config.value into configuration, preserving a sibling point (R1a)", async () => {
+    const mock = new MockBindingInvoker({ requireServerConfig: true });
+    const resolver = vi.fn(async () => ({
+      configuration: { server: { url: "https://api.example.com" } },
+    }));
+    const op = makeInvoker(mock, { contextResolver: resolver });
+    // The caller pre-supplies a DIFFERENT configuration point (decode); it must
+    // survive the resolve-and-retry merge rather than being clobbered.
+    const call = op.invoke(testInterface(), operationSignature("getUser"), {
+      context: { configuration: { decode: { lane: "text" } } },
+    });
+    await call.write({ id: "u1" });
+    await expect(single(call.outputs)).resolves.toEqual({ id: "u1", name: "Ada" });
+
+    expect(resolver).toHaveBeenCalledTimes(1);
+    expect(mock.attempts).toBe(2);
+    const retryCfg = mock.contexts[1]?.["configuration"] as Record<string, unknown>;
+    expect(retryCfg["server"]).toEqual({ url: "https://api.example.com" });
+    // The caller's decode point was not clobbered by the merge.
+    expect(retryCfg["decode"]).toEqual({ lane: "text" });
   });
 
   it("resolve-and-retry replays the already-forwarded input (read ≠ consumed) [U]", async () => {
