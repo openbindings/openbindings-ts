@@ -228,6 +228,171 @@ describe("OAPI-P-03 — flattened-model refusals", () => {
     expect(requests).toHaveLength(0);
   });
 
+  // §9.1 (OAPI-P-03): with a NON-OBJECT declared request body, the
+  // flattened contract carries only parameters and the synthetic `body`
+  // property — an input field matching neither has no destination and
+  // refuses pre-dispatch, loudly, naming the unroutable field (same species
+  // of refusal as the no-body unmatched case above).
+  it("refuses an unmatched field loudly for a non-object request body", async () => {
+    const wantMsg =
+      'field(s) stray match no declared parameter, and the declared request body is non-object (its flattened contract carries only the synthetic "body" property)';
+    const cases: Array<[string, Record<string, unknown>]> = [
+      ["string JSON body", { "application/json": { schema: { type: "string" } } }],
+      [
+        "array JSON body",
+        { "application/json": { schema: { type: "array", items: { type: "integer" } } } },
+      ],
+      [
+        "binary-in-JSON body (3.1 contentEncoding)",
+        { "application/json": { schema: { type: "string", contentEncoding: "base64" } } },
+      ],
+      ["text/plain body", { "text/plain": { schema: { type: "string" } } }],
+    ];
+    for (const [name, content] of cases) {
+      const spec = {
+        openapi: "3.1.0",
+        info: { title: "t", version: "1" },
+        servers: [{ url: BASE }],
+        paths: {
+          "/echo": {
+            post: {
+              operationId: "echo",
+              requestBody: { required: true, content },
+              responses: { "200": { description: "ok" } },
+            },
+          },
+        },
+      };
+      const { fetch, requests } = mockFetch(() => jsonResponse({}));
+      const call = new OpenAPIInvoker().invokeBinding({
+        source: src(spec),
+        ref: "#/paths/~1echo/post",
+        fetch,
+      });
+      await call.write({ body: "x", stray: 1 });
+      await expect(call.closed, name).rejects.toMatchObject({
+        code: ERR_VALIDATION_FAILED,
+        message: wantMsg,
+      });
+      expect(requests, name).toHaveLength(0);
+    }
+  });
+
+  // §9.1 (OAPI-P-03): with an OBJECT body, a field matching no declared
+  // parameter or body property joins the body value BEFORE encoding
+  // selection and rides whatever encoding the body rides — JSON here,
+  // exactly like declared fields.
+  it("joins passthrough fields into a JSON object body", async () => {
+    const spec = {
+      openapi: "3.0.3",
+      info: { title: "t", version: "1" },
+      servers: [{ url: BASE }],
+      paths: {
+        "/w": {
+          post: {
+            operationId: "makeW",
+            requestBody: {
+              required: true,
+              content: {
+                "application/json": {
+                  schema: { type: "object", properties: { name: { type: "string" } } },
+                },
+              },
+            },
+            responses: { "200": { description: "ok" } },
+          },
+        },
+      },
+    };
+    const { fetch, requests } = mockFetch(() => jsonResponse({}));
+    const call = new OpenAPIInvoker().invokeBinding({ source: src(spec), ref: "#/paths/~1w/post", fetch });
+    await call.write({ name: "x", extra: "y" });
+    await single(call.outputs);
+    expect(requests[0].headers.get("Content-Type")).toBe("application/json");
+    expect(requests[0].body).toBe('{"extra":"y","name":"x"}');
+  });
+
+  // §9.1 (OAPI-P-03): passthrough rides the body's encoding — multipart
+  // here. A primitive passthrough field rides as a text part; an object
+  // passthrough field rides as an application/json part, per the same §9.2
+  // part rules as declared fields.
+  it("rides passthrough fields on a multipart body", async () => {
+    const spec = {
+      openapi: "3.0.3",
+      info: { title: "t", version: "1" },
+      servers: [{ url: BASE }],
+      paths: {
+        "/upload": {
+          post: {
+            operationId: "upload",
+            requestBody: {
+              required: true,
+              content: {
+                "multipart/form-data": {
+                  schema: { type: "object", properties: { description: { type: "string" } } },
+                },
+              },
+            },
+            responses: { "200": { description: "ok" } },
+          },
+        },
+      },
+    };
+    const { fetch, requests } = mockFetch(() => jsonResponse({}));
+    const call = new OpenAPIInvoker().invokeBinding({
+      source: src(spec),
+      ref: "#/paths/~1upload/post",
+      fetch,
+    });
+    await call.write({ description: "d", note: "urgent", meta: { k: "v" } });
+    await single(call.outputs);
+    const fd = requests[0].body as FormData;
+    expect(fd).toBeInstanceOf(FormData);
+    expect(fd.get("description")).toBe("d");
+    expect(fd.get("note")).toBe("urgent");
+    const meta = fd.get("meta") as Blob;
+    expect(meta).toBeInstanceOf(Blob);
+    expect(meta.type).toBe("application/json");
+    await expect(meta.text()).resolves.toBe('{"k":"v"}');
+  });
+
+  // §9.1 (OAPI-P-03): passthrough rides the body's encoding —
+  // application/x-www-form-urlencoded here, serialized like declared
+  // fields.
+  it("rides passthrough fields on a urlencoded body", async () => {
+    const spec = {
+      openapi: "3.0.3",
+      info: { title: "t", version: "1" },
+      servers: [{ url: BASE }],
+      paths: {
+        "/form": {
+          post: {
+            operationId: "postForm",
+            requestBody: {
+              required: true,
+              content: {
+                "application/x-www-form-urlencoded": {
+                  schema: { type: "object", properties: { name: { type: "string" } } },
+                },
+              },
+            },
+            responses: { "200": { description: "ok" } },
+          },
+        },
+      },
+    };
+    const { fetch, requests } = mockFetch(() => jsonResponse({}));
+    const call = new OpenAPIInvoker().invokeBinding({
+      source: src(spec),
+      ref: "#/paths/~1form/post",
+      fetch,
+    });
+    await call.write({ name: "a b", extra: "y" });
+    await single(call.outputs);
+    expect(requests[0].headers.get("Content-Type")).toBe("application/x-www-form-urlencoded");
+    expect(requests[0].body).toBe("extra=y&name=a%20b");
+  });
+
   // A supplied input missing a declared path parameter always refuses
   // before dispatch (§9.1); other missing required members are the
   // server's business.
