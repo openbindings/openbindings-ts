@@ -8,6 +8,7 @@ import type {
   OpenAPIResponse,
 } from "./types.js";
 import { BINDING_SPEC, DEFAULT_SOURCE_NAME } from "./constants.js";
+import { DegenerateMediaError, planRequestBody } from "./media.js";
 import { translateSchemaDialect } from "./translate.js";
 import {
   bodySchemaFlattens,
@@ -158,6 +159,26 @@ function buildInputSchema(
 
   if (op.requestBody) {
     const rb = op.requestBody;
+    // §9.2's degenerate media/schema combination (OAPI-P-04), surfaced at
+    // synthesis time: when the operation's declared request media cannot
+    // carry the contract this schema publishes, a conformant invoker
+    // refuses the operation before dispatch — warn here so authors hear
+    // it when the contract is produced, not at first dispatch. The
+    // selection is not re-derived: planRequestBody (media.ts) is the one
+    // deciding site, and its typed refusal is the warning's trigger.
+    if (onWarning) {
+      try {
+        planRequestBody(op);
+      } catch (e) {
+        if (e instanceof DegenerateMediaError) {
+          onWarning({
+            code: "openapi.media_schema_mismatch",
+            message: `${e.message}; a conformant invoker refuses this operation before dispatch`,
+            path: `operations.${opKey}.input`,
+          });
+        }
+      }
+    }
     const bodySchema = requestBodyToSchema(rb);
     if (bodySchema) {
       const bodyProps = bodySchema.properties as Record<string, unknown> | undefined;
