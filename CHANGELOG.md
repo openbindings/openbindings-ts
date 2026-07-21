@@ -4,6 +4,20 @@
 
 ### Changed
 
+- **BREAKING: `@openbindings/asyncapi`: `configuration.server` accepts
+  exactly the §9.2-pinned value shapes** — `{"key": "<server-name>"}`
+  selecting a member of the effective server set, xor
+  `{"url": "<connection-url>"}` overriding with a complete connection URL;
+  the two mutually exclusive. The previously tolerated spellings — a bare
+  string (member name or URL), `{"name": ...}`, and `{"variables": {...}}` —
+  are now refused loudly with a teaching error naming the two pinned forms
+  (byte-identical to the Go SDK's; the pin exists so two implementations
+  carry the value identically, and silent tolerance of extra spellings
+  defeats it). Server variables consequently substitute from their declared
+  defaults only; a consumer needing a non-default server variable supplies
+  the complete connection URL via the `url` form. The below-the-point
+  `metadata.baseURL` legacy override is unchanged.
+
 - **Comparison-engine cross-SDK canon (three rulings, 2026-07-20).**
   (1) `checkInterfaceCompatibility` now emits issues in sorted
   required-operation-key order (output before input within an operation)

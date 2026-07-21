@@ -41,7 +41,8 @@ export const CHANNEL_NAME_TAG = "x-ob-asyncapi-channel-name";
  * map (its own map key) before the shared dereferencer runs, and read back
  * off a channel's resolved `servers` subset entries to recover each
  * member's servers-map key. The effective server set (ASYNC-P-04) is
- * name-addressable — consumer `configuration.server` selects a member by
- * name — and dereferencing would otherwise erase the names.
+ * key-addressable — consumer `configuration.server` selects a member by
+ * its servers-map key ({"key": ...}, the §9.2 pinned form) — and
+ * dereferencing would otherwise erase the keys.
  */
 export const SERVER_NAME_TAG = "x-ob-asyncapi-server-name";
