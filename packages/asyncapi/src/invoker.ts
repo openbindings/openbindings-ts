@@ -24,7 +24,7 @@ import { BINDING_SPEC, DEFAULT_SOURCE_NAME } from "./constants.js";
 import { runBinding, requiredContext } from "./invoke.js";
 import { resolveTarget } from "./target.js";
 import { convertToInterface } from "./synthesize.js";
-import { operationRef, parseAsyncAPIDocument, parseRef, errorMessage, sanitizeKey, uniqueKey } from "./util.js";
+import { codePointCompare, operationRef, parseAsyncAPIDocument, parseRef, errorMessage, sanitizeKey, uniqueKey } from "./util.js";
 import { WSPool } from "./ws-pool.js";
 
 /**
@@ -230,7 +230,7 @@ export class AsyncAPISynthesizer implements InterfaceSynthesizer, SourceInspecto
       // sorted iteration and sanitizeKey + uniqueKey de-duplication), so an
       // inspection previews exactly what synthesis names.
       const usedKeys = new Set<string>();
-      for (const opID of Object.keys(doc.operations).sort()) {
+      for (const opID of Object.keys(doc.operations).sort(codePointCompare)) {
         const asyncOp = doc.operations[opID];
         const desc = asyncOp?.description || asyncOp?.summary || undefined;
         const operationKey = uniqueKey(sanitizeKey(opID), usedKeys);

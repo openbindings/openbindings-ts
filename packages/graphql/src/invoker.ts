@@ -36,7 +36,7 @@ import {
 } from "./invoke.js";
 import type { Field, IntrospectionSchema } from "./introspection.js";
 import { buildTypeMap, rootTypeName } from "./introspection.js";
-import { convertToInterface, resolveKey, sanitizeKey } from "./synthesize.js";
+import { convertToInterface, resolveKey, sanitizeKey, codePointCompare } from "./synthesize.js";
 
 function errMsg(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
@@ -278,7 +278,7 @@ export class GraphQLSynthesizer implements InterfaceSynthesizer, SourceInspector
       if (!rt.typeName) continue;
       const t = tm.get(rt.typeName);
       if (!t?.fields) continue;
-      for (const f of [...t.fields].sort((a, b) => a.name.localeCompare(b.name))) {
+      for (const f of [...t.fields].sort((a, b) => codePointCompare(a.name, b.name))) {
         if (f.name.startsWith("__")) continue;
         const ref = `${rt.label}/${f.name}`;
         const operationKey = resolveKey(sanitizeKey(f.name), rt.label.toLowerCase(), usedKeys);

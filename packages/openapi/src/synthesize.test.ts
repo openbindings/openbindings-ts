@@ -720,3 +720,26 @@ describe("content-fed synthesis", () => {
     expect(src?.content).toBeUndefined();
   });
 });
+
+describe("deterministic ordering", () => {
+  it("orders mixed-case paths by code point, not locale collation", async () => {
+    const spec = {
+      openapi: "3.1.0",
+      info: { title: "Case API", version: "1.0.0" },
+      paths: {
+        "/adopt": {
+          get: { operationId: "adoptPet", responses: { "200": { description: "OK" } } },
+        },
+        "/Pets": {
+          get: { operationId: "listPets", responses: { "200": { description: "OK" } } },
+        },
+      },
+    };
+
+    const iface = await convertToInterface(undefined, spec);
+
+    // "P" (U+0050) < "a" (U+0061) by code point — the order Go's byte-wise
+    // comparison produces; ICU locale collation would flip the pair.
+    expect(Object.keys(iface.operations)).toEqual(["listPets", "adoptPet"]);
+  });
+});

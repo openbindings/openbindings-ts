@@ -166,4 +166,36 @@ describe("convertToInterface", () => {
     if (!sendBinding) throw new Error("missing binding: sendMessage.asyncapi");
     expect(Object.keys(sendBinding)).not.toContain("security");
   });
+
+  it("orders mixed-case operation ids by code point, not locale collation", async () => {
+    const doc = await parsedDoc({
+      asyncapi: "3.0.0",
+      info: { title: "Event API", version: "1.0.0" },
+      channels: {
+        messages: {
+          address: "/messages",
+          messages: {
+            Msg: { payload: { type: "object" } },
+          },
+        },
+      },
+      operations: {
+        alpha: {
+          action: "receive",
+          channel: { $ref: "#/channels/messages" },
+          messages: [{ $ref: "#/channels/messages/messages/Msg" }],
+        },
+        Zulu: {
+          action: "receive",
+          channel: { $ref: "#/channels/messages" },
+          messages: [{ $ref: "#/channels/messages/messages/Msg" }],
+        },
+      },
+    });
+    const iface = await convertToInterface(undefined, doc);
+
+    // "Z" (U+005A) < "a" (U+0061) by code point — the order Go's byte-wise
+    // comparison produces; ICU locale collation would flip the pair.
+    expect(Object.keys(iface.operations)).toEqual(["Zulu", "alpha"]);
+  });
 });

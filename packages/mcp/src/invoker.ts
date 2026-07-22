@@ -23,6 +23,7 @@ import {
   pinnedDiscovery,
   sanitizeKey,
   resolveKey,
+  codePointCompare,
   type MCPDiscovery,
 } from "./synthesize.js";
 
@@ -185,25 +186,25 @@ export class MCPSynthesizer implements InterfaceSynthesizer, SourceInspector {
     const targets: SourceInspection["targets"] = [];
     const usedKeys = new Map<string, string>();
 
-    for (const tool of disc.tools.sort((a, b) => a.name.localeCompare(b.name))) {
+    for (const tool of disc.tools.sort((a, b) => codePointCompare(a.name, b.name))) {
       const ref = `tools/${tool.name}`;
       const operationKey = resolveKey(sanitizeKey(tool.name), "tool", usedKeys);
       usedKeys.set(operationKey, ref);
       targets.push({ ref, operationKey, operation: tool.description ? { description: tool.description } : undefined });
     }
-    for (const res of disc.resources.sort((a, b) => a.name.localeCompare(b.name))) {
+    for (const res of disc.resources.sort((a, b) => codePointCompare(a.name, b.name))) {
       const ref = `resources/${res.uri}`;
       const operationKey = resolveKey(sanitizeKey(res.name), "resource", usedKeys);
       usedKeys.set(operationKey, ref);
       targets.push({ ref, operationKey, operation: res.description ? { description: res.description } : undefined });
     }
-    for (const tmpl of disc.resourceTemplates.sort((a, b) => a.name.localeCompare(b.name))) {
+    for (const tmpl of disc.resourceTemplates.sort((a, b) => codePointCompare(a.name, b.name))) {
       const ref = `resourceTemplates/${tmpl.uriTemplate}`;
       const operationKey = resolveKey(sanitizeKey(tmpl.name), "resource_template", usedKeys);
       usedKeys.set(operationKey, ref);
       targets.push({ ref, operationKey, operation: tmpl.description ? { description: tmpl.description } : undefined });
     }
-    for (const prompt of disc.prompts.sort((a, b) => a.name.localeCompare(b.name))) {
+    for (const prompt of disc.prompts.sort((a, b) => codePointCompare(a.name, b.name))) {
       const ref = `prompts/${prompt.name}`;
       const operationKey = resolveKey(sanitizeKey(prompt.name), "prompt", usedKeys);
       usedKeys.set(operationKey, ref);

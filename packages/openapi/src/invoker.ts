@@ -21,7 +21,7 @@ import type { OpenAPIDocument, OpenAPIOperation } from "./types.js";
 import { DEFAULT_SOURCE_NAME, BINDING_SPEC } from "./constants.js";
 import { preflightTarget, requiredContext, runBinding } from "./invoke.js";
 import { convertToInterface, deriveOperationKey, HTTP_METHODS } from "./synthesize.js";
-import { buildJsonPointerRef, errorMessage, loadOpenAPIDocument } from "./util.js";
+import { buildJsonPointerRef, codePointCompare, errorMessage, loadOpenAPIDocument } from "./util.js";
 
 // ---------------------------------------------------------------------------
 // Shared doc-cache helper
@@ -199,7 +199,7 @@ export class OpenAPISynthesizer implements InterfaceSynthesizer, SourceInspector
     if (!doc.paths) return { targets, exhaustive: true };
 
     const usedKeys = new Set<string>();
-    for (const [pathStr, pathItemRaw] of Object.entries(doc.paths).sort(([a], [b]) => a.localeCompare(b))) {
+    for (const [pathStr, pathItemRaw] of Object.entries(doc.paths).sort(([a], [b]) => codePointCompare(a, b))) {
       if (pathStr.startsWith("x-") || !pathItemRaw || typeof pathItemRaw !== "object") continue;
       const pathItem = pathItemRaw as Record<string, unknown>;
       for (const method of HTTP_METHODS) {

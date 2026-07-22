@@ -13,6 +13,7 @@ import { translateSchemaDialect } from "./translate.js";
 import {
   bodySchemaFlattens,
   buildJsonPointerRef,
+  codePointCompare,
   loadOpenAPIDocument,
   mergeParameters,
   sanitizeKey,
@@ -231,7 +232,7 @@ function buildInputSchema(
 
   const schema: JSONSchema = { type: "object", properties };
   if (required.length > 0) {
-    schema.required = [...required].sort();
+    schema.required = [...required].sort(codePointCompare);
   }
   return schema;
 }
@@ -282,7 +283,7 @@ function preferJsonMediaType(content: Record<string, OpenAPIMediaType>): OpenAPI
 }
 
 function sortedEntries(obj: Record<string, unknown>): [string, unknown][] {
-  return Object.entries(obj).sort(([a], [b]) => a.localeCompare(b));
+  return Object.entries(obj).sort(([a], [b]) => codePointCompare(a, b));
 }
 
 /**

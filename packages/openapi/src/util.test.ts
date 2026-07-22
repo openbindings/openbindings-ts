@@ -82,6 +82,10 @@ describe("sanitizeKey", () => {
     expect(sanitizeKey("!!!")).toBe("unnamed");
   });
 
+  it("replaces an astral-plane character with one underscore, not one per surrogate half", () => {
+    expect(sanitizeKey("t-😀-a")).toBe("t-_-a");
+  });
+
   it("preserves dots and hyphens", () => {
     expect(sanitizeKey("users.get-all")).toBe("users.get-all");
   });

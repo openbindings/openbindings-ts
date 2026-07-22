@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { convertToInterface } from "./synthesize.js";
+import { codePointCompare, convertToInterface, sanitizeKey } from "./synthesize.js";
 
 describe("convertToInterface", () => {
   it("converts tools to operations", () => {
@@ -200,5 +200,71 @@ describe("convertToInterface", () => {
 
     const keys = Object.keys(iface.operations);
     expect(keys).toEqual(["alpha", "middle", "zebra"]);
+  });
+
+  it("orders mixed-case names by code point, not locale collation", () => {
+    const iface = convertToInterface({
+      tools: [{ name: "alpha_tool" }, { name: "Bravo_tool" }],
+      resources: [],
+      resourceTemplates: [],
+      prompts: [],
+    });
+
+    // "B" (U+0042) < "a" (U+0061) by code point; ICU locale collation
+    // (the localeCompare this replaces) would flip the pair.
+    expect(Object.keys(iface.operations)).toEqual(["Bravo_tool", "alpha_tool"]);
+  });
+
+  it("orders astral-plane names by code point, not UTF-16 code unit", () => {
+    // "ﬁ" (U+FB01) < "😀" (U+1F600) by code point — the order Go's byte-wise
+    // comparison produces — while by UTF-16 code unit the surrogate half
+    // 0xD83D would sort the emoji first.
+    const iface = convertToInterface({
+      tools: [{ name: "t-😀-a" }, { name: "t-ﬁ-b" }],
+      resources: [],
+      resourceTemplates: [],
+      prompts: [],
+    });
+
+    // Each non-key character sanitizes to ONE underscore (u-flag regex),
+    // matching Go's rune-wise SanitizeKey.
+    expect(Object.keys(iface.operations)).toEqual(["t-_-b", "t-_-a"]);
+  });
+
+  it("resolves sanitized-key collisions in code point order of the raw names", () => {
+    // Both names sanitize to "a_b". " " (U+0020) < "_" (U+005F), so the
+    // space-named tool is processed first and wins the bare key; the
+    // underscore-named tool takes the entity-type prefix. ICU collation
+    // weighs punctuation variably, so before codePointCompare this
+    // assignment depended on the host locale.
+    const iface = convertToInterface({
+      tools: [
+        { name: "a_b", description: "underscore tool" },
+        { name: "a b", description: "space tool" },
+      ],
+      resources: [],
+      resourceTemplates: [],
+      prompts: [],
+    });
+
+    expect(iface.operations["a_b"]?.description).toBe("space tool");
+    expect(iface.operations["tool_a_b"]?.description).toBe("underscore tool");
+  });
+});
+
+describe("codePointCompare", () => {
+  it("matches Go's byte-wise string ordering", () => {
+    expect(codePointCompare("Ping", "add")).toBeLessThan(0); // 0x50 < 0x61
+    expect(codePointCompare("ﬁ", "😀")).toBeLessThan(0); // U+FB01 < U+1F600
+    expect("😀" < "ﬁ").toBe(true); // the UTF-16 code-unit trap this replaces
+    expect(codePointCompare("a", "ab")).toBeLessThan(0); // shared prefix: shorter first
+    expect(codePointCompare("same", "same")).toBe(0);
+    expect(codePointCompare("b", "a")).toBeGreaterThan(0);
+  });
+});
+
+describe("sanitizeKey", () => {
+  it("replaces an astral-plane character with one underscore, not one per surrogate half", () => {
+    expect(sanitizeKey("t-😀-a")).toBe("t-_-a");
   });
 });
