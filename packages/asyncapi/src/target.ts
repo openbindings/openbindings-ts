@@ -114,6 +114,27 @@ const NO_RESOLVABLE_SERVER =
   "no resolvable server: the effective server set declares no server with a supported protocol (http, https, ws, wss)";
 
 /**
+ * The typed signal a resolution helper throws when a named configuration point
+ * cannot resolve because a value is absent (no default, no supplied value) — a
+ * resolvable-missing value, not a malformed one. The invoke path turns it into
+ * a config.value CONTEXT_REQUIRED challenge (retryable after resolution, R1a)
+ * rather than a terminal ERR_SOURCE_CONFIG_ERROR. config values are non-secret,
+ * so no credential-grade target keying is needed.
+ */
+export class ConfigRequired extends Error {
+  constructor(
+    readonly point: string,
+    readonly key: string,
+    message: string,
+    readonly choices?: string[],
+    readonly durable?: boolean,
+  ) {
+    super(message);
+    this.name = "ConfigRequired";
+  }
+}
+
+/**
  * Resolves the server configuration point for the operation's channel
  * (ASYNC-P-04): consumer configuration may select another member of the
  * effective set or supply a complete connection URL outright; the default
@@ -163,7 +184,12 @@ export function resolveTarget(
     return fullURLOverride(base, def);
   }
 
-  if (!def) throw new Error(NO_RESOLVABLE_SERVER);
+  if (!def)
+    throw new ConfigRequired(
+      "server",
+      "url",
+      `${NO_RESOLVABLE_SERVER}; supply a connection URL at the server configuration point`,
+    );
   return assembleServer(def);
 }
 
@@ -332,18 +358,17 @@ function assembleServer(
 
   if (supplied) {
     const sorted = Object.entries(supplied).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
-    for (const [name, val] of sorted) {
+    for (const [name] of sorted) {
       const declared = srv.variables?.[name];
       if (!declared) {
         throw new Error(
           `configuration.server.variables[${JSON.stringify(name)}] names no declared variable of server ${JSON.stringify(member.name)}`,
         );
       }
-      if (declared.enum && declared.enum.length > 0 && !declared.enum.includes(val)) {
-        throw new Error(
-          `server ${JSON.stringify(member.name)}: variable ${JSON.stringify(name)} value ${JSON.stringify(val)} is not in the declared enum [${declared.enum.join(", ")}]`,
-        );
-      }
+      // A declared enum does not gate the supplied value (§9.2): it is the
+      // author's expectation, not a boundary, and the same point admits a
+      // full-URL override that bypasses the declaration. Undeclared names
+      // still refuse (above); enum values do not.
     }
   }
 
@@ -382,16 +407,16 @@ function substituteServerVariables(
     if (val === undefined) {
       val = declared?.default;
       if (val === undefined || val === "") {
-        throw new Error(
+        throw new ConfigRequired(
+          "server",
+          name,
           `server ${JSON.stringify(member.name)}: variable ${JSON.stringify(name)} has no supplied value and no declared default (supply one at the server configuration point's "variables" member)`,
+          declared?.enum,
         );
       }
     }
-    if (declared?.enum && declared.enum.length > 0 && !declared.enum.includes(val)) {
-      throw new Error(
-        `server ${JSON.stringify(member.name)}: variable ${JSON.stringify(name)} value ${JSON.stringify(val)} is not in the declared enum [${declared.enum.join(", ")}]`,
-      );
-    }
+    // A declared enum does not gate the value (§9.2): author's expectation,
+    // not a boundary, consistent with the config-server-variables path.
     out = out.replaceAll(`{${name}}`, val);
   }
   if (/[{}]/.test(out)) {
@@ -478,8 +503,14 @@ export function resolveAddress(
     return cfg.address;
   }
   if (!ch || !ch.address) {
-    throw new Error(
-      `channel ${JSON.stringify(channelName)} declares no address and none was supplied at the address configuration point: an absent address is a refusal, never a guess`,
+    // AsyncAPI's address:null "generated dynamically at runtime" case:
+    // resolvable by consumer supply, and per-invocation (not persisted).
+    throw new ConfigRequired(
+      "address",
+      "address",
+      `channel ${JSON.stringify(channelName)} declares no address and none was supplied at the address configuration point (AsyncAPI's runtime-generated address); supply one`,
+      undefined,
+      false,
     );
   }
   return expandAddress(ch, ch.address, channelName, cfg.parameters);
@@ -506,17 +537,16 @@ function expandAddress(
       if (declared?.default) {
         val = declared.default;
       } else {
-        throw new Error(
+        throw new ConfigRequired(
+          "address",
+          name,
           `channel ${JSON.stringify(channelName)}: address parameter ${JSON.stringify(name)} has no supplied value and no declared default`,
+          declared?.enum,
         );
       }
     }
-    const declared = ch.parameters?.[name];
-    if (declared?.enum && declared.enum.length > 0 && !declared.enum.includes(val)) {
-      throw new Error(
-        `channel ${JSON.stringify(channelName)}: address parameter ${JSON.stringify(name)} value ${JSON.stringify(val)} is not in the declared enum [${declared.enum.join(", ")}]`,
-      );
-    }
+    // A declared enum does not gate the value (§9.2): author's expectation,
+    // not a boundary, consistent with the server-variable point.
     out = out.replaceAll(`{${name}}`, val);
   }
   if (/[{}]/.test(out)) {

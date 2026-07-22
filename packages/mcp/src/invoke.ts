@@ -36,16 +36,31 @@ export interface RunOptions {
   solicitProgress?: boolean;
 }
 
-/** Parse a ref like "tools/name", "resources/uri", or "prompts/name". */
+/**
+ * Parse a ref like "tools/name", "resources/uri",
+ * "resourceTemplates/uriTemplate", or "prompts/name". The four entities
+ * mirror MCP's four listable collections (§7, R5); resources and
+ * resourceTemplates are distinct namespaces, so a resource URI and a
+ * byte-identical template string never collide.
+ */
 export function parseRef(ref: string): { entityType: string; name: string } {
   const idx = ref.indexOf("/");
   if (idx < 0 || idx === 0 || idx === ref.length - 1) {
-    throw new Error(`MCP ref "${ref}" must be in the form tools/<name>, resources/<uri>, or prompts/<name>`);
+    throw new Error(
+      `MCP ref "${ref}" must be in the form tools/<name>, resources/<uri>, resourceTemplates/<uriTemplate>, or prompts/<name>`,
+    );
   }
   const entityType = ref.slice(0, idx);
   const name = ref.slice(idx + 1);
-  if (entityType !== "tools" && entityType !== "resources" && entityType !== "prompts") {
-    throw new Error(`MCP ref "${ref}" has invalid entity type "${entityType}" (must be tools, resources, or prompts)`);
+  if (
+    entityType !== "tools" &&
+    entityType !== "resources" &&
+    entityType !== "resourceTemplates" &&
+    entityType !== "prompts"
+  ) {
+    throw new Error(
+      `MCP ref "${ref}" has invalid entity type "${entityType}" (must be tools, resources, resourceTemplates, or prompts)`,
+    );
   }
   return { entityType, name };
 }
@@ -198,7 +213,7 @@ export async function runMCPBinding(
   const noInput = args.binding !== undefined && args.inputSchema === undefined;
   let toolArgs: Record<string, unknown> | undefined; // undefined means absent: the arguments member is omitted (§9.1)
   let promptArgs: Record<string, string> | undefined; // undefined means absent: the arguments member is omitted (§9.1)
-  if (entityType !== "resources") {
+  if (entityType !== "resources" && entityType !== "resourceTemplates") {
     if (noInput) {
       void inv.closeInput();
     } else {
@@ -306,7 +321,7 @@ export async function runMCPBinding(
     // --- Resource input (post-resolution: static vs template decides the
     // interaction shape, §8/§9.1). ---
     let targetURI = name;
-    if (entityType === "resources") {
+    if (entityType === "resources" || entityType === "resourceTemplates") {
       if (kind === "staticResource") {
         // Static resources take no input (§9.1): the input side closes
         // without reading. A caller that then supplies a value gets a loud

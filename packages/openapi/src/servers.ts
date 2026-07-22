@@ -10,6 +10,27 @@ import type { OpenAPIDocument, OpenAPIOperation, OpenAPIPathItem } from "./types
 // so this file consults one merged value. Mirrors the Go SDK's
 // formats/openapi/servers.go.
 
+/**
+ * The typed signal server resolution throws when a value is absent (no
+ * default, no supplied value) — a resolvable-missing value, not a malformed
+ * one. The invoke path turns it into a config.value CONTEXT_REQUIRED challenge
+ * (retryable after resolution, R1a) rather than a terminal
+ * ERR_SOURCE_CONFIG_ERROR. config values are non-secret, so no credential-grade
+ * target keying is needed.
+ */
+export class ConfigRequired extends Error {
+  constructor(
+    readonly point: string,
+    readonly key: string,
+    message: string,
+    readonly choices?: string[],
+    readonly durable?: boolean,
+  ) {
+    super(message);
+    this.name = "ConfigRequired";
+  }
+}
+
 /** One declared server entry (url template + variables), as the OAS spells it. */
 interface ServerEntry {
   url: string;
@@ -196,13 +217,17 @@ function substituteServerVariables(
     const declaredDefault = typeof v.default === "string" ? v.default : "";
     const val = supplied?.[name] ?? declaredDefault;
     if (val === "" && declaredDefault === "") {
-      throw new Error(`server "${srv.url}": variable "${name}" has no supplied value and no declared default`);
-    }
-    if (Array.isArray(v.enum) && v.enum.length > 0 && !v.enum.includes(val)) {
-      throw new Error(
-        `server "${srv.url}": variable "${name}" value "${val}" is not in the declared enum [${v.enum.join(", ")}]`,
+      const enumVals = Array.isArray(v.enum) ? v.enum : undefined;
+      throw new ConfigRequired(
+        "server",
+        name,
+        `server "${srv.url}": variable "${name}" has no supplied value and no declared default`,
+        enumVals,
       );
     }
+    // A declared enum does not gate the value (§9.3, R1): it is the author's
+    // expectation, not a boundary; a full base-URL override bypasses the
+    // declaration anyway. The OAS does not mandate enum enforcement.
     u = u.replaceAll(`{${name}}`, val);
   }
   for (const name of Object.keys(supplied ?? {})) {
@@ -243,7 +268,9 @@ export function absolutizeServerURL(serverURL: string, sourceLocation: string | 
       // fall through to the refusal
     }
   }
-  throw new Error(
-    `server URL "${serverURL}" cannot resolve to an absolute URL: the source has no absolute-URI location to serve as the artifact's base URI`,
+  throw new ConfigRequired(
+    "server",
+    "url",
+    `server URL "${serverURL}" cannot resolve to an absolute URL: the source has no absolute-URI location to serve as the artifact's base URI; supply a base URL at the server configuration point`,
   );
 }

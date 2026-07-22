@@ -199,10 +199,11 @@ export async function liveListing(client: Client, entityType: string, signal: Ab
  * Resolves a parsed ref against the (pinned or live, exhausted) listing
  * BEFORE dispatch (§7, MCP-P-02): a remainder matching nothing makes the
  * binding unresolvable, and a remainder matching more than one entry is
- * ambiguous and likewise unresolvable — loudly, never first-match. A
- * resources remainder matches first against declared resource URIs, then
- * against template strings (a template is addressed by its template string,
- * byte-exact — never by a URI the template happens to match). Throws
+ * ambiguous WITHIN its entity's collection and likewise unresolvable —
+ * loudly, never first-match. resources matches only declared resource URIs;
+ * resourceTemplates matches only declared template strings (§7, R5): the two
+ * are separate namespaces, so a resource URI and a byte-identical template
+ * string never collide — each is reached by its own entity token. Throws
  * InvocationError(ERR_REF_NOT_FOUND) on refusal.
  */
 export function resolveRef(l: Listing, entityType: string, remainder: string): TargetKind {
@@ -230,15 +231,22 @@ export function resolveRef(l: Listing, entityType: string, remainder: string): T
       if (n > 1) throw ambiguous("prompt", n);
       throw notFound("prompt");
     }
-    default: {
-      // resources
+    case "resources": {
       const n = count(l.resources);
       if (n === 1) return "staticResource";
       if (n > 1) throw ambiguous("resource", n);
+      throw notFound("resource");
+    }
+    case "resourceTemplates": {
       const t = count(l.templates);
       if (t === 1) return "templateResource";
       if (t > 1) throw ambiguous("resource template", t);
-      throw notFound("resource or resource template");
+      throw notFound("resource template");
     }
+    default:
+      throw new InvocationError(
+        ERR_REF_NOT_FOUND,
+        `MCP ref ${JSON.stringify(ref)} names an unknown entity ${JSON.stringify(entityType)} (expected tools, resources, resourceTemplates, or prompts)`,
+      );
   }
 }

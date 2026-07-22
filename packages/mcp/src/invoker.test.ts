@@ -577,7 +577,7 @@ describe("MCPSynthesizer pinned listings", () => {
     expect(Object.keys(iface.operations).sort()).toEqual(["file", "get_weather", "greet", "status"]);
     expect(iface.bindings!["get_weather.mcpServer"]?.ref).toBe("tools/get_weather");
     expect(iface.bindings!["status.mcpServer"]?.ref).toBe("resources/app://status");
-    expect(iface.bindings!["file.mcpServer"]?.ref).toBe("resources/file:///{path}");
+    expect(iface.bindings!["file.mcpServer"]?.ref).toBe("resourceTemplates/file:///{path}");
     expect(iface.bindings!["greet.mcpServer"]?.ref).toBe("prompts/greet");
     expect(iface.operations.get_weather?.input).toEqual(pin.tools.at(0)?.inputSchema);
     expect((iface.operations.greet?.input as { required?: string[] }).required).toEqual(["name"]);
@@ -599,7 +599,7 @@ describe("MCPSynthesizer pinned listings", () => {
     expect(keys).toEqual({
       "tools/get_weather": "get_weather",
       "resources/app://status": "status",
-      "resources/file:///{path}": "file",
+      "resourceTemplates/file:///{path}": "file",
       "prompts/greet": "greet",
     });
 

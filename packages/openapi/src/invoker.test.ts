@@ -12,7 +12,6 @@ import {
   ERR_PROTOCOL,
   ERR_REF_NOT_FOUND,
   ERR_RESPONSE_ERROR,
-  ERR_SOURCE_CONFIG_ERROR,
   ERR_SOURCE_LOAD_FAILED,
   USE_DEFAULT,
   newInvokeHooks,
@@ -443,7 +442,7 @@ describe("invokeBinding — pre-dispatch failures", () => {
     expect(requests).toHaveLength(0);
   });
 
-  it("errors ERR_SOURCE_CONFIG_ERROR when the document declares no server URL", async () => {
+  it("challenges config.value when the document declares no absolute server URL", async () => {
     const { fetch, requests } = mockFetch(() => jsonResponse({}));
     const spec = { ...SPEC, servers: undefined };
     const call = new OpenAPIInvoker().invokeBinding({
@@ -452,7 +451,12 @@ describe("invokeBinding — pre-dispatch failures", () => {
       fetch,
     });
 
-    await expect(call.closed).rejects.toMatchObject({ code: ERR_SOURCE_CONFIG_ERROR });
+    // R1a: the implied "/" with no absolute base is resolvable by supplying a
+    // base URL — a config.value CONTEXT_REQUIRED, not a terminal error.
+    await expect(call.closed).rejects.toMatchObject({
+      code: "CONTEXT_REQUIRED",
+      details: { alternatives: [{ requirements: [{ type: "config.value", point: "server", key: "url" }] }] },
+    });
     expect(requests).toHaveLength(0);
   });
 

@@ -274,16 +274,11 @@ describe("resolveTarget §9.2 server variables carriage", () => {
     );
   });
 
-  it("refuses a supplied value outside the declared enum", () => {
-    let message = "";
-    try {
-      resolveTarget(variableDoc(), undefined, cfg({ key: "tiered", variables: { env: "qa" } }));
-    } catch (e) {
-      message = (e as Error).message;
-    }
-    expect(message).toBe(
-      'server "tiered": variable "env" value "qa" is not in the declared enum [prod, staging]',
-    );
+  it("does not gate a supplied value on the declared enum (§9.2, R1)", () => {
+    // The enum is the author's expectation, not a boundary; the same point
+    // admits a full-URL override that bypasses the declaration. It substitutes.
+    const target = resolveTarget(variableDoc(), undefined, cfg({ key: "tiered", variables: { env: "qa" } }));
+    expect(target.serverURL).toBe("wss://qa.example.com/v1");
   });
 
   it("refuses a supplied name the selected server does not declare, even when every expression would resolve", () => {

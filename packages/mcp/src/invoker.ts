@@ -198,7 +198,7 @@ export class MCPSynthesizer implements InterfaceSynthesizer, SourceInspector {
       targets.push({ ref, operationKey, operation: res.description ? { description: res.description } : undefined });
     }
     for (const tmpl of disc.resourceTemplates.sort((a, b) => a.name.localeCompare(b.name))) {
-      const ref = `resources/${tmpl.uriTemplate}`;
+      const ref = `resourceTemplates/${tmpl.uriTemplate}`;
       const operationKey = resolveKey(sanitizeKey(tmpl.name), "resource_template", usedKeys);
       usedKeys.set(operationKey, ref);
       targets.push({ ref, operationKey, operation: tmpl.description ? { description: tmpl.description } : undefined });

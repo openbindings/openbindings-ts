@@ -25,6 +25,7 @@ export {
   InvocationImpl,
   single,
   contextRequiredError,
+  configValueRequirement,
   isContextRequired,
 } from "./invocation.js";
 

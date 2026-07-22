@@ -109,6 +109,18 @@ function codeOf(err: Error | undefined): string | undefined {
   return (err as { code?: string } | undefined)?.code;
 }
 
+/** Narrows a CONTEXT_REQUIRED terminal to its single config.value requirement. */
+function configReq(err: Error | undefined): { type: string; point?: string; key?: string; durable?: boolean } {
+  const details = (err as { details?: { alternatives?: { requirements?: unknown[] }[] } } | undefined)?.details;
+  const req = details?.alternatives?.[0]?.requirements?.[0] as
+    | { type: string; point?: string; key?: string; durable?: boolean }
+    | undefined;
+  if (!req || req.type !== "config.value") {
+    throw new Error(`expected a config.value requirement, got ${JSON.stringify(req)}`);
+  }
+  return req;
+}
+
 /** One publish round-trip: write one value, close input, drain. Writes are
  * tolerant of a pre-dispatch refusal landing first (the refusal is the
  * asserted surface, via the returned terminal). */
@@ -176,17 +188,20 @@ describe("address parameters (ASYNC-P-04)", () => {
       expect(r.err).toBeUndefined();
       expect(srv.lastPath()).toBe("/rooms/ops/audit");
 
-      // Unresolved after defaults: pre-dispatch refusal, braces never dialed.
+      // Unresolved after defaults: braces never dialed. R1a: a resolvable-
+      // missing address parameter is a config.value CONTEXT_REQUIRED, not a
+      // terminal ERR_SOURCE_CONFIG_ERROR.
       const before = srv.requests();
       r = await publish(invoker, paramDoc(srv.port), "#/operations/post");
-      expect(codeOf(r.err)).toBe("ERR_SOURCE_CONFIG_ERROR");
+      expect(codeOf(r.err)).toBe("CONTEXT_REQUIRED");
+      expect(configReq(r.err).point).toBe("address");
       expect(srv.requests()).toBe(before);
     } finally {
       invoker.close();
     }
   });
 
-  it("refuses a supplied parameter value outside the declared enum", async () => {
+  it("does not gate a supplied parameter value on the declared enum (§9.2, R1)", async () => {
     const srv = await startHTTP((_req, res) => {
       res.writeHead(202);
       res.end();
@@ -196,11 +211,13 @@ describe("address parameters (ASYNC-P-04)", () => {
 
     const invoker = new AsyncAPIInvoker();
     try {
+      // The enum is the author's expectation, not a boundary: the value is
+      // substituted and the invocation dispatches.
       const r = await publish(invoker, doc, "#/operations/post", {
         configuration: { address: { parameters: { roomId: "backstage" } } },
       });
-      expect(codeOf(r.err)).toBe("ERR_SOURCE_CONFIG_ERROR");
-      expect(srv.requests()).toBe(0);
+      expect(r.err).toBeUndefined();
+      expect(srv.requests()).toBe(1);
     } finally {
       invoker.close();
     }
@@ -251,19 +268,17 @@ describe("server variables and pathname assembly (ASYNC-P-04)", () => {
       expect(r.err).toBeUndefined();
       expect(srv.lastPath()).toBe("/v2/events");
 
-      // A supplied value outside the variable's declared enum is a
-      // pre-dispatch refusal (upstream SHOULD, hardened to a refusal —
-      // the specification's own pin).
-      const beforeEnum = srv.requests();
+      // A supplied value outside the variable's declared enum is NOT refused
+      // (§9.2, R1): the enum is the author's expectation, not a boundary. The
+      // value substitutes and the invocation dispatches.
       r = await publish(invoker, doc, "#/operations/post", {
         configuration: { server: { key: "test", variables: { version: "v9" } } },
       });
-      expect(codeOf(r.err)).toBe("ERR_SOURCE_CONFIG_ERROR");
-      expect(String(r.err)).toContain("is not in the declared enum");
-      expect(srv.requests()).toBe(beforeEnum);
+      expect(r.err).toBeUndefined();
+      expect(srv.lastPath()).toBe("/v9/events");
 
       // A declared default outside the variable's own declared enum is
-      // refused (the declaration's own constraint, incorporated).
+      // likewise not refused — enum gates neither supplied values nor defaults.
       const badDefault = {
         ...doc,
         servers: {
@@ -276,7 +291,7 @@ describe("server variables and pathname assembly (ASYNC-P-04)", () => {
         },
       };
       r = await publish(invoker, badDefault, "#/operations/post");
-      expect(codeOf(r.err)).toBe("ERR_SOURCE_CONFIG_ERROR");
+      expect(r.err).toBeUndefined();
 
       // No default and no supplied value: pre-dispatch refusal.
       const noDefault = {
@@ -292,7 +307,11 @@ describe("server variables and pathname assembly (ASYNC-P-04)", () => {
       };
       const before = srv.requests();
       r = await publish(invoker, noDefault, "#/operations/post");
-      expect(codeOf(r.err)).toBe("ERR_SOURCE_CONFIG_ERROR");
+      // R1a: an undefaulted, unsupplied server variable is a config.value
+      // CONTEXT_REQUIRED, not a terminal ERR_SOURCE_CONFIG_ERROR.
+      expect(codeOf(r.err)).toBe("CONTEXT_REQUIRED");
+      expect(configReq(r.err).point).toBe("server");
+      expect(configReq(r.err).key).toBe("version");
       expect(srv.requests()).toBe(before);
 
       // The same undefaulted variable IS satisfiable by supply — AsyncAPI
@@ -456,7 +475,11 @@ describe("effective server set (ASYNC-P-04)", () => {
         ref: "#/operations/post",
       });
       const { err } = await drainOutputs(call);
-      expect(codeOf(err)).toBe("ERR_SOURCE_CONFIG_ERROR");
+      // R1a: no server with a supported protocol is resolvable by supplying a
+      // connection URL — a config.value CONTEXT_REQUIRED, not a terminal error.
+      expect(codeOf(err)).toBe("CONTEXT_REQUIRED");
+      expect(configReq(err).point).toBe("server");
+      expect(configReq(err).key).toBe("url");
     } finally {
       invoker.close();
     }

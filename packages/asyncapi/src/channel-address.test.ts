@@ -58,7 +58,15 @@ describe("channel without address", () => {
     });
     await call.write({}).catch(() => {});
     await call.close().catch(() => {});
-    await expect(call.closed).rejects.toMatchObject({ code: "ERR_SOURCE_CONFIG_ERROR" });
+    // R1a: AsyncAPI's absent (runtime-generated) address is resolvable by
+    // consumer supply — a config.value CONTEXT_REQUIRED (address point,
+    // non-durable), not a terminal ERR_SOURCE_CONFIG_ERROR.
+    await expect(call.closed).rejects.toMatchObject({
+      code: "CONTEXT_REQUIRED",
+      details: {
+        alternatives: [{ requirements: [{ type: "config.value", point: "address", durable: false }] }],
+      },
+    });
     expect(requests).toBe(0);
   });
 

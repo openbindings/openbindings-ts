@@ -1,6 +1,7 @@
 import {
   InvocationError,
   contextRequiredError,
+  configValueRequirement,
   contextSatisfies,
   classifyThroughHooks,
   decodeThroughHooks,
@@ -59,7 +60,28 @@ import {
   planRequestBody,
   type BodyPlan,
 } from "./media.js";
-import { resolveServer } from "./servers.js";
+import { ConfigRequired, resolveServer } from "./servers.js";
+
+/**
+ * Maps a server-resolution failure to the right terminal: a resolvable-missing
+ * configuration value (a ConfigRequired signal) becomes a config.value
+ * CONTEXT_REQUIRED challenge — retryable after resolution (R1a) — while any
+ * other error stays a terminal ERR_SOURCE_CONFIG_ERROR. resolveServer already
+ * consulted the supplied context; the operation-invoker's bounded
+ * resolve-and-retry loop is the backstop. config values are non-secret, so the
+ * challenge carries an empty target (no server URL resolved; best-effort keying).
+ */
+function configOrSourceError(e: unknown): InvocationError {
+  if (e instanceof ConfigRequired) {
+    return contextRequiredError(e.message, {
+      target: "",
+      alternatives: [
+        { requirements: [configValueRequirement(e.point, e.key, e.message, e.choices, e.durable)] },
+      ],
+    });
+  }
+  return new InvocationError(ERR_SOURCE_CONFIG_ERROR, errorMessage(e));
+}
 import { isSSEContentType, streamSSE } from "./sse.js";
 
 /**
@@ -133,7 +155,7 @@ export async function runBinding(
   try {
     baseURL = resolveServer(doc, pathItem, op, args.context, args.source.location);
   } catch (e: unknown) {
-    inv.fireError(new InvocationError(ERR_SOURCE_CONFIG_ERROR, errorMessage(e)));
+    inv.fireError(configOrSourceError(e));
     return;
   }
 

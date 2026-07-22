@@ -30,6 +30,7 @@
 import {
   InvocationError,
   contextRequiredError,
+  configValueRequirement,
   contextSatisfies,
   contextBearerToken,
   contextApiKey,
@@ -88,11 +89,39 @@ import { streamSSE } from "./sse.js";
 import {
   addressConfiguration,
   channelNameOf,
+  ConfigRequired,
   joinURL,
   resolveAddress,
   resolveTarget,
   type ResolvedTarget,
 } from "./target.js";
+
+/**
+ * Maps a resolution failure to the right terminal: a resolvable-missing
+ * configuration value (a ConfigRequired signal) becomes a config.value
+ * CONTEXT_REQUIRED challenge — retryable after resolution (R1a) — while any
+ * other error stays a terminal ERR_SOURCE_CONFIG_ERROR. resolveTarget/
+ * resolveAddress already consulted the supplied context and found the value
+ * absent, so the challenge fires unconditionally; the operation-invoker's
+ * bounded resolve-and-retry loop is the backstop. config values are
+ * non-secret, so a best-effort target (the resolved server URL when known)
+ * suffices for keying.
+ */
+function configOrSourceError(e: unknown, serverURL: string): InvocationError {
+  if (e instanceof ConfigRequired) {
+    return contextRequiredError(e.message, {
+      target: serverURL,
+      alternatives: [
+        {
+          requirements: [
+            configValueRequirement(e.point, e.key, e.message, e.choices, e.durable),
+          ],
+        },
+      ],
+    });
+  }
+  return new InvocationError(ERR_SOURCE_CONFIG_ERROR, errorMessage(e));
+}
 import { parseRef, errorMessage } from "./util.js";
 import type { PooledWS, WSPool } from "./ws-pool.js";
 
@@ -145,7 +174,7 @@ export async function runBinding(
   try {
     target = resolveTarget(doc, ch, args.context);
   } catch (e: unknown) {
-    h.fireError(new InvocationError(ERR_SOURCE_CONFIG_ERROR, errorMessage(e)));
+    h.fireError(configOrSourceError(e, ""));
     return;
   }
 
@@ -174,7 +203,7 @@ export async function runBinding(
     addrParams = addrCfg.parameters;
     address = resolveAddress(ch, channelName, addrCfg);
   } catch (e: unknown) {
-    h.fireError(new InvocationError(ERR_SOURCE_CONFIG_ERROR, errorMessage(e)));
+    h.fireError(configOrSourceError(e, target.serverURL));
     return;
   }
 

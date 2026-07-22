@@ -105,7 +105,7 @@ describe("convertToInterface", () => {
 
     const binding = iface.bindings!["user_profile.mcpServer"];
     if (!binding) throw new Error("missing binding: user_profile.mcpServer");
-    expect(binding.ref).toBe("resources/users/{userId}/profile");
+    expect(binding.ref).toBe("resourceTemplates/users/{userId}/profile");
   });
 
   it("converts prompts with arguments", () => {

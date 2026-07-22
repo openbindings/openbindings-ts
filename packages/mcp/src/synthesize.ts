@@ -352,7 +352,7 @@ export function convertToInterface(disc: MCPDiscovery, location?: string): OBInt
   // Resource templates: the operation's input value is the object of the
   // template's RFC 6570 variables (§8/§9.1).
   for (const tmpl of templates) {
-    const ref = `resources/${tmpl.uriTemplate}`;
+    const ref = `resourceTemplates/${tmpl.uriTemplate}`;
     const opKey = resolveKey(sanitizeKey(tmpl.name), "resource_template", usedKeys);
     usedKeys.set(opKey, ref);
 

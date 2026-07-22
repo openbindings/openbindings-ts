@@ -472,7 +472,22 @@ export class OperationInvoker {
       });
 
     const mergeResolved = (resolved: Record<string, unknown>): void => {
-      context = { ...(context ?? {}), ...resolved };
+      const next: Record<string, unknown> = { ...(context ?? {}), ...resolved };
+      // The binding-invoker contract retries with the *augmented* context, not
+      // a replaced one. Top-level credential fields are leaf values, so an
+      // overwrite is correct — but `configuration` is a map keyed by
+      // configuration point, and a resolved config.value (R1a) names one point;
+      // overwriting the whole map would clobber sibling points the caller
+      // already supplied. Merge it point-wise so a resolved `server` value does
+      // not drop an existing `decode` override.
+      const ec = (context ?? {})["configuration"];
+      const rc = resolved["configuration"];
+      const plain = (v: unknown): v is Record<string, unknown> =>
+        typeof v === "object" && v !== null && !Array.isArray(v);
+      if (plain(ec) && plain(rc)) {
+        next["configuration"] = { ...ec, ...rc };
+      }
+      context = next;
     };
 
     // Preflight (binding-invoker interface `prepareBinding`): collapse
