@@ -62,6 +62,7 @@ interface MockResponse {
 }
 
 interface MockOp {
+  onOpen?: { emit?: unknown[]; fail?: string };
   closesAfter?: number;
   responses: MockResponse[];
 }
@@ -72,6 +73,7 @@ interface ExecFixture {
   operations?: Record<string, MockOp>;
   graph: Graph;
   writes: unknown[];
+  awaitOutputsBeforeWrites?: number;
   expected: {
     output?: unknown[];
     ordering?: "exact" | "set";
@@ -85,6 +87,7 @@ interface ExecFixture {
     arrayOrdering?: "set";
     error?: boolean;
     errorDetail?: unknown;
+    refusedWrites?: number;
   };
 }
 
@@ -149,6 +152,10 @@ class MockBindingInvoker {
       inv.fireError(new InvocationError("ERR_NO_MOCK", `fixture has no mock for operation "${opKey}"`));
       return inv as Invocation<I, O>;
     }
+    // The controlled no-input mock closes from below as part of invocation
+    // opening, before the caller can race a write. This is the direct-binding
+    // behavior OG-EX-42 asks the graph wrapper to preserve.
+    if (op.closesAfter === 0) void inv.closeInput();
     void this.serve(inv, op, opKey);
     return inv as Invocation<I, O>;
   }
@@ -158,6 +165,18 @@ class MockBindingInvoker {
     op: MockOp,
     opKey: string,
   ): Promise<void> {
+    if (op.onOpen?.emit) {
+      try {
+        for (const value of op.onOpen.emit) await handle.emitOutput(value);
+      } catch {
+        return;
+      }
+    }
+    if (op.onOpen?.fail !== undefined) {
+      handle.fireError(new InvocationError(op.onOpen.fail, op.onOpen.fail));
+      return;
+    }
+
     const writes: unknown[] = [];
     const limit = op.closesAfter ?? -1;
     if (limit !== 0) {
@@ -279,6 +298,9 @@ describe.skipIf(!dir)("conformance corpus: execution", () => {
         interface: iface as unknown as OBInterface,
       });
 
+      const outputs: unknown[] = [];
+      let refusedWrites = 0;
+
       // The fixture's caller. Writes are paced: after each write the caller
       // yields until either the graph back-closes the input side (then
       // remaining writes are refused at the boundary, per the spec) or a
@@ -289,12 +311,27 @@ describe.skipIf(!dir)("conformance corpus: execution", () => {
         const watchClosed = call.inputClosed.then(() => {
           closed = true;
         });
+        // The corpus schedule begins writes after graph startup. Yield through
+        // the adapter's asynchronous source/ref/validation startup so an
+        // immediately non-accepting inner session can back-close first.
+        await Promise.race([watchClosed, sleep(0)]);
+        while (
+          fx.awaitOutputsBeforeWrites !== undefined &&
+          outputs.length < fx.awaitOutputsBeforeWrites &&
+          !closed
+        ) {
+          await Promise.race([watchClosed, sleep(1)]);
+        }
         for (let i = 0; i < fx.writes.length; i++) {
           if (i > 0) await Promise.race([watchClosed, sleep(50)]);
-          if (closed) return;
+          if (closed) {
+            refusedWrites += fx.writes.length - i;
+            return;
+          }
           try {
             await call.write(fx.writes[i]);
           } catch {
+            refusedWrites += fx.writes.length - i;
             return; // input closed from below (back-closure) or terminal
           }
         }
@@ -306,7 +343,6 @@ describe.skipIf(!dir)("conformance corpus: execution", () => {
       })();
 
       // Collect outputs to clean end or terminal.
-      const outputs: unknown[] = [];
       let terminal: InvocationError | undefined;
       try {
         for await (const out of call.outputs) outputs.push(out);
@@ -314,6 +350,10 @@ describe.skipIf(!dir)("conformance corpus: execution", () => {
         terminal = err as InvocationError;
       }
       await writer;
+
+      if (fx.expected.refusedWrites !== undefined) {
+        expect(refusedWrites).toBe(fx.expected.refusedWrites);
+      }
 
       if (fx.expected.error) {
         expect(terminal, `expected terminal error, completed normally with ${canon(outputs)}`).toBeDefined();

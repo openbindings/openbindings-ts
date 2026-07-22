@@ -61,6 +61,15 @@ describe("parseDocument", () => {
     expect(() => parseDocument(bytes)).toThrow(/UTF-8/);
   });
 
+  it("rejects a leading UTF-8 byte-order mark in byte and string carriage (OBI-D-01)", () => {
+    const document = new TextEncoder().encode(`{"openbindings":"0.2.0","operations":{}}`);
+    const bytes = new Uint8Array(document.length + 3);
+    bytes.set([0xef, 0xbb, 0xbf], 0);
+    bytes.set(document, 3);
+    expect(() => parseDocument(bytes)).toThrow(/byte-order mark/);
+    expect(() => parseDocument(`\ufeff{"openbindings":"0.2.0","operations":{}}`)).toThrow(/byte-order mark/);
+  });
+
   it("accepts valid UTF-8 byte input", () => {
     const bytes = new TextEncoder().encode(`{"openbindings":"0.2.0","name":"héllo","operations":{}}`);
     expect(parseDocument(bytes).name).toBe("héllo");

@@ -4,6 +4,7 @@ export {
   MAP_NOT_ARRAY,
   TIMEOUT_EXCEEDED,
   TRANSFORM_UNDEFINED,
+  EXPRESSION_EVALUATION_FAILED,
   WRITE_REJECTED,
 } from "./constants.js";
 export {

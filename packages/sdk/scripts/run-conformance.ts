@@ -19,6 +19,7 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, basename, dirname, isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
+import { spawn } from "node:child_process";
 import {
   validateDocument,
   isHigherMajorOrPre1MinorThanMaxTested,
@@ -26,11 +27,18 @@ import {
   isSupportedVersion,
   MAX_TESTED_VERSION,
   MIN_SUPPORTED_VERSION,
+  resolveOperation,
+  concludeVerification,
 } from "../src/index.js";
+import { compileExampleSchema } from "../src/schema-validation.js";
+import type { OBInterface } from "../src/types.js";
+import type { RuleEvidenceStatus } from "../src/verification.js";
 
 interface FixtureTest {
   description: string;
-  document: unknown;
+  document?: unknown;
+  documentText?: string;
+  documentBase64?: string;
   valid: boolean;
   violates?: string[];
   requiresSupports?: string;
@@ -54,6 +62,17 @@ interface Result {
   expected: boolean;
   actual: boolean;
   reason?: string;
+}
+
+interface ToolScenarioFile {
+  rule: string;
+  scenarios: Array<{
+    id: string;
+    description: string;
+    action: string;
+    given: Record<string, unknown>;
+    expected: Record<string, unknown>;
+  }>;
 }
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -83,6 +102,15 @@ function listFixtures(root: string): string[] {
   }
   out.sort();
   return out;
+}
+
+function listScenarioFiles(root: string): string[] {
+  const dir = join(root, "scenarios");
+  if (!existsSync(dir)) return [];
+  return readdirSync(dir)
+    .filter((entry) => entry.endsWith(".json"))
+    .map((entry) => join(dir, entry))
+    .sort();
 }
 
 function resolveCorpusDir(input: string): string {
@@ -159,7 +187,17 @@ function runOne(rule: string, t: FixtureTest): Result {
   let actual = false;
   let reason: string | undefined;
   try {
-    validateDocument(JSON.stringify(t.document));
+    let input: string | Uint8Array;
+    if (t.documentText !== undefined) {
+      input = t.documentText;
+    } else if (t.documentBase64 !== undefined) {
+      input = Uint8Array.from(Buffer.from(t.documentBase64, "base64"));
+    } else if (Object.hasOwn(t, "document")) {
+      input = JSON.stringify(t.document);
+    } else {
+      throw new Error("fixture supplies no document carriage");
+    }
+    validateDocument(input);
     actual = true;
   } catch (e) {
     reason = `parse/validate: ${(e as Error).message}`;
@@ -176,6 +214,163 @@ function runOne(rule: string, t: FixtureTest): Result {
   };
 }
 
+function passScenario(rule: string, test: string): Result {
+  return { rule, test, passed: true, skipped: false, expected: true, actual: true };
+}
+
+function failScenario(rule: string, test: string, reason: string): Result {
+  return { rule, test, passed: false, skipped: false, expected: true, actual: false, reason };
+}
+
+function evaluateSchemaCycle(
+  scenario: ToolScenarioFile["scenarios"][number],
+): string {
+  const document = validateDocument(JSON.stringify(scenario.given.document)) as OBInterface;
+  const operationName = String(scenario.given.operation);
+  const resolved = resolveOperation(document, operationName);
+  if (!resolved) throw new Error(`operation ${JSON.stringify(operationName)} not found`);
+  const side = String(scenario.given.side);
+  const schema = side === "output" ? resolved.operation.output : resolved.operation.input;
+  if (schema === undefined) throw new Error(`operation ${side} side has no schema`);
+  try {
+    const validator = compileExampleSchema(schema, document.schemas);
+    return validator.validate(scenario.given.value).valid ? "valid" : "instance-mismatch";
+  } catch {
+    return "resolver-error";
+  }
+}
+
+async function evaluateSchemaCycleWithTimeout(
+  scenario: ToolScenarioFile["scenarios"][number],
+): Promise<string> {
+  const child = spawn(
+    process.execPath,
+    [...process.execArgv, fileURLToPath(import.meta.url), "--schema-cycle-worker"],
+    { stdio: ["pipe", "pipe", "pipe"] },
+  );
+  child.stdin.end(JSON.stringify(scenario));
+  return await new Promise<string>((resolve, reject) => {
+    let stdout = "";
+    let stderr = "";
+    const timer = setTimeout(() => {
+      child.kill();
+      reject(new Error("schema-cycle resolution did not terminate within 2 seconds"));
+    }, 2_000);
+    child.stdout.setEncoding("utf8").on("data", (chunk: string) => { stdout += chunk; });
+    child.stderr.setEncoding("utf8").on("data", (chunk: string) => { stderr += chunk; });
+    child.once("error", (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
+    child.once("close", (code) => {
+      clearTimeout(timer);
+      if (code !== 0) {
+        reject(new Error(stderr.trim() || `schema-cycle worker exited with code ${code}`));
+        return;
+      }
+      try {
+        const message = JSON.parse(stdout) as { outcome?: string; error?: string };
+        if (message.error) reject(new Error(message.error));
+        else resolve(String(message.outcome));
+      } catch (error) {
+        reject(new Error(`invalid schema-cycle worker response: ${(error as Error).message}`));
+      }
+    });
+  });
+}
+
+async function runToolScenario(
+  rule: string,
+  scenario: ToolScenarioFile["scenarios"][number],
+): Promise<Result> {
+  try {
+    if (scenario.action === "resolve-operation") {
+      const document = validateDocument(JSON.stringify(scenario.given.document));
+      const name = String(scenario.given.name);
+      const resolved = resolveOperation(document, name);
+      if (scenario.expected.outcome === "not-found") {
+        return resolved === undefined
+          ? passScenario(rule, scenario.description)
+          : failScenario(rule, scenario.description, `resolved to ${JSON.stringify(resolved.key)}; expected not-found`);
+      }
+      const expectedKey = String(scenario.expected.operationKey);
+      if (!resolved) {
+        return failScenario(rule, scenario.description, `not found; expected ${JSON.stringify(expectedKey)}`);
+      }
+      if (resolved.key !== expectedKey) {
+        return failScenario(rule, scenario.description, `resolved key ${JSON.stringify(resolved.key)}; expected ${JSON.stringify(expectedKey)}`);
+      }
+      const bindingKeys = Object.entries(document.bindings ?? {})
+        .filter(([, binding]) => binding.operation === resolved.key)
+        .map(([key]) => key)
+        .sort();
+      const expectedBindings = [...(scenario.expected.bindingKeys as string[])].sort();
+      if (JSON.stringify(bindingKeys) !== JSON.stringify(expectedBindings)) {
+        return failScenario(rule, scenario.description, `binding keys ${JSON.stringify(bindingKeys)}; expected ${JSON.stringify(expectedBindings)}`);
+      }
+      return passScenario(rule, scenario.description);
+    }
+
+    if (scenario.action === "resolve-schema-cycle") {
+      const allowed = scenario.expected.allowedOutcomes as string[];
+      const outcome = await evaluateSchemaCycleWithTimeout(scenario);
+      return allowed.includes(outcome)
+        ? passScenario(rule, scenario.description)
+        : failScenario(rule, scenario.description, `outcome ${JSON.stringify(outcome)} not in permitted set ${JSON.stringify(allowed)}`);
+    }
+
+    if (scenario.action === "validate-operation-values") {
+      const document = validateDocument(JSON.stringify(scenario.given.document)) as OBInterface;
+      const operationName = String(scenario.given.operation);
+      const resolved = resolveOperation(document, operationName);
+      if (!resolved) {
+        return failScenario(rule, scenario.description, `operation ${JSON.stringify(operationName)} not found`);
+      }
+      const side = String(scenario.given.side);
+      const schema = side === "output" ? resolved.operation.output : resolved.operation.input;
+      if (schema === undefined) {
+        return failScenario(rule, scenario.description, `operation ${side} side has no schema`);
+      }
+      const values = scenario.given.values as unknown[];
+      let actual: string[];
+      try {
+        const validator = compileExampleSchema(schema, document.schemas);
+        actual = values.map((value) =>
+          validator.validate(value).valid ? "valid" : "instance-mismatch",
+        );
+      } catch {
+        actual = values.map(() => "graph-unavailable");
+      }
+      const expected = scenario.expected.results as string[];
+      return JSON.stringify(actual) === JSON.stringify(expected)
+        ? passScenario(rule, scenario.description)
+        : failScenario(rule, scenario.description, `results ${JSON.stringify(actual)}; expected ${JSON.stringify(expected)}`);
+    }
+
+    if (scenario.action === "conclude-verification") {
+      const report = concludeVerification(
+        scenario.given.evidence as Record<string, RuleEvidenceStatus>,
+      );
+      const expectedViolated = [...(scenario.expected.violated as string[])].sort();
+      const expectedUnverified = [...(scenario.expected.unverified as string[])].sort();
+      if (report.conclusion !== scenario.expected.conclusion) {
+        return failScenario(rule, scenario.description, `conclusion ${JSON.stringify(report.conclusion)}; expected ${JSON.stringify(scenario.expected.conclusion)}`);
+      }
+      if (JSON.stringify(report.violated) !== JSON.stringify(expectedViolated)) {
+        return failScenario(rule, scenario.description, `violated rules ${JSON.stringify(report.violated)}; expected ${JSON.stringify(expectedViolated)}`);
+      }
+      if (JSON.stringify(report.unverified) !== JSON.stringify(expectedUnverified)) {
+        return failScenario(rule, scenario.description, `unverified rules ${JSON.stringify(report.unverified)}; expected ${JSON.stringify(expectedUnverified)}`);
+      }
+      return passScenario(rule, scenario.description);
+    }
+
+    return failScenario(rule, scenario.description, `unsupported action ${JSON.stringify(scenario.action)}`);
+  } catch (error) {
+    return failScenario(rule, scenario.description, (error as Error).message);
+  }
+}
+
 function parseArgs(argv: string[]): { ruleFilter?: string; verbose: boolean; json: boolean; corpusDir: string } {
   let ruleFilter: string | undefined;
   let verbose = false;
@@ -190,13 +385,15 @@ function parseArgs(argv: string[]): { ruleFilter?: string; verbose: boolean; jso
   return { ruleFilter, verbose, json, corpusDir };
 }
 
-function main(): void {
+async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
   let files = listFixtures(args.corpusDir);
+  let scenarioFiles = listScenarioFiles(args.corpusDir);
   if (args.ruleFilter) {
     files = files.filter((f) => basename(f, ".json") === args.ruleFilter);
+    scenarioFiles = scenarioFiles.filter((f) => basename(f, ".json") === args.ruleFilter);
   }
-  if (files.length === 0) {
+  if (files.length === 0 && scenarioFiles.length === 0) {
     console.error(`no fixtures found under ${args.corpusDir}`);
     process.exit(2);
   }
@@ -207,6 +404,13 @@ function main(): void {
     const fix = JSON.parse(data) as Fixture;
     for (const t of fix.tests) {
       results.push(runOne(fix.rule, t));
+    }
+  }
+  for (const f of scenarioFiles) {
+    const data = readFileSync(f, "utf8");
+    const file = JSON.parse(data) as ToolScenarioFile;
+    for (const scenario of file.scenarios) {
+      results.push(await runToolScenario(file.rule, scenario));
     }
   }
 
@@ -284,4 +488,16 @@ function main(): void {
   }
 }
 
-main();
+if (process.argv.includes("--schema-cycle-worker")) {
+  try {
+    const scenario = JSON.parse(readFileSync(0, "utf8")) as ToolScenarioFile["scenarios"][number];
+    process.stdout.write(JSON.stringify({ outcome: evaluateSchemaCycle(scenario) }));
+  } catch (error) {
+    process.stdout.write(JSON.stringify({ error: (error as Error).message }));
+  }
+} else {
+  void main().catch((error) => {
+    console.error((error as Error).stack ?? String(error));
+    process.exit(1);
+  });
+}

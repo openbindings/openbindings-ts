@@ -12,6 +12,7 @@ export const TIMEOUT_EXCEEDED = "TIMEOUT_EXCEEDED";
 export const WRITE_REJECTED = "WRITE_REJECTED";
 export const MAP_NOT_ARRAY = "MAP_NOT_ARRAY";
 export const TRANSFORM_UNDEFINED = "TRANSFORM_UNDEFINED";
+export const EXPRESSION_EVALUATION_FAILED = "EXPRESSION_EVALUATION_FAILED";
 
 /**
  * The format version this implementation supports. OG-T-02 (mirroring the
@@ -21,3 +22,4 @@ export const TRANSFORM_UNDEFINED = "TRANSFORM_UNDEFINED";
  */
 export const SUPPORTED_MAJOR = 0;
 export const SUPPORTED_MINOR = 2;
+export const SUPPORTED_PATCH = 0;

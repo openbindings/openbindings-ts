@@ -1,16 +1,14 @@
 /**
- * Enforces the format spec's validation rules OG-V-01 through OG-V-17 on one
- * graph definition, plus required-field presence and field types. Field
- * PLACEMENT has one failure only — OG-V-17 (onError on a boundary node),
- * enforced here as a rule (R3 opened the format's schema, so it no longer
- * closes objects); any other unknown or misplaced field is tolerated, not
- * rejected, mirroring core OBI-T-02.
+ * Enforces the format spec's validation rules OG-V-01 through OG-V-19 on one
+ * graph definition, plus required-field presence and field types. Graph-
+ * controlled objects are closed except for x- extensions (OG-V-19); an
+ * executable-field typo or a field placed on the wrong node type is refused.
  *
  * `validateGraph` returns structured issues (rule id + offending node keys)
  * so callers like graph editors can attribute failures to nodes; `validate`
  * is the throwing form used by the invoker (OG-T-01).
  */
-import { SUPPORTED_MAJOR, SUPPORTED_MINOR } from "./constants.js";
+import { SUPPORTED_MAJOR, SUPPORTED_MINOR, SUPPORTED_PATCH } from "./constants.js";
 import type { Graph, Node } from "./types.js";
 
 /** The SemVer 2.0.0 pattern (the same pattern the format schema carries). */
@@ -83,20 +81,11 @@ function validateEmbeddedSchema(
  * which is TypeScript-first, and absent from the Go SDK by design.
  */
 export function checkVersion(version: string): string | null {
-  const m = SEMVER_RE.exec(version);
-  if (!m) return `version "${version}" is not a SemVer 2.0.0 string`;
-  const major = Number(m[1]);
-  const minor = Number(m[2]);
-  if (major > SUPPORTED_MAJOR || (SUPPORTED_MAJOR === 0 && major === 0 && minor > SUPPORTED_MINOR)) {
-    return `OG-T-02: graph declares openbindings.operation-graph ${version}; this implementation supports up to ${SUPPORTED_MAJOR}.${SUPPORTED_MINOR}.x`;
-  }
-  if (major < SUPPORTED_MAJOR || (SUPPORTED_MAJOR === 0 && major === 0 && minor < SUPPORTED_MINOR)) {
-    return `OG-T-02: graph declares openbindings.operation-graph ${version}; this implementation supports no lower than ${SUPPORTED_MAJOR}.${SUPPORTED_MINOR}.x`;
-  }
-  if (m[4]) {
-    return `OG-T-02: graph declares prerelease openbindings.operation-graph ${version}; this implementation declares no prerelease support`;
-  }
-  return null;
+  if (!SEMVER_RE.test(version)) return `version "${version}" is not a SemVer 2.0.0 string`;
+  const supported = `${SUPPORTED_MAJOR}.${SUPPORTED_MINOR}.${SUPPORTED_PATCH}`;
+  return version === supported
+    ? null
+    : `OG-T-02: graph declares openbindings.operation-graph ${version}; this implementation supports exactly ${supported}`;
 }
 
 /**
@@ -231,6 +220,14 @@ export function validateGraph(
 
   const issues: GraphValidationIssue[] = [];
 
+  // OG-V-19: the graph object itself is closed except for x- extensions.
+  const graphFields = new Set(["openbindings.operation-graph", "description", "nodes", "edges"]);
+  for (const field of Object.keys(g as unknown as Record<string, unknown>)) {
+    if (!graphFields.has(field) && !field.startsWith("x-")) {
+      issues.push({ rule: "OG-V-19", message: `graph has unknown field "${field}"` });
+    }
+  }
+
   // OG-V-01: version field present and SemVer 2.0.0.
   const version = g["openbindings.operation-graph"];
   if (version === undefined || version === "") {
@@ -273,7 +270,12 @@ export function validateGraph(
   const outEdges = new Map<string, string[]>();
   const inEdges = new Map<string, string[]>();
   const edgeSeen = new Set<string>();
-  for (const e of g.edges ?? []) {
+  for (const [edgeIndex, e] of (g.edges ?? []).entries()) {
+    for (const field of Object.keys(e as unknown as Record<string, unknown>)) {
+      if (field !== "from" && field !== "to" && !field.startsWith("x-")) {
+        issues.push({ rule: "OG-V-19", message: `edge ${edgeIndex} has unknown field "${field}"` });
+      }
+    }
     if (!(e.from in g.nodes)) {
       issues.push({
         rule: "OG-V-07",
@@ -397,24 +399,24 @@ export function validateGraph(
       continue;
     }
 
-    for (const f of presentFields(node)) {
-      if (!fields.allowed.has(f)) {
-        // The only field-placement failure is the explicit prohibition
-        // OG-V-17 (onError on a boundary node), enforced here as a rule (R10 —
-        // the format's schema no longer closes objects). Any OTHER field the
-        // node type does not define is tolerated, not a failure: per R3 (§20)
-        // an unknown or misplaced field is ignored the way core OBI-T-02
-        // treats one — a defined field on the wrong node type (maxIterations
-        // on operation) included. A diagnostic MAY be surfaced; never a refusal.
-        if (f === "onError" && (node.type === "input" || node.type === "output")) {
-          issues.push({
-            rule: "OG-V-17",
-            message: `node "${key}" (${node.type} node) must not declare onError`,
-            nodeKeys: [key],
-          });
-        }
-        continue;
+    for (const f of Object.keys(node as unknown as Record<string, unknown>)) {
+      if (f === "type" || fields.allowed.has(f) || f.startsWith("x-")) continue;
+      if (f === "onError" && (node.type === "input" || node.type === "output")) {
+        issues.push({
+          rule: "OG-V-17",
+          message: `node "${key}" (${node.type} node) must not declare onError`,
+          nodeKeys: [key],
+        });
+      } else {
+        issues.push({
+          rule: "OG-V-19",
+          message: `node "${key}" (${node.type} node) has unknown field "${f}"`,
+          nodeKeys: [key],
+        });
       }
+    }
+    for (const f of presentFields(node)) {
+      if (!fields.allowed.has(f)) continue;
       const ft = FIELD_TYPES[f];
       const value = (node as unknown as Record<string, unknown>)[f];
       if (ft && !ft.ok(value)) {

@@ -41,7 +41,13 @@ import {
   isTransformEvaluatorWithBindings,
   operationSignature,
 } from "@openbindings/sdk";
-import { MAP_NOT_ARRAY, TIMEOUT_EXCEEDED, TRANSFORM_UNDEFINED, WRITE_REJECTED } from "./constants.js";
+import {
+  EXPRESSION_EVALUATION_FAILED,
+  MAP_NOT_ARRAY,
+  TIMEOUT_EXCEEDED,
+  TRANSFORM_UNDEFINED,
+  WRITE_REJECTED,
+} from "./constants.js";
 import type { Graph, Node } from "./types.js";
 import {
   BufferState,
@@ -217,6 +223,15 @@ export class Engine {
       if ((this.inEdges.get(key) ?? []).length > 0) this.completedSources.set(key, 0);
     }
 
+    // An operation node denotes one unconditional held session. Open every
+    // conduit with the graph, before waiting for caller input, so startup
+    // output and startup failure retain the causal availability of direct
+    // invocation. Mailboxes already exist, so an eager output pump can queue
+    // events before node workers start consuming them.
+    for (const [key, node] of Object.entries(this.graph.nodes)) {
+      if (node.type === "operation") this.startConduit(key, node);
+    }
+
     const workers = Object.entries(this.graph.nodes).map(([key, node]) => this.runNode(key, node));
 
     // Input pump: every caller write becomes one event at the input node, in
@@ -341,8 +356,8 @@ export class Engine {
 
   /**
    * Routes a per-event failure ({error, event}) to the node's onError
-   * target, or drops it. The error event inherits the failing event's
-   * lineage and root.
+   * target. Without an explicit route, the complete error event terminates
+   * the graph; omission never silently discards a failed event.
    */
   private sendPerEventError(
     nodeKey: string,
@@ -351,12 +366,23 @@ export class Engine {
     lineage: Map<string, number>,
   ): void {
     const node = this.graph.nodes[nodeKey];
-    if (!node?.onError) return;
-    if (ev.errorDepth >= MAX_ERROR_DEPTH) return;
+    const errorEvent = { error: errVal, event: ev.data };
+    if (!node?.onError || ev.errorDepth >= MAX_ERROR_DEPTH) {
+      this.exitFlag = true;
+      this.handle.fireError(
+        new InvocationError(
+          ERR_OPERATION_GRAPH_EXIT,
+          `unhandled per-event failure at node "${nodeKey}"`,
+          errorEvent,
+        ),
+      );
+      this.abortController.abort();
+      return;
+    }
     this.sendToNode(
       node.onError,
       newEvent({
-        data: { error: errVal, event: ev.data },
+        data: errorEvent,
         source: nodeKey,
         root: ev.root,
         lineage: copyLineage(lineage),
@@ -520,7 +546,7 @@ export class Engine {
   // ----- operation (the conduit) -----
 
   /**
-   * Lazily drives an operation node's held invocation and spawns its
+   * Opens an operation node's held invocation and spawns its
    * acceptance watcher and output pump. The output pump owns the node's
    * downstream completion and its terminal error handling: routed per
    * onError when set, fatal to the graph when not (the identity law's
@@ -733,7 +759,7 @@ export class Engine {
     ev: GraphEvent,
   ): Promise<{ result?: unknown; failed: boolean }> {
     if (!this.transform) {
-      this.sendPerEventError(key, "no transform evaluator available", ev, ev.lineage);
+      this.sendPerEventError(key, EXPRESSION_EVALUATION_FAILED, ev, ev.lineage);
       return { failed: true };
     }
     let result: unknown;
@@ -745,8 +771,8 @@ export class Engine {
       } else {
         result = await this.transform.evaluate(expression, ev.data);
       }
-    } catch (err) {
-      this.sendPerEventError(key, errValue(err), ev, ev.lineage);
+    } catch {
+      this.sendPerEventError(key, EXPRESSION_EVALUATION_FAILED, ev, ev.lineage);
       return { failed: true };
     }
     if (result === undefined) {

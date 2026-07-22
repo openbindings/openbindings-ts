@@ -140,6 +140,13 @@ export type { CompatibilityIssue } from "./compatibility.js";
 export { resolveOperation, allOperationIdentifiers } from "./resolve-operation.js";
 export type { ResolvedOperation } from "./resolve-operation.js";
 
+export { concludeVerification } from "./verification.js";
+export type {
+  RuleEvidenceStatus,
+  VerificationConclusion,
+  VerificationReport,
+} from "./verification.js";
+
 export { familyName, isJSONContentType, isHttpUrl } from "./helpers.js";
 
 export {

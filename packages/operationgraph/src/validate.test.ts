@@ -98,17 +98,15 @@ describe("node field rules exports", () => {
   });
 });
 
-// OG-T-02: the full mirror of OBI-T-04 — upward refusal (higher major;
-// higher minor pre-1.0), downward refusal (below the supported minimum),
-// and prerelease refusal absent declared support.
+// OG-T-02: this identifier accepts exactly graph edition 0.2.0.
 describe("checkVersion (OG-T-02)", () => {
   const cases: Array<[string, string | null]> = [
     ["0.2.0", null],
-    ["0.2.9", null], // higher patch within the supported minor never refuses
-    ["0.3.0", "supports up to"],
-    ["1.0.0", "supports up to"],
-    ["0.1.0", "supports no lower than"],
-    ["0.2.0-beta.1", "prerelease"],
+    ["0.2.9", "supports exactly"],
+    ["0.3.0", "supports exactly"],
+    ["1.0.0", "supports exactly"],
+    ["0.1.0", "supports exactly"],
+    ["0.2.0-beta.1", "supports exactly"],
   ];
   for (const [version, want] of cases) {
     it(`${version} -> ${want ?? "accepted"}`, () => {

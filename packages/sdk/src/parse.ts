@@ -30,6 +30,12 @@ export function parseDocument(input: string | Uint8Array): OBInterface {
   if (typeof input === "string") {
     text = input;
   } else {
+    // TextDecoder strips a leading UTF-8 BOM by default. OBI-D-01 forbids
+    // accepting one, so inspect the exact bytes before decoding rather than
+    // letting the decoder normalize the document.
+    if (input.length >= 3 && input[0] === 0xef && input[1] === 0xbb && input[2] === 0xbf) {
+      throw new SyntaxError("parse document: leading byte-order mark is forbidden (OBI-D-01)");
+    }
     // OBI-D-01: an OBI document is UTF-8 encoded JSON. The default
     // TextDecoder silently replaces invalid sequences with U+FFFD; decode
     // fatally so encoding errors surface as parse errors.
@@ -38,6 +44,12 @@ export function parseDocument(input: string | Uint8Array): OBInterface {
     } catch {
       throw new SyntaxError("parse document: input is not valid UTF-8 (OBI-D-01)");
     }
+  }
+  // A string input has no byte encoding to inspect but can still carry the
+  // decoded U+FEFF marker. Treat the leading marker identically to the byte
+  // carriage; no input form gets a normalization exception.
+  if (text.charCodeAt(0) === 0xfeff) {
+    throw new SyntaxError("parse document: leading byte-order mark is forbidden (OBI-D-01)");
   }
   rejectDuplicateObjectKeys(text);
   const parsed: unknown = JSON.parse(text);
