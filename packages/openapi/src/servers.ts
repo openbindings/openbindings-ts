@@ -217,7 +217,7 @@ function substituteServerVariables(
     const declaredDefault = typeof v.default === "string" ? v.default : "";
     const val = supplied?.[name] ?? declaredDefault;
     if (val === "" && declaredDefault === "") {
-      const enumVals = Array.isArray(v.enum) ? (v.enum as string[]) : undefined;
+      const enumVals = Array.isArray(v.enum) ? v.enum : undefined;
       throw new ConfigRequired(
         "server",
         name,

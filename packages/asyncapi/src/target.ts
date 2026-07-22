@@ -358,7 +358,7 @@ function assembleServer(
 
   if (supplied) {
     const sorted = Object.entries(supplied).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
-    for (const [name, val] of sorted) {
+    for (const [name] of sorted) {
       const declared = srv.variables?.[name];
       if (!declared) {
         throw new Error(
