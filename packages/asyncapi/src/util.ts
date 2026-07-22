@@ -4,7 +4,10 @@ import { dereference } from "@openbindings/sdk";
 import type { AsyncAPIDocument } from "./asyncapi-types.js";
 import { CHANNEL_NAME_TAG, REF_NAME_TAG, SERVER_NAME_TAG } from "./constants.js";
 
-const NON_KEY_CHARS = /[^a-zA-Z0-9._-]/g;
+// The u flag makes the class match whole code points, so an astral-plane
+// character replaces as one underscore, not one per surrogate half
+// (Go parity: SanitizeKey's regexp operates on runes).
+const NON_KEY_CHARS = /[^a-zA-Z0-9._-]/gu;
 
 /** Replaces non-alphanumeric characters with underscores to produce a valid key. */
 export function sanitizeKey(name: string): string {
@@ -22,6 +25,27 @@ export function uniqueKey(key: string, used: Set<string>): string {
     const candidate = `${key}_${i}`;
     if (!used.has(candidate)) return candidate;
   }
+}
+
+/**
+ * Compares strings by Unicode code point: the canonical ordering for
+ * synthesis and inspection (Go parity: Go compares strings byte-wise, and
+ * UTF-8 byte order is code point order). Neither `localeCompare` (collates
+ * under the host locale, so output varies machine to machine) nor default
+ * sort / UTF-16 code-unit `<` (ranks astral-plane code points below
+ * U+E000..U+FFFF) matches the reference implementation. The order is
+ * load-bearing beyond emission: it decides which of two colliding names
+ * wins the bare key in {@link uniqueKey}.
+ */
+export function codePointCompare(a: string, b: string): number {
+  let i = 0;
+  while (i < a.length && i < b.length) {
+    const ca = a.codePointAt(i) as number; // i < a.length, so defined
+    const cb = b.codePointAt(i) as number;
+    if (ca !== cb) return ca < cb ? -1 : 1;
+    i += ca > 0xffff ? 2 : 1;
+  }
+  return a.length - b.length;
 }
 
 const SECURITY_SCHEME_REF_PREFIX = "#/components/securitySchemes/";

@@ -295,6 +295,34 @@
 
 ### Fixed
 
+- **Synthesis and inspection order names by Unicode code point in all four
+  format packages (`@openbindings/openapi`, `@openbindings/mcp`,
+  `@openbindings/graphql`, `@openbindings/asyncapi`), never by host-locale
+  collation.** Entity ordering — MCP tools/resources/templates/prompts,
+  GraphQL fields, OpenAPI paths, AsyncAPI operation ids, and sorted
+  `required` arrays — used `localeCompare`, which collates under the host
+  machine's default locale and ICU data: the same source synthesized on
+  differently-configured machines could emit operations in different
+  order, and — because processing order decides which of two names
+  colliding after sanitization wins the bare operation key — could assign
+  different keys outright (ICU English collation orders `"a b"`/`"a_b"`
+  and mixed-case pairs differently than byte order does). All ordering now
+  routes through a per-package `codePointCompare` (Go parity: Go compares
+  strings byte-wise, and UTF-8 byte order is code point order); a plain
+  UTF-16 `<` comparator would not have been enough, since it ranks
+  astral-plane code points below U+E000..U+FFFF. The AsyncAPI inspection
+  lane also sorted with a different comparator than the synthesis lane
+  whose key assignment it promises to preview; both now share one
+  ordering. Pinned by mixed-case, astral-plane, and collision-assignment
+  fixtures in each package.
+
+- **`sanitizeKey` replaces an astral-plane character with one underscore,
+  not one per surrogate half.** The non-key character class lacked the `u`
+  flag, so a name like `t-😀-a` sanitized to `t-__-a` in TypeScript but
+  `t-_-a` in Go (whose `regexp` operates on runes), yielding different
+  operation keys across SDKs for the same source. All four format packages
+  now use Unicode-mode classes.
+
 - **`@openbindings/graphql`: a subscription `next` frame whose `errors`
   array carries a malformed element settles as a structured error, never a
   TypeError.** A broken or hostile graphql-transport-ws server sending

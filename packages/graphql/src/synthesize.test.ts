@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { convertToInterface } from "./synthesize.js";
+import { convertToInterface, sanitizeKey } from "./synthesize.js";
 import type { IntrospectionSchema } from "./introspection.js";
 
 describe("convertToInterface", () => {
@@ -286,5 +286,34 @@ describe("convertToInterface — shared-type synthesis (C8f)", () => {
     expect(parent).toBeDefined();
     expect(parent?.type).toBe("object");
     expect(parent?.properties).toBeUndefined();
+  });
+});
+
+describe("deterministic ordering", () => {
+  it("orders mixed-case field names by code point, not locale collation", () => {
+    const schema: IntrospectionSchema = {
+      queryType: { kind: "OBJECT", name: "Query", ofType: null },
+      mutationType: null,
+      subscriptionType: null,
+      types: [
+        {
+          kind: "OBJECT", name: "Query",
+          fields: [
+            { name: "alpha", type: { kind: "SCALAR", name: "String", ofType: null }, args: [], isDeprecated: false },
+            { name: "Bravo", type: { kind: "SCALAR", name: "String", ofType: null }, args: [], isDeprecated: false },
+          ],
+        },
+      ],
+    };
+
+    const iface = convertToInterface(schema);
+
+    // "B" (U+0042) < "a" (U+0061) by code point — the order Go's byte-wise
+    // comparison produces; ICU locale collation would flip the pair.
+    expect(Object.keys(iface.operations)).toEqual(["Bravo", "alpha"]);
+  });
+
+  it("sanitizes an astral-plane character to one underscore, not one per surrogate half", () => {
+    expect(sanitizeKey("t-😀-a")).toBe("t-_-a");
   });
 });

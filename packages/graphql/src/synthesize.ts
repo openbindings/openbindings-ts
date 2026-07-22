@@ -26,7 +26,7 @@ export function convertToInterface(schema: IntrospectionSchema, location?: strin
     const t = tm.get(rt.typeName);
     if (!t?.fields) continue;
 
-    const fields = [...t.fields].sort((a, b) => a.name.localeCompare(b.name));
+    const fields = [...t.fields].sort((a, b) => codePointCompare(a.name, b.name));
 
     for (const f of fields) {
       if (f.name.startsWith("__")) continue;
@@ -96,7 +96,7 @@ function argsToInputSchema(args: InputValue[], tm: TypeMap): Record<string, unkn
   }
 
   const schema: Record<string, unknown> = { type: "object", properties };
-  if (required.length > 0) schema.required = required.sort();
+  if (required.length > 0) schema.required = required.sort(codePointCompare);
   return schema;
 }
 
@@ -196,7 +196,7 @@ function inputObjectToJSONSchema(name: string, tm: TypeMap, visited: Set<string>
       if (isRequired) required.push(f.name);
     }
     const schema: Record<string, unknown> = { type: "object", properties };
-    if (required.length > 0) schema.required = required.sort();
+    if (required.length > 0) schema.required = required.sort(codePointCompare);
     return schema;
   } finally {
     visited.delete(name);
@@ -220,11 +220,35 @@ function unionToJSONSchema(name: string, tm: TypeMap, visited: Set<string>): Rec
  * previews exactly what synthesis would name (Go parity: list_refs.go
  * reuses the same collision-resolution helpers SynthesizeInterface uses). */
 export function sanitizeKey(name: string): string {
-  const key = name.replace(/[^a-zA-Z0-9._-]/g, "_").replace(/^_+|_+$/g, "");
+  // The u flag makes the class match whole code points, so an astral-plane
+  // character replaces as one underscore, not one per surrogate half
+  // (Go parity: SanitizeKey's regexp operates on runes).
+  const key = name.replace(/[^a-zA-Z0-9._-]/gu, "_").replace(/^_+|_+$/g, "");
   if (!key) return "unnamed";
   // OBI-D-03 requires the first character to be a letter or underscore
   // (Go parity: SanitizeKey).
   return /^[A-Za-z_]/.test(key) ? key : `_${key}`;
+}
+
+/**
+ * Compares strings by Unicode code point: the canonical ordering for
+ * synthesis and inspection (Go parity: Go compares strings byte-wise, and
+ * UTF-8 byte order is code point order). Neither `localeCompare` (collates
+ * under the host locale, so output varies machine to machine) nor default
+ * sort / UTF-16 code-unit `<` (ranks astral-plane code points below
+ * U+E000..U+FFFF) matches the reference implementation. The order is
+ * load-bearing beyond emission: it decides which of two colliding names
+ * wins the bare key in {@link resolveKey}.
+ */
+export function codePointCompare(a: string, b: string): number {
+  let i = 0;
+  while (i < a.length && i < b.length) {
+    const ca = a.codePointAt(i) as number; // i < a.length, so defined
+    const cb = b.codePointAt(i) as number;
+    if (ca !== cb) return ca < cb ? -1 : 1;
+    i += ca > 0xffff ? 2 : 1;
+  }
+  return a.length - b.length;
 }
 
 export function resolveKey(key: string, entityType: string, used: Map<string, string>): string {

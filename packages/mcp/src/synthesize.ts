@@ -286,11 +286,35 @@ function promptOutputSchema(): JSONSchema {
  * names."
  */
 export function sanitizeKey(name: string): string {
-  const key = name.replace(/[^a-zA-Z0-9._-]/g, "_").replace(/^_+|_+$/g, "");
+  // The u flag makes the class match whole code points, so an astral-plane
+  // character replaces as one underscore, not one per surrogate half
+  // (Go parity: SanitizeKey's regexp operates on runes).
+  const key = name.replace(/[^a-zA-Z0-9._-]/gu, "_").replace(/^_+|_+$/g, "");
   if (!key) return "unnamed";
   // OBI-D-03 requires the first character to be a letter or underscore
   // (Go parity: SanitizeKey).
   return /^[A-Za-z_]/.test(key) ? key : `_${key}`;
+}
+
+/**
+ * Compares strings by Unicode code point: the canonical ordering for
+ * synthesis and inspection (Go parity: Go compares strings byte-wise, and
+ * UTF-8 byte order is code point order). Neither `localeCompare` (collates
+ * under the host locale, so output varies machine to machine) nor default
+ * sort / UTF-16 code-unit `<` (ranks astral-plane code points below
+ * U+E000..U+FFFF) matches the reference implementation. The order is
+ * load-bearing beyond emission: it decides which of two colliding names
+ * wins the bare key in {@link resolveKey}.
+ */
+export function codePointCompare(a: string, b: string): number {
+  let i = 0;
+  while (i < a.length && i < b.length) {
+    const ca = a.codePointAt(i) as number; // i < a.length, so defined
+    const cb = b.codePointAt(i) as number;
+    if (ca !== cb) return ca < cb ? -1 : 1;
+    i += ca > 0xffff ? 2 : 1;
+  }
+  return a.length - b.length;
 }
 
 /** Resolve key collisions by prefixing with entity type. */
@@ -313,11 +337,11 @@ export function convertToInterface(disc: MCPDiscovery, location?: string): OBInt
   const source: { bindingSpec: string; location?: string } = { bindingSpec: BINDING_SPEC };
   if (location) source.location = location;
 
-  // Sort all entities alphabetically for deterministic output.
-  const tools = [...disc.tools].sort((a, b) => a.name.localeCompare(b.name));
-  const resources = [...disc.resources].sort((a, b) => a.name.localeCompare(b.name));
-  const templates = [...disc.resourceTemplates].sort((a, b) => a.name.localeCompare(b.name));
-  const prompts = [...disc.prompts].sort((a, b) => a.name.localeCompare(b.name));
+  // Sort all entities by name, code point order, for deterministic output.
+  const tools = [...disc.tools].sort((a, b) => codePointCompare(a.name, b.name));
+  const resources = [...disc.resources].sort((a, b) => codePointCompare(a.name, b.name));
+  const templates = [...disc.resourceTemplates].sort((a, b) => codePointCompare(a.name, b.name));
+  const prompts = [...disc.prompts].sort((a, b) => codePointCompare(a.name, b.name));
 
   // Tools
   for (const tool of tools) {
@@ -385,7 +409,7 @@ export function convertToInterface(disc: MCPDiscovery, location?: string): OBInt
         if (arg.required) required.push(arg.name);
       }
       const input: Record<string, unknown> = { type: "object", properties };
-      if (required.length > 0) input.required = required.sort();
+      if (required.length > 0) input.required = required.sort(codePointCompare);
       op.input = input;
     }
 

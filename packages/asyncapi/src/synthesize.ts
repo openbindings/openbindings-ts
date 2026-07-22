@@ -6,7 +6,7 @@ import type {
   AsyncAPIOperationReply,
 } from "./asyncapi-types.js";
 import { BINDING_SPEC, DEFAULT_SOURCE_NAME } from "./constants.js";
-import { operationRef, sanitizeKey, uniqueKey } from "./util.js";
+import { codePointCompare, operationRef, sanitizeKey, uniqueKey } from "./util.js";
 
 // eslint-disable-next-line @typescript-eslint/require-await -- the synthesizer contract is Promise-returning; this format synthesizes synchronously
 export async function convertToInterface(
@@ -35,8 +35,8 @@ export async function convertToInterface(
 
   const usedKeys = new Set<string>();
   const ops = Object.entries(doc.operations ?? {});
-  // Sort by id for deterministic output
-  ops.sort(([a], [b]) => a.localeCompare(b));
+  // Sort by id, code point order, for deterministic output
+  ops.sort(([a], [b]) => codePointCompare(a, b));
 
   for (const [opID, asyncOp] of ops) {
     const opKey = uniqueKey(sanitizeKey(opID), usedKeys);
