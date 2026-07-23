@@ -36,6 +36,10 @@ export interface BindingInvoker {
  * Independent of {@link BindingInvoker} -- an implementation may provide one, the other, or both.
  * Synthesizers load sources fresh on every call; parsed-artifact caching belongs
  * to invokers (authoring wants freshness).
+ * Every returned binding must resolve to a supported target and admit at least
+ * one faithful invocation path. If an accepted callable target cannot be
+ * represented faithfully, synthesis fails rather than returning a silent
+ * partial interface.
  */
 export interface InterfaceSynthesizer {
   bindingSpecs(): BindingSpecInfo[];

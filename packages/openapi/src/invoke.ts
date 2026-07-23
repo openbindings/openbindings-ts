@@ -12,6 +12,7 @@ import {
   contextString,
   contextHeaders,
   contextCookies,
+  contextConfiguration,
   httpErrorCode,
   httpErrorEffects,
   ERR_INVALID_REF,
@@ -54,10 +55,13 @@ import {
 import {
   acceptHeader,
   buildRequestBody,
+  candidateCollides,
+  governingResponse,
+  governingResponseMedia,
   isJSONMediaType,
-  isStreamingCapable,
   normalizeMediaType,
-  planRequestBody,
+  parseMediaType,
+  planRequestBodies,
   type BodyPlan,
 } from "./media.js";
 import { ConfigRequired, resolveServer } from "./servers.js";
@@ -143,14 +147,6 @@ export async function runBinding(
     );
     return;
   }
-  let plan: BodyPlan;
-  try {
-    plan = planRequestBody(op);
-  } catch (e: unknown) {
-    inv.fireError(new InvocationError(ERR_SOURCE_CONFIG_ERROR, errorMessage(e)));
-    return;
-  }
-
   let baseURL: string;
   try {
     baseURL = resolveServer(doc, pathItem, op, args.context, args.source.location);
@@ -168,6 +164,19 @@ export async function runBinding(
       contextRequiredError("OpenAPI operation requires authentication context", details),
     );
     return;
+  }
+
+  // A required body will necessarily consult request-media selection. Its
+  // candidate set is artifact-only, so an unsupported/degenerate set is a
+  // knowable pre-dispatch refusal and must not wait for caller input.
+  let requiredBodyPlans: BodyPlan[] | undefined;
+  if (op.requestBody?.required === true) {
+    try {
+      requiredBodyPlans = planRequestBodies(op);
+    } catch (e: unknown) {
+      inv.fireError(new InvocationError(ERR_SOURCE_CONFIG_ERROR, errorMessage(e)));
+      return;
+    }
   }
 
   // ----- Input flows through the handle, not the args. An operation with
@@ -207,27 +216,59 @@ export async function runBinding(
 
   // ----- Routing (§9.1) and body construction (§9.2): still pre-dispatch. -----
 
-  let routed;
-  try {
-    routed = routeInput(params, inputMap, path, plan);
-  } catch (e: unknown) {
-    const code = e instanceof MissingPathParamError ? ERR_MISSING_INPUT : ERR_VALIDATION_FAILED;
-    inv.fireError(new InvocationError(code, errorMessage(e)));
-    return;
+  let plans: BodyPlan[] = [];
+  if (requestWillEmitBody(params, inputMap, op)) {
+    try {
+      plans = requiredBodyPlans ?? planRequestBodies(op);
+    } catch (e: unknown) {
+      inv.fireError(new InvocationError(ERR_SOURCE_CONFIG_ERROR, errorMessage(e)));
+      return;
+    }
   }
 
-  let wire;
-  try {
-    wire = buildRequestBody(doc, plan, routed);
-  } catch (e: unknown) {
-    inv.fireError(new InvocationError(ERR_VALIDATION_FAILED, errorMessage(e)));
+  let routed: ReturnType<typeof routeInput> | undefined;
+  let wire: ReturnType<typeof buildRequestBody> | undefined;
+  let routeFailure: unknown;
+  const reasons: string[] = [];
+  const candidates = plans.length === 0
+    ? [null]
+    : configuredRequestPlans(plans, args.context);
+  for (const candidate of candidates) {
+    if (candidate && candidateCollides(params, candidate)) {
+      reasons.push(
+        `request media candidate ${candidate.mediaType} collides with an independently declared parameter`,
+      );
+      continue;
+    }
+    try {
+      const candidateRouted = routeInput(params, inputMap, path, candidate);
+      const candidateWire = buildRequestBody(doc, candidate, candidateRouted);
+      routed = candidateRouted;
+      wire = candidateWire;
+      break;
+    } catch (e: unknown) {
+      if (e instanceof MissingPathParamError) {
+        routeFailure = e;
+        break;
+      }
+      reasons.push(`${candidate?.mediaType ?? "no body"}: ${errorMessage(e)}`);
+    }
+  }
+  if (!routed || !wire) {
+    const failure = routeFailure ?? new Error(
+      `no request media candidate can carry this invocation: ${
+        reasons.length > 0 ? reasons.join("; ") : "configured requestMedia selects no declared supported candidate"
+      }`,
+    );
+    const code = failure instanceof MissingPathParamError ? ERR_MISSING_INPUT : ERR_VALIDATION_FAILED;
+    inv.fireError(new InvocationError(code, errorMessage(failure)));
     return;
   }
 
   // ----- Channel assembly (§9.6, OAPI-P-10). -----
 
   const placements = credentialPlacements(doc, op, args.context);
-  const collision = credentialCollision(placements, routed.populated);
+  const collision = credentialCollision(placements, params, routed.populated);
   if (collision !== "") {
     inv.fireError(new InvocationError(ERR_VALIDATION_FAILED, collision));
     return;
@@ -259,11 +300,10 @@ export async function runBinding(
   if (wire.contentType !== "") {
     fetchHeaders.set("Content-Type", wire.contentType);
   }
-  // The Accept header advertises the declared concrete media types of the
-  // operation's success responses; absent any declaration, application/json
-  // (§9.2). For streaming-capable operations the declared text/event-stream
-  // is in the set naturally.
-  fetchHeaders.set("Accept", acceptHeader(op));
+  // Advertise only artifact-declared concrete success media; an empty set
+  // leaves Accept absent.
+  const accept = acceptHeader(op);
+  if (accept !== "") fetchHeaders.set("Accept", accept);
 
   for (const [k, v] of routed.headers) {
     fetchHeaders.set(k, v);
@@ -291,6 +331,7 @@ export async function runBinding(
       headers: fetchHeaders,
       body: wire.body,
       signal: inv.signal,
+      redirect: "manual",
     });
   } catch (e: unknown) {
     // Aborted while in flight: the handle is already terminal (caller
@@ -307,6 +348,7 @@ export async function runBinding(
 
   const contentType = resp.headers.get("content-type");
   const site = siteFor(args, baseURL);
+  const responseDeclaration = governingResponse(op, resp.status);
 
   // Interaction-shape dispatch (§8, OAPI-P-06): the shape is bounded by
   // declaration and selected by framing. An operation is streaming-capable
@@ -317,19 +359,9 @@ export async function runBinding(
   // streaming-capable contradicts the declaration: a protocol error, never
   // a silent reclassification.
   if (isSSEContentType(contentType)) {
-    if (!isStreamingCapable(op)) {
-      await resp.body?.cancel().catch(() => {});
-      inv.fireError(
-        new InvocationError(
-          ERR_PROTOCOL,
-          "response arrived as text/event-stream, but no declared success response of this operation declares that media type (OAPI-P-06: an undeclared event-stream response is a protocol error)",
-        ),
-      );
-      return;
-    }
-    // Classification for the stream path runs once, here, at dispatch, on
-    // the initial response's status and headers (the body is the stream;
-    // it is never read for classification).
+    // Classification is independent of declaration lookup. A non-success
+    // final status is the native HTTP failure even if its body happens to
+    // use event-stream framing.
     let ok: boolean;
     try {
       ok = await classifyThroughHooks(
@@ -355,6 +387,32 @@ export async function runBinding(
       );
       return;
     }
+    let governingMedia: string | null = null;
+    try {
+      governingMedia = responseDeclaration
+        ? governingResponseMedia(responseDeclaration.response, contentType)
+        : null;
+    } catch (e: unknown) {
+      await resp.body?.cancel().catch(() => {});
+      inv.fireError(
+        new InvocationError(
+          ERR_PROTOCOL,
+          `response arrived as text/event-stream, but the governing response does not declare that media type: ${errorMessage(e)}`,
+        ),
+      );
+      return;
+    }
+    if (!governingMedia || parseMediaType(governingMedia).base !== "text/event-stream") {
+      await resp.body?.cancel().catch(() => {});
+      inv.fireError(
+        new InvocationError(
+          ERR_PROTOCOL,
+          "response arrived as text/event-stream, but the governing response does not declare that media type",
+        ),
+      );
+      return;
+    }
+    inv.setTrailer({ "x-ob-governing-media": [governingMedia] });
     await streamSSE(resp, args, site, inv, invocationMeta, decodeByContentType(contentType));
     return;
   }
@@ -413,6 +471,25 @@ export async function runBinding(
     return;
   }
 
+  // An empty successful response carries absence, not an invented null.
+  if (bodyBytes.length === 0) {
+    inv.setTrailer(decodeClassifyTrailer(args.hooks, "not-consulted/empty"));
+    inv.closeOutput();
+    return;
+  }
+
+  let governingMedia: string;
+  try {
+    if (!responseDeclaration) {
+      throw new Error(`status ${resp.status} has no governing Response Object`);
+    }
+    governingMedia = governingResponseMedia(responseDeclaration.response, contentType) ?? "";
+    if (!governingMedia) throw new Error("the governing Response Object declares no response content");
+  } catch (e: unknown) {
+    inv.fireError(new InvocationError(ERR_PROTOCOL, errorMessage(e)));
+    return;
+  }
+
   let output: unknown;
   try {
     output = await decodeThroughHooks(args.hooks, site, raw, decodeBytesByContentType(contentType, bodyBytes));
@@ -425,7 +502,9 @@ export async function runBinding(
   // header/content-type when the builtin (the Content-Type lane) decided,
   // hook when overridden; classify is always assumption/2xx unless a hook
   // widened it.
-  inv.setTrailer(decodeClassifyTrailer(args.hooks, "header/content-type"));
+  const trailer = decodeClassifyTrailer(args.hooks, "header/content-type");
+  trailer["x-ob-governing-media"] = [governingMedia];
+  inv.setTrailer(trailer);
   await inv.emitOutput(output);
   inv.closeOutput();
 }
@@ -453,6 +532,40 @@ function requiredInputMissing(params: OpenAPIParameter[], op: OpenAPIOperation):
     return "operation requires a request body";
   }
   return "";
+}
+
+function requestWillEmitBody(
+  params: OpenAPIParameter[],
+  input: Record<string, unknown>,
+  op: OpenAPIOperation,
+): boolean {
+  if (op.requestBody?.required === true) return true;
+  if (op.requestBody == null) return false;
+  const parameterNames = new Set(params.map((parameter) => parameter.name).filter((name): name is string => Boolean(name)));
+  return Object.keys(input).some((name) => !parameterNames.has(name));
+}
+
+/** Applies the optional artifact-neutral request-media configuration point. */
+function configuredRequestPlans(
+  plans: BodyPlan[],
+  ctx: Record<string, unknown> | undefined,
+): BodyPlan[] {
+  const raw = contextConfiguration(ctx)["requestMedia"];
+  if (raw == null) return plans;
+  if (typeof raw !== "string") return [];
+  let wanted: string;
+  try {
+    wanted = parseMediaType(raw).identity;
+  } catch {
+    return [];
+  }
+  return plans.filter((plan) => {
+    try {
+      return parseMediaType(plan.mediaKey).identity === wanted;
+    } catch {
+      return false;
+    }
+  });
 }
 
 /**
@@ -979,13 +1092,33 @@ export function credentialPlacements(
  */
 export function credentialCollision(
   placements: CredentialPlacement[],
+  params: OpenAPIParameter[],
   populated: { header: Set<string>; query: Set<string>; cookie: Set<string> },
 ): string {
+  const declared = {
+    header: new Set<string>(),
+    query: new Set<string>(),
+    cookie: new Set<string>(),
+  };
+  for (const parameter of params) {
+    if (!parameter.name) continue;
+    if (parameter.in === "header") declared.header.add(parameter.name.toLowerCase());
+    else if (parameter.in === "query") declared.query.add(parameter.name);
+    else if (parameter.in === "cookie") declared.cookie.add(parameter.name);
+  }
+  const processorOwned = new Set(["host", "content-length", "content-type", "accept"]);
+  const seen = new Set<string>();
   for (const pl of placements) {
     const name = pl.channel === "header" ? pl.name.toLowerCase() : pl.name;
-    if (populated[pl.channel].has(name)) {
-      return `credential "${pl.name}" collides with a caller-populated ${pl.channel} parameter of the same name (OAPI-P-10: refused before dispatch, never a silent overwrite in either direction)`;
+    if (pl.channel === "header" && processorOwned.has(name)) {
+      return `credential "${pl.name}" collides with processor-owned request field ${pl.name} (OAPI-P-10)`;
     }
+    if (declared[pl.channel].has(name) || populated[pl.channel].has(name)) {
+      return `credential "${pl.name}" collides with an effective ${pl.channel} parameter of the same name (OAPI-P-10: refused before dispatch, never a silent overwrite in either direction)`;
+    }
+    const key = `${pl.channel}\0${name}`;
+    if (seen.has(key)) return `two credentials collide at ${pl.channel} "${pl.name}" (OAPI-P-10)`;
+    seen.add(key);
   }
   return "";
 }

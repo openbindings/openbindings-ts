@@ -365,10 +365,11 @@ function assembleServer(
           `configuration.server.variables[${JSON.stringify(name)}] names no declared variable of server ${JSON.stringify(member.name)}`,
         );
       }
-      // A declared enum does not gate the supplied value (§9.2): it is the
-      // author's expectation, not a boundary, and the same point admits a
-      // full-URL override that bypasses the declaration. Undeclared names
-      // still refuse (above); enum values do not.
+      if (declared?.enum && declared.enum.length > 0 && !declared.enum.includes(supplied[name]!)) {
+        throw new Error(
+          `configuration.server.variables[${JSON.stringify(name)}] value ${JSON.stringify(supplied[name])} is outside the artifact-declared enum`,
+        );
+      }
     }
   }
 
@@ -415,8 +416,11 @@ function substituteServerVariables(
         );
       }
     }
-    // A declared enum does not gate the value (§9.2): author's expectation,
-    // not a boundary, consistent with the config-server-variables path.
+    if (declared?.enum && declared.enum.length > 0 && !declared.enum.includes(val)) {
+      throw new Error(
+        `server ${JSON.stringify(member.name)}: variable ${JSON.stringify(name)} value ${JSON.stringify(val)} is outside the artifact-declared enum`,
+      );
+    }
     out = out.replaceAll(`{${name}}`, val);
   }
   if (/[{}]/.test(out)) {
@@ -456,6 +460,8 @@ export function addressConfiguration(ctx?: Record<string, unknown>): AddressConf
   const out: AddressConfig = { address: "" };
   const cfg = contextConfiguration(ctx);
   const raw = cfg["address"];
+  const directParameters = cfg["parameters"];
+  if (directParameters !== undefined) out.parameters = stringMap(directParameters, "configuration.parameters");
   if (raw === undefined || raw === null) return out;
   if (typeof raw === "string") {
     out.address = raw;
@@ -465,12 +471,11 @@ export function addressConfiguration(ctx?: Record<string, unknown>): AddressConf
     const v = raw as Record<string, unknown>;
     if (typeof v.address === "string") out.address = v.address;
     if (v.parameters !== null && typeof v.parameters === "object" && !Array.isArray(v.parameters)) {
-      out.parameters = {};
-      for (const [name, val] of Object.entries(v.parameters as Record<string, unknown>)) {
-        if (typeof val !== "string") {
-          throw new Error(
-            `configuration.address.parameters[${JSON.stringify(name)}] must be a string, got ${typeof val}`,
-          );
+      const nested = stringMap(v.parameters, "configuration.address.parameters");
+      out.parameters ??= {};
+      for (const [name, val] of Object.entries(nested)) {
+        if (out.parameters[name] !== undefined && out.parameters[name] !== val) {
+          throw new Error(`address parameter ${JSON.stringify(name)} is supplied twice with different values`);
         }
         out.parameters[name] = val;
       }
@@ -478,6 +483,16 @@ export function addressConfiguration(ctx?: Record<string, unknown>): AddressConf
     return out;
   }
   throw new Error(`configuration.address must be a string or an object, got ${typeof raw}`);
+}
+
+function stringMap(raw: unknown, what: string): Record<string, string> {
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) throw new Error(`${what} must be an object of string values`);
+  const result: Record<string, string> = {};
+  for (const [name, val] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof val !== "string") throw new Error(`${what}[${JSON.stringify(name)}] must be a string, got ${typeof val}`);
+    result[name] = val;
+  }
+  return result;
 }
 
 /**
@@ -493,6 +508,7 @@ export function resolveAddress(
   ch: AsyncAPIChannel | undefined,
   channelName: string,
   cfg: AddressConfig,
+  outgoingPayload?: unknown,
 ): string {
   if (cfg.address !== "") {
     if (/[{}]/.test(cfg.address)) {
@@ -513,7 +529,7 @@ export function resolveAddress(
       false,
     );
   }
-  return expandAddress(ch, ch.address, channelName, cfg.parameters);
+  return expandAddress(ch, ch.address, channelName, cfg.parameters, outgoingPayload);
 }
 
 /**
@@ -528,12 +544,23 @@ function expandAddress(
   address: string,
   channelName: string,
   supplied: Record<string, string> | undefined,
+  outgoingPayload: unknown,
 ): string {
+  for (const name of Object.keys(supplied ?? {})) {
+    const declared = ch.parameters?.[name];
+    if (!declared) throw new Error(`configuration parameter ${JSON.stringify(name)} is not declared by channel ${JSON.stringify(channelName)}`);
+    if (declared.location) throw new Error(`configuration cannot override address parameter ${JSON.stringify(name)} because the artifact declares location ${JSON.stringify(declared.location)}`);
+  }
   let out = address;
   for (const name of templateExpressions(address)) {
-    let val = supplied?.[name];
+    const declared = ch.parameters?.[name];
+    let val: string | undefined;
+    if (declared?.location) {
+      val = evaluatePayloadLocation(declared.location, outgoingPayload, name);
+    } else {
+      val = supplied?.[name];
+    }
     if (val === undefined) {
-      const declared = ch.parameters?.[name];
       if (declared?.default) {
         val = declared.default;
       } else {
@@ -545,9 +572,10 @@ function expandAddress(
         );
       }
     }
-    // A declared enum does not gate the value (§9.2): author's expectation,
-    // not a boundary, consistent with the server-variable point.
-    out = out.replaceAll(`{${name}}`, val);
+    if (declared?.enum && declared.enum.length > 0 && !declared.enum.includes(val)) {
+      throw new Error(`address parameter ${JSON.stringify(name)} value ${JSON.stringify(val)} is outside the artifact-declared enum`);
+    }
+    out = out.replaceAll(`{${name}}`, encodeURIComponent(val));
   }
   if (/[{}]/.test(out)) {
     throw new Error(
@@ -555,6 +583,27 @@ function expandAddress(
     );
   }
   return out;
+}
+
+function evaluatePayloadLocation(location: string, payload: unknown, name: string): string {
+  const prefix = "$message.payload#";
+  if (!location.startsWith(prefix)) {
+    throw new Error(`address parameter ${JSON.stringify(name)} uses unsupported runtime expression ${JSON.stringify(location)}`);
+  }
+  let current: unknown = payload;
+  const pointer = location.slice(prefix.length);
+  if (pointer !== "") {
+    if (!pointer.startsWith("/")) throw new Error(`runtime expression ${JSON.stringify(location)} has an invalid JSON Pointer`);
+    for (const raw of pointer.slice(1).split("/")) {
+      const segment = raw.replaceAll("~1", "/").replaceAll("~0", "~");
+      if (current === null || typeof current !== "object" || Array.isArray(current) || !Object.hasOwn(current, segment)) {
+        throw new Error(`runtime expression ${JSON.stringify(location)} did not resolve against the outgoing payload`);
+      }
+      current = (current as Record<string, unknown>)[segment];
+    }
+  }
+  if (typeof current !== "string") throw new Error(`runtime expression ${JSON.stringify(location)} must resolve to a string`);
+  return current;
 }
 
 /**

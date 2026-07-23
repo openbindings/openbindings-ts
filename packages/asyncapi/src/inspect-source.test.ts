@@ -11,8 +11,8 @@ describe("AsyncAPISynthesizer.inspectSource operationKey", () => {
     asyncapi: "3.0.0",
     info: { title: "Test API", version: "1.0.0" },
     channels: {
-      messages: { address: "/messages" },
-      events: { address: "/events" },
+      messages: { address: "/messages", messages: { event: { payload: { type: "object" } } } },
+      events: { address: "/events", messages: { event: { payload: { type: "object" } } } },
     },
     operations: {
       sendMessage: {
@@ -24,6 +24,7 @@ describe("AsyncAPISynthesizer.inspectSource operationKey", () => {
         action: "receive",
         description: "Receive an event",
         channel: { $ref: "#/channels/events" },
+        bindings: { http: { method: "POST" } },
       },
     },
   });
@@ -46,7 +47,7 @@ describe("AsyncAPISynthesizer.inspectSource operationKey", () => {
     const specDoc = {
       asyncapi: "3.0.0",
       info: { title: "Test", version: "1.0.0" },
-      channels: { ch: { address: "/ch" } },
+      channels: { ch: { address: "/ch", messages: { event: { payload: { type: "object" } } } } },
       operations: {
         // Two operation IDs that sanitize to the same key ("send msg" and
         // "send.msg" both sanitize to "send_msg"), to prove the
@@ -66,5 +67,33 @@ describe("AsyncAPISynthesizer.inspectSource operationKey", () => {
     const inspectedKeys = new Set(result.targets.map((t) => t.operationKey));
 
     expect(inspectedKeys).toEqual(synthesizedKeys);
+  });
+
+  it("shares invocation eligibility and preserves artifact message alternatives", async () => {
+    const artifact = {
+      asyncapi: "3.0.0",
+      info: { title: "Eligibility", version: "1.0.0" },
+      channels: {
+        good: { address: "/good", messages: {
+          a: { payload: { type: "string" } },
+          b: { payload: { type: "number" } },
+        } },
+        headers: { address: "/headers", messages: {
+          event: { payload: { type: "object" }, headers: {} },
+        } },
+      },
+      operations: {
+        good: { action: "send", channel: { $ref: "#/channels/good" } },
+        headers: { action: "send", channel: { $ref: "#/channels/headers" } },
+        missing: { action: "send", channel: { $ref: "#/channels/missing" } },
+        replyNoHTTP: { action: "receive", channel: { $ref: "#/channels/good" }, reply: {} },
+      },
+    };
+    const synthesizer = new AsyncAPISynthesizer();
+    const iface = await synthesizer.synthesizeInterface({ sources: [{ bindingSpec: BINDING_SPEC, content: artifact }] });
+    const inspection = await synthesizer.inspectSource({ bindingSpec: BINDING_SPEC, content: artifact });
+    expect(Object.keys(iface.operations)).toEqual(["good"]);
+    expect(inspection.targets.map((target) => target.operationKey)).toEqual(["good"]);
+    expect((iface.operations.good?.output as { anyOf?: unknown[] }).anyOf).toHaveLength(2);
   });
 });

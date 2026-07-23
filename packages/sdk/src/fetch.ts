@@ -44,7 +44,7 @@ export async function fetchInterface(
   const synthesizer = opts?.synthesizers?.length ? combineSynthesizers(...opts.synthesizers) : null;
 
   // The resolution chain has up to three steps (direct OBI, well-known
-  // discovery, per-format synthesis). On total failure the caller gets the
+  // discovery, binding-spec synthesis). On total failure the caller gets the
   // WHOLE trail: reporting only the last step's raw error hands a user who
   // pointed at an API's HTML root a third-party parse error with no statement
   // of what was tried or how to fix it. Mirrors the Go SDK.

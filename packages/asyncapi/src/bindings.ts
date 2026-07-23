@@ -11,6 +11,7 @@
  */
 
 import type { AsyncAPIChannel, AsyncAPIOperation } from "./asyncapi-types.js";
+import { contextConfiguration } from "@openbindings/sdk";
 
 /**
  * Returns the request method for an http-protocol cell: the http operation
@@ -31,6 +32,43 @@ export function requestMethod(op: AsyncAPIOperation | undefined, cellDefault: st
 export interface WSUpgrade {
   query?: Record<string, string>;
   headers?: Record<string, string>;
+}
+
+export interface ProtocolFieldValues {
+  httpQuery?: Record<string, string>;
+  webSocketQuery?: Record<string, string>;
+  webSocketHeaders?: Record<string, string>;
+}
+
+export function protocolFieldValues(context?: Record<string, unknown>): ProtocolFieldValues {
+  const raw = contextConfiguration(context)["protocolFields"];
+  if (raw === undefined) return {};
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) throw new Error("configuration.protocolFields must be an object");
+  const record = raw as Record<string, unknown>;
+  const allowed = new Set(["httpQuery", "webSocketQuery", "webSocketHeaders"]);
+  for (const name of Object.keys(record)) if (!allowed.has(name)) throw new Error(`configuration.protocolFields names unsupported map ${JSON.stringify(name)}`);
+  return {
+    ...(record.httpQuery !== undefined ? { httpQuery: configuredStringMap(record.httpQuery, "httpQuery") } : {}),
+    ...(record.webSocketQuery !== undefined ? { webSocketQuery: configuredStringMap(record.webSocketQuery, "webSocketQuery") } : {}),
+    ...(record.webSocketHeaders !== undefined ? { webSocketHeaders: configuredStringMap(record.webSocketHeaders, "webSocketHeaders") } : {}),
+  };
+}
+
+function configuredStringMap(raw: unknown, point: string): Record<string, string> {
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) throw new Error(`configuration.protocolFields.${point} must be an object of strings`);
+  const result: Record<string, string> = {};
+  for (const [name, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof value !== "string") throw new Error(`configuration.protocolFields.${point}[${JSON.stringify(name)}] must be a string`);
+    result[name] = value;
+  }
+  return result;
+}
+
+export function resolveHTTPQuery(
+  op: AsyncAPIOperation,
+  supplied: Record<string, string> | undefined,
+): Record<string, string> | undefined {
+  return schemaPropertyValues(op.bindings?.http?.query, supplied, undefined, "HTTP operation binding query field");
 }
 
 /**
@@ -111,16 +149,16 @@ function schemaPropertyValues(
     if (satisfiedElsewhere && hasCaseInsensitive(satisfiedElsewhere, name)) {
       continue; // already riding the request via the generic carriage
     }
-    const prop = props[name];
-    if (prop !== null && typeof prop === "object" && !Array.isArray(prop)) {
-      const def = stringifyScalar((prop as Record<string, unknown>).default);
-      if (def !== undefined) {
-        out[name] = def;
-        continue;
-      }
-    }
     if (required.has(name)) {
       throw new Error(`${what} ${JSON.stringify(name)} is required but has no supplied value and no declared default`);
+    }
+  }
+  for (const name of Object.keys(supplied ?? {})) {
+    if (!Object.hasOwn(props, name)) throw new Error(`${what} ${JSON.stringify(name)} is not declared by the binding schema`);
+    const prop = props[name];
+    if (prop !== null && typeof prop === "object" && !Array.isArray(prop)) {
+      const type = (prop as Record<string, unknown>)["type"];
+      if (type !== undefined && type !== "string") throw new Error(`${what} ${JSON.stringify(name)} cannot admit a string value`);
     }
   }
   if (Object.keys(out).length === 0) return undefined;
@@ -137,18 +175,6 @@ function hasCaseInsensitive(m: Record<string, string>, key: string): boolean {
  * Renders a JSON-schema scalar default as a wire value. Structured values
  * (objects, arrays, null) resolve nothing.
  */
-function stringifyScalar(v: unknown): string | undefined {
-  switch (typeof v) {
-    case "string":
-      return v;
-    case "boolean":
-      return String(v);
-    case "number":
-      return String(v);
-  }
-  return undefined;
-}
-
 /**
  * Appends resolved ws-binding query values onto an expanded address,
  * keeping the result a single dialable path-and-query string (so the pool

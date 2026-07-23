@@ -2,6 +2,8 @@ import type { OpenAPIDocument, OpenAPIParameter } from "./types.js";
 import { VALID_METHODS } from "./constants.js";
 import { dereference } from "@openbindings/sdk";
 import yaml from "js-yaml";
+import { readFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
 
 // The u flag makes the class match whole code points, so an astral-plane
 // character replaces as one underscore, not one per surrogate half
@@ -140,7 +142,7 @@ export async function loadOpenAPIDocument(
       throw new Error("source must have location or content");
     }
 
-    const doFetch = fetchFn ?? fetch;
+    const doFetch = fileAwareFetch(fetchFn ?? fetch);
     const resp = await doFetch(location, { signal: options?.signal });
     if (!resp.ok) {
       throw new Error(`failed to fetch ${location}: ${resp.status} ${resp.statusText}`);
@@ -170,7 +172,7 @@ export async function loadOpenAPIDocument(
   } else if (!location && content !== undefined) {
     refFetch = selfContainedRefFetch(fetchFn ?? fetch);
   } else {
-    refFetch = fetchFn ?? fetch;
+    refFetch = fileAwareFetch(fetchFn ?? fetch);
   }
   return dereference<OpenAPIDocument>(raw as Record<string, unknown>, {
     baseUrl: location,
@@ -178,6 +180,19 @@ export async function loadOpenAPIDocument(
     signal: options?.signal,
     fetch: refFetch,
   });
+}
+
+function fileAwareFetch(fallback: typeof globalThis.fetch): typeof globalThis.fetch {
+  return async (input, init) => {
+    const address = input instanceof Request ? input.url : input.toString();
+    const url = new URL(address);
+    if (url.protocol !== "file:") return fallback(input, init);
+    try {
+      return new Response(await readFile(fileURLToPath(url)), { status: 200 });
+    } catch (error: unknown) {
+      throw new Error(`failed to read ${address}: ${errorMessage(error)}`, { cause: error });
+    }
+  };
 }
 
 /**

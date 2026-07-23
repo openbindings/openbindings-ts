@@ -42,7 +42,7 @@ export interface PooledWS {
    * silently dropping frames would let a publish complete "successfully"
    * after the connection died.
    */
-  send(data: string): void;
+  send(data: string | Uint8Array): void;
   /** Release this reference. Starts idle timer if last ref. */
   release(): void;
 }
@@ -262,7 +262,7 @@ export class WSPool {
         };
       },
 
-      send(data: string): void {
+      send(data: string | Uint8Array): void {
         if (entry.ws.readyState !== WebSocket.OPEN) {
           throw new Error("WebSocket is not open");
         }

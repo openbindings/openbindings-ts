@@ -60,6 +60,8 @@ export interface AsyncAPIParameter {
   description?: string;
   default?: string;
   enum?: string[];
+  location?: string;
+  schema?: Record<string, unknown>;
 }
 
 /** The protocol entries of a channel's `bindings` object this
@@ -79,6 +81,7 @@ export interface AsyncAPIWSChannelBinding {
   method?: string;
   query?: Record<string, unknown>;
   headers?: Record<string, unknown>;
+  bindingVersion?: string;
 }
 
 export interface AsyncAPIOperation {
@@ -105,6 +108,8 @@ export interface AsyncAPIOperationBindings {
  *  publish, GET for an SSE subscription). */
 export interface AsyncAPIHTTPOperationBinding {
   method?: string;
+  query?: Record<string, unknown>;
+  bindingVersion?: string;
 }
 
 export interface AsyncAPIOperationReply {
@@ -119,6 +124,8 @@ export interface AsyncAPIMessage {
   description?: string;
   contentType?: string;
   payload?: Record<string, unknown>;
+  headers?: Record<string, unknown>;
+  bindings?: { http?: { statusCode?: number; bindingVersion?: string } };
 }
 
 export interface AsyncAPIComponents {

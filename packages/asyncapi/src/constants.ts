@@ -46,3 +46,6 @@ export const CHANNEL_NAME_TAG = "x-ob-asyncapi-channel-name";
  * dereferencing would otherwise erase the keys.
  */
 export const SERVER_NAME_TAG = "x-ob-asyncapi-server-name";
+
+/** Synthetic channel-message map key preserved through dereferencing. */
+export const MESSAGE_NAME_TAG = "x-ob-asyncapi-message-name";

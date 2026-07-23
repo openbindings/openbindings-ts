@@ -14,6 +14,9 @@ OpenBindings is an open standard: one interface, limitless bindings. An OBI (Ope
 | `@openbindings/openapi` | OpenAPI 3.x binding invoker and interface synthesizer | `npm install @openbindings/openapi` |
 | `@openbindings/asyncapi` | AsyncAPI 3.x binding invoker and interface synthesizer | `npm install @openbindings/asyncapi` |
 | `@openbindings/mcp` | MCP binding invoker and interface synthesizer | `npm install @openbindings/mcp` |
+| `@openbindings/grpc` | gRPC binding invoker and interface synthesizer | `npm install @openbindings/grpc` |
+| `@openbindings/connect` | Connect binding invoker and interface synthesizer | `npm install @openbindings/connect` |
+| `@openbindings/usage` | jdx usage binding invoker and interface synthesizer | `npm install @openbindings/usage` |
 | `@openbindings/graphql` | GraphQL binding invoker and interface synthesizer | `npm install @openbindings/graphql` |
 | `@openbindings/operationgraph` | Operation-graph binding invoker (compose operations) | `npm install @openbindings/operationgraph` |
 | `@openbindings/workers-rpc` | Cloudflare Workers RPC binding invoker | `npm install @openbindings/workers-rpc` |
@@ -21,13 +24,13 @@ OpenBindings is an open standard: one interface, limitless bindings. An OBI (Ope
 ## What the SDK does
 
 - **Core types** for the OpenBindings interface document: operations, bindings, sources, transforms, schemas
-- **Validation** with shape-level checks, strict mode for unknown fields, and format token validation
+- **Validation** with shape-level checks, strict mode for unknown fields, and exact binding-specification identifier validation
 - **Schema compatibility** checking under the OpenBindings Schema Compatibility Profile v0.1 (covariant outputs, contravariant inputs) with diagnostic reasons
 - **`fetchInterface`** for resolving OBIs from URLs: well-known discovery, then synthesis from raw OpenAPI / AsyncAPI / etc. via supplied synthesizers
-- **`OperationInvoker`** for routing operations to binding invokers by format, with transform support
+- **`OperationInvoker`** for routing operations to binding invokers by binding-spec identifier, with transform support
 - **Context contracts** for per-origin invocation context (credentials and non-secret configuration), resolved at call time with least-privilege scoping
 
-The SDK defines the contracts that binding invokers implement but does not contain any format-specific logic itself. Format support is added by installing format packages.
+The SDK defines the contracts that binding invokers implement but does not contain any binding-spec-specific logic itself. Binding support is added by installing binding packages.
 
 ## Conformance
 
@@ -36,6 +39,10 @@ The core SDK is tested against the OpenBindings 0.2 conformance corpus. With the
 ```bash
 pnpm conformance
 ```
+
+The Go/TypeScript equivalence policy and corresponding public names are in
+[`IMPLEMENTATION_PARITY.md`](IMPLEMENTATION_PARITY.md). Run `pnpm correspondence`
+to verify the six-family public correspondence matrix.
 
 ## Quick start
 
@@ -136,22 +143,27 @@ the operation invoker's `contextResolver` when one is configured.
 
 ## Binding invokers
 
-The SDK routes operations to binding invokers by format token. Invokers declare what formats they handle (including semver ranges like `openapi@^3.0.0`) and the SDK matches OBI source formats against those declarations:
+The SDK routes operations to binding invokers by exact, opaque `bindingSpec`
+identifier. Invokers declare the identifiers they implement, and the SDK uses
+exact equality—never semver range matching:
 
 ```typescript
 const invoker = new OperationInvoker([
-  new OpenAPIInvoker(),    // handles openapi@^3.0.0
-  new AsyncAPIInvoker(),   // handles asyncapi@^3.0.0
+  new OpenAPIInvoker(),    // openbindings.openapi@1
+  new AsyncAPIInvoker(),   // openbindings.asyncapi@1
 ]);
 ```
 
-| Package | Format token | Synthesizes OBIs? |
+| Package | Binding specification | Synthesizes OBIs? |
 |---------|--------------|-------------------|
-| `@openbindings/openapi` | `openapi@^3.0.0` | yes |
-| `@openbindings/asyncapi` | `asyncapi@^3.0.0` | yes |
-| `@openbindings/mcp` | `mcp@2025-11-25` | yes |
+| `@openbindings/openapi` | `openbindings.openapi@1` | yes |
+| `@openbindings/asyncapi` | `openbindings.asyncapi@1` | yes |
+| `@openbindings/mcp` | `openbindings.mcp@1` | yes |
+| `@openbindings/grpc` | `openbindings.grpc@1` | yes |
+| `@openbindings/connect` | `openbindings.connect@1` | yes |
+| `@openbindings/usage` | `openbindings.usage@1` | yes |
 | `@openbindings/graphql` | `graphql` | yes |
-| `@openbindings/operationgraph` | `openbindings.operation-graph@0.2.0` | no (graphs are authored, then composed at invoke time) |
+| `@openbindings/operationgraph` | `openbindings.operation-graph@1` | no (graphs are authored, then composed at invoke time) |
 | `@openbindings/workers-rpc` | `workers-rpc@^1.0.0` | no (hand-authored OBIs; runs inside the Workers runtime) |
 
 Invokers implement `BindingInvoker`. Interface synthesizers (which synthesize OBIs from raw specs) implement `InterfaceSynthesizer`. Source inspectors (which enumerate refs in a source) implement `SourceInspector`. A single class may implement any combination.
@@ -215,7 +227,12 @@ The profile handles: type sets, const/enum, object properties and required field
 
 ## Platform support
 
-The SDK works in Node.js, Deno, Bun, and modern browsers. It uses standard APIs (`fetch`, `AbortSignal`, `structuredClone`) with no platform-specific dependencies. A custom `fetch` implementation can be injected via `OperationInvokerOptions` (and `fetchInterface`'s options) for environments where the global is unavailable.
+The core `@openbindings/sdk` package works in Node.js, Deno, Bun, and modern
+browsers using standard web APIs. Format packages document narrower runtime
+requirements: `@openbindings/grpc` uses the Node gRPC transport and
+`@openbindings/usage` spawns local processes; HTTP-oriented packages accept
+custom `fetch` implementations where their constructors or invocation args
+expose one.
 
 ## License
 

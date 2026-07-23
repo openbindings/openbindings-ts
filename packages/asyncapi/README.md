@@ -2,7 +2,7 @@
 
 AsyncAPI 3.x binding invoker and interface synthesizer for the [OpenBindings](https://openbindings.com) TypeScript SDK.
 
-This package enables OpenBindings to invoke operations against AsyncAPI documents and synthesize OBI documents from them. It supports HTTP/SSE for event streaming, HTTP POST for sending messages, and WebSocket for bidirectional communication. Documents are parsed with `js-yaml` and `$ref` pointers resolved with `@openbindings/sdk`'s built-in dereferencer (browser-safe, no Node.js dependencies). Credentials are applied via the document's security schemes.
+This package enables OpenBindings to invoke operations against AsyncAPI documents and synthesize OBI documents from them. It supports HTTP/SSE for event streaming, HTTP POST for sending messages, and WebSocket for bidirectional communication. Documents are parsed with `js-yaml` and `$ref` pointers resolved with `@openbindings/sdk`'s built-in dereferencer. The Node.js reference implementation also accepts local authoring paths, normalizing them to `file:` addresses; invocation still requires the binding specification's absolute address form. Credentials are applied via the document's security schemes.
 
 See the [spec](https://github.com/openbindings/spec) and the [invocation pattern](https://openbindings.com/spec/invocation-pattern) for how binding invokers and interface synthesizers fit into the OpenBindings architecture.
 

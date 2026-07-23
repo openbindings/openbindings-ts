@@ -274,11 +274,12 @@ describe("resolveTarget §9.2 server variables carriage", () => {
     );
   });
 
-  it("does not gate a supplied value on the declared enum (§9.2, R1)", () => {
-    // The enum is the author's expectation, not a boundary; the same point
-    // admits a full-URL override that bypasses the declaration. It substitutes.
-    const target = resolveTarget(variableDoc(), undefined, cfg({ key: "tiered", variables: { env: "qa" } }));
-    expect(target.serverURL).toBe("wss://qa.example.com/v1");
+  it("refuses a supplied value outside the artifact-declared enum", () => {
+    expect(() => resolveTarget(
+      variableDoc(),
+      undefined,
+      cfg({ key: "tiered", variables: { env: "qa" } }),
+    )).toThrow(/outside the artifact-declared enum/);
   });
 
   it("refuses a supplied name the selected server does not declare, even when every expression would resolve", () => {

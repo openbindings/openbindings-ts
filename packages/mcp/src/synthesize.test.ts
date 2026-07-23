@@ -73,7 +73,8 @@ describe("convertToInterface", () => {
 
   it("resource templates declare their RFC 6570 variables as input (§8/§9.1, MCP-P-03)", () => {
     // Updated for openbindings.mcp@1: a template operation's input is the
-    // object of its RFC 6570 variables (string-typed, none required) —
+    // object of its RFC 6570 variables (string/list/associative, none
+    // required) —
     // this test previously pinned a const-uriTemplate input schema, whose
     // only member the conformant invoker refuses as an undeclared variable.
     const iface = convertToInterface({
@@ -93,8 +94,12 @@ describe("convertToInterface", () => {
     const props = input.properties as Record<string, unknown>;
     const varSchema = props.userId as Record<string, unknown>;
     expect(varSchema).toBeDefined();
-    // Template variables are string-typed (never coerced).
-    expect(varSchema.type).toBe("string");
+    // Preserve RFC 6570's complete variable value domain.
+    expect(varSchema.anyOf).toEqual([
+      { type: "string" },
+      { type: "array", items: { type: "string" } },
+      { type: "object", additionalProperties: { type: "string" } },
+    ]);
     // uriTemplate must not appear as an input property.
     expect(props).not.toHaveProperty("uriTemplate");
     // Undeclared variables are refused, hence additionalProperties: false.

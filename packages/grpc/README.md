@@ -1,0 +1,36 @@
+# @openbindings/grpc
+
+TypeScript invocation, synthesis, and source inspection for the exact
+`openbindings.grpc@1` binding specification.
+
+```bash
+npm install @openbindings/grpc @openbindings/sdk
+```
+
+```typescript
+import { GrpcInvoker, GrpcSynthesizer } from "@openbindings/grpc";
+import { OperationInvoker } from "@openbindings/sdk";
+
+const operations = new OperationInvoker([new GrpcInvoker()]);
+const authoring = new GrpcSynthesizer();
+```
+
+A source location is a port-explicit dial address: `grpc://host:port`,
+`grpcs://host:port`, or bare `host:port`. A bare address supplies no transport
+default; configure `transport: "plaintext" | "tls"` explicitly. Content, when
+present, is single-file proto source text (only bundled `google/protobuf/*`
+imports) or a canonical-JSON `FileDescriptorSet`; it displaces reflection.
+Without content, the implementation tries reflection v1 and falls back to
+v1alpha only on `UNIMPLEMENTED`.
+
+Refs are exact `package.Service/Method` names. All four protobuf-declared
+interaction kinds use one cardinality-agnostic invocation handle. Input and
+output values follow canonical ProtoJSON, including well-known types, nested
+unknown-field refusal, and precision-preserving 64-bit strings.
+
+The binding invents no authentication convention. Supply explicitly named
+gRPC metadata. Generic credentials without a named carriage raise
+`CONTEXT_REQUIRED` before reflection or method dispatch.
+
+The binding specification is normative; this README describes the package
+surface and declared implementation coverage.

@@ -13,6 +13,7 @@ import {
   ERR_REF_NOT_FOUND,
   ERR_RESPONSE_ERROR,
   ERR_SOURCE_LOAD_FAILED,
+  ERR_VALIDATION_FAILED,
   USE_DEFAULT,
   newInvokeHooks,
 } from "@openbindings/sdk";
@@ -59,13 +60,15 @@ function jsonResponse(body: unknown, status = 200, headers?: Record<string, stri
 // Fixtures
 // ---------------------------------------------------------------------------
 
+const RESPONSE_CONTENT = { "application/json": {}, "text/plain": {} };
+
 const SPEC = {
   openapi: "3.1.0",
   info: { title: "Test API", version: "1.0.0" },
   servers: [{ url: "https://api.example.com/v1" }],
   paths: {
     "/ping": {
-      get: { responses: { "200": { description: "OK" } } },
+      get: { responses: { "200": { description: "OK", content: RESPONSE_CONTENT }, default: { description: "Other", content: RESPONSE_CONTENT } } },
     },
     "/users/{id}": {
       get: {
@@ -74,7 +77,7 @@ const SPEC = {
           { name: "verbose", in: "query", schema: { type: "boolean" } },
           { name: "X-Trace", in: "header", schema: { type: "string" } },
         ],
-        responses: { "200": { description: "OK" } },
+        responses: { "200": { description: "OK", content: RESPONSE_CONTENT } },
       },
     },
     "/users": {
@@ -83,13 +86,13 @@ const SPEC = {
           required: true,
           content: { "application/json": { schema: { type: "object" } } },
         },
-        responses: { "201": { description: "Created" } },
+        responses: { "201": { description: "Created", content: RESPONSE_CONTENT } },
       },
     },
     "/search": {
       get: {
         parameters: [{ name: "q", in: "query", schema: { type: "string" } }],
-        responses: { "200": { description: "OK" } },
+        responses: { "200": { description: "OK", content: RESPONSE_CONTENT } },
       },
     },
   },
@@ -118,7 +121,7 @@ function authSpec(opts: {
       "/data": {
         get: {
           ...(opts.opSecurity !== undefined ? { security: opts.opSecurity } : {}),
-          responses: { "200": { description: "OK" } },
+          responses: { "200": { description: "OK", content: { "application/json": {} } } },
         },
       },
     },
@@ -154,8 +157,7 @@ describe("invokeBinding — request construction", () => {
     expect(requests).toHaveLength(1);
     expect(requests[0]?.url).toBe("https://api.example.com/v1/ping");
     expect(requests[0]?.method).toBe("GET");
-    // §9.2: absent any declared success media, Accept is application/json.
-    expect(requests[0]?.headers.get("Accept")).toBe("application/json");
+    expect(requests[0]?.headers.get("Accept")).toBe("application/json, text/plain");
     await expect(call.closed).resolves.toBeUndefined();
   });
 
@@ -187,9 +189,7 @@ describe("invokeBinding — request construction", () => {
     });
   });
 
-  it("a field declared as parameter AND body property is delivered to both wire locations", async () => {
-    // Field-collision rule: PUT /users/{id} with id also in the body
-    // sends ONE caller value to the path AND the body.
+  it("refuses a request-media candidate whose body property collides with a parameter", async () => {
     const spec = {
       openapi: "3.1.0",
       info: { title: "t", version: "1" },
@@ -211,7 +211,7 @@ describe("invokeBinding — request construction", () => {
                 },
               },
             },
-            responses: { "200": { description: "ok" } },
+            responses: { "200": { description: "ok", content: { "application/json": {} } } },
           },
         },
       },
@@ -224,10 +224,8 @@ describe("invokeBinding — request construction", () => {
     });
 
     await call.write({ id: "u1", name: "Ada" });
-    await single(call.outputs);
-
-    expect(requests[0]?.url).toBe("https://api.example.com/v1/users/u1");
-    expect(JSON.parse(requests[0]?.body as string)).toEqual({ id: "u1", name: "Ada" });
+    await expect(call.closed).rejects.toMatchObject({ code: ERR_VALIDATION_FAILED });
+    expect(requests).toHaveLength(0);
   });
 
   it("errors ERR_MISSING_INPUT when input closes bare on a required-input operation", async () => {
@@ -293,7 +291,7 @@ describe("invokeBinding — request construction", () => {
               { $ref: "#/components/parameters/IdParam" },
               { $ref: "#/components/parameters/VerboseParam" },
             ],
-            responses: { "200": { description: "ok" } },
+            responses: { "200": { description: "ok", content: { "application/json": {} } } },
           },
         },
       },
@@ -336,7 +334,12 @@ describe("invokeBinding — request construction", () => {
               { name: "session_id", in: "cookie", schema: { type: "string" } },
               { name: "csrf", in: "cookie", schema: { type: "string" } },
             ],
-            responses: { "200": { description: "ok" } },
+            responses: {
+              "200": {
+                description: "ok",
+                content: { "application/json": { schema: { type: "object" } } },
+              },
+            },
           },
         },
       },
@@ -359,7 +362,7 @@ describe("invokeBinding — request construction", () => {
   // whether a declared request body counts as JSON for the field-collision
   // rule. Mirrors Go's TestBodyPropertyNames_MediaTypeParameters (already
   // correct on the TS side — this pins it).
-  it("recognizes a JSON body content-type carrying media-type parameters for the collision rule", async () => {
+  it("recognizes parameters on JSON media without hiding a parameter/body collision", async () => {
     const spec = {
       openapi: "3.1.0",
       info: { title: "t", version: "1" },
@@ -394,12 +397,8 @@ describe("invokeBinding — request construction", () => {
     });
 
     await call.write({ id: "u1", name: "Ada" });
-    await single(call.outputs);
-
-    // The collision rule only fires when bodyPropertyNames sees through the
-    // "; charset=utf-8" parameter: id must ride both the path AND the body.
-    expect(requests[0]?.url).toBe("https://api.example.com/v1/users/u1");
-    expect(JSON.parse(requests[0]?.body as string)).toEqual({ id: "u1", name: "Ada" });
+    await expect(call.closed).rejects.toMatchObject({ code: ERR_VALIDATION_FAILED });
+    expect(requests).toHaveLength(0);
   });
 
   it("dispatches immediately with empty input under the operation-layer no-input convention", async () => {
@@ -575,15 +574,13 @@ describe("invokeBinding — responses", () => {
     await expect(single(call.outputs)).resolves.toBe("plain text");
   });
 
-  it("emits a single null output for an empty body", async () => {
+  it("emits no output for an empty body", async () => {
     const { fetch } = mockFetch(() => new Response(null, { status: 204 }));
     const call = new OpenAPIInvoker().invokeBinding({ source: SOURCE, ref: REF_PING, fetch });
 
-    // An empty body decodes to null (the builtin's empty-unit answer),
-    // matching the Go SDK — never undefined, which JSON cannot carry.
     const outs: unknown[] = [];
     for await (const o of call.outputs) outs.push(o);
-    expect(outs).toEqual([null]);
+    expect(outs).toEqual([]);
   });
 
   it("cancels the body stream when the response exceeds the size limit", async () => {

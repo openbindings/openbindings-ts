@@ -43,6 +43,8 @@ export type {
 export {
   DEFAULT_MAX_DELIVERY_UNIT_BYTES,
   resolveDeliveryUnitLimit,
+  synthesisSkeleton,
+  finalizeSynthesis,
 } from "./invoker-types.js";
 
 export type {
@@ -216,6 +218,18 @@ export {
 export type { Category, Effects } from "./classification.js";
 
 export { dereference } from "./deref.js";
+
+export { matchProcessorObservation } from "./processor-scenarios.js";
+export type {
+  ProcessorScenarioFile,
+  ProcessorScenario,
+  ProcessorExpected,
+  ProcessorAssertion,
+  ProcessorDisposition,
+  ProcessorPhase,
+  ProcessorObservation,
+  ProcessorMatch,
+} from "./processor-scenarios.js";
 
 export { Normalizer, inputCompatible, outputCompatible } from "./schema-profile/index.js";
 export type { Fetcher, JSONValue, JSONObject, CompatResult } from "./schema-profile/index.js";

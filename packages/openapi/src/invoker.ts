@@ -1,8 +1,9 @@
 import {
   InvocationError,
   InvocationImpl,
-  NoSourcesError,
   MultipleSourcesError,
+  finalizeSynthesis,
+  synthesisSkeleton,
   ERR_RUNTIME,
   ERR_SOURCE_LOAD_FAILED,
   type BindingInvoker,
@@ -17,11 +18,35 @@ import {
   type SourceInspection,
   type SourceInspector,
 } from "@openbindings/sdk";
-import type { OpenAPIDocument, OpenAPIOperation } from "./types.js";
+import { resolve } from "node:path";
+import { pathToFileURL, fileURLToPath } from "node:url";
+import { readFile } from "node:fs/promises";
+import type { OpenAPIDocument } from "./types.js";
 import { DEFAULT_SOURCE_NAME, BINDING_SPEC } from "./constants.js";
 import { preflightTarget, requiredContext, runBinding } from "./invoke.js";
-import { convertToInterface, deriveOperationKey, HTTP_METHODS } from "./synthesize.js";
-import { buildJsonPointerRef, codePointCompare, errorMessage, loadOpenAPIDocument } from "./util.js";
+import { convertToInterface } from "./synthesize.js";
+import { codePointCompare, errorMessage, loadOpenAPIDocument, validateDocumentAddress } from "./util.js";
+
+function authoringLocation(location?: string): string | undefined {
+  if (!location) return location;
+  try {
+    new URL(location);
+    return location;
+  } catch {
+    return pathToFileURL(resolve(location)).href;
+  }
+}
+
+async function readAuthoringArtifact(location: string, signal?: AbortSignal): Promise<string> {
+  const url = new URL(location);
+  if (url.protocol === "file:") return readFile(fileURLToPath(url), "utf8");
+  if (url.protocol === "http:" || url.protocol === "https:") {
+    const response = await fetch(url, { signal });
+    if (!response.ok) throw new Error(`failed to fetch ${location}: ${response.status} ${response.statusText}`);
+    return response.text();
+  }
+  throw new Error(`location scheme ${JSON.stringify(url.protocol)} cannot be embedded`);
+}
 
 // ---------------------------------------------------------------------------
 // Shared doc-cache helper
@@ -166,26 +191,26 @@ export class OpenAPISynthesizer implements InterfaceSynthesizer, SourceInspector
     const sources = input.sources ?? [];
     const src = sources[0];
     if (src === undefined) {
-      throw new NoSourcesError();
+      return synthesisSkeleton(input);
     }
     if (sources.length > 1) {
       throw new MultipleSourcesError();
     }
-    const iface = await convertToInterface(src.location, src.content, options, input.onWarning);
-    // Content-fed synthesis: the emitted source must stay invocable. A
-    // source needs location or content; with no location, dropping the
-    // provided content would emit neither (Go parity: invoker.go's
-    // SynthesizeInterface embeds src.Content verbatim into the same branch).
-    if (!src.location && src.content !== undefined) {
+    if (src.bindingSpec !== BINDING_SPEC) throw new Error(`synthesizer supports exact binding specification ${JSON.stringify(BINDING_SPEC)}, got ${JSON.stringify(src.bindingSpec)}`);
+    if (src.outputLocation) validateDocumentAddress(src.outputLocation);
+    const location = authoringLocation(src.location);
+    const artifactContent = src.content === undefined && src.embed && location
+      ? await readAuthoringArtifact(location, options?.signal)
+      : src.content;
+    const iface = await convertToInterface(location, artifactContent, options, input.onWarning);
+    // Content is authoritative and remains verbatim in the synthesized
+    // source. A co-present location is its base/provenance, not permission
+    // to replace the embedded artifact with a later fetch.
+    if (artifactContent !== undefined) {
       const entry = iface.sources?.[DEFAULT_SOURCE_NAME];
-      if (entry) {
-        entry.content = typeof src.content === "string" ? src.content : JSON.stringify(src.content);
-      }
+      if (entry) entry.content = artifactContent;
     }
-    if (input.name) iface.name = input.name;
-    if (input.version) iface.version = input.version;
-    if (input.description) iface.description = input.description;
-    return iface;
+    return finalizeSynthesis(iface, input, DEFAULT_SOURCE_NAME, BINDING_SPEC);
   }
 
   /** Lists all bindable targets (path+method combinations) from an OpenAPI source. */
@@ -193,34 +218,19 @@ export class OpenAPISynthesizer implements InterfaceSynthesizer, SourceInspector
     source: Source,
     options?: { signal?: AbortSignal },
   ): Promise<SourceInspection> {
-    const doc = await loadOpenAPIDocument(source.location, source.content, options);
+    // Inspection and synthesis share the same realizability filter. A ref
+    // whose revision-1 flattened boundary cannot be represented is not
+    // advertised as a bindable target merely because it appears in paths.
+    const iface = await convertToInterface(authoringLocation(source.location), source.content, options);
     const targets: SourceInspection["targets"] = [];
-
-    if (!doc.paths) return { targets, exhaustive: true };
-
-    const usedKeys = new Set<string>();
-    for (const [pathStr, pathItemRaw] of Object.entries(doc.paths).sort(([a], [b]) => codePointCompare(a, b))) {
-      if (pathStr.startsWith("x-") || !pathItemRaw || typeof pathItemRaw !== "object") continue;
-      const pathItem = pathItemRaw as Record<string, unknown>;
-      for (const method of HTTP_METHODS) {
-        const op = pathItem[method];
-        if (!op || typeof op !== "object") continue;
-        const opObj = op as OpenAPIOperation;
-        // Suggest the same operation key SynthesizeInterface would assign
-        // for this target. The iteration order and usedKeys de-duplication
-        // here match convertToInterface's, so inspection previews exactly
-        // what synthesis names (Go parity: list_refs.go InspectSource).
-        const opKey = deriveOperationKey(opObj, pathStr, method, usedKeys);
-        usedKeys.add(opKey);
-        const desc = opObj.description || opObj.summary || undefined;
-        targets.push({
-          ref: buildJsonPointerRef(pathStr, method),
-          operationKey: opKey,
-          operation: desc ? { description: desc } : undefined,
-        });
-      }
+    for (const binding of Object.values(iface.bindings ?? {})) {
+      targets.push({
+        ref: binding.ref ?? "",
+        operationKey: binding.operation,
+        operation: iface.operations[binding.operation],
+      });
     }
-
+    targets.sort((a, b) => codePointCompare(a.ref, b.ref));
     return { targets, exhaustive: true };
   }
 }

@@ -11,6 +11,8 @@ import { InvocationError, ERR_REF_NOT_FOUND, ERR_PROTOCOL } from "@openbindings/
  */
 export interface Listing {
   tools: string[]; // Tool.name
+  /** Tool names whose 2025-11-25 declaration requires task augmentation. */
+  requiredTaskTools?: string[];
   resources: string[]; // Resource.uri
   templates: string[]; // ResourceTemplate.uriTemplate
   prompts: string[]; // Prompt.name
@@ -63,13 +65,33 @@ export function parsePinnedListing(content: unknown): Listing {
     }
   }
 
+  const tools = pinEntityIdentities(members["tools"], "tools", "name");
   return {
-    tools: pinEntityIdentities(members["tools"], "tools", "name"),
+    tools,
+    requiredTaskTools: requiredTaskToolNames(members["tools"]),
     resources: pinEntityIdentities(members["resources"], "resources", "uri"),
     templates: pinEntityIdentities(members["resourceTemplates"], "resourceTemplates", "uriTemplate"),
     prompts: pinEntityIdentities(members["prompts"], "prompts", "name"),
     pinned: true,
   };
+}
+
+function requiredTaskToolNames(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  const names: string[] = [];
+  for (const entry of raw) {
+    if (entry === null || typeof entry !== "object" || Array.isArray(entry)) continue;
+    const record = entry as Record<string, unknown>;
+    const execution = record["execution"];
+    if (
+      typeof record["name"] === "string" &&
+      execution !== null &&
+      typeof execution === "object" &&
+      !Array.isArray(execution) &&
+      (execution as Record<string, unknown>)["taskSupport"] === "required"
+    ) names.push(record["name"]);
+  }
+  return names;
 }
 
 /**
@@ -149,7 +171,7 @@ export async function exhaustPages<P extends { nextCursor?: string }>(
  * gates both resource lists.
  */
 export async function liveListing(client: Client, entityType: string, signal: AbortSignal): Promise<Listing> {
-  const l: Listing = { tools: [], resources: [], templates: [], prompts: [], pinned: false };
+  const l: Listing = { tools: [], requiredTaskTools: [], resources: [], templates: [], prompts: [], pinned: false };
   const caps = client.getServerCapabilities();
   if (!caps) return l;
 
@@ -159,7 +181,10 @@ export async function liveListing(client: Client, entityType: string, signal: Ab
       await exhaustPages(
         (cursor) => client.listTools(cursor !== undefined ? { cursor } : undefined, { signal }),
         (page) => {
-          for (const t of page.tools ?? []) l.tools.push(t.name);
+          for (const t of page.tools ?? []) {
+            l.tools.push(t.name);
+            if (t.execution?.taskSupport === "required") l.requiredTaskTools!.push(t.name);
+          }
         },
       );
       break;
@@ -221,7 +246,15 @@ export function resolveRef(l: Listing, entityType: string, remainder: string): T
   switch (entityType) {
     case "tools": {
       const n = count(l.tools);
-      if (n === 1) return "tool";
+      if (n === 1) {
+        if ((l.requiredTaskTools ?? []).includes(remainder)) {
+          throw new InvocationError(
+            ERR_REF_NOT_FOUND,
+            `MCP ref ${JSON.stringify(ref)} names a tool that requires task augmentation, which openbindings.mcp@1 excludes`,
+          );
+        }
+        return "tool";
+      }
       if (n > 1) throw ambiguous("tool", n);
       throw notFound("tool");
     }

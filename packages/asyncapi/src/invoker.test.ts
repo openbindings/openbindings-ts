@@ -1,4 +1,8 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { CONTEXT_REQUIRED, single } from "@openbindings/sdk";
 import { AsyncAPIInvoker, AsyncAPISynthesizer } from "./invoker.js";
 import { BINDING_SPEC, DEFAULT_SOURCE_NAME } from "./constants.js";
@@ -134,9 +138,13 @@ describe("AsyncAPIInvoker no-input publish refusal", () => {
       asyncapi: "3.0.0",
       info: { title: "Notify", version: "1.0.0" },
       servers: { prod: { host: "api.example.com", protocol: "https" } },
-      channels: { n: { address: "/notify", messages: { M: { payload: { type: "object" } } } } },
+      channels: { n: { address: "/notify", messages: { M: { contentType: "application/json", payload: { type: "object" } } } } },
       operations: {
-        notify: { action: "receive" as const, channel: { $ref: "#/channels/n" } },
+        notify: {
+          action: "receive" as const,
+          channel: { $ref: "#/channels/n" },
+          bindings: { http: { method: "POST", bindingVersion: "0.3.0" } },
+        },
       },
     };
 
@@ -165,6 +173,27 @@ describe("AsyncAPIInvoker no-input publish refusal", () => {
 // stays invocable as written." Mirrors the Go SDK's
 // TestSynthesizeInterface_ContentOnlyEmbedsSource.
 describe("AsyncAPISynthesizer content-fed synthesis", () => {
+  it("returns the deterministic source-less scaffold", async () => {
+    await expect(new AsyncAPISynthesizer().synthesizeInterface({ name: "scaffold" })).resolves.toEqual({
+      openbindings: "0.2.0", name: "scaffold", operations: {},
+    });
+  });
+
+  it("normalizes an authoring file path into an invocable file URI", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "openbindings-asyncapi-"));
+    const path = join(directory, "api.json");
+    try {
+      await writeFile(path, JSON.stringify({ asyncapi: "3.0.0", info: { title: "T", version: "1" }, operations: {} }));
+      const iface = await new AsyncAPISynthesizer().synthesizeInterface({
+        sources: [{ bindingSpec: BINDING_SPEC, location: path, embed: true }],
+      });
+      expect(iface.sources?.[DEFAULT_SOURCE_NAME]?.location).toBe(pathToFileURL(path).href);
+      expect(iface.sources?.[DEFAULT_SOURCE_NAME]?.content).toContain(`"asyncapi":"3.0.0"`);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it("embeds the provided content verbatim when the source has no location", async () => {
     const content = '{"asyncapi":"3.0.0","info":{"title":"T","version":"1.0.0"},"operations":{}}';
     const iface = await new AsyncAPISynthesizer().synthesizeInterface({
@@ -177,7 +206,7 @@ describe("AsyncAPISynthesizer content-fed synthesis", () => {
     expect(src!.content).toBe(content);
   });
 
-  it("does not embed content when the source has a location", async () => {
+  it("retains authoritative content even when the source also has a provenance location", async () => {
     const content = '{"asyncapi":"3.0.0","info":{"title":"T","version":"1.0.0"},"operations":{}}';
 
     const iface = await new AsyncAPISynthesizer().synthesizeInterface({
@@ -186,7 +215,15 @@ describe("AsyncAPISynthesizer content-fed synthesis", () => {
 
     const src = iface.sources?.[DEFAULT_SOURCE_NAME];
     expect(src?.location).toBe("https://example.com/spec.json");
-    expect(src?.content).toBeUndefined();
+    expect(src?.content).toBe(content);
+  });
+
+  it("preserves object-form authoritative content as an object", async () => {
+    const content = { asyncapi: "3.0.0", info: { title: "T", version: "1.0.0" }, operations: {} };
+    const iface = await new AsyncAPISynthesizer().synthesizeInterface({
+      sources: [{ bindingSpec: BINDING_SPEC, content }],
+    });
+    expect(iface.sources?.[DEFAULT_SOURCE_NAME]?.content).toBe(content);
   });
 });
 
@@ -320,7 +357,7 @@ describe("context requirements — unmapped schemes surfaced (R2.c ruling)", () 
       asyncapi: "3.0.0",
       info: { title: "Digest", version: "1.0.0" },
       servers: { prod: { host: "api.example.com", protocol: "https" } },
-      channels: { pub: { address: "/pub", messages: { Msg: { payload: { type: "object" } } } } },
+      channels: { pub: { address: "/pub", messages: { Msg: { contentType: "application/json", payload: { type: "object" } } } } },
       operations: {
         publish: {
           action: "send" as const,
@@ -344,7 +381,7 @@ describe("context requirements — unmapped schemes surfaced (R2.c ruling)", () 
       asyncapi: "3.0.0",
       info: { title: "Multi", version: "1.0.0" },
       servers: { prod: { host: "api.example.com", protocol: "https" } },
-      channels: { pub: { address: "/pub", messages: { Msg: { payload: { type: "object" } } } } },
+      channels: { pub: { address: "/pub", messages: { Msg: { contentType: "application/json", payload: { type: "object" } } } } },
       operations: {
         publish: {
           action: "send" as const,
@@ -378,11 +415,12 @@ describe("context requirements — unmapped schemes surfaced (R2.c ruling)", () 
       asyncapi: "3.0.0",
       info: { title: "AllUnmapped", version: "1.0.0" },
       servers: { prod: { host: "api.example.com", protocol: "https" } },
-      channels: { pub: { address: "/pub", messages: { Msg: { payload: { type: "object" } } } } },
+      channels: { pub: { address: "/pub", messages: { Msg: { contentType: "application/json", payload: { type: "object" } } } } },
       operations: {
         publish: {
           action: "receive" as const,
           channel: { $ref: "#/channels/pub" },
+          bindings: { http: { method: "POST", bindingVersion: "0.3.0" } },
           security: [{ type: "http", scheme: "digest" }, { type: "X509" }],
         },
       },
@@ -428,11 +466,12 @@ describe("context requirements — conjunctive server + operation security (ASYN
           security: [{ $ref: "#/components/securitySchemes/bearer" }],
         },
       },
-      channels: { pub: { address: "/pub", messages: { Msg: { payload: { type: "object" } } } } },
+      channels: { pub: { address: "/pub", messages: { Msg: { contentType: "application/json", payload: { type: "object" } } } } },
       operations: {
         publish: {
           action: "receive" as const,
           channel: { $ref: "#/channels/pub" },
+          bindings: { http: { method: "POST", bindingVersion: "0.3.0" } },
           security: opSecurity,
         },
       },
@@ -503,11 +542,13 @@ describe("credential application — apiKeys keyed lookup (R2.d ruling)", () => 
       asyncapi: "3.0.0",
       info: { title: "TwoKeys", version: "1.0.0" },
       servers: { prod: { host: "api.example.com", protocol: "https" } },
-      channels: { pub: { address: "/pub", messages: { Msg: { payload: { type: "object" } } } } },
+      channels: { pub: { address: "/pub", messages: { Msg: { contentType: "application/json", payload: { type: "object" } } } } },
       operations: {
         publish: {
           action: "receive" as const,
           channel: { $ref: "#/channels/pub" },
+          bindings: { http: { method: "POST", bindingVersion: "0.3.0" } },
+          reply: { messages: [{ name: "Reply", contentType: "application/json" }] },
           security: [
             { $ref: "#/components/securitySchemes/headerKey" },
             { $ref: "#/components/securitySchemes/queryKey" },

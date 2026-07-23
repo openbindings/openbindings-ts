@@ -129,7 +129,7 @@ describe("pinned listings (MCP-D-01)", () => {
       fetch: server.fn,
     });
     await call.write({ q: "1" });
-    await expect(single(call.outputs)).resolves.toBe("ok");
+    await expect(single(call.outputs)).resolves.toEqual({ content: [{ type: "text", text: "ok" }] });
     expect(server.count("tools/list")).toBe(0);
     expect(server.count("tools/call")).toBe(1);
   });
@@ -168,7 +168,9 @@ describe("pinned listings (MCP-D-01)", () => {
       ref: "resources/app://static",
       fetch: server.fn,
     });
-    await expect(single(call.outputs)).resolves.toEqual(["s"]);
+    await expect(single(call.outputs)).resolves.toEqual({
+      contents: [{ uri: "app://static", mimeType: "text/plain", text: "s" }],
+    });
     expect(server.count("resources/list")).toBe(0);
     expect(server.count("resources/templates/list")).toBe(0);
   });
@@ -184,7 +186,9 @@ describe("pinned listings (MCP-D-01)", () => {
       fetch: server.fn,
     });
     await call.write({ date: "2026-07-15" });
-    await expect(single(call.outputs)).resolves.toEqual(["file:///logs/2026-07-15"]);
+    await expect(single(call.outputs)).resolves.toEqual({
+      contents: [{ uri: "file:///logs/2026-07-15", mimeType: "text/plain", text: "file:///logs/2026-07-15" }],
+    });
     expect(server.count("resources/templates/list")).toBe(0);
     const reads = server.params("resources/read");
     expect(reads).toHaveLength(1);
@@ -204,7 +208,7 @@ describe("pagination exhaustion (MCP-P-02)", () => {
     const server = conformanceServer({ tools: ["probe", "progress", "zzz-last"], pageSize: 1 });
     const call = new MCPInvoker().invokeBinding({ source, ref: "tools/zzz-last", fetch: server.fn });
     await call.write({});
-    await expect(single(call.outputs)).resolves.toBe("ok");
+    await expect(single(call.outputs)).resolves.toEqual({ content: [{ type: "text", text: "ok" }] });
     expect(server.count("tools/list")).toBeGreaterThanOrEqual(3);
   });
 });
@@ -241,12 +245,12 @@ describe("progress solicitation (§9.3 `solicit`, MCP-P-04/MCP-P-05)", () => {
     if (!wantToken) {
       // Not solicited: the stream is the result value alone (§9.2) —
       // realization-neutral by default.
-      expect(vals).toEqual(["done"]);
+      expect(vals).toEqual([{ content: [{ type: "text", text: "done" }] }]);
     } else {
       // Solicited: the result is last; anything before it is a progress
       // value {progress, total?, message?} with progressToken removed.
       expect(vals.length).toBeGreaterThanOrEqual(1);
-      expect(vals[vals.length - 1]).toBe("done");
+      expect(vals[vals.length - 1]).toEqual({ content: [{ type: "text", text: "done" }] });
       for (const ev of vals.slice(0, -1)) {
         expect(ev).toMatchObject({ progress: expect.anything() });
         expect(ev).not.toHaveProperty("progressToken");
@@ -295,7 +299,7 @@ describe("progress solicitation (§9.3 `solicit`, MCP-P-04/MCP-P-05)", () => {
     expect(vals[0]).toEqual({ progress: 1, total: 0, message: "" }); // explicit zero/empty survive; token removed
     expect(vals[1]).toEqual({ progress: 2 });
     expect(vals[1]).not.toHaveProperty("total"); // absent stays absent
-    expect(vals[2]).toBe("done");
+    expect(vals[2]).toEqual({ content: [{ type: "text", text: "done" }] });
   });
 });
 
@@ -330,7 +334,7 @@ describe("input mapping (§9.1, MCP-P-03)", () => {
       binding: { operation: "probe", source: "s", ref: "tools/probe" },
       fetch: server.fn,
     });
-    await expect(single(call.outputs)).resolves.toBe("ok");
+    await expect(single(call.outputs)).resolves.toEqual({ content: [{ type: "text", text: "ok" }] });
 
     const reqs = server.params("tools/call");
     expect(reqs).toHaveLength(1);
@@ -372,12 +376,25 @@ describe("resource templates (§9.1, MCP-P-03)", () => {
     const server = conformanceServer();
     const call = new MCPInvoker().invokeBinding({ source, ref: "resourceTemplates/file:///logs/{date}", fetch: server.fn });
     await call.write({ date: "2026-07-15" });
-    await expect(single(call.outputs)).resolves.toEqual(["file:///logs/2026-07-15"]);
+    await expect(single(call.outputs)).resolves.toEqual({
+      contents: [{ uri: "file:///logs/2026-07-15", mimeType: "text/plain", text: "file:///logs/2026-07-15" }],
+    });
     // The template was resolved against the live, exhausted template listing.
     expect(server.count("resources/templates/list")).toBeGreaterThanOrEqual(1);
     const reads = server.params("resources/read");
     expect(reads).toHaveLength(1);
     expect(reads.at(0)?.uri).toBe("file:///logs/2026-07-15");
+  });
+
+  it.each([
+    ["list", ["2026", "07"], "file:///logs/2026,07"],
+    ["associative map", { year: "2026", month: "07" }, "file:///logs/month,07,year,2026"],
+  ])("preserves the RFC 6570 %s value domain", async (_name, date, expected) => {
+    const server = conformanceServer();
+    const call = new MCPInvoker().invokeBinding({ source, ref: "resourceTemplates/file:///logs/{date}", fetch: server.fn });
+    await call.write({ date });
+    await single(call.outputs);
+    expect(server.params("resources/read").at(0)?.uri).toBe(expected);
   });
 
   // A declared variable the input does not supply follows RFC 6570's
@@ -387,7 +404,9 @@ describe("resource templates (§9.1, MCP-P-03)", () => {
     const server = conformanceServer();
     const call = new MCPInvoker().invokeBinding({ source, ref: "resourceTemplates/file:///logs/{date}", fetch: server.fn });
     await call.close(); // absent input
-    await expect(single(call.outputs)).resolves.toEqual(["file:///logs/"]);
+    await expect(single(call.outputs)).resolves.toEqual({
+      contents: [{ uri: "file:///logs/", mimeType: "text/plain", text: "file:///logs/" }],
+    });
     const reads = server.params("resources/read");
     expect(reads).toHaveLength(1);
     expect(reads.at(0)?.uri).toBe("file:///logs/");

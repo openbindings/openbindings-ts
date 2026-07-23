@@ -30,7 +30,9 @@ describe("MCPInvoker tools", () => {
     const call = new MCPInvoker().invokeBinding({ source, ref: "tools/get_weather", fetch: server.fn });
 
     await call.write({ city: "Oslo" });
-    await expect(single(call.outputs)).resolves.toEqual('{"tempC":20}');
+    await expect(single(call.outputs)).resolves.toEqual({
+      content: [{ type: "text", text: '{"tempC":20}' }],
+    });
     await expect(call.closed).resolves.toBeUndefined();
 
     const calls = server.params("tools/call");
@@ -50,13 +52,15 @@ describe("MCPInvoker tools", () => {
     const call = new MCPInvoker().invokeBinding({ source, ref: "tools/multi", fetch: server.fn });
 
     await call.write({});
-    await expect(single(call.outputs)).resolves.toEqual([
-      { type: "text", text: "note:" },
-      { type: "text", text: '{"a":1}' },
-    ]);
+    await expect(single(call.outputs)).resolves.toEqual({
+      content: [
+        { type: "text", text: "note:" },
+        { type: "text", text: '{"a":1}' },
+      ],
+    });
   });
 
-  it("prefers structuredContent over the content array", async () => {
+  it("preserves structuredContent together with the content array", async () => {
     const server = mcpServer(
       () => ({ result: { content: [{ type: "text", text: "ignored" }], structuredContent: { ok: true } } }),
       { tools: ["check"] },
@@ -64,7 +68,10 @@ describe("MCPInvoker tools", () => {
     const call = new MCPInvoker().invokeBinding({ source, ref: "tools/check", fetch: server.fn });
 
     await call.write({});
-    await expect(single(call.outputs)).resolves.toEqual({ ok: true });
+    await expect(single(call.outputs)).resolves.toEqual({
+      content: [{ type: "text", text: "ignored" }],
+      structuredContent: { ok: true },
+    });
   });
 
   it("omits the arguments member entirely on close-without-write (§9.1, MCP-P-03)", async () => {
@@ -75,7 +82,7 @@ describe("MCPInvoker tools", () => {
     const call = new MCPInvoker().invokeBinding({ source, ref: "tools/ping", fetch: server.fn });
 
     await call.close();
-    await expect(single(call.outputs)).resolves.toBe("ok");
+    await expect(single(call.outputs)).resolves.toEqual({ content: [{ type: "text", text: "ok" }] });
     expect(server.params("tools/call")[0]).not.toHaveProperty("arguments");
   });
 
@@ -115,7 +122,7 @@ describe("MCPInvoker tools", () => {
     expect(outputs).toHaveLength(3);
     expect(outputs[0]).toMatchObject({ progress: 1, total: 2 });
     expect(outputs[1]).toMatchObject({ progress: 2, total: 2 });
-    expect(outputs[2]).toBe("done");
+    expect(outputs[2]).toEqual({ content: [{ type: "text", text: "done" }] });
     await expect(call.closed).resolves.toBeUndefined();
   });
 
@@ -163,18 +170,32 @@ describe("MCPInvoker tools", () => {
     const call = new MCPInvoker().invokeBinding({ source, ref: "tools/ping", fetch: server.fn });
 
     await call.write({});
-    await expect(single(call.outputs)).resolves.toBe("ok");
+    await expect(single(call.outputs)).resolves.toEqual({ content: [{ type: "text", text: "ok" }] });
     await expect(call.header).resolves.toMatchObject({ "x-request-id": ["r1"] });
   });
 
-  it("applies bearer context to the Authorization header", async () => {
+  it("surfaces a generic bearer credential instead of inventing an Authorization mapping", async () => {
     const server = mcpServer(() => textResult("ok"), { tools: ["ping"] });
     const call = new MCPInvoker().invokeBinding({
       source, ref: "tools/ping", fetch: server.fn, context: { bearerToken: "tok_123" },
     });
 
     await call.write({});
-    await expect(single(call.outputs)).resolves.toBe("ok");
+    await expect(call.closed).rejects.toMatchObject({ code: "CONTEXT_REQUIRED" });
+    expect(server.fetches()).toBe(0);
+  });
+
+  it("carries an explicitly named Authorization header", async () => {
+    const server = mcpServer(() => textResult("ok"), { tools: ["ping"] });
+    const call = new MCPInvoker().invokeBinding({
+      source,
+      ref: "tools/ping",
+      fetch: server.fn,
+      context: { headers: { Authorization: "Bearer tok_123" } },
+    });
+
+    await call.write({});
+    await expect(single(call.outputs)).resolves.toEqual({ content: [{ type: "text", text: "ok" }] });
     const toolCall = server.calls.find((c) => c.method === "tools/call");
     expect(toolCall?.headers["authorization"]).toBe("Bearer tok_123");
   });
@@ -209,7 +230,7 @@ describe("MCPInvoker tools", () => {
 // ---------------------------------------------------------------------------
 
 describe("MCPInvoker resources", () => {
-  it("reads a resource without any input; the output is always the array of decoded items (§9.3, MCP-P-05)", async () => {
+  it("reads a resource without any input and preserves the complete result object (§9.3, MCP-P-05)", async () => {
     // Resources decode by their DECLARED mimeType — the header-driven
     // lane, never a payload sniff — and the output value is uniformly the
     // array of decoded contents items (this test previously pinned the
@@ -221,7 +242,9 @@ describe("MCPInvoker resources", () => {
     const call = new MCPInvoker().invokeBinding({ source, ref: "resources/file:///data.json", fetch: server.fn });
 
     // No write, no close: static resources take no input (§9.1).
-    await expect(single(call.outputs)).resolves.toEqual([{ a: 1 }]);
+    await expect(single(call.outputs)).resolves.toEqual({
+      contents: [{ uri: "file:///data.json", mimeType: "application/json", text: '{"a":1}' }],
+    });
     const reads = server.params("resources/read");
     expect(reads).toHaveLength(1);
     expect(reads.at(0)?.uri).toBe("file:///data.json");
@@ -233,19 +256,23 @@ describe("MCPInvoker resources", () => {
       { resources: ["file:///notes.txt"] },
     );
     const call = new MCPInvoker().invokeBinding({ source, ref: "resources/file:///notes.txt", fetch: server.fn });
-    await expect(single(call.outputs)).resolves.toEqual(['{"a":1}']);
+    await expect(single(call.outputs)).resolves.toEqual({
+      contents: [{ uri: "file:///notes.txt", mimeType: "text/plain", text: '{"a":1}' }],
+    });
   });
 
-  it("declared-JSON that does not parse is a loud error, never a silent string", async () => {
+  it("preserves declared-JSON resource text without reparsing it", async () => {
     const server = mcpServer(
       () => ({ result: { contents: [{ uri: "file:///bad.json", mimeType: "application/json", text: "{not json" }] } }),
       { resources: ["file:///bad.json"] },
     );
     const call = new MCPInvoker().invokeBinding({ source, ref: "resources/file:///bad.json", fetch: server.fn });
-    await expect(single(call.outputs)).rejects.toMatchObject({ code: ERR_EXECUTION_FAILED });
+    await expect(single(call.outputs)).resolves.toEqual({
+      contents: [{ uri: "file:///bad.json", mimeType: "application/json", text: "{not json" }],
+    });
   });
 
-  it("decodes multiple contents items item-by-item, in order (§9.3, MCP-P-05)", async () => {
+  it("preserves multiple contents items in order (§9.3, MCP-P-05)", async () => {
     // The output value is ALWAYS the array of decoded contents items (this
     // test previously pinned the raw contents-array passthrough): a
     // declared-JSON item parses, a text item stays text.
@@ -262,10 +289,15 @@ describe("MCPInvoker resources", () => {
     );
     const call = new MCPInvoker().invokeBinding({ source, ref: "resources/file:///dir", fetch: server.fn });
 
-    await expect(single(call.outputs)).resolves.toEqual([{ n: 1 }, "second"]);
+    await expect(single(call.outputs)).resolves.toEqual({
+      contents: [
+        { uri: "file:///a.json", mimeType: "application/json", text: '{"n":1}' },
+        { uri: "file:///b.txt", mimeType: "text/plain", text: "second" },
+      ],
+    });
   });
 
-  it("a blob item passes as its Base64 string, whatever mimeType it declares (§9.3)", async () => {
+  it("a blob item remains in the complete resource result (§9.3)", async () => {
     // Structural first: the blob member wins before any mimeType
     // consideration — even a declared application/json.
     const blob = Buffer.from("hello world").toString("base64");
@@ -275,14 +307,16 @@ describe("MCPInvoker resources", () => {
     );
     const call = new MCPInvoker().invokeBinding({ source, ref: "resources/app://blob", fetch: server.fn });
 
-    await expect(single(call.outputs)).resolves.toEqual([blob]);
+    await expect(single(call.outputs)).resolves.toEqual({
+      contents: [{ uri: "app://blob", mimeType: "application/json", blob }],
+    });
   });
 
-  it("contents: [] yields [] — the shape never depends on the item count (§9.3)", async () => {
+  it("contents: [] remains a complete result object (§9.3)", async () => {
     const server = mcpServer(() => ({ result: { contents: [] } }), { resources: ["app://empty"] });
     const call = new MCPInvoker().invokeBinding({ source, ref: "resources/app://empty", fetch: server.fn });
 
-    await expect(single(call.outputs)).resolves.toEqual([]);
+    await expect(single(call.outputs)).resolves.toEqual({ contents: [] });
   });
 });
 
@@ -490,6 +524,18 @@ function discoveryServer(opts?: { pageSize?: number; toolNames?: string[] }): {
 }
 
 describe("MCPSynthesizer", () => {
+  it("returns the deterministic source-less scaffold", async () => {
+    await expect(new MCPSynthesizer().synthesizeInterface({ name: "scaffold" })).resolves.toEqual({
+      openbindings: "0.2.0", name: "scaffold", operations: {},
+    });
+  });
+
+  it("refuses live discovery embedding instead of emitting a lossy listing pin", async () => {
+    await expect(new MCPSynthesizer().synthesizeInterface({
+      sources: [{ bindingSpec: "openbindings.mcp@1", location: ENDPOINT, embed: true }],
+    })).rejects.toThrow(/complete pagination-exhausted listing/);
+  });
+
   it("inspectSource suggests the same operationKey synthesizeInterface assigns (Go parity)", async () => {
     // Go's InspectSource (list_refs.go) stamps BindableTarget.OperationKey
     // with the same SanitizeKey + collision-resolved key SynthesizeInterface
@@ -582,8 +628,32 @@ describe("MCPSynthesizer pinned listings", () => {
     expect(iface.operations.get_weather?.input).toEqual(pin.tools.at(0)?.inputSchema);
     expect((iface.operations.greet?.input as { required?: string[] }).required).toEqual(["name"]);
     expect(iface.sources!.mcpServer?.location).toBe(ENDPOINT);
+    expect(iface.sources!.mcpServer?.content).toEqual(pin);
+
+    const pathSchema = (iface.operations.file?.input as { properties?: Record<string, { anyOf?: unknown[] }> }).properties?.path;
+    expect(pathSchema?.anyOf).toHaveLength(3);
 
     expect(fetches()).toBe(0); // pin-authoritative: zero network dials
+  });
+
+  it("does not advertise refs the binding specification declares unresolvable", async () => {
+    const content = {
+      tools: [
+        { name: "task", execution: { taskSupport: "required" } },
+        { name: "duplicate" },
+        { name: "duplicate" },
+        { name: "ok" },
+      ],
+      resources: [{ name: "a", uri: "app://same" }, { name: "b", uri: "app://same" }],
+      resourceTemplates: [{ name: "bad", uriTemplate: "{" }, { name: "good", uriTemplate: "file:///{path}" }],
+    };
+    const synthesizer = new MCPSynthesizer();
+    const iface = await synthesizer.synthesizeInterface({
+      sources: [{ bindingSpec: "openbindings.mcp@1", location: ENDPOINT, content }],
+    });
+    const inspection = await synthesizer.inspectSource({ bindingSpec: "openbindings.mcp@1", location: ENDPOINT, content });
+    expect(Object.keys(iface.operations).sort()).toEqual(["good", "ok"]);
+    expect(inspection.targets.map((target) => target.operationKey).sort()).toEqual(["good", "ok"]);
   });
 
   it("inspects OFFLINE from a pinned listing, previewing the keys pinned synthesis assigns", async () => {

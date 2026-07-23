@@ -25,6 +25,10 @@ function source() {
           action: "receive" as const,
           channel: { $ref: "#/channels/messages" },
           messages: [{ $ref: "#/channels/messages/messages/Msg" }],
+          bindings: { http: { method: "POST", bindingVersion: "0.3.0" } },
+          reply: {
+            messages: [{ name: "Reply", contentType: "application/json" }],
+          },
         },
       },
     }),

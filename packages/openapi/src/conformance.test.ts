@@ -67,7 +67,26 @@ function sseResponse(chunks: string[], init?: { status?: number }): Response {
 }
 
 function src(spec: unknown) {
-  return { bindingSpec: "openbindings.openapi@1", content: spec };
+  // Most tests in this file target routing, refs, or credentials rather
+  // than response-declaration mismatch. Give their minimal fixtures the
+  // JSON declaration their mocked non-empty JSON response requires under
+  // OAPI-P-06/P-07; tests with an explicit content map remain untouched.
+  const content = structuredClone(spec);
+  const visit = (value: unknown): void => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return;
+    const object = value as Record<string, unknown>;
+    if (object.responses && typeof object.responses === "object" && !Array.isArray(object.responses)) {
+      for (const response of Object.values(object.responses as Record<string, unknown>)) {
+        if (response && typeof response === "object" && !Array.isArray(response)) {
+          const item = response as Record<string, unknown>;
+          if (item.content === undefined) item.content = { "application/json": {} };
+        }
+      }
+    }
+    for (const member of Object.values(object)) visit(member);
+  };
+  visit(content);
+  return { bindingSpec: "openbindings.openapi@1", content };
 }
 
 const BASE = "https://api.example.test";
@@ -82,7 +101,7 @@ const WIDGET_SPEC = {
       get: {
         operationId: "getSession",
         parameters: [{ name: "session_id", in: "cookie", schema: { type: "string" } }],
-        responses: { "200": { description: "ok" } },
+        responses: { "200": { description: "ok", content: { "application/json": {}, "text/plain": {} } } },
       },
     },
   },
@@ -281,7 +300,7 @@ describe("OAPI-P-03 — flattened-model refusals", () => {
       await call.write({ body: "x", stray: 1 });
       await expect(call.closed, name).rejects.toMatchObject({
         code: ERR_VALIDATION_FAILED,
-        message: wantMsg,
+        message: expect.stringContaining(wantMsg),
       });
       expect(requests, name).toHaveLength(0);
     }
@@ -670,11 +689,11 @@ describe("OAPI-P-04 — request media on the wire", () => {
   // and refuses pre-dispatch rather than inventing carriage. Mirrors the
   // Go SDK's TestInvoke_DegenerateMediaSchemaCombinationRefused.
   const MULTIPART_DEGENERATE_MSG =
-    "request media selection (OAPI-P-04) lands on multipart/form-data, but the declared body schema does not flatten (no properties and no explicit object type): openbindings.openapi@1 defines no request carriage for this combination";
+    "request media candidate multipart/form-data has a non-object body schema and is inadmissible";
   const URLENCODED_DEGENERATE_MSG =
-    "request media selection (OAPI-P-04) lands on application/x-www-form-urlencoded, but the declared body schema does not flatten (no properties and no explicit object type): openbindings.openapi@1 defines no request carriage for this combination";
+    "request media candidate application/x-www-form-urlencoded has a non-object body schema and is inadmissible";
   const TEXT_DEGENERATE_MSG =
-    "request media selection (OAPI-P-04) lands on text/plain, but the declared body schema flattens (an object contract): openbindings.openapi@1 defines no request carriage for this combination";
+    "request media candidate text/plain has an object body schema and is inadmissible";
   const degenerateCases: [string, Record<string, unknown>, string][] = [
     [
       "multipart-only with a scalar schema",
@@ -1067,13 +1086,13 @@ describe("OAPI-P-07 — decode", () => {
     });
   });
 
-  it("yields null for an empty body (204 included) on every lane", async () => {
+  it("emits no value for an empty body (204 included)", async () => {
     const { fetch } = mockFetch(() => new Response(null, { status: 204 }));
     const call = new OpenAPIInvoker().invokeBinding({ source: src(WIDGET_SPEC), ref: PING_REF, fetch });
     await call.close();
     const outs: unknown[] = [];
     for await (const o of call.outputs) outs.push(o);
-    expect(outs).toEqual([null]);
+    expect(outs).toEqual([]);
   });
 });
 

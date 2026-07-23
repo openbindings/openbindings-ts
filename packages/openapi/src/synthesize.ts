@@ -4,18 +4,25 @@ import type {
   OpenAPIMediaType,
   OpenAPIOperation,
   OpenAPIParameter,
-  OpenAPIRequestBody,
-  OpenAPIResponse,
+  OpenAPIPathItem,
 } from "./types.js";
 import { BINDING_SPEC, DEFAULT_SOURCE_NAME } from "./constants.js";
-import { DegenerateMediaError, planRequestBody } from "./media.js";
+import {
+  DegenerateMediaError,
+  FAMILY_JSON,
+  candidateCollides,
+  isJSONMediaType,
+  parseMediaType,
+  planRequestBodies,
+  type BodyPlan,
+} from "./media.js";
+import { effectiveParameters, unflattenableParam } from "./params.js";
 import { translateSchemaDialect } from "./translate.js";
 import {
   bodySchemaFlattens,
   buildJsonPointerRef,
   codePointCompare,
   loadOpenAPIDocument,
-  mergeParameters,
   sanitizeKey,
   uniqueKey,
 } from "./util.js";
@@ -39,6 +46,7 @@ export async function convertToInterface(
     bindingSpec: BINDING_SPEC,
   };
   if (location) sourceEntry.location = location;
+  if (content !== undefined) sourceEntry.content = content;
 
   const iface: OBInterface = {
     openbindings: MAX_TESTED_VERSION,
@@ -60,8 +68,6 @@ export async function convertToInterface(
   for (const [pathStr, pathItemRaw] of sortedEntries(doc.paths)) {
     if (pathStr.startsWith("x-") || !pathItemRaw || typeof pathItemRaw !== "object") continue;
     const pathItem = pathItemRaw as Record<string, unknown>;
-    const pathParams = (pathItem.parameters ?? []) as OpenAPIParameter[];
-
     for (const method of HTTP_METHODS) {
       const op = pathItem[method];
       if (!op || typeof op !== "object") continue;
@@ -69,6 +75,43 @@ export async function convertToInterface(
 
       const opKey = deriveOperationKey(opObj, pathStr, method, usedKeys);
       usedKeys.add(opKey);
+
+      const params = effectiveParameters(pathItem as OpenAPIPathItem, opObj);
+      const unflattenable = unflattenableParam(params);
+      if (unflattenable) {
+        throw unrealizableOperation(
+          opKey,
+          `parameter ${JSON.stringify(unflattenable)} has no unique revision-1 flattened identity`,
+        );
+      }
+
+      let requestPlans: BodyPlan[] = [];
+      if (opObj.requestBody) {
+        let planError: unknown;
+        try {
+          const plans = planRequestBodies(opObj);
+          requestPlans = plans.filter((plan) => !candidateCollides(params, plan));
+        } catch (error: unknown) {
+          planError = error;
+        }
+
+        if (requestPlans.length === 0 && opObj.requestBody.required) {
+          const reason = planError instanceof Error
+            ? planError.message
+            : planError === undefined
+              ? "no artifact-declared request media candidate can realize its required flattened input"
+              : String(planError);
+          throw unrealizableOperation(opKey, reason);
+        }
+
+        if (requestPlans.length === 0) {
+          onWarning?.({
+            code: planError instanceof DegenerateMediaError ? "openapi.media_schema_mismatch" : "openapi.unresolvable_request_body",
+            message: `${planError instanceof Error ? planError.message : planError === undefined ? "no artifact-declared request media candidate can realize its flattened input" : String(planError)}; optional body omitted from the synthesized contract`,
+            path: `operations.${opKey}.input`,
+          });
+        }
+      }
 
       const obiOp: Operation = {
         description: opObj.description || opObj.summary || undefined,
@@ -79,7 +122,7 @@ export async function convertToInterface(
         obiOp.tags = opObj.tags;
       }
 
-      const inputSchema = buildInputSchema(opObj, pathParams, opKey, onWarning);
+      const inputSchema = buildInputSchemaForPlans(opObj, params, requestPlans);
       if (inputSchema) {
         obiOp.input = translateSchemaDialect(inputSchema, formatVersion) as JSONSchema;
       }
@@ -102,6 +145,12 @@ export async function convertToInterface(
   }
 
   return iface;
+}
+
+function unrealizableOperation(operationKey: string, reason: string): Error {
+  return new Error(
+    `cannot synthesize OpenAPI operation ${JSON.stringify(operationKey)}: ${reason}; synthesis would return a statically unbindable partial interface`,
+  );
 }
 
 /**
@@ -139,48 +188,48 @@ export function deriveOperationKey(
   return uniqueKey(key, used);
 }
 
+function buildInputSchemaForPlans(
+  op: OpenAPIOperation,
+  allParams: OpenAPIParameter[],
+  requestPlans: BodyPlan[],
+): JSONSchema | undefined {
+  if (!op.requestBody) return buildInputSchema(op, allParams);
+  const variants = requestPlans
+    .map((plan) => buildInputSchema(op, allParams, plan))
+    .filter((schema): schema is JSONSchema => schema !== undefined);
+  if (!op.requestBody.required) {
+    const parameterOnly = buildInputSchema(op, allParams);
+    if (parameterOnly) variants.unshift(parameterOnly);
+  }
+  const unique = new Map<string, JSONSchema>();
+  for (const schema of variants) unique.set(JSON.stringify(schema), schema);
+  const schemas = [...unique.values()];
+  if (schemas.length === 0) return undefined;
+  if (schemas.length === 1) return schemas[0];
+  return { anyOf: schemas };
+}
+
 function buildInputSchema(
   op: OpenAPIOperation,
-  pathParams: OpenAPIParameter[],
-  opKey: string,
-  onWarning?: (warning: SynthesizerWarning) => void,
+  allParams: OpenAPIParameter[],
+  requestPlan?: BodyPlan,
 ): JSONSchema | undefined {
   const properties: Record<string, unknown> = {};
   const required: string[] = [];
-  let hasOpenBody = false;
-
-  const allParams = mergeParameters(pathParams, op.parameters ?? []);
+  // Only JSON-family object candidates can carry undeclared fields by the
+  // binding rule. Multipart/form and parameter-only surfaces stay closed.
+  let hasOpenBody = requestPlan?.family === FAMILY_JSON && !requestPlan.synthetic;
 
   for (const param of allParams) {
-    if (!param?.name || param.in === "cookie") continue;
+    if (!param?.name) continue;
     const prop = paramToSchema(param);
     if (prop) properties[param.name] = prop;
     if (param.required) required.push(param.name);
   }
 
-  if (op.requestBody) {
+  if (op.requestBody && requestPlan) {
     const rb = op.requestBody;
-    // §9.2's degenerate media/schema combination (OAPI-P-04), surfaced at
-    // synthesis time: when the operation's declared request media cannot
-    // carry the contract this schema publishes, a conformant invoker
-    // refuses the operation before dispatch — warn here so authors hear
-    // it when the contract is produced, not at first dispatch. The
-    // selection is not re-derived: planRequestBody (media.ts) is the one
-    // deciding site, and its typed refusal is the warning's trigger.
-    if (onWarning) {
-      try {
-        planRequestBody(op);
-      } catch (e) {
-        if (e instanceof DegenerateMediaError) {
-          onWarning({
-            code: "openapi.media_schema_mismatch",
-            message: `${e.message}; a conformant invoker refuses this operation before dispatch`,
-            path: `operations.${opKey}.input`,
-          });
-        }
-      }
-    }
-    const bodySchema = requestBodyToSchema(rb);
+    const bodySchema = requestPlan.media?.schema ? { ...requestPlan.media.schema } : undefined;
     if (bodySchema) {
       const bodyProps = bodySchema.properties as Record<string, unknown> | undefined;
       if (!bodySchemaFlattens(bodySchema)) {
@@ -193,18 +242,7 @@ function buildInputSchema(
         if (rb.required) required.push("body");
       } else if (bodyProps && typeof bodyProps === "object") {
         for (const [k, v] of Object.entries(bodyProps)) {
-          // Field-collision rule: a name declared as a parameter AND a
-          // body property flattens to ONE input field (the body's schema
-          // wins deterministically); at invocation the one value is
-          // delivered to every declared wire location. Warn so the merge
-          // is never silent.
-          if (k in properties) {
-            onWarning?.({
-              code: "openapi.param_body_collision",
-              message: `field "${k}" is declared as a parameter and a body property; the flattened input carries one field (body schema shown) whose value is delivered to both wire locations at invocation`,
-              path: `operations.${opKey}.input.properties.${k}`,
-            });
-          }
+          // Colliding candidates were removed before this plan was chosen.
           properties[k] = v;
         }
         if (Array.isArray(bodySchema.required)) {
@@ -220,17 +258,22 @@ function buildInputSchema(
         // stays an OPEN object — the synthetic `body` wrap is reserved for
         // NON-object body schemas, and wrapping here would describe a
         // field the conformant invoker refuses as unmatched.
-        hasOpenBody = true;
+        // hasOpenBody was determined by the selected candidate's family.
       }
     }
   }
 
   if (Object.keys(properties).length === 0) {
     if (hasOpenBody) return { type: "object" };
+    if (requestPlan && op.requestBody?.required) return { type: "object", additionalProperties: false };
     return undefined;
   }
 
-  const schema: JSONSchema = { type: "object", properties };
+  const schema: JSONSchema = {
+    type: "object",
+    properties,
+    ...(hasOpenBody ? {} : { additionalProperties: false }),
+  };
   if (required.length > 0) {
     schema.required = [...required].sort(codePointCompare);
   }
@@ -241,6 +284,9 @@ function paramToSchema(param: OpenAPIParameter): Record<string, unknown> | undef
   let schema: Record<string, unknown>;
   if (param.schema && typeof param.schema === "object") {
     schema = { ...param.schema };
+  } else if (param.content && typeof param.content === "object") {
+    const media = Object.values(param.content as Record<string, OpenAPIMediaType>)[0];
+    schema = media?.schema && typeof media.schema === "object" ? { ...media.schema } : { type: "string" };
   } else {
     schema = { type: "string" };
   }
@@ -248,38 +294,34 @@ function paramToSchema(param: OpenAPIParameter): Record<string, unknown> | undef
   return schema;
 }
 
-function requestBodyToSchema(rb: OpenAPIRequestBody): Record<string, unknown> | undefined {
-  if (!rb.content) return undefined;
-  const mt = preferJsonMediaType(rb.content);
-  if (!mt?.schema) return undefined;
-  return { ...mt.schema };
-}
-
 function buildOutputSchema(op: OpenAPIOperation): JSONSchema | undefined {
   if (!op.responses) return undefined;
-  for (const code of ["200", "201", "202"]) {
-    const resp = op.responses[code];
-    if (!resp) continue;
-    return responseToSchema(resp);
+  const keys = Object.keys(op.responses);
+  const hasRange = Object.hasOwn(op.responses, "2XX");
+  const exact = keys.filter((key) => /^2[0-9][0-9]$/.test(key));
+  const schemas: Record<string, unknown>[] = [];
+  for (const key of keys.sort(codePointCompare)) {
+    if (!/^2[0-9][0-9]$/.test(key) && key !== "2XX" && !(key === "default" && !hasRange && exact.length < 100)) continue;
+    const response = op.responses[key];
+    if (!response?.content) continue; // this outcome emits no value
+    for (const [mediaKey, media] of Object.entries(response.content).sort(([a], [b]) => codePointCompare(a, b))) {
+      let parsed;
+      try { parsed = parseMediaType(mediaKey); } catch { continue; }
+      if (isJSONMediaType(parsed.base)) {
+        // A JSON success declaration without a schema can emit any JSON
+        // value; the synthesized OBI must not make a narrower claim.
+        if (!media.schema) return undefined;
+        schemas.push({ ...media.schema });
+      } else {
+        // Revision 1's builtin non-JSON response lane is text, including
+        // one string per SSE event, irrespective of an OAS schema claim.
+        schemas.push({ type: "string" });
+      }
+    }
   }
-  return undefined;
-}
-
-function responseToSchema(resp: OpenAPIResponse): Record<string, unknown> | undefined {
-  if (!resp.content) return undefined;
-  const mt = preferJsonMediaType(resp.content);
-  if (!mt?.schema) return undefined;
-  return { ...mt.schema };
-}
-
-function preferJsonMediaType(content: Record<string, OpenAPIMediaType>): OpenAPIMediaType | undefined {
-  if (content["application/json"]) return content["application/json"];
-  const keys = Object.keys(content).sort();
-  for (const k of keys) {
-    if (k.includes("json")) return content[k];
-  }
-  const first = keys[0];
-  return first !== undefined ? content[first] : undefined;
+  const unique = [...new Map(schemas.map((schema) => [JSON.stringify(schema), schema])).values()];
+  if (unique.length === 0) return undefined;
+  return unique.length === 1 ? unique[0] : { anyOf: unique };
 }
 
 function sortedEntries(obj: Record<string, unknown>): [string, unknown][] {

@@ -1,0 +1,84 @@
+# Go/TypeScript implementation parity
+
+OpenBindings 0.2.0 treats the Go and TypeScript SDKs as two idiomatic
+implementations of one observable contract. They run the same core, binding
+processor, and Operation Graph corpora. The checked-in
+[`reference-sdk-correspondence.json`](../spec/conformance/reference-sdk-correspondence.json)
+also guards the public role and family correspondence.
+
+| Concept | Go | TypeScript |
+|---|---|---|
+| binding implementation | `BindingInvoker` | `BindingInvoker` |
+| supported identifiers | `BindingSpecs()` | `bindingSpecs()` |
+| invoke one binding | `InvokeBinding(...)` | `invokeBinding(...)` |
+| side-effect-free context preflight | `PrepareBinding(...)` | `prepareBinding(...)` |
+| artifact → OBI | `InterfaceSynthesizer.SynthesizeInterface(...)` | `InterfaceSynthesizer.synthesizeInterface(...)` |
+| inspect bindable targets | `SourceInspector.InspectSource(...)` | `SourceInspector.inspectSource(...)` |
+| source-less scaffold | `SynthesisSkeleton(...)` | `synthesisSkeleton(...)` |
+| shared authoring directives + validation | `FinalizeSynthesis(...)` | `finalizeSynthesis(...)` |
+
+All six published binding families implement invocation, synthesis, and source
+inspection in both SDKs: OpenAPI, AsyncAPI, MCP, gRPC, Connect, and usage.
+
+Parity means the same behavior at the OpenBindings boundary: exact
+`bindingSpec` support, resolution and refusal decisions, input/output values,
+stream cardinality and ordering, pre-dispatch context challenges,
+classification, cancellation effects, and conformance outcomes. It does not
+mean identical class/type casing, goroutines versus promises and async
+iterables, stack traces, incidental error prose, caches, connection pools, or
+other details that the OpenBindings contract does not expose.
+
+Names intentionally remain recognizable across languages whenever idiom
+allows: `GrpcInvoker` corresponds to `grpc.Invoker`, `synthesizeInterface` to
+`SynthesizeInterface`, and so on. A user moving between SDKs should recognize
+the role before learning its language-specific mechanics.
+
+## Implementation proof
+
+Every family is checked at three boundaries. Family authoring tests exercise
+artifact loading, inspection, synthesis, and synthesized-document validation.
+Both SDKs then execute the same 97 portable processor scenarios from
+`spec/conformance/binding-specs/processor/`, covering all 47 published P-rules.
+Protocol integration tests exercise actual request framing and response
+decoding. Passing only one column is not sufficient release evidence.
+
+| Family | Go authoring evidence | TypeScript authoring evidence | Shared invocation evidence |
+|---|---|---|---|
+| OpenAPI | `formats/openapi/synthesize_test.go`, `list_refs_test.go` | `packages/openapi/src/synthesize.test.ts`, `invoker.test.ts` | `processor/openapi.json` |
+| AsyncAPI | `formats/asyncapi/synthesize_test.go`, `list_refs_test.go` | `packages/asyncapi/src/invoker.test.ts`, `inspect-source.test.ts` | `processor/asyncapi.json` |
+| MCP | `formats/mcp/synthesize_test.go`, `list_refs_test.go` | `packages/mcp/src/invoker.test.ts` | `processor/mcp.json` |
+| gRPC | `formats/grpc/synthesize_test.go`, `list_refs_test.go` | `packages/grpc/src/authoring.test.ts` | `processor/grpc.json` |
+| Connect | `formats/connect/synthesize_test.go`, `list_refs_test.go` | `packages/connect/src/authoring.test.ts` | `processor/connect.json` |
+| usage | `formats/usage/synthesize_interface_test.go`, `list_refs_test.go` | `packages/usage/src/authoring.test.ts` | `processor/usage.json` |
+
+The authoring invariant is creation-time soundness: inspection and synthesis
+apply the same target eligibility used by invocation; no emitted operation is
+statically guaranteed to refuse; and direct synthesis fails as a whole when an
+accepted target cannot be represented faithfully. It is not a promise that a
+live source or peer will never change after synthesis.
+
+## Intentional revision-1 boundaries
+
+These are specification boundaries, not SDK parity gaps:
+
+| Family | Deliberately outside revision 1 |
+|---|---|
+| OpenAPI | webhooks, callbacks, NDJSON/other streaming framings, and operations whose effective parameter/body alternatives cannot be represented without collision or loss |
+| AsyncAPI | non-HTTP/WebSocket protocols, standalone HTTP `send`, message-header carriage, and arbitrary byte values without an artifact-declared boundary encoding |
+| MCP | stdio and deprecated HTTP+SSE transports, required task augmentation, and server-initiated subscriptions/sampling/elicitation/roots/log streams |
+| gRPC | schemas outside the canonical ProtoJSON-compatible bound closure; metadata is not promoted into operation values |
+| Connect | binary protobuf, gRPC-Web, GET dispatch, descriptorless streaming, and full-duplex use where the selected transport cannot provide HTTP/2 |
+| usage | includes, mounts, config-file/external-parse lanes, interactive/PTY/streaming commands, and binary output without a configured decoder |
+
+Within those boundaries, an implementation refuses rather than inventing a
+private approximation. Runtime capability limitations are declared and refuse
+before dispatch; they do not rewrite the binding specification's interaction
+shape.
+
+Authoring directives follow the same rule. Both SDKs honor source naming,
+description, `outputLocation`, and complete `embed` requests. Location-fed
+OpenAPI, AsyncAPI, and usage artifacts can be embedded losslessly. Live MCP
+discovery and gRPC reflection currently refuse `embed` because their internal
+discovery views do not retain every member needed to publish a complete pinned
+listing or descriptor closure; silently emitting a partial artifact would be
+less conformant than the refusal.

@@ -32,8 +32,10 @@ describe("resolveServer — effective list precedence", () => {
     expect(resolveServer(doc, pathItem, {}, undefined, "")).toBe("https://path.example.com");
   });
 
-  it("document servers next (first entry)", () => {
-    expect(resolveServer(doc, null, {}, undefined, "")).toBe("https://doc-a.example.com");
+  it("preserves document-server alternatives until the consumer selects one", () => {
+    expect(() => resolveServer(doc, null, {}, undefined, "")).toThrow(/2 alternatives/);
+    expect(resolveServer(doc, null, {}, ctxWith({ index: 0 }), "")).toBe("https://doc-a.example.com");
+    expect(resolveServer(doc, null, {}, ctxWith({ index: 1 }), "")).toBe("https://doc-b.example.com");
   });
 
   it("the implied / resolves against the artifact's base URI (the location)", () => {
@@ -109,17 +111,19 @@ describe("resolveServer — the configuration point", () => {
     );
   });
 
-  it("substitutes supplied variables against the default entry; enum informs, does not gate", () => {
-    expect(resolveServer(doc, null, null, ctxWith({ variables: { env: "staging" } }), "")).toBe(
+  it("substitutes supplied variables on the selected entry and enforces its enum", () => {
+    expect(resolveServer(doc, null, null, ctxWith({ index: 0, variables: { env: "staging" } }), "")).toBe(
       "https://staging.example.com",
     );
-    // An out-of-enum value is NOT refused (§9.3, R1): the enum is the author's
-    // expectation, not a boundary; a full base-URL override bypasses it anyway.
-    expect(resolveServer(doc, null, null, ctxWith({ variables: { env: "prod" } }), "")).toBe(
-      "https://prod.example.com",
-    );
+    expect(() => resolveServer(
+      doc,
+      null,
+      null,
+      ctxWith({ index: 0, variables: { env: "prod" } }),
+      "",
+    )).toThrow(/outside its declared enum/);
     expect(() =>
-      resolveServer(doc, null, null, ctxWith({ variables: { nope: "x" } }), ""),
+      resolveServer(doc, null, null, ctxWith({ index: 0, variables: { nope: "x" } }), ""),
     ).toThrow('declares no variable "nope"');
   });
 

@@ -139,9 +139,12 @@ describe("parseAsyncAPIDocument", () => {
     await expect(parseAsyncAPIDocument(undefined, doc2x)).rejects.toThrow("ASYNC-P-01");
   });
 
-  it("accepts any 3.0.x patch version", async () => {
-    const doc = await parseAsyncAPIDocument(undefined, validDoc.replace("3.0.0", "3.0.17"));
-    expect(doc.asyncapi).toBe("3.0.17");
+  it("accepts exactly the artifact version adopted by revision 1", async () => {
+    const doc = await parseAsyncAPIDocument(undefined, validDoc);
+    expect(doc.asyncapi).toBe("3.0.0");
+    await expect(
+      parseAsyncAPIDocument(undefined, validDoc.replace("3.0.0", "3.0.17")),
+    ).rejects.toThrow("ASYNC-P-01");
   });
 
   // ASYNC-P-01: a later 3.x line is adopted by compatible revision of the

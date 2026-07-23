@@ -7,7 +7,8 @@ import type {
 } from "./invoker-types.js";
 import type { ContextRequiredDetails, Invocation } from "./invocation.js";
 import type { OBInterface, Source } from "./types.js";
-import { NoInvokerError, NoSynthesizerError, NoSourcesError } from "./errors.js";
+import { NoInvokerError, NoSynthesizerError } from "./errors.js";
+import { synthesisSkeleton } from "./invoker-types.js";
 
 /**
  * Returns a single BindingInvoker that routes to the appropriate inner
@@ -86,7 +87,9 @@ export function combineSynthesizers(...synthesizers: InterfaceSynthesizer[]): In
       options?: { signal?: AbortSignal },
     ): Promise<OBInterface> {
       const [firstSource] = input.sources ?? [];
-      if (!firstSource) throw new NoSourcesError();
+      if (!firstSource) {
+        return synthesisSkeleton(input);
+      }
       const synthesizer = bySpec.get(firstSource.bindingSpec);
       if (!synthesizer) throw new NoSynthesizerError(firstSource.bindingSpec);
       return synthesizer.synthesizeInterface(input, options);

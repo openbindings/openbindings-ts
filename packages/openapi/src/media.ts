@@ -38,7 +38,67 @@ export function isJSONMediaType(mt: string): boolean {
   return mt === "application/json" || mt.endsWith("+json");
 }
 
-/** Body families, in the §9.2 preference order. */
+export interface ParsedMediaType {
+  base: string;
+  params: Record<string, string>;
+  canonical: string;
+  identity: string;
+}
+
+/** Parses the concrete media-type identity used for declaration collision and matching. */
+export function parseMediaType(raw: string): ParsedMediaType {
+  const parts = splitMediaType(raw);
+  const base = (parts.shift() ?? "").trim().toLowerCase();
+  if (!base || !base.includes("/") || isMediaRange(base)) {
+    throw new Error(`media type ${JSON.stringify(raw)} is not concrete`);
+  }
+  const params: Record<string, string> = {};
+  for (const part of parts) {
+    const equals = part.indexOf("=");
+    if (equals <= 0) throw new Error(`invalid media-type parameter in ${JSON.stringify(raw)}`);
+    const name = part.slice(0, equals).trim().toLowerCase();
+    if (name in params) throw new Error(`duplicate media-type parameter ${JSON.stringify(name)}`);
+    params[name] = unquoteParameter(part.slice(equals + 1).trim());
+  }
+  const keys = Object.keys(params).sort();
+  const identity = [base, ...keys.map((key) => `${key}=${params[key]}`)].join("\u0000");
+  const canonical = base + keys.map((key) => `; ${key}=${formatParameter(params[key] ?? "")}`).join("");
+  return { base, params, canonical, identity };
+}
+
+function splitMediaType(raw: string): string[] {
+  const parts: string[] = [];
+  let start = 0;
+  let quoted = false;
+  let escaped = false;
+  for (let i = 0; i < raw.length; i++) {
+    const char = raw[i];
+    if (escaped) escaped = false;
+    else if (char === "\\" && quoted) escaped = true;
+    else if (char === '"') quoted = !quoted;
+    else if (char === ";" && !quoted) {
+      parts.push(raw.slice(start, i));
+      start = i + 1;
+    }
+  }
+  if (quoted) throw new Error(`unterminated quoted media-type parameter in ${JSON.stringify(raw)}`);
+  parts.push(raw.slice(start));
+  return parts;
+}
+
+function unquoteParameter(value: string): string {
+  if (!value.startsWith('"')) return value;
+  if (!value.endsWith('"') || value.length < 2) throw new Error("invalid quoted parameter");
+  return value.slice(1, -1).replace(/\\([\\"])/g, "$1");
+}
+
+function formatParameter(value: string): string {
+  return /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/.test(value)
+    ? value
+    : `"${value.replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"`;
+}
+
+/** Supported request-body families. The artifact gives them no preference order. */
 export const FAMILY_JSON = "json";
 export const FAMILY_MULTIPART = "multipart";
 export const FAMILY_URLENCODED = "urlencoded";
@@ -55,7 +115,7 @@ export interface BodyPlan {
   required: boolean;
   /** The declared content key, verbatim. */
   mediaKey: string;
-  /** Normalized type/subtype (the request Content-Type). */
+  /** Canonical parsed declaration, including identity-affecting parameters. */
   mediaType: string;
   media: OpenAPIMediaType | null;
   family: string;
@@ -89,121 +149,101 @@ function hasRequestBody(op: OpenAPIOperation): boolean {
 export class DegenerateMediaError extends Error {}
 
 /**
- * Selects the request media type from the operation's DECLARED
- * requestBody.content per OAPI-P-04's preference order: exact
- * application/json, then the lexicographically least +json type, then
- * multipart/form-data, then application/x-www-form-urlencoded, then
- * text/plain (whose string-value condition is checked after routing, when
- * the body value exists). Two refusals are loud and pre-dispatch: an
- * operation declaring only media types outside these families (its request
- * carriage is undefined in revision 1), and a degenerate media/schema
- * combination the OAS defines no wire form for (§9.2).
+ * Compatibility convenience for callers that need one SDK-local candidate.
+ * Invocation uses planRequestBodies so the binding layer preserves every
+ * artifact-permitted alternative until configuration or admissibility chooses.
  */
 export function planRequestBody(op: OpenAPIOperation): BodyPlan {
-  if (!hasRequestBody(op)) return { ...NO_BODY_PLAN };
+  return planRequestBodies(op)[0] ?? { ...NO_BODY_PLAN };
+}
+
+/** Preserves all concrete supported request candidates without binding-spec preference. */
+export function planRequestBodies(op: OpenAPIOperation): BodyPlan[] {
+  if (!hasRequestBody(op)) return [];
   const rb = op.requestBody!;
   const content = rb.content;
-  if (!content || Object.keys(content).length === 0) {
-    // A requestBody with no content declares no carriage; treat as no
-    // declared body (degenerate artifact — the OAS requires content).
-    return { ...NO_BODY_PLAN };
-  }
+  if (!content || Object.keys(content).length === 0) return [];
 
   interface Candidate {
     key: string;
-    normalized: string;
+    parsed: ParsedMediaType;
+    family: string;
   }
-  let exactJSON: Candidate | undefined;
-  let multipartFD: Candidate | undefined;
-  let urlEncoded: Candidate | undefined;
-  let textPlain: Candidate | undefined;
-  const plusJSON: Candidate[] = [];
+  const candidates: Candidate[] = [];
   const declared: string[] = [];
+  const identities = new Map<string, string>();
   for (const key of Object.keys(content)) {
-    const n = normalizeMediaType(key);
-    declared.push(n);
-    if (isMediaRange(n)) continue; // ranges never participate in selection
-    const c: Candidate = { key, normalized: n };
-    if (n === "application/json") exactJSON = c;
-    else if (n.endsWith("+json")) plusJSON.push(c);
-    else if (n === "multipart/form-data") multipartFD = c;
-    else if (n === "application/x-www-form-urlencoded") urlEncoded = c;
-    else if (n === "text/plain") textPlain = c;
+    let parsed: ParsedMediaType;
+    try {
+      parsed = parseMediaType(key);
+    } catch {
+      declared.push(key);
+      continue;
+    }
+    declared.push(parsed.canonical);
+    const previous = identities.get(parsed.identity);
+    if (previous !== undefined) {
+      throw new Error(
+        `request content declarations ${JSON.stringify(previous)} and ${JSON.stringify(key)} denote the same parsed media type (OAPI-P-04 normalized collision)`,
+      );
+    }
+    identities.set(parsed.identity, key);
+    let family = "";
+    if (isJSONMediaType(parsed.base)) family = FAMILY_JSON;
+    else if (parsed.base === "multipart/form-data") family = FAMILY_MULTIPART;
+    else if (parsed.base === "application/x-www-form-urlencoded") family = FAMILY_URLENCODED;
+    else if (parsed.base === "text/plain") family = FAMILY_TEXT;
+    if (family) candidates.push({ key, parsed, family });
   }
-
-  // Deterministic +json pick: first in normalized order (inert when the
-  // exact-JSON branch wins or the list is empty).
-  plusJSON.sort((a, b) => (a.normalized < b.normalized ? -1 : 1));
-  const firstPlusJSON = plusJSON[0];
-
-  let chosen: Candidate | undefined;
-  let family: string;
-  if (exactJSON) {
-    chosen = exactJSON;
-    family = FAMILY_JSON;
-  } else if (firstPlusJSON !== undefined) {
-    chosen = firstPlusJSON;
-    family = FAMILY_JSON;
-  } else if (multipartFD) {
-    chosen = multipartFD;
-    family = FAMILY_MULTIPART;
-  } else if (urlEncoded) {
-    chosen = urlEncoded;
-    family = FAMILY_URLENCODED;
-  } else if (textPlain) {
-    chosen = textPlain;
-    family = FAMILY_TEXT;
-  } else {
+  if (candidates.length === 0) {
     declared.sort();
     throw new Error(
       `request body declares only media types outside the families openbindings.openapi@1 defines a request carriage for (declared: ${declared.join(", ")})`,
     );
   }
+  candidates.sort((a, b) => a.parsed.identity.localeCompare(b.parsed.identity));
+  const plans: BodyPlan[] = [];
+  const rejected: string[] = [];
+  for (const candidate of candidates) {
+    try {
+      plans.push(buildBodyPlan(rb.required === true, content, candidate));
+    } catch (error: unknown) {
+      rejected.push(error instanceof Error ? error.message : String(error));
+    }
+  }
+  if (plans.length === 0) throw new DegenerateMediaError(rejected.join("; "));
+  return plans;
+}
 
+function buildBodyPlan(
+  required: boolean,
+  content: Record<string, OpenAPIMediaType>,
+  candidate: { key: string; parsed: ParsedMediaType; family: string },
+): BodyPlan {
   const plan: BodyPlan = {
     declared: true,
-    required: rb.required === true,
-    mediaKey: chosen.key,
-    mediaType: chosen.normalized,
-    media: content[chosen.key] ?? null,
-    family,
+    required,
+    mediaKey: candidate.key,
+    mediaType: candidate.parsed.canonical,
+    media: content[candidate.key] ?? null,
+    family: candidate.family,
     synthetic: false,
   };
-
-  // Flatten mode and the degenerate-combination refusal (§9.2). The
-  // flatten determination is §9.1's, SHARED with synthesis
-  // (bodySchemaFlattens, util.ts): a declared schema flattens iff it
-  // declares `properties` or an explicit object type — a TYPELESS schema
-  // does not — so the wire always agrees with the published contract.
-  //
-  // A combination the OAS defines no wire form for refuses pre-dispatch
-  // rather than inventing one (OAPI-P-04): multipart and form-urlencoded
-  // serialize exclusively over object properties, so a non-flattening
-  // schema gives them nothing to implement; the text lane is a
-  // single-string wire, so a flattening schema's object contract cannot
-  // ride it. Reachable only when no JSON-family media is declared — JSON
-  // is preferred and carries any shape.
   const schema = mediaSchema(plan.media);
-  const flattens = schema === null ? true : bodySchemaFlattens(schema); // no declared schema: an open object body
-  if (family === FAMILY_JSON) {
-    plan.synthetic = !flattens;
-  } else if (family === FAMILY_MULTIPART || family === FAMILY_URLENCODED) {
-    if (schema !== null && !flattens) {
-      throw new DegenerateMediaError(
-        `request media selection (OAPI-P-04) lands on ${plan.mediaType}, but the declared body schema does not flatten (no properties and no explicit object type): openbindings.openapi@1 defines no request carriage for this combination`,
-      );
+  const shape = resolvedBodyShape(schema, new Set());
+  if (candidate.family === FAMILY_JSON) {
+    plan.synthetic = schema !== null && !shape.object;
+  } else if (candidate.family === FAMILY_MULTIPART || candidate.family === FAMILY_URLENCODED) {
+    if (schema !== null && !shape.object) {
+      throw new Error(`request media candidate ${plan.mediaType} has a non-object body schema and is inadmissible`);
     }
-  } else if (family === FAMILY_TEXT) {
-    if (schema !== null && flattens) {
-      throw new DegenerateMediaError(
-        "request media selection (OAPI-P-04) lands on text/plain, but the declared body schema flattens (an object contract): openbindings.openapi@1 defines no request carriage for this combination",
-      );
+  } else if (candidate.family === FAMILY_TEXT) {
+    if (schema !== null && shape.object) {
+      throw new Error("request media candidate text/plain has an object body schema and is inadmissible");
     }
     plan.synthetic = true;
   }
-  if (!plan.synthetic) {
-    plan.props = mediaSchemaProps(plan.media);
-  }
+  if (!plan.synthetic && shape.props.size > 0) plan.props = shape.props;
   return plan;
 }
 
@@ -216,12 +256,47 @@ function mediaSchema(media: OpenAPIMediaType | null): Record<string, unknown> | 
  * The selected media schema's declared top-level property names — the body
  * half of the flattened model's collision rule.
  */
-function mediaSchemaProps(media: OpenAPIMediaType | null): Set<string> | undefined {
-  const props = mediaSchema(media)?.properties;
-  if (!props || typeof props !== "object") return undefined;
-  const names = Object.keys(props);
-  if (names.length === 0) return undefined;
-  return new Set(names);
+function resolvedBodyShape(
+  schema: Record<string, unknown> | null,
+  seen: Set<Record<string, unknown>>,
+): { object: boolean; props: Set<string> } {
+  if (schema === null) return { object: true, props: new Set() };
+  if (seen.has(schema)) return { object: false, props: new Set() };
+  seen.add(schema);
+  try {
+    if (
+      Array.isArray(schema.oneOf) || Array.isArray(schema.anyOf) || schema.not !== undefined ||
+      schema.if !== undefined || schema.then !== undefined || schema.else !== undefined
+    ) {
+      throw new Error(
+        "conditional/combinatorial request schema has no single declaration-defined flattened surface in openbindings.openapi@1 revision 1",
+      );
+    }
+    const props = new Set<string>();
+    const ownProps = schema.properties;
+    if (ownProps && typeof ownProps === "object" && !Array.isArray(ownProps)) {
+      for (const name of Object.keys(ownProps)) props.add(name);
+    }
+    let object = bodySchemaFlattens(schema);
+    if (Array.isArray(schema.allOf)) {
+      for (const member of schema.allOf) {
+        if (!member || typeof member !== "object" || Array.isArray(member)) continue;
+        const nested = resolvedBodyShape(member as Record<string, unknown>, seen);
+        object ||= nested.object;
+        for (const name of nested.props) props.add(name);
+      }
+    }
+    return { object, props };
+  } finally {
+    seen.delete(schema);
+  }
+}
+
+export function candidateCollides(params: Array<{ name?: string }>, plan: BodyPlan): boolean {
+  return params.some((parameter) => {
+    const name = parameter.name ?? "";
+    return (plan.synthetic && name === "body") || (!plan.synthetic && plan.props?.has(name) === true);
+  });
 }
 
 /** A routed input's body halves, as buildRequestBody consumes them. */
@@ -601,9 +676,9 @@ export function buildURLEncodedBody(
 // ---------------------------------------------------------------------------
 
 /**
- * The §8 definition of a success response entry: a 2xx status literal or
- * the `2XX` range. The `default` entry never participates in shape or
- * media determination.
+ * A literal 2xx entry or `2XX` is intrinsically successful. `default` also
+ * participates in the possible success surface because it can govern a 2xx
+ * status that has no more-specific declaration.
  */
 export function isSuccessResponseKey(key: string): boolean {
   if (key === "2XX") return true;
@@ -618,14 +693,22 @@ export function isSuccessResponseKey(key: string): boolean {
 export function successMediaTypes(op: OpenAPIOperation | null | undefined): string[] {
   if (!op?.responses) return [];
   const seen = new Set<string>();
+  const hasRange = Object.hasOwn(op.responses, "2XX");
+  const exactSuccesses = new Set(
+    Object.keys(op.responses).filter((key) => /^2[0-9][0-9]$/.test(key)),
+  );
   for (const [key, resp] of Object.entries(op.responses)) {
-    if (!isSuccessResponseKey(key)) continue;
+    const defaultCanGovernSuccess = key === "default" && !hasRange && exactSuccesses.size < 100;
+    if (!isSuccessResponseKey(key) && !defaultCanGovernSuccess) continue;
     const content = (resp as OpenAPIResponse | undefined)?.content;
     if (!content) continue;
     for (const mt of Object.keys(content)) {
-      const n = normalizeMediaType(mt);
-      if (n === "" || isMediaRange(n)) continue;
-      seen.add(n);
+      try {
+        seen.add(parseMediaType(mt).canonical);
+      } catch {
+        // A non-concrete media range cannot be advertised as one concrete
+        // representation. Malformed keys are handled when they govern.
+      }
     }
   }
   return [...seen].sort();
@@ -633,12 +716,63 @@ export function successMediaTypes(op: OpenAPIOperation | null | undefined): stri
 
 /**
  * Advertises the declared concrete media types of the operation's success
- * responses; absent any declaration, application/json (§9.2).
+ * responses. No declaration means no invented Accept preference.
  */
 export function acceptHeader(op: OpenAPIOperation): string {
   const types = successMediaTypes(op);
-  if (types.length === 0) return "application/json";
   return types.join(", ");
+}
+
+/** The response declaration governing one actual status: exact, range, then default. */
+export function governingResponse(
+  op: OpenAPIOperation,
+  status: number,
+): { key: string; response: OpenAPIResponse } | null {
+  const responses = op.responses ?? {};
+  const exact = String(status);
+  const range = `${Math.floor(status / 100)}XX`;
+  for (const key of [exact, range, "default"]) {
+    const response = responses[key] as OpenAPIResponse | undefined;
+    if (response && typeof response === "object") return { key, response };
+  }
+  return null;
+}
+
+/**
+ * Selects the most-specific declared media identity compatible with the
+ * actual Content-Type. A declaration's parameters must be a subset of the
+ * actual parameters; equally specific alternatives are ambiguous.
+ */
+export function governingResponseMedia(
+  response: OpenAPIResponse,
+  actualContentType: string | null,
+): string | null {
+  const content = response.content ?? {};
+  if (Object.keys(content).length === 0) return null;
+  if (!actualContentType) {
+    throw new Error("response declaration has content alternatives but the response omits Content-Type");
+  }
+  const actual = parseMediaType(actualContentType);
+  const matches: Array<{ media: ParsedMediaType; specificity: number }> = [];
+  for (const key of Object.keys(content)) {
+    const declared = parseMediaType(key);
+    if (declared.base !== actual.base) continue;
+    if (Object.entries(declared.params).every(([name, value]) => actual.params[name] === value)) {
+      matches.push({ media: declared, specificity: Object.keys(declared.params).length });
+    }
+  }
+  if (matches.length === 0) {
+    throw new Error(
+      `response Content-Type ${JSON.stringify(actualContentType)} matches no media declaration in the governing Response Object`,
+    );
+  }
+  matches.sort((a, b) => b.specificity - a.specificity || a.media.identity.localeCompare(b.media.identity));
+  if (matches.length > 1 && matches[0]?.specificity === matches[1]?.specificity) {
+    throw new Error(
+      `response Content-Type ${JSON.stringify(actualContentType)} ambiguously matches equally specific media declarations`,
+    );
+  }
+  return matches[0]?.media.canonical ?? null;
 }
 
 /**

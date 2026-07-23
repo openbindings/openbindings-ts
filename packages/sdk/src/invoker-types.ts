@@ -1,5 +1,7 @@
 import type { OBInterface, BindingEntry, JSONSchema, Operation } from "./types.js";
 import type { InvokeHooks, InvokeSite, OutputDecoder, ResultClassifier, FieldRouter } from "./hooks.js";
+import { MAX_TESTED_VERSION } from "./version.js";
+import { validateInterface } from "./validate.js";
 
 /** Identifies the binding source for invocation. */
 export interface InvocationSource {
@@ -9,7 +11,7 @@ export interface InvocationSource {
 }
 
 /**
- * Arguments for invoking a resolved binding against a format-specific
+ * Arguments for invoking a resolved binding against a binding-spec-specific
  * source. Input messages are NOT part of the args — they flow through the
  * returned {@link Invocation} handle's `write` channel.
  *
@@ -37,7 +39,7 @@ export interface BindingInvocationArgs {
   maxDeliveryUnitBytes?: number;
   /** The containing OBI. Most invokers do not need this; it is used by invokers that invoke sub-operations (e.g., operation graphs). */
   interface?: OBInterface;
-  /** Operation input schema, populated by the operation invoker. Enables format-specific invokers to read schema metadata (e.g., const values). */
+  /** Operation input schema, populated by the operation invoker. Enables binding invokers to read schema metadata (e.g., const values). */
   inputSchema?: JSONSchema;
   /** External cancellation; converges with the handle's `cancel()`. */
   signal?: AbortSignal;
@@ -116,7 +118,7 @@ export interface SynthesizeSource {
   description?: string;
 }
 
-/** Input for synthesizing an OpenBindings interface from format-specific sources. */
+/** Input for synthesizing an OpenBindings interface from binding-spec-specific sources. */
 export interface SynthesizeInput {
   openbindingsVersion?: string;
   sources?: SynthesizeSource[];
@@ -124,21 +126,69 @@ export interface SynthesizeInput {
   version?: string;
   description?: string;
   /**
-   * Invoked by synthesizers that encounter non-fatal limitations during
-   * interface construction (e.g., a field-name collision the flatten
-   * resolves deterministically). The synthesizer still produces a valid
-   * interface; the warning surfaces what was lost or approximated.
-   * Undefined means warnings are dropped silently. Mirrors the Go SDK's
-   * SynthesizeInput.OnWarning.
+   * Invoked for a non-fatal, usable but lossy schema projection. A warning
+   * must never stand in for omitting a callable target or returning an
+   * operation that is statically guaranteed to refuse; those conditions fail
+   * synthesis. Undefined is safe because the returned interface remains
+   * sound. Mirrors the Go SDK's SynthesizeInput.OnWarning.
    */
   onWarning?: (warning: SynthesizerWarning) => void;
 }
 
+/** Deterministic source-less result required by the interface-synthesizer contract. */
+export function synthesisSkeleton(input: SynthesizeInput = {}): OBInterface {
+  const iface: OBInterface = {
+    openbindings: input.openbindingsVersion ?? MAX_TESTED_VERSION,
+    ...(input.name ? { name: input.name } : {}),
+    ...(input.version ? { version: input.version } : {}),
+    ...(input.description ? { description: input.description } : {}),
+    operations: {},
+  };
+  validateInterface(iface);
+  return iface;
+}
+
+/** Applies the format-neutral single-source authoring directives and validates the emitted OBI. */
+export function finalizeSynthesis(
+  iface: OBInterface,
+  input: SynthesizeInput,
+  defaultSourceName: string,
+  bindingSpec: string,
+): OBInterface {
+  const [source] = input.sources ?? [];
+  if (!source || (input.sources?.length ?? 0) !== 1) {
+    throw new Error("finalize synthesis requires one source and one interface");
+  }
+  if (source.bindingSpec !== bindingSpec) {
+    throw new Error(`synthesizer supports exact binding specification ${JSON.stringify(bindingSpec)}, got ${JSON.stringify(source.bindingSpec)}`);
+  }
+  if (input.openbindingsVersion) iface.openbindings = input.openbindingsVersion;
+  if (input.name) iface.name = input.name;
+  if (input.version) iface.version = input.version;
+  if (input.description) iface.description = input.description;
+
+  const entry = iface.sources?.[defaultSourceName];
+  if (!entry) throw new Error(`synthesizer emitted no source ${JSON.stringify(defaultSourceName)}`);
+  entry.bindingSpec = bindingSpec;
+  if (source.outputLocation) entry.location = source.outputLocation;
+  if (source.description) entry.description = source.description;
+  const outputName = source.name || defaultSourceName;
+  if (outputName !== defaultSourceName) {
+    delete iface.sources![defaultSourceName];
+    iface.sources![outputName] = entry;
+    for (const binding of Object.values(iface.bindings ?? {})) {
+      if (binding.source === defaultSourceName) binding.source = outputName;
+    }
+  }
+  validateInterface(iface);
+  return iface;
+}
+
 /**
- * A non-fatal limitation encountered while building an interface from a
- * source. Codes are stable and format-namespaced (e.g.
- * "openapi.param_body_collision"); `path` locates the affected member in
- * dotted notation. Mirrors the Go SDK's SynthesizerWarning.
+ * A non-fatal, usable but lossy projection made while building an interface
+ * from a source. Every returned operation remains bindable. Codes are stable
+ * and binding-family-namespaced; `path` locates the affected member in dotted
+ * notation. Mirrors the Go SDK's SynthesizerWarning.
  */
 export interface SynthesizerWarning {
   code: string;

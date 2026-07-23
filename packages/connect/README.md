@@ -1,0 +1,32 @@
+# @openbindings/connect
+
+TypeScript invocation, synthesis, and source inspection for the exact
+`openbindings.connect@1` binding specification.
+
+```bash
+npm install @openbindings/connect @openbindings/sdk
+```
+
+```typescript
+import { ConnectInvoker, ConnectSynthesizer } from "@openbindings/connect";
+import { OperationInvoker } from "@openbindings/sdk";
+
+const operations = new OperationInvoker([new ConnectInvoker()]);
+const authoring = new ConnectSynthesizer();
+```
+
+The source location is an HTTP(S) service base URL. Embedded content is
+single-file proto text or a canonical-JSON `FileDescriptorSet` and enables
+schema mode: byte-exact ref resolution, canonical ProtoJSON, and the
+protobuf-declared interaction kind. Without content, descriptorless mode is
+unary and carries exactly one JSON value verbatim. Because Connect provides no
+reflection lane, synthesis and source inspection require content rather than
+inventing a method set.
+
+Refs are exact `package.Service/Method` names. Unary uses `application/json`;
+streaming uses Connect envelopes and an END_STREAM verdict. The protocol's
+classification is authoritative. Explicitly named leading metadata may be
+configured, but the binding invents no bearer/basic/API-key carriage.
+
+The binding specification is normative; this README describes the package
+surface and declared implementation coverage.

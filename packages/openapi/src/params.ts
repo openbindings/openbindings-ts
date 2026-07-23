@@ -41,11 +41,18 @@ export function effectiveParameters(
  */
 export function unflattenableParam(params: OpenAPIParameter[]): string {
   const locs = new Map<string, string>();
+  const headerSpellings = new Map<string, string>();
   for (const p of params) {
     if (!p?.name || !p?.in) continue;
     const prev = locs.get(p.name);
     if (prev !== undefined && prev !== p.in) return p.name;
     locs.set(p.name, p.in);
+    if (p.in === "header") {
+      const folded = p.name.toLowerCase();
+      const spelling = headerSpellings.get(folded);
+      if (spelling !== undefined && spelling !== p.name) return p.name;
+      headerSpellings.set(folded, p.name);
+    }
   }
   return "";
 }
@@ -95,11 +102,9 @@ export interface RoutedInput {
  *
  *   - declared parameters ride their location, serialized per the OAS
  *     style/explode/allowReserved rules (OAPI-P-02);
- *   - a field that is both a parameter and a declared body property is one
- *     name, one value, delivered to BOTH wire locations (the merge is
- *     surfaced at synthesis time as the openapi.param_body_collision
- *     warning — invocation performs the dual delivery, never a silent drop
- *     of either carriage);
+ *   - parameter/body name collisions are screened while selecting the
+ *     request-media candidate; a routed field therefore has exactly one
+ *     wire carriage;
  *   - a field matching no declared parameter or body property passes
  *     through into the body when a request body is declared, and is refused
  *     loudly before dispatch when none is declared;
@@ -137,18 +142,6 @@ export function routeInput(
     const value = input[p.name];
 
     routeParameter(r, p, value);
-
-    // One name, one value, delivered to every declared wire location: the
-    // parameter location AND the body when the name is also a declared body
-    // property (or the synthetic `body` property).
-    if (plan?.declared) {
-      if (plan.synthetic && p.name === SYNTHETIC_BODY_PROPERTY) {
-        r.bodyValue = value;
-        r.bodySet = true;
-      } else if (!plan.synthetic && plan.props?.has(p.name)) {
-        r.bodyFields[p.name] = value;
-      }
-    }
   }
 
   if (missingPath.length > 0) {

@@ -1,8 +1,10 @@
 import yaml from "js-yaml";
 import { dereference } from "@openbindings/sdk";
+import { readFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
 
 import type { AsyncAPIDocument } from "./asyncapi-types.js";
-import { CHANNEL_NAME_TAG, REF_NAME_TAG, SERVER_NAME_TAG } from "./constants.js";
+import { CHANNEL_NAME_TAG, MESSAGE_NAME_TAG, REF_NAME_TAG, SERVER_NAME_TAG } from "./constants.js";
 
 // The u flag makes the class match whole code points, so an astral-plane
 // character replaces as one underscore, not one per surrogate half
@@ -118,6 +120,22 @@ function tagNameKeys(raw: unknown, mapField: string, tag: string): void {
   }
 }
 
+function tagChannelMessageNames(raw: unknown): void {
+  if (raw == null || typeof raw !== "object") return;
+  const channels = (raw as Record<string, unknown>)["channels"];
+  if (channels == null || typeof channels !== "object" || Array.isArray(channels)) return;
+  for (const channel of Object.values(channels as Record<string, unknown>)) {
+    if (channel == null || typeof channel !== "object" || Array.isArray(channel)) continue;
+    const messages = (channel as Record<string, unknown>)["messages"];
+    if (messages == null || typeof messages !== "object" || Array.isArray(messages)) continue;
+    for (const [name, message] of Object.entries(messages as Record<string, unknown>)) {
+      if (message != null && typeof message === "object" && !Array.isArray(message)) {
+        (message as Record<string, unknown>)[MESSAGE_NAME_TAG] = name;
+      }
+    }
+  }
+}
+
 /** Fetches (if needed) and parses an AsyncAPI document from a location URL or inline content. */
 export async function parseAsyncAPIDocument(
   location?: string,
@@ -140,7 +158,7 @@ export async function parseAsyncAPIDocument(
     // `location` must be an absolute URI (ASYNC-D-02) — a bare filesystem
     // path is refused loudly before any fetch is attempted.
     validateDocumentAddress(location);
-    const doFetch = fetchFn ?? fetch;
+    const doFetch = fileAwareFetch(fetchFn ?? fetch);
     const resp = await doFetch(location, { signal: options?.signal });
     if (!resp.ok) {
       throw new Error(`failed to fetch ${location}: ${resp.status} ${resp.statusText}`);
@@ -157,13 +175,14 @@ export async function parseAsyncAPIDocument(
 
   tagNameKeys(raw, "channels", CHANNEL_NAME_TAG);
   tagNameKeys(raw, "servers", SERVER_NAME_TAG);
+  tagChannelMessageNames(raw);
   tagAllSecurityRefNames(raw);
 
   // Resolve all $ref pointers. External $refs fetch through the injected
   // fetch (callers that must stay side-effect-free inject a rejecting one).
   const resolved = await dereference<AsyncAPIDocument>(raw as Record<string, unknown>, {
     baseUrl: location,
-    fetch: fetchFn,
+    fetch: fileAwareFetch(fetchFn ?? fetch),
     parse: (text) => yaml.load(text),
     signal: options?.signal,
   });
@@ -172,15 +191,28 @@ export async function parseAsyncAPIDocument(
     throw new Error("not a valid AsyncAPI document (missing 'asyncapi' field)");
   }
   // ASYNC-P-01: the artifact's own `asyncapi` field discriminates the
-  // accepted line — 3.0.x ONLY. A later 3.x line is adopted by compatible
+  // accepted artifact — exactly 3.0.0. A later patch is adopted only by a
   // revision of the binding specification, never sight-unseen.
-  if (!resolved.asyncapi.startsWith("3.0.")) {
+  if (resolved.asyncapi !== "3.0.0") {
     throw new Error(
-      `unsupported AsyncAPI version "${resolved.asyncapi}": openbindings.asyncapi@1 accepts the 3.0.x line only (ASYNC-P-01)`,
+      `unsupported AsyncAPI version "${resolved.asyncapi}": openbindings.asyncapi@1 accepts exactly 3.0.0 (ASYNC-P-01)`,
     );
   }
 
   return resolved;
+}
+
+function fileAwareFetch(fallback: typeof globalThis.fetch): typeof globalThis.fetch {
+  return async (input, init) => {
+    const address = input instanceof Request ? input.url : input.toString();
+    const url = new URL(address);
+    if (url.protocol !== "file:") return fallback(input, init);
+    try {
+      return new Response(await readFile(fileURLToPath(url)), { status: 200 });
+    } catch (error: unknown) {
+      throw new Error(`failed to read ${address}: ${errorMessage(error)}`, { cause: error });
+    }
+  };
 }
 
 /**
@@ -246,4 +278,3 @@ export function errorMessage(e: unknown): string {
   if (e instanceof Error) return e.message;
   return String(e);
 }
-

@@ -14,26 +14,42 @@ import type {
 import {
   InvocationError,
   InvocationImpl,
-  NoSourcesError,
   MultipleSourcesError,
+  finalizeSynthesis,
+  synthesisSkeleton,
   ERR_RUNTIME,
   ERR_SOURCE_LOAD_FAILED,
 } from "@openbindings/sdk";
+import { resolve } from "node:path";
+import { pathToFileURL, fileURLToPath } from "node:url";
+import { readFile } from "node:fs/promises";
 import type { AsyncAPIDocument } from "./asyncapi-types.js";
 import { BINDING_SPEC, DEFAULT_SOURCE_NAME } from "./constants.js";
 import { runBinding, requiredContext } from "./invoke.js";
 import { resolveTarget } from "./target.js";
-import { convertToInterface } from "./synthesize.js";
-import { codePointCompare, operationRef, parseAsyncAPIDocument, parseRef, errorMessage, sanitizeKey, uniqueKey } from "./util.js";
+import { bindableOperationEntries, convertToInterface } from "./synthesize.js";
+import { operationRef, parseAsyncAPIDocument, parseRef, errorMessage, sanitizeKey, uniqueKey, validateDocumentAddress } from "./util.js";
 import { WSPool } from "./ws-pool.js";
 
-/**
- * Serializes source content for embedding into a synthesized OBI source
- * entry: a string passes through verbatim, anything else is JSON-encoded.
- * Mirrors the Go SDK's ContentToBytes (helpers.go).
- */
-function contentToString(content: unknown): string {
-  return typeof content === "string" ? content : JSON.stringify(content);
+function authoringLocation(location?: string): string | undefined {
+  if (!location) return location;
+  try {
+    new URL(location);
+    return location;
+  } catch {
+    return pathToFileURL(resolve(location)).href;
+  }
+}
+
+async function readAuthoringArtifact(location: string, signal?: AbortSignal): Promise<string> {
+  const url = new URL(location);
+  if (url.protocol === "file:") return readFile(fileURLToPath(url), "utf8");
+  if (url.protocol === "http:" || url.protocol === "https:") {
+    const response = await fetch(url, { signal });
+    if (!response.ok) throw new Error(`failed to fetch ${location}: ${response.status} ${response.statusText}`);
+    return response.text();
+  }
+  throw new Error(`location scheme ${JSON.stringify(url.protocol)} cannot be embedded`);
 }
 
 // ---------------------------------------------------------------------------
@@ -192,29 +208,32 @@ export class AsyncAPISynthesizer implements InterfaceSynthesizer, SourceInspecto
     const sources = input.sources ?? [];
     const src = sources.at(0);
     if (src === undefined) {
-      throw new NoSourcesError();
+      return synthesisSkeleton(input);
     }
     if (sources.length > 1) {
       throw new MultipleSourcesError();
     }
-    const doc = await parseAsyncAPIDocument(src.location, src.content, options);
-    const iface = await convertToInterface(src.location, doc, options);
-    if (input.name) iface.name = input.name;
-    if (input.version) iface.version = input.version;
-    if (input.description) iface.description = input.description;
+    if (src.bindingSpec !== BINDING_SPEC) throw new Error(`synthesizer supports exact binding specification ${JSON.stringify(BINDING_SPEC)}, got ${JSON.stringify(src.bindingSpec)}`);
+    if (src.outputLocation) validateDocumentAddress(src.outputLocation);
+    const location = authoringLocation(src.location);
+    const artifactContent = src.content === undefined && src.embed && location
+      ? await readAuthoringArtifact(location, options?.signal)
+      : src.content;
+    const doc = await parseAsyncAPIDocument(location, artifactContent, options);
+    const iface = await convertToInterface(location, doc, options);
     // Content-fed synthesis: the emitted source must stay invocable. A
     // source needs location or content; with no location, dropping the
     // provided content would emit neither (mirrors the Go SDK's
     // SynthesizeInterface, spec/binding-specs/asyncapi/openbindings.asyncapi.md: "A synthesized source
     // carries the artifact (location, or embedded content when synthesized
     // from content) so it stays invocable as written.").
-    if (!src.location && src.content !== undefined) {
+    if (artifactContent !== undefined) {
       const entry = iface.sources?.[DEFAULT_SOURCE_NAME];
       if (entry) {
-        entry.content = contentToString(src.content);
+        entry.content = artifactContent;
       }
     }
-    return iface;
+    return finalizeSynthesis(iface, input, DEFAULT_SOURCE_NAME, BINDING_SPEC);
   }
 
   /** Lists all bindable targets (operation IDs) from an AsyncAPI source. */
@@ -222,7 +241,7 @@ export class AsyncAPISynthesizer implements InterfaceSynthesizer, SourceInspecto
     source: Source,
     options?: { signal?: AbortSignal },
   ): Promise<SourceInspection> {
-    const doc = await parseAsyncAPIDocument(source.location, source.content, options);
+    const doc = await parseAsyncAPIDocument(authoringLocation(source.location), source.content, options);
     const targets: SourceInspection["targets"] = [];
 
     if (doc.operations) {
@@ -230,8 +249,7 @@ export class AsyncAPISynthesizer implements InterfaceSynthesizer, SourceInspecto
       // sorted iteration and sanitizeKey + uniqueKey de-duplication), so an
       // inspection previews exactly what synthesis names.
       const usedKeys = new Set<string>();
-      for (const opID of Object.keys(doc.operations).sort(codePointCompare)) {
-        const asyncOp = doc.operations[opID];
+      for (const [opID, asyncOp] of bindableOperationEntries(doc)) {
         const desc = asyncOp?.description || asyncOp?.summary || undefined;
         const operationKey = uniqueKey(sanitizeKey(opID), usedKeys);
         usedKeys.add(operationKey);

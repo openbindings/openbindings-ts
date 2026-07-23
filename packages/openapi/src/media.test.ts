@@ -44,10 +44,10 @@ function routedWith(overrides: Partial<RoutedInput>): RoutedInput {
 const DOC_30: OpenAPIDocument = { openapi: "3.0.3" };
 const DOC_31: OpenAPIDocument = { openapi: "3.1.0" };
 
-// OAPI-P-04: selection order — exact application/json, then the
-// lexicographically least +json type, then multipart/form-data, then
-// urlencoded, then text/plain. Ranges never participate.
-describe("planRequestBody — selection order", () => {
+// OAPI-P-04 preserves all artifact-declared admissible candidates without a
+// normative preference. This helper's deterministic fallback is lexical; it
+// is an implementation convention, not a binding-spec priority.
+describe("planRequestBody — deterministic unconfigured selection", () => {
   const cases: Array<[string, Record<string, OpenAPIMediaType>, string, string]> = [
     [
       "exact json wins over everything",
@@ -72,10 +72,10 @@ describe("planRequestBody — selection order", () => {
       FAMILY_JSON,
     ],
     [
-      "multipart over urlencoded",
+      "lexical fallback preserves multipart and urlencoded as alternatives",
       { "application/x-www-form-urlencoded": {}, "multipart/form-data": {} },
-      "multipart/form-data",
-      FAMILY_MULTIPART,
+      "application/x-www-form-urlencoded",
+      FAMILY_URLENCODED,
     ],
     [
       "urlencoded over text/plain",
@@ -85,9 +85,9 @@ describe("planRequestBody — selection order", () => {
     ],
     ["text/plain last", { "text/plain": {} }, "text/plain", FAMILY_TEXT],
     [
-      "parameters ignored in matching",
+      "parameters remain part of the exact declared identity",
       { "application/JSON; charset=utf-8": {} },
-      "application/json",
+      "application/json; charset=utf-8",
       FAMILY_JSON,
     ],
   ];
@@ -391,16 +391,16 @@ describe("successMediaTypes / acceptHeader / isStreamingCapable", () => {
     expect(isStreamingCapable(op)).toBe(true);
   });
 
-  it("defaults Accept to application/json with no declared media", () => {
+  it("omits Accept when the artifact declares no success media", () => {
     const op: OpenAPIOperation = { responses: { "204": { description: "no content" } } };
-    expect(acceptHeader(op)).toBe("application/json");
+    expect(acceptHeader(op)).toBe("");
     expect(isStreamingCapable(op)).toBe(false);
   });
 
-  it("a default-only text/event-stream does NOT confer streaming capability (§8)", () => {
+  it("a default-only text/event-stream confers capability when default can govern 2xx", () => {
     const op: OpenAPIOperation = {
       responses: { default: { content: { "text/event-stream": {} } } },
     };
-    expect(isStreamingCapable(op)).toBe(false);
+    expect(isStreamingCapable(op)).toBe(true);
   });
 });

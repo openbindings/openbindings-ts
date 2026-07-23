@@ -44,8 +44,8 @@ interface ServerEntry {
  *     else the path item's, else the document's, else the implied
  *     `url: "/"`.
  *
- *   - The default selects the effective list's first entry with each server
- *     variable substituted by its declared default.
+ *   - One effective entry is used directly. Several effective entries are
+ *     preserved as alternatives and require explicit selection.
  *
  *   - Consumer configuration (context.configuration.server) may instead
  *     select another entry, supply variable values, or supply a complete
@@ -88,6 +88,11 @@ export function resolveServer(
     return absolutizeServerURL(metaBase, sourceLocation);
   }
 
+  if (servers.length !== 1) {
+    throw new Error(
+      `the effective server list has ${servers.length} alternatives; configuration.server must select one (openbindings.openapi@1 OAPI-P-05)`,
+    );
+  }
   const substituted = substituteServerVariables(servers[0], undefined);
   return absolutizeServerURL(substituted, sourceLocation);
 }
@@ -150,6 +155,7 @@ function resolveServerConfig(raw: unknown, servers: [ServerEntry, ...ServerEntry
       return base;
     }
     let srv: ServerEntry = servers[0];
+    let selected = servers.length === 1;
     const entryURL = v["url"];
     if (typeof entryURL === "string" && entryURL !== "") {
       const found = serverByURL(servers, entryURL);
@@ -157,6 +163,7 @@ function resolveServerConfig(raw: unknown, servers: [ServerEntry, ...ServerEntry
         throw new Error(`configuration.server.url "${entryURL}" matches no declared server entry`);
       }
       srv = found;
+      selected = true;
     } else if ("index" in v) {
       // The in-list existence check IS the bounds check: a non-integer, a
       // negative, or an index past the end all leave `chosen` undefined.
@@ -168,6 +175,12 @@ function resolveServerConfig(raw: unknown, servers: [ServerEntry, ...ServerEntry
         );
       }
       srv = chosen;
+      selected = true;
+    }
+    if (!selected) {
+      throw new Error(
+        `the effective server list has ${servers.length} alternatives; configuration.server.url or configuration.server.index must select one (openbindings.openapi@1 OAPI-P-05)`,
+      );
     }
     let vars: Record<string, string> | undefined;
     const rawVars = v["variables"];
@@ -225,9 +238,12 @@ function substituteServerVariables(
         enumVals,
       );
     }
-    // A declared enum does not gate the value (§9.3, R1): it is the author's
-    // expectation, not a boundary; a full base-URL override bypasses the
-    // declaration anyway. The OAS does not mandate enum enforcement.
+    const enumValues = Array.isArray(v.enum) ? v.enum.filter((item): item is string => typeof item === "string") : [];
+    if (enumValues.length > 0 && !enumValues.includes(val)) {
+      throw new Error(
+        `server ${JSON.stringify(srv.url)} variable ${JSON.stringify(name)} value ${JSON.stringify(val)} is outside its declared enum`,
+      );
+    }
     u = u.replaceAll(`{${name}}`, val);
   }
   for (const name of Object.keys(supplied ?? {})) {

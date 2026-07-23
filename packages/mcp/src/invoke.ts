@@ -7,7 +7,12 @@ import { McpError } from "@modelcontextprotocol/sdk/types.js";
 import { UriTemplate } from "@modelcontextprotocol/sdk/shared/uriTemplate.js";
 import {
   InvocationError,
-  buildAuthHeaders,
+  contextApiKey,
+  contextBearerToken,
+  contextBasicAuth,
+  contextHeaders,
+  contextCookies,
+  contextRequiredError,
   contextConfiguration,
   httpErrorCode,
   httpErrorEffects,
@@ -128,6 +133,72 @@ function mapError(e: unknown, signal: AbortSignal, fallback: string): Invocation
     return new InvocationError(httpErrorCode(e.code), msg, { status: e.code }, httpErrorEffects(e.code));
   }
   return new InvocationError(fallback, msg);
+}
+
+/** Validates the transport credential placement before initialize side effects. */
+function validateCredentialHeaders(
+  args: BindingInvocationArgs,
+  location: string,
+): InvocationError | null {
+  const context = args.context;
+  if (contextApiKey(context) || contextBearerToken(context) || contextBasicAuth(context)) {
+    return contextRequiredError(
+      "generic credential has no named MCP HTTP-header destination",
+      {
+        target: location,
+        alternatives: [{ requirements: [{
+          type: "auth.apiKey",
+          description: "supply the credential through an explicitly named HTTP header",
+        }] }],
+      },
+    );
+  }
+
+  const headers = contextHeaders(context);
+  const reserved = new Set([
+    "host",
+    "content-length",
+    "content-type",
+    "accept",
+    "origin",
+    "mcp-protocol-version",
+    "mcp-session-id",
+    "last-event-id",
+  ]);
+  const seen = new Map<string, string>();
+  for (const name of Object.keys(headers)) {
+    const lower = name.toLowerCase();
+    if (reserved.has(lower)) {
+      return new InvocationError(
+        ERR_SOURCE_CONFIG_ERROR,
+        `credential header ${JSON.stringify(name)} collides with a processor-owned MCP transport or session field`,
+      );
+    }
+    const prior = seen.get(lower);
+    if (prior !== undefined) {
+      return new InvocationError(
+        ERR_SOURCE_CONFIG_ERROR,
+        `credential headers ${JSON.stringify(prior)} and ${JSON.stringify(name)} have the same case-insensitive destination`,
+      );
+    }
+    seen.set(lower, name);
+  }
+
+  if (Object.keys(contextCookies(context)).length > 0 && seen.has("cookie")) {
+    return new InvocationError(
+      ERR_SOURCE_CONFIG_ERROR,
+      "configured Cookie header collides with structured cookie credentials",
+    );
+  }
+  return null;
+}
+
+function buildMCPHeaders(context: Record<string, unknown> | undefined): Record<string, string> {
+  const headers = { ...contextHeaders(context) };
+  const cookies = contextCookies(context);
+  const names = Object.keys(cookies).sort();
+  if (names.length > 0) headers.Cookie = names.map((name) => `${name}=${cookies[name]}`).join("; ");
+  return headers;
 }
 
 /**
@@ -257,7 +328,12 @@ export async function runMCPBinding(
   if (inv.signal.aborted) return; // already terminal via ERR_CANCELLED
 
   // --- Connect: the MCP initialize handshake is the first network I/O. ---
-  const authHeaders = buildAuthHeaders(args.context);
+  const credentialError = validateCredentialHeaders(args, location);
+  if (credentialError) {
+    inv.fireError(credentialError);
+    return;
+  }
+  const authHeaders = buildMCPHeaders(args.context);
   const baseFetch = args.fetch ?? globalThis.fetch;
 
   // Capture HTTP response headers from POSTs (initialize, the list calls,
@@ -265,7 +341,10 @@ export async function runMCPBinding(
   // call's response.
   let responseHeaders: Metadata = {};
   const captureFetch = async (url: string | URL, init?: RequestInit): Promise<Response> => {
-    const response = await baseFetch(url, init);
+    // Streamable HTTP POST and GET have different MCP meanings. Ordinary
+    // user-agent redirect behavior is therefore unsafe (notably 303 POST ->
+    // GET); surface the response so the protocol layer classifies it.
+    const response = await baseFetch(url, { ...init, redirect: "manual" });
     if (init?.method === "POST") {
       const md: Metadata = {};
       response.headers.forEach((value, key) => {
@@ -290,6 +369,18 @@ export async function runMCPBinding(
     await client.connect(transport, { signal: inv.signal });
   } catch (e: unknown) {
     inv.fireError(mapError(e, inv.signal, ERR_CONNECT_FAILED));
+    return;
+  }
+
+  // The upstream SDK intentionally accepts several MCP revisions. This
+  // binding specification has evaluated exactly one, so gate the negotiated
+  // revision before any listing or entity request.
+  if (transport.protocolVersion !== "2025-11-25") {
+    inv.fireError(new InvocationError(
+      ERR_SOURCE_LOAD_FAILED,
+      `negotiated MCP protocol revision ${JSON.stringify(transport.protocolVersion)} is outside openbindings.mcp@1's accepted envelope (2025-11-25)`,
+    ));
+    try { await client.close(); } catch { /* ignore close errors */ }
     return;
   }
 
@@ -323,11 +414,17 @@ export async function runMCPBinding(
     let targetURI = name;
     if (entityType === "resources" || entityType === "resourceTemplates") {
       if (kind === "staticResource") {
-        // Static resources take no input (§9.1): the input side closes
-        // without reading. A caller that then supplies a value gets a loud
-        // ERR_INPUT_CLOSED on its write — the refusal surface the handle
-        // model gives a value this binding may never read.
-        void inv.closeInput();
+        // Close first, then inspect any already-accepted buffered value. This
+        // keeps the no-input path non-blocking while making a supplied value
+        // a terminal pre-entity-dispatch refusal instead of silently dropping
+        // it. A later write is rejected by the closed input side.
+        await inv.closeInput();
+        for await (const _value of inv.inputs()) {
+          throw new InvocationError(
+            ERR_VALIDATION_FAILED,
+            "MCP static-resource bindings take no input value",
+          );
+        }
       } else {
         targetURI = await expandTemplateInput(inv, name, noInput);
       }
@@ -399,8 +496,9 @@ function promptArguments(v: unknown): Record<string, string> {
 /**
  * Reads and validates a resource template's input value and expands the
  * template per RFC 6570 (§9.1, MCP-P-03). The input, when supplied, is a
- * JSON object of the template's variables: every member value MUST be a
- * string and every member MUST name a declared variable — each violation is
+ * JSON object of the template's variables: every member value MUST be an
+ * RFC 6570 string, string list, or string map and every member MUST name a
+ * declared variable — each violation is
  * refused loudly before resources/read is dispatched. An absent input (or a
  * no-input operation) expands with all variables undefined, which follows
  * RFC 6570's undefined-value expansion.
@@ -433,7 +531,7 @@ async function expandTemplateInput(
     void inv.closeInput();
   }
 
-  const values: Record<string, string> = {};
+  const values: Record<string, string | string[] | Record<string, string>> = {};
   if (supplied) {
     if (first === null || typeof first !== "object" || Array.isArray(first)) {
       throw new InvocationError(
@@ -449,24 +547,107 @@ async function expandTemplateInput(
           `MCP resource-template input names variable ${JSON.stringify(k)}, which template ${JSON.stringify(template)} does not declare`,
         );
       }
-      if (typeof v !== "string") {
+      const stringMap = v !== null && typeof v === "object" && !Array.isArray(v) && Object.values(v).every((item) => typeof item === "string");
+      if (typeof v !== "string" && !(Array.isArray(v) && v.every((item) => typeof item === "string")) && !stringMap) {
         throw new InvocationError(
           ERR_VALIDATION_FAILED,
-          `MCP resource-template variable ${JSON.stringify(k)} must be a string, got ${typeName(v)} (template variables are never coerced)`,
+          `MCP resource-template variable ${JSON.stringify(k)} must be a string, string array, or string map, got ${typeName(v)} (template values are never coerced)`,
         );
       }
-      values[k] = v;
+      values[k] = v as string | string[] | Record<string, string>;
     }
   }
 
   try {
-    return tmpl.expand(values);
+    return expandRFC6570(template, values);
   } catch (e: unknown) {
     throw new InvocationError(
       ERR_VALIDATION_FAILED,
       `RFC 6570 expansion of template ${JSON.stringify(template)} failed: ${e instanceof Error ? e.message : String(e)}`,
     );
   }
+}
+
+/**
+ * RFC 6570 expansion for the string and list value domain exposed by this
+ * binding. The upstream MCP helper currently joins an exploded query list
+ * with a comma; RFC 6570 requires a repeated name (`?tag=a&tag=b`). Keeping
+ * this small expansion point here avoids narrowing the artifact's legal
+ * value domain to the helper's behavior.
+ */
+function expandRFC6570(
+  template: string,
+  values: Record<string, string | string[] | Record<string, string>>,
+): string {
+  return template.replace(/\{([+#./;?&]?)([^}]+)\}/g, (_whole, operator: string, body: string) => {
+    const options = operatorOptions(operator);
+    const pieces: string[] = [];
+    for (const rawSpec of body.split(",")) {
+      const exploded = rawSpec.endsWith("*");
+      const withoutStar = exploded ? rawSpec.slice(0, -1) : rawSpec;
+      const prefixIndex = withoutStar.indexOf(":");
+      const name = prefixIndex >= 0 ? withoutStar.slice(0, prefixIndex) : withoutStar;
+      const prefixLength = prefixIndex >= 0 ? Number(withoutStar.slice(prefixIndex + 1)) : undefined;
+      const value = values[name];
+      if (value === undefined) continue;
+      const encodedName = encodeURIComponent(name);
+      if (Array.isArray(value)) {
+        const encoded = value.map((item) => encodeTemplateValue(item, options.allowReserved));
+        if (exploded) {
+          if (options.named) {
+            for (const item of encoded) pieces.push(`${encodedName}=${item}`);
+          } else {
+            pieces.push(...encoded);
+          }
+        } else {
+          const joined = encoded.join(",");
+          pieces.push(options.named ? `${encodedName}=${joined}` : joined);
+        }
+      } else if (typeof value === "object") {
+        const entries = Object.keys(value).sort().map((key) => [
+          encodeTemplateValue(key, options.allowReserved),
+          encodeTemplateValue(value[key]!, options.allowReserved),
+        ] as const);
+        if (exploded) {
+          for (const [key, item] of entries) pieces.push(`${key}=${item}`);
+        } else {
+          const joined = entries.flatMap(([key, item]) => [key, item]).join(",");
+          pieces.push(options.named ? `${encodedName}=${joined}` : joined);
+        }
+      } else {
+        const selected = prefixLength === undefined ? value : [...value].slice(0, prefixLength).join("");
+        const encoded = encodeTemplateValue(selected, options.allowReserved);
+        pieces.push(options.named ? `${encodedName}=${encoded}` : encoded);
+      }
+    }
+    return pieces.length === 0 ? "" : `${options.prefix}${pieces.join(options.separator)}`;
+  });
+}
+
+function operatorOptions(operator: string): {
+  prefix: string;
+  separator: string;
+  named: boolean;
+  allowReserved: boolean;
+} {
+  switch (operator) {
+    case "+": return { prefix: "", separator: ",", named: false, allowReserved: true };
+    case "#": return { prefix: "#", separator: ",", named: false, allowReserved: true };
+    case ".": return { prefix: ".", separator: ".", named: false, allowReserved: false };
+    case "/": return { prefix: "/", separator: "/", named: false, allowReserved: false };
+    case ";": return { prefix: ";", separator: ";", named: true, allowReserved: false };
+    case "?": return { prefix: "?", separator: "&", named: true, allowReserved: false };
+    case "&": return { prefix: "&", separator: "&", named: true, allowReserved: false };
+    default: return { prefix: "", separator: ",", named: false, allowReserved: false };
+  }
+}
+
+function encodeTemplateValue(value: string, allowReserved: boolean): string {
+  const encoded = encodeURIComponent(value);
+  if (!allowReserved) return encoded;
+  return encoded.replace(/%(3A|2F|3F|23|5B|5D|40|21|24|26|27|28|29|2A|2B|2C|3B|3D)/gi, (match) =>
+    String.fromCharCode(Number.parseInt(match.slice(1), 16)),
+  );
 }
 
 /**
@@ -570,32 +751,11 @@ async function emitToolResult(
     );
   }
 
-  // structuredContent is MCP's declared structured lane (2025-11-25:
-  // servers MUST conform it to outputSchema) and wins outright. A single
-  // text content is a STRING by the content-independent builtin —
-  // JSON-in-text is the spec's backwards-compatibility shadow of
-  // structuredContent, and parsing it is a consumer choice made through
-  // the decode seam, never a payload sniff.
-  let output: unknown;
-  let decodeStamp: string;
-  const soleText = soleTextContent(result.content);
-  if (result.structuredContent !== undefined && result.structuredContent !== null) {
-    output = result.structuredContent;
-    decodeStamp = "structuredContent";
-  } else if (soleText !== undefined) {
-    output = await decodeThroughHooks(
-      hooks,
-      site,
-      { status: null, body: soleText, meta: {} },
-      builtinTextDecode,
-    );
-    decodeStamp = decodeStampFor(hooks, "text");
-  } else {
-    output = parseContent(result.content);
-    decodeStamp = "content";
-  }
+  // MCP already defines the result representation. Preserve it whole;
+  // projection belongs in an OBI outputTransform, not in this binding.
+  const output: unknown = result;
   setHeaderOnce();
-  inv.setTrailer({ "x-ob-decode": [decodeStamp], "x-ob-classify": ["protocol/isError"] });
+  inv.setTrailer({ "x-ob-decode": ["protocol/result"], "x-ob-classify": ["protocol/isError"] });
   await inv.emitOutput(output);
   inv.closeOutput();
 }
@@ -648,27 +808,9 @@ async function runResource(
 ): Promise<void> {
   const result = await client.readResource({ uri }, { signal: inv.signal });
 
-  const items: unknown[] = [];
-  for (const c of result.contents ?? []) {
-    if (c == null) continue;
-    const blob = (c as { blob?: unknown }).blob;
-    if (typeof blob === "string") {
-      // Structural: the wire item carried a blob member — its Base64
-      // string passes as MCP carries it, before any mimeType consideration.
-      items.push(blob);
-      continue;
-    }
-    const text = typeof (c as { text?: unknown }).text === "string" ? (c as { text: string }).text : "";
-    const mimeType =
-      typeof (c as { mimeType?: unknown }).mimeType === "string" ? (c as { mimeType: string }).mimeType : "";
-    items.push(
-      await decodeThroughHooks(hooks, site, { status: null, body: text, meta: {} }, builtinMimeDecode(mimeType)),
-    );
-  }
-
   setHeaderOnce();
-  inv.setTrailer({ "x-ob-decode": [decodeStampFor(hooks, "contents/declared")] });
-  await inv.emitOutput(items);
+  inv.setTrailer({ "x-ob-decode": ["protocol/result"] });
+  await inv.emitOutput(result);
   inv.closeOutput();
 }
 
@@ -727,13 +869,8 @@ async function runPrompt(
 
   const result = await client.getPrompt(params, { signal: inv.signal });
 
-  const output: Record<string, unknown> = { messages: result.messages };
-  if (result.description) {
-    output.description = result.description;
-  }
-
   setHeaderOnce();
-  await inv.emitOutput(output);
+  await inv.emitOutput(result);
   inv.closeOutput();
 }
 

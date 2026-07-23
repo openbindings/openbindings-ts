@@ -9,7 +9,7 @@ import { exhaustPages, parsePinnedListing } from "./listing.js";
 export interface MCPDiscovery {
   serverName?: string;
   serverVersion?: string;
-  tools: Array<{ name: string; description?: string; inputSchema?: Record<string, unknown>; outputSchema?: Record<string, unknown> }>;
+  tools: Array<{ name: string; description?: string; inputSchema?: Record<string, unknown>; outputSchema?: Record<string, unknown>; taskSupport?: "optional" | "required" | "forbidden" }>;
   resources: Array<{ name: string; uri: string; description?: string; mimeType?: string }>;
   resourceTemplates: Array<{ name: string; uriTemplate: string; description?: string; mimeType?: string }>;
   prompts: Array<{ name: string; description?: string; arguments?: Array<{ name: string; description?: string; required?: boolean }> }>;
@@ -64,6 +64,7 @@ export async function discover(url: string, options?: DiscoverOptions): Promise<
               description: t.description,
               inputSchema: t.inputSchema,
               outputSchema: (t as { outputSchema?: Record<string, unknown> }).outputSchema,
+              taskSupport: (t as { execution?: { taskSupport?: "optional" | "required" | "forbidden" } }).execution?.taskSupport,
             });
           }
         },
@@ -137,7 +138,7 @@ export async function discover(url: string, options?: DiscoverOptions): Promise<
  * from SynthesizeInput.
  */
 export function pinnedDiscovery(content: unknown): MCPDiscovery {
-  parsePinnedListing(content);
+  const listing = parsePinnedListing(content);
   const members = content as {
     tools?: Record<string, unknown>[];
     resources?: Record<string, unknown>[];
@@ -197,6 +198,7 @@ export function pinnedDiscovery(content: unknown): MCPDiscovery {
       description: optString(t, "description", `tools[${i}]`),
       inputSchema: optObject(t, "inputSchema", `tools[${i}]`),
       outputSchema: optObject(t, "outputSchema", `tools[${i}]`),
+      taskSupport: listing.requiredTaskTools?.includes(t["name"] as string) ? "required" : undefined,
     })),
     resources: (members.resources ?? []).map((r, i) => ({
       name: optString(r, "name", `resources[${i}]`) ?? "",
@@ -221,12 +223,12 @@ export function pinnedDiscovery(content: unknown): MCPDiscovery {
 /**
  * Derives a resource template's input schema from its RFC 6570 variables —
  * the operation's input value per openbindings.mcp@1 §8/§9.1: one string
- * property per declared variable (template variables are string-typed,
- * never coerced), none required (an unsupplied variable follows RFC 6570's
+ * property per declared variable (using RFC 6570's string/list/associative
+ * value domain), none required (an unsupplied variable follows RFC 6570's
  * undefined-value expansion), and no undeclared members (the invoker
  * refuses them, hence additionalProperties: false). Mirrors the Go SDK's
- * templateInputSchema (synthesize.go). A template that does not parse
- * yields no input schema; the invoker refuses it loudly at invocation time.
+ * templateInputSchema (synthesize.go). Eligibility filters malformed
+ * templates before this function is called.
  */
 function templateInputSchema(template: string): JSONSchema | undefined {
   let tmpl: UriTemplate;
@@ -237,7 +239,13 @@ function templateInputSchema(template: string): JSONSchema | undefined {
   }
   const properties: Record<string, unknown> = {};
   for (const name of tmpl.variableNames) {
-    properties[name] = { type: "string" };
+    properties[name] = {
+      anyOf: [
+        { type: "string" },
+        { type: "array", items: { type: "string" } },
+        { type: "object", additionalProperties: { type: "string" } },
+      ],
+    };
   }
   return {
     type: "object",
@@ -337,7 +345,9 @@ export function convertToInterface(disc: MCPDiscovery, location?: string): OBInt
   const source: { bindingSpec: string; location?: string } = { bindingSpec: BINDING_SPEC };
   if (location) source.location = location;
 
-  // Sort all entities by name, code point order, for deterministic output.
+  disc = bindableDiscovery(disc);
+
+  // Sort all bindable entities by name, code point order, for deterministic output.
   const tools = [...disc.tools].sort((a, b) => codePointCompare(a.name, b.name));
   const resources = [...disc.resources].sort((a, b) => codePointCompare(a.name, b.name));
   const templates = [...disc.resourceTemplates].sort((a, b) => codePointCompare(a.name, b.name));
@@ -431,4 +441,41 @@ export function convertToInterface(disc: MCPDiscovery, location?: string): OBInt
   if (disc.serverVersion) iface.version = disc.serverVersion;
 
   return iface;
+}
+
+/**
+ * Applies the binding specification's own resolution boundary. Ambiguous
+ * identities, required-task tools, and malformed RFC 6570 templates are not
+ * binding targets in revision 1. Synthesis and inspection share this helper
+ * so neither can advertise a ref invocation is statically bound to refuse.
+ */
+export function bindableDiscovery(disc: MCPDiscovery): MCPDiscovery {
+  const counts = <T>(items: T[], identity: (item: T) => string): Map<string, number> => {
+    const result = new Map<string, number>();
+    for (const item of items) {
+      const key = identity(item);
+      result.set(key, (result.get(key) ?? 0) + 1);
+    }
+    return result;
+  };
+  const toolCounts = counts(disc.tools, (v) => v.name);
+  const resourceCounts = counts(disc.resources, (v) => v.uri);
+  const templateCounts = counts(disc.resourceTemplates, (v) => v.uriTemplate);
+  const promptCounts = counts(disc.prompts, (v) => v.name);
+  const validTemplate = (value: string): boolean => {
+    try {
+      new UriTemplate(value);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  return {
+    serverName: disc.serverName,
+    serverVersion: disc.serverVersion,
+    tools: disc.tools.filter((v) => toolCounts.get(v.name) === 1 && v.taskSupport !== "required"),
+    resources: disc.resources.filter((v) => resourceCounts.get(v.uri) === 1),
+    resourceTemplates: disc.resourceTemplates.filter((v) => templateCounts.get(v.uriTemplate) === 1 && validTemplate(v.uriTemplate)),
+    prompts: disc.prompts.filter((v) => promptCounts.get(v.name) === 1),
+  };
 }

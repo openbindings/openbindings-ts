@@ -1,4 +1,8 @@
 import { describe, it, expect } from "vitest";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { convertToInterface } from "./synthesize.js";
 import { OpenAPIInvoker } from "./invoker.js";
 import { DEFAULT_SOURCE_NAME } from "./constants.js";
@@ -400,7 +404,7 @@ describe("free-form object bodies", () => {
               required: true,
               content: { "application/json": { schema: bodySchema } },
             },
-            responses: { "200": { description: "ok" } },
+            responses: { "200": { description: "ok", content: { "application/json": {} } } },
           },
         },
       },
@@ -453,7 +457,7 @@ describe("free-form object bodies", () => {
 });
 
 describe("param/body field collision", () => {
-  it("warns and flattens to one field", async () => {
+  it("refuses a partial interface when no required-body candidate can flatten faithfully", async () => {
     const spec = {
       openapi: "3.1.0",
       info: { title: "t", version: "1" },
@@ -480,27 +484,21 @@ describe("param/body field collision", () => {
       },
     };
     const warnings: Array<{ code: string; path?: string }> = [];
-    const iface = await new OpenAPISynthesizer().synthesizeInterface({
-      sources: [{ bindingSpec: "openbindings.openapi@1", content: spec }],
-      onWarning: (w) => warnings.push(w),
-    });
-    expect(warnings).toHaveLength(1);
-    expect(warnings[0]?.code).toBe("openapi.param_body_collision");
-    expect(warnings[0]?.path).toBe("operations.updateUser.input.properties.id");
-    const props = (iface.operations.updateUser?.input as { properties: Record<string, unknown> })
-      .properties;
-    expect(Object.keys(props).sort()).toEqual(["id", "name"]);
+    await expect(new OpenAPISynthesizer().synthesizeInterface({
+        sources: [{ bindingSpec: "openbindings.openapi@1", content: spec }],
+        onWarning: (w) => warnings.push(w),
+      })).rejects.toThrow(/updateUser.*statically unbindable partial interface/);
+    expect(warnings).toHaveLength(0);
   });
 });
 
 // Pins the synthesis half of §9.2's degenerate media/schema combination
-// rule (OAPI-P-04): when the produced contract's only declared request
-// media cannot carry it — multipart or urlencoded selected while the body
-// schema does not flatten, text/plain selected while it does — synthesis
-// emits openapi.media_schema_mismatch, so authors hear it at synthesis
-// time rather than at first dispatch. A co-declared JSON media type is
-// selected instead and silences the warning. Mirrors the Go SDK's
-// TestSynthesize_MediaSchemaMismatchWarns.
+// rule (OAPI-P-04): when an optional request body's only declared media
+// cannot carry it — multipart or urlencoded selected while the body schema
+// does not flatten, text/plain selected while it does — synthesis can still
+// emit a usable no-body operation and warns about the lossy projection. A
+// co-declared JSON media type is selected instead and silences the warning.
+// Required degenerate bodies fail synthesis. Mirrors the Go SDK.
 describe("degenerate media/schema combination warning", () => {
   it("warns for combinations the invoker refuses, stays silent with co-declared JSON", async () => {
     const spec = {
@@ -511,7 +509,7 @@ describe("degenerate media/schema combination warning", () => {
           post: {
             operationId: "scalarMultipart",
             requestBody: {
-              required: true,
+              required: false,
               content: { "multipart/form-data": { schema: { type: "string" } } },
             },
             responses: { "200": { description: "ok" } },
@@ -521,7 +519,7 @@ describe("degenerate media/schema combination warning", () => {
           post: {
             operationId: "objectText",
             requestBody: {
-              required: true,
+              required: false,
               content: {
                 "text/plain": { schema: { type: "object", properties: { a: { type: "string" } } } },
               },
@@ -555,11 +553,41 @@ describe("degenerate media/schema combination warning", () => {
     }
     expect(byPath.size).toBe(2);
     expect(byPath.get("operations.scalarMultipart.input")?.message).toBe(
-      "request media selection (OAPI-P-04) lands on multipart/form-data, but the declared body schema does not flatten (no properties and no explicit object type): openbindings.openapi@1 defines no request carriage for this combination; a conformant invoker refuses this operation before dispatch",
+      "request media candidate multipart/form-data has a non-object body schema and is inadmissible; optional body omitted from the synthesized contract",
     );
     expect(byPath.get("operations.objectText.input")?.message).toBe(
-      "request media selection (OAPI-P-04) lands on text/plain, but the declared body schema flattens (an object contract): openbindings.openapi@1 defines no request carriage for this combination; a conformant invoker refuses this operation before dispatch",
+      "request media candidate text/plain has an object body schema and is inadmissible; optional body omitted from the synthesized contract",
     );
+  });
+});
+
+describe("candidate-specific synthesized input", () => {
+  it("preserves distinct realizable media surfaces instead of inventing one preferred schema", async () => {
+    const iface = await convertToInterface(undefined, {
+      openapi: "3.1.0",
+      info: { title: "t", version: "1" },
+      paths: {
+        "/send": {
+          post: {
+            operationId: "send",
+            requestBody: {
+              required: true,
+              content: {
+                "multipart/form-data": { schema: { type: "object", properties: { metadata: { type: "string" } } } },
+                "text/plain": { schema: { type: "string" } },
+              },
+            },
+            responses: { "200": { description: "ok" } },
+          },
+        },
+      },
+    });
+    const input = iface.operations.send?.input as { anyOf?: Array<Record<string, unknown>> };
+    expect(input.anyOf).toHaveLength(2);
+    expect(input.anyOf).toEqual(expect.arrayContaining([
+      expect.objectContaining({ properties: expect.objectContaining({ metadata: { type: "string" } }), additionalProperties: false }),
+      expect.objectContaining({ properties: expect.objectContaining({ body: { type: "string" } }), required: ["body"], additionalProperties: false }),
+    ]));
   });
 });
 
@@ -679,6 +707,27 @@ describe("inspectSource", () => {
 // ---------------------------------------------------------------------------
 
 describe("content-fed synthesis", () => {
+  it("returns the deterministic source-less scaffold", async () => {
+    await expect(new OpenAPISynthesizer().synthesizeInterface({ name: "scaffold" })).resolves.toEqual({
+      openbindings: "0.2.0", name: "scaffold", operations: {},
+    });
+  });
+
+  it("normalizes an authoring file path into an invocable file URI", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "openbindings-openapi-"));
+    const path = join(directory, "api.json");
+    try {
+      await writeFile(path, JSON.stringify(MINIMAL_SPEC));
+      const iface = await new OpenAPISynthesizer().synthesizeInterface({
+        sources: [{ bindingSpec: "openbindings.openapi@1", location: path, embed: true }],
+      });
+      expect(iface.sources?.[DEFAULT_SOURCE_NAME]?.location).toBe(pathToFileURL(path).href);
+      expect(iface.sources?.[DEFAULT_SOURCE_NAME]?.content).toBe(JSON.stringify(MINIMAL_SPEC));
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it("embeds the artifact verbatim into the source when no location is given", async () => {
     const content = JSON.stringify({
       openapi: "3.0.3",
@@ -706,10 +755,10 @@ describe("content-fed synthesis", () => {
 
     const src = iface.sources?.[DEFAULT_SOURCE_NAME];
     expect(src?.location).toBeUndefined();
-    expect(JSON.parse(src?.content as string)).toEqual(content);
+    expect(src?.content).toEqual(content);
   });
 
-  it("does not re-embed content when a location is present (location is provenance)", async () => {
+  it("preserves authoritative content when a location is also its base and provenance", async () => {
     const content = { openapi: "3.0.3", info: { title: "T", version: "1" }, paths: {} };
     const iface = await new OpenAPISynthesizer().synthesizeInterface({
       sources: [{ bindingSpec: "openbindings.openapi@1", location: "https://example.com/openapi.json", content }],
@@ -717,7 +766,7 @@ describe("content-fed synthesis", () => {
 
     const src = iface.sources?.[DEFAULT_SOURCE_NAME];
     expect(src?.location).toBe("https://example.com/openapi.json");
-    expect(src?.content).toBeUndefined();
+    expect(src?.content).toEqual(content);
   });
 });
 

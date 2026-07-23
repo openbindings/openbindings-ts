@@ -16,6 +16,8 @@ import type {
   AsyncAPIMessage,
   AsyncAPIOperation,
 } from "./asyncapi-types.js";
+import { contextConfiguration } from "@openbindings/sdk";
+import { MESSAGE_NAME_TAG } from "./constants.js";
 
 /**
  * Returns the operation's own governing message set — the declarations
@@ -34,6 +36,36 @@ export function governingMessages(
   if (declared && declared.length > 0) return declared.filter(isResolvedMessage);
   if (!ch) return [];
   return channelMessages(ch);
+}
+
+/** Resolves the publish-side `message` point to exactly one declaration. */
+export function selectedInputMessages(
+  op: AsyncAPIOperation | undefined,
+  ch: AsyncAPIChannel | undefined,
+  context?: Record<string, unknown>,
+): AsyncAPIMessage[] {
+  const messages = governingMessages(op, ch);
+  if (messages.length === 0) throw new Error("publish operation has no resolved message declaration");
+  let selected: AsyncAPIMessage;
+  if (messages.length === 1) {
+    selected = messages[0]!;
+  } else {
+    const choice = contextConfiguration(context)["message"];
+    if (typeof choice !== "string" || choice === "") {
+      throw new Error("publish operation declares several messages; configuration.message must select one artifact-declared member");
+    }
+    const matches = messages.filter((message) => messageName(message) === choice);
+    if (matches.length !== 1) throw new Error(`configuration.message ${JSON.stringify(choice)} does not select exactly one operation message`);
+    selected = matches[0]!;
+  }
+  if (selected.headers !== undefined) throw new Error("selected message declares headers, which openbindings.asyncapi@1 revision 1 cannot carry");
+  return [selected];
+}
+
+function messageName(message: AsyncAPIMessage): string {
+  const tagged = (message as unknown as Record<string, unknown>)[MESSAGE_NAME_TAG];
+  if (typeof tagged === "string") return tagged;
+  return message.name ?? "";
 }
 
 /**
@@ -102,10 +134,21 @@ export function distinctEffectiveTypes(
  * more than one distinct type, is the text lane ("" — builtinDecodeFor's
  * non-JSON lane), never a guess.
  */
-export function decodeContentType(doc: AsyncAPIDocument, msgs: AsyncAPIMessage[]): string {
-  const types = distinctEffectiveTypes(doc, msgs);
-  const only = types.length === 1 ? types[0] : undefined;
-  return only ?? "";
+export function decodeContentType(
+  doc: AsyncAPIDocument,
+  msgs: AsyncAPIMessage[],
+  context?: Record<string, unknown>,
+): string {
+  if (msgs.length === 0) throw new Error("operation has no resolved output message declaration");
+  for (const message of msgs) {
+    validateMessageBindingVersion(message);
+    if (message.headers !== undefined) throw new Error("output message declares headers, which revision 1 cannot carry");
+  }
+  const types = completeEffectiveTypes(doc, msgs);
+  if (types.length > 1) throw new Error("output messages declare conflicting effective content types");
+  const only = types[0] ?? "";
+  if (only !== "") return only;
+  return requiredLane(context, "decode");
 }
 
 /**
@@ -124,30 +167,111 @@ export interface InputCodec {
 
 /**
  * Resolves the input encoding from the governing request-side declaration
- * (§9.1, ASYNC-P-03): a JSON-family type — or no declaration at all, this
- * specification's default — serializes the value as JSON; a text-family
- * type sends a string value raw; any other declared family (binary, avro,
- * protobuf, …) is EXCLUDED from revision 1 and refused before dispatch. A
- * governing set with more than one distinct effective type is ambiguous
- * and falls to the text lane, mirroring §9.3's decode rule. Forwarded
- * frames on the duplex subscription cell use the same rule.
+ * (§9.1, ASYNC-P-03): a JSON-family type serializes the value as JSON;
+ * every other declared type carries a string value as character bytes.
+ * With no declaration, configuration.encode must choose the JSON or text
+ * lane. More or fewer than one selected message is refused; payload bytes
+ * never select among artifact alternatives. Forwarded frames on the duplex
+ * subscription cell use the same rule.
  */
-export function resolveInputCodec(doc: AsyncAPIDocument, msgs: AsyncAPIMessage[]): InputCodec {
+export function resolveInputCodec(
+  doc: AsyncAPIDocument,
+  msgs: AsyncAPIMessage[],
+  context?: Record<string, unknown>,
+): InputCodec {
+  if (msgs.length !== 1) throw new Error("publish input must be governed by exactly one selected message");
   const types = distinctEffectiveTypes(doc, msgs);
-  if (types.length > 1) {
-    return { json: false, contentType: "" }; // ambiguous → the text lane
-  }
+  if (types.length > 1) throw new Error("selected message has ambiguous effective content type");
   // Zero or one distinct type after the ambiguity return above; absent is "".
   const t = types[0] ?? "";
   if (t === "") {
-    // No declaration at all: JSON, the specification's default.
-    return { json: true, contentType: "application/json" };
+    const lane = requiredLane(context, "encode");
+    return { json: lane === "application/json", contentType: lane === "application/json" ? "application/json" : "text/plain; charset=utf-8" };
   }
   if (isJSONMediaType(t)) return { json: true, contentType: t };
-  if (isTextContentType(t)) return { json: false, contentType: t };
-  throw new Error(
-    `declared content type ${JSON.stringify(t)} is neither a JSON- nor a text-family type: excluded from openbindings.asyncapi@1 revision 1 and refused before dispatch`,
-  );
+  return { json: false, contentType: t };
+}
+
+/** Selects the reply declaration governing a non-empty HTTP response. */
+export function resolveReplyContentType(
+  doc: AsyncAPIDocument,
+  op: AsyncAPIOperation,
+  status: number,
+  actualContentType: string,
+  context?: Record<string, unknown>,
+): string {
+  const all = replyGoverningMessages(op);
+  if (all.length === 0) throw new Error("non-empty HTTP response has no artifact-declared reply message");
+  const exact = all.filter((message) => message.bindings?.http?.statusCode === status);
+  const candidates = exact.length > 0 ? exact : all.filter((message) => message.bindings?.http?.statusCode === undefined);
+  if (candidates.length === 0) throw new Error(`non-empty HTTP ${status} response has no governing reply message`);
+  for (const message of candidates) {
+    validateMessageBindingVersion(message);
+    if (message.headers !== undefined) throw new Error("selected reply message declares headers, which revision 1 cannot carry");
+  }
+
+  const declared = candidates.map((message) => message.contentType ?? doc.defaultContentType ?? "");
+  const nonempty = declared.filter((value) => value !== "");
+  if (nonempty.length === 0) return requiredLane(context, "decode");
+  if (actualContentType.trim() === "") throw new Error("reply candidates declare content types but the HTTP response has no Content-Type");
+  const actual = parseMedia(actualContentType);
+  const matches = nonempty
+    .map((value) => ({ value, parsed: parseMedia(value) }))
+    .filter(({ parsed }) => mediaSubset(parsed, actual));
+  if (matches.length === 0) throw new Error(`HTTP response Content-Type ${JSON.stringify(actualContentType)} matches no reply declaration`);
+  const specificity = Math.max(...matches.map(({ parsed }) => parsed.parameters.size));
+  const best = matches.filter(({ parsed }) => parsed.parameters.size === specificity);
+  const identities = new Set(best.map(({ parsed }) => parsed.identity));
+  if (best.length !== 1 || identities.size !== 1) throw new Error("HTTP response matches several distinct reply media declarations at equal specificity");
+  return best[0]!.value;
+}
+
+export function validateMessageBindingVersion(message: AsyncAPIMessage): void {
+  const version = message.bindings?.http?.bindingVersion;
+  if (version !== undefined && version !== "0.3.0") {
+    throw new Error(`HTTP message binding version ${JSON.stringify(version)} is outside revision 1's incorporated 0.3.0 envelope`);
+  }
+}
+
+function completeEffectiveTypes(doc: AsyncAPIDocument, msgs: AsyncAPIMessage[]): string[] {
+  const result: string[] = [];
+  const seen = new Set<string>();
+  for (const message of msgs) {
+    const value = message.contentType ?? doc.defaultContentType ?? "";
+    const identity = value === "" ? "" : parseMedia(value).identity;
+    if (!seen.has(identity)) { seen.add(identity); result.push(value); }
+  }
+  return result;
+}
+
+function requiredLane(context: Record<string, unknown> | undefined, point: "encode" | "decode"): string {
+  const value = contextConfiguration(context)[point];
+  if (value === "json") return "application/json";
+  if (value === "text") return "text/plain; charset=utf-8";
+  throw new Error(`configuration.${point} must select "json" or "text" because the artifact declares no effective content type`);
+}
+
+interface ParsedMedia { type: string; parameters: Map<string, string>; identity: string }
+function parseMedia(value: string): ParsedMedia {
+  const parts = value.split(";");
+  const type = (parts.shift() ?? "").trim().toLowerCase();
+  if (!type.includes("/")) throw new Error(`invalid media type ${JSON.stringify(value)}`);
+  const parameters = new Map<string, string>();
+  for (const part of parts) {
+    const index = part.indexOf("=");
+    if (index < 1) throw new Error(`invalid media type parameter in ${JSON.stringify(value)}`);
+    const name = part.slice(0, index).trim().toLowerCase();
+    let parameter = part.slice(index + 1).trim();
+    if (parameter.startsWith('"') && parameter.endsWith('"')) parameter = parameter.slice(1, -1).replace(/\\(.)/g, "$1");
+    parameters.set(name, parameter);
+  }
+  const identity = `${type};${[...parameters].sort(([a], [b]) => a.localeCompare(b)).map(([name, parameter]) => `${name}=${parameter}`).join(";")}`;
+  return { type, parameters, identity };
+}
+function mediaSubset(declared: ParsedMedia, actual: ParsedMedia): boolean {
+  if (declared.type !== actual.type) return false;
+  for (const [name, value] of declared.parameters) if (actual.parameters.get(name) !== value) return false;
+  return true;
 }
 
 /**
@@ -178,10 +302,9 @@ export function normalizeMediaType(contentType: string): string {
 }
 
 /**
- * Reports a text-family type: the `text/*` primary type. Application-tree
- * types that happen to be textual (application/xml, …) are NOT the text
- * family — on the input side they are excluded families (§9.1); on the
- * decode side everything non-JSON is the text lane anyway.
+ * Reports MIME's text family. The boundary correspondence itself uses the
+ * broader non-JSON string lane; this predicate is retained for callers that
+ * specifically need the MIME family.
  */
 export function isTextContentType(contentType: string): boolean {
   return normalizeMediaType(contentType).startsWith("text/");

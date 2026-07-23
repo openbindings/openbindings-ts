@@ -2,8 +2,9 @@ import {
   ERR_RUNTIME,
   InvocationError,
   InvocationImpl,
-  NoSourcesError,
   MultipleSourcesError,
+  finalizeSynthesis,
+  synthesisSkeleton,
   type BindingInvocationArgs,
   type BindingInvoker,
   type SynthesizeInput,
@@ -15,7 +16,7 @@ import {
   type SourceInspection,
   type SourceInspector,
 } from "@openbindings/sdk";
-import { BINDING_SPEC } from "./constants.js";
+import { BINDING_SPEC, DEFAULT_SOURCE_NAME } from "./constants.js";
 import { runMCPBinding, validateEndpoint } from "./invoke.js";
 import {
   discover,
@@ -24,6 +25,7 @@ import {
   sanitizeKey,
   resolveKey,
   codePointCompare,
+  bindableDiscovery,
   type MCPDiscovery,
 } from "./synthesize.js";
 
@@ -136,10 +138,15 @@ export class MCPSynthesizer implements InterfaceSynthesizer, SourceInspector {
     const sources = input.sources ?? [];
     const src = sources.at(0);
     if (src === undefined) {
-      throw new NoSourcesError();
+      return synthesisSkeleton(input);
     }
     if (sources.length > 1) {
       throw new MultipleSourcesError();
+    }
+    if (src.bindingSpec !== BINDING_SPEC) throw new Error(`synthesizer supports exact binding specification ${JSON.stringify(BINDING_SPEC)}, got ${JSON.stringify(src.bindingSpec)}`);
+    if (src.outputLocation) validateEndpoint(src.outputLocation);
+    if (src.embed && src.content === undefined) {
+      throw new Error("MCP live-discovery embedding is not supported: preserving the complete pagination-exhausted listing is required; provide pinned listing content explicitly");
     }
 
     let disc: MCPDiscovery;
@@ -153,10 +160,11 @@ export class MCPSynthesizer implements InterfaceSynthesizer, SourceInspector {
       disc = await discover(src.location, { signal: options?.signal, fetch: this.fetchImpl });
     }
     const iface = convertToInterface(disc, src.location);
-    if (input.name) iface.name = input.name;
-    if (input.version) iface.version = input.version;
-    if (input.description) iface.description = input.description;
-    return iface;
+    if (src.content !== undefined) {
+      const emittedSource = iface.sources?.[DEFAULT_SOURCE_NAME];
+      if (emittedSource) emittedSource.content = src.content;
+    }
+    return finalizeSynthesis(iface, input, DEFAULT_SOURCE_NAME, BINDING_SPEC);
   }
 
   /**
@@ -183,6 +191,7 @@ export class MCPSynthesizer implements InterfaceSynthesizer, SourceInspector {
       if (!source.location) throw new Error("MCP source requires a location (endpoint URL)");
       disc = await discover(source.location, { signal: options?.signal, fetch: this.fetchImpl });
     }
+    disc = bindableDiscovery(disc);
     const targets: SourceInspection["targets"] = [];
     const usedKeys = new Map<string, string>();
 

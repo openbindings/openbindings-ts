@@ -5,6 +5,7 @@
     "build": "pnpm -r build",
     "test": "vitest run",
     "conformance": "pnpm --filter @openbindings/sdk conformance",
+    "correspondence": "node scripts/verify-reference-correspondence.mjs",
     "lint": "pnpm -r --filter './packages/*' run lint && eslint . --ignore-pattern 'packages/**'"
   },
   "devDependencies": {

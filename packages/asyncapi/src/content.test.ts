@@ -49,12 +49,10 @@ describe("decode content type uses reply-side declarations", () => {
   });
 });
 
-// §9.3's conflict rule (ASYNC-P-05): a governing set resolving to MORE than
-// one distinct effective content type is ambiguous, and decode falls to the
-// text lane ("") rather than guessing — a mixed declared/undeclared set
-// included.
-describe("distinct effective types: ambiguity falls to the text lane", () => {
-  it("two distinct types fall to the text lane", () => {
+// Complete declared media identities are preserved. Several distinct
+// identities cannot be collapsed without choosing for the artifact.
+describe("distinct effective types: ambiguity is refused", () => {
+  it("refuses two distinct types", () => {
     const op: AsyncAPIOperation = {
       action: "send",
       messages: [
@@ -62,10 +60,10 @@ describe("distinct effective types: ambiguity falls to the text lane", () => {
         { name: "b", contentType: "text/plain" },
       ],
     };
-    expect(decodeContentType(doc(), governingMessages(op, undefined))).toBe("");
+    expect(() => decodeContentType(doc(), governingMessages(op, undefined))).toThrow(/conflicting/);
   });
 
-  it("a charset parameter never makes a type distinct", () => {
+  it("preserves parameters as part of the complete media identity", () => {
     const op: AsyncAPIOperation = {
       action: "send",
       messages: [
@@ -73,7 +71,7 @@ describe("distinct effective types: ambiguity falls to the text lane", () => {
         { name: "b", contentType: "application/json; charset=utf-8" },
       ],
     };
-    expect(decodeContentType(doc(), governingMessages(op, undefined))).toBe("application/json");
+    expect(() => decodeContentType(doc(), governingMessages(op, undefined))).toThrow(/conflicting/);
   });
 
   it("a mixed declared/undeclared set is ambiguous, never collapsed onto the declared type", () => {
@@ -81,7 +79,7 @@ describe("distinct effective types: ambiguity falls to the text lane", () => {
       action: "send",
       messages: [{ name: "a", contentType: "application/json" }, { name: "b" }],
     };
-    expect(decodeContentType(doc(), governingMessages(op, undefined))).toBe("");
+    expect(() => decodeContentType(doc(), governingMessages(op, undefined))).toThrow(/conflicting/);
   });
 });
 
@@ -102,10 +100,9 @@ describe("governing messages: channel fallback", () => {
   });
 });
 
-// §9.1 (ASYNC-P-03): JSON family → JSON; no declaration → JSON (the
-// specification's default); text family → the raw text lane; ambiguity →
-// the text lane; any other declared family is an @1 exclusion refused
-// before dispatch.
+// §9.1 (ASYNC-P-03): a declared JSON family selects JSON; every other
+// declared media type carries string bytes. When the artifact declares no
+// lane, configuration must choose one rather than the binding inventing it.
 describe("resolveInputCodec", () => {
   const mk = (...cts: string[]): AsyncAPIMessage[] =>
     cts.map((ct, i) => ({ name: String.fromCharCode(97 + i), contentType: ct }));
@@ -117,10 +114,16 @@ describe("resolveInputCodec", () => {
     });
   });
 
-  it("selects JSON for no declaration at all (the spec default)", () => {
-    expect(resolveInputCodec(doc(), [])).toEqual({
+  it("requires configuration when the selected message declares no lane", () => {
+    const message = [{ name: "a" }];
+    expect(() => resolveInputCodec(doc(), message)).toThrow(/configuration\.encode/);
+    expect(resolveInputCodec(doc(), message, { configuration: { encode: "json" } })).toEqual({
       json: true,
       contentType: "application/json",
+    });
+    expect(resolveInputCodec(doc(), message, { configuration: { encode: "text" } })).toEqual({
+      json: false,
+      contentType: "text/plain; charset=utf-8",
     });
   });
 
@@ -131,15 +134,14 @@ describe("resolveInputCodec", () => {
     expect(() => encodeInput(codec, { not: "a string" })).toThrow(/must be a string/);
   });
 
-  it("falls to the text lane for an ambiguous set, with no one declared type", () => {
-    expect(resolveInputCodec(doc(), mk("application/json", "text/plain"))).toEqual({
-      json: false,
-      contentType: "",
-    });
+  it("refuses an unselected set rather than choosing among artifact alternatives", () => {
+    expect(() => resolveInputCodec(doc(), mk("application/json", "text/plain"))).toThrow(/exactly one selected message/);
   });
 
-  it("refuses excluded declared families before dispatch", () => {
-    expect(() => resolveInputCodec(doc(), mk("avro/binary"))).toThrow(/excluded/);
-    expect(() => resolveInputCodec(doc(), mk("application/octet-stream"))).toThrow(/excluded/);
+  it("preserves non-JSON declared media types in the string lane", () => {
+    const avro = resolveInputCodec(doc(), mk("application/avro"));
+    expect(avro).toEqual({ json: false, contentType: "application/avro" });
+    expect(encodeInput(avro, "wire bytes represented as a string")).toBe("wire bytes represented as a string");
+    expect(() => encodeInput(avro, { unsupported: "arbitrary bytes" })).toThrow(/must be a string/);
   });
 });

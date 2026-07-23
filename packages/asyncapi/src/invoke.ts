@@ -39,6 +39,7 @@ import {
   contextString,
   contextHeaders,
   contextCookies,
+  contextConfiguration,
   httpErrorCode,
   httpErrorEffects,
   ERR_INVALID_REF,
@@ -75,14 +76,23 @@ import type {
 } from "./asyncapi-types.js";
 import { isSecurityScheme } from "./asyncapi-types.js";
 import { REF_NAME_TAG } from "./constants.js";
-import { mergeQuery, requestMethod, resolveWSUpgrade } from "./bindings.js";
+import {
+  mergeQuery,
+  protocolFieldValues,
+  requestMethod,
+  resolveHTTPQuery,
+  resolveWSUpgrade,
+} from "./bindings.js";
 import {
   decodeContentType,
   encodeInput,
   governingMessages,
   normalizeMediaType,
   replyGoverningMessages,
+  resolveReplyContentType,
+  validateMessageBindingVersion,
   resolveInputCodec,
+  selectedInputMessages,
   type InputCodec,
 } from "./content.js";
 import { streamSSE } from "./sse.js";
@@ -178,6 +188,13 @@ export async function runBinding(
     return;
   }
 
+  try {
+    validateCell(doc, ch, asyncOp, target.protocol, args.context);
+  } catch (e: unknown) {
+    h.fireError(new InvocationError(ERR_SOURCE_CONFIG_ERROR, errorMessage(e)));
+    return;
+  }
+
   // Context negotiation: challenge BEFORE any connection is opened. The
   // requirements derive from the server whose declared security applies
   // (§9.5): the server the connection targets — or, under a full-URL
@@ -193,15 +210,33 @@ export async function runBinding(
     return;
   }
 
+  try {
+    validateCredentialDestinations(asyncOp, target.securityServer, target.protocol, args.context);
+  } catch (e: unknown) {
+    h.fireError(new InvocationError(ERR_SOURCE_CONFIG_ERROR, errorMessage(e)));
+    return;
+  }
+
   // The address configuration point (ASYNC-P-04): the declared address with
   // every {name} expression expanded — an absent address or an unresolved
   // expression is a pre-dispatch refusal, never a guess.
   let address: string;
-  let addrParams: Record<string, string> | undefined;
+  let preparedInput: { ok: true; value: unknown } | undefined;
   try {
     const addrCfg = addressConfiguration(args.context);
-    addrParams = addrCfg.parameters;
-    address = resolveAddress(ch, channelName, addrCfg);
+    const needsPayload = channelNeedsOutgoingPayload(ch);
+    if (needsPayload) {
+      if (asyncOp.action !== "receive") throw new Error("subscription address uses a message runtime expression before any outgoing message exists");
+      if (target.protocol !== "http" && target.protocol !== "https") {
+        throw new Error("WebSocket publish address runtime expressions are not available before connection in revision 1");
+      }
+      if (noInputDeclared(args)) throw new Error("address runtime expression requires an outgoing message, but the operation declares no input");
+      const first = await readFirstInput(h);
+      if (!first.ok) throw new Error("address runtime expression requires an outgoing message, but invocation input is absent");
+      await h.closeInput();
+      preparedInput = first;
+    }
+    address = resolveAddress(ch, channelName, addrCfg, preparedInput?.value);
   } catch (e: unknown) {
     h.fireError(configOrSourceError(e, target.serverURL));
     return;
@@ -229,7 +264,8 @@ export async function runBinding(
       // pre-dispatch refusal.
       let up: ReturnType<typeof resolveWSUpgrade>;
       try {
-        up = resolveWSUpgrade(ch, channelName, addrParams, contextHeaders(args.context));
+        const fields = protocolFieldValues(args.context);
+        up = resolveWSUpgrade(ch, channelName, fields.webSocketQuery, fields.webSocketHeaders ?? contextHeaders(args.context));
       } catch (e: unknown) {
         h.fireError(new InvocationError(ERR_SOURCE_CONFIG_ERROR, errorMessage(e)));
         return;
@@ -245,7 +281,7 @@ export async function runBinding(
     case "http":
     case "https":
       if (asyncOp.action === "receive") {
-        await runUnaryPublish(target, address, doc, ch, asyncOp, args, h);
+        await runUnaryPublish(target, address, doc, ch, asyncOp, args, h, preparedInput);
       } else {
         await runSSESubscribe(target, address, doc, ch, asyncOp, args, h);
       }
@@ -267,6 +303,96 @@ function resolvedChannel(ch: AsyncAPIChannel | undefined): AsyncAPIChannel | und
   if (!ch) return undefined;
   if (typeof (ch as unknown as Record<string, unknown>).$ref === "string") return undefined;
   return ch;
+}
+
+function validateCell(
+  doc: AsyncAPIDocument,
+  ch: AsyncAPIChannel | undefined,
+  op: AsyncAPIOperation,
+  protocol: string,
+  context?: Record<string, unknown>,
+): void {
+  const httpBinding = op.bindings?.http;
+  if (httpBinding?.bindingVersion !== undefined && httpBinding.bindingVersion !== "0.3.0") {
+    throw new Error(`HTTP binding version ${JSON.stringify(httpBinding.bindingVersion)} is outside revision 1's incorporated 0.3.0 envelope`);
+  }
+  const wsBinding = ch?.bindings?.ws;
+  if (wsBinding?.bindingVersion !== undefined && wsBinding.bindingVersion !== "0.1.0") {
+    throw new Error(`WebSockets binding version ${JSON.stringify(wsBinding.bindingVersion)} is outside revision 1's incorporated 0.1.0 envelope`);
+  }
+
+  if (protocol === "http" || protocol === "https") {
+    if (op.action === "send") throw new Error("standalone HTTP send operations are excluded from revision 1");
+    if (!httpBinding?.method?.trim()) throw new Error("HTTP receive operation has no artifact-declared HTTP method; POST is not inferred");
+    const selected = selectedInputMessages(op, ch, context);
+    validateMessageBindingVersion(selected[0]!);
+    resolveInputCodec(doc, selected, context);
+    resolveHTTPQuery(op, protocolFieldValues(context).httpQuery);
+    return;
+  }
+
+  if (op.action === "receive") {
+    if (op.reply) throw new Error("reply-bearing WebSocket receive operations are excluded from revision 1");
+    const selected = selectedInputMessages(op, ch, context);
+    validateMessageBindingVersion(selected[0]!);
+    resolveInputCodec(doc, selected, context);
+    const messageType = contextConfiguration(context)["websocketMessageType"];
+    if (messageType !== "text" && messageType !== "binary") {
+      throw new Error("configuration.websocketMessageType must select text or binary for a WebSocket publish");
+    }
+  } else {
+    // This validates non-empty output declarations, message-header
+    // exclusions, declaration identity, and the decode point when absent.
+    decodeContentType(doc, governingMessages(op, ch), context);
+  }
+}
+
+function channelNeedsOutgoingPayload(ch: AsyncAPIChannel | undefined): boolean {
+  return Object.values(ch?.parameters ?? {}).some((parameter) => typeof parameter.location === "string");
+}
+
+function validateCredentialDestinations(
+  op: AsyncAPIOperation,
+  server: AsyncAPIServer | undefined,
+  protocol: string,
+  context?: Record<string, unknown>,
+): void {
+  if (!context) return;
+  const fields = protocolFieldValues(context);
+  const wsQuery = new Set(Object.keys(fields.webSocketQuery ?? {}));
+  const wsHeaders = new Set(Object.keys(fields.webSocketHeaders ?? {}).map((name) => name.toLowerCase()));
+  const processorHeaders = new Set(protocol === "http" || protocol === "https"
+    ? ["host", "content-length", "content-type"]
+    : ["host", "connection", "upgrade", "sec-websocket-key", "sec-websocket-version", "sec-websocket-protocol"]);
+  const destinations = new Set<string>();
+  for (const name of Object.keys(contextHeaders(context))) {
+    if (processorHeaders.has(name.toLowerCase())) {
+      throw new Error(`configured header ${JSON.stringify(name)} collides with a processor-owned transport field`);
+    }
+  }
+  for (const { scheme, name } of resolveSecuritySchemes(op, server)) {
+    let destination: string | undefined;
+    let credential: string | undefined;
+    if (scheme.type === "httpApiKey") {
+      credential = contextApiKeyFor(context, name);
+      if (credential && scheme.name && scheme.in) destination = `${scheme.in}:${scheme.in === "header" ? scheme.name.toLowerCase() : scheme.name}`;
+    } else if (scheme.type === "http" && ["basic", "bearer"].includes((scheme.scheme ?? "").toLowerCase())) {
+      credential = (scheme.scheme ?? "").toLowerCase() === "basic" ? (contextBasicAuth(context) ? "present" : undefined) : contextBearerToken(context);
+      if (credential) destination = "header:authorization";
+    } else if (scheme.type === "oauth2" || scheme.type === "openIdConnect" || scheme.type === "httpBearer") {
+      credential = contextBearerToken(context) || contextString(context, "accessToken");
+      if (credential) destination = "header:authorization";
+    }
+    if (!destination) continue;
+    if (destinations.has(destination)) throw new Error(`two credentials target the same ${destination} destination`);
+    destinations.add(destination);
+    const [channel, rawName] = destination.split(":", 2) as [string, string];
+    if (channel === "header" && processorHeaders.has(rawName)) throw new Error(`credential destination ${rawName} collides with a processor-owned transport field`);
+    if (protocol === "ws" || protocol === "wss") {
+      if (channel === "query" && wsQuery.has(rawName)) throw new Error(`credential query destination ${rawName} collides with a declared WebSocket protocol field`);
+      if (channel === "header" && wsHeaders.has(rawName)) throw new Error(`credential header destination ${rawName} collides with a declared WebSocket protocol field`);
+    }
+  }
 }
 
 // Server and address resolution (the §9.2 configuration points) live in
@@ -611,9 +737,6 @@ function applyContext(
 
   if (ctx) {
     const result = applyCredentialsViaSchemes(headers, asyncOp, server, ctx);
-    if (!result.applied) {
-      applyCredentialsFallback(headers, ctx);
-    }
     queryParams = result.queryParams;
     for (const [k, v] of Object.entries(contextHeaders(ctx))) {
       headers.set(k, v);
@@ -643,6 +766,7 @@ async function runUnaryPublish(
   asyncOp: AsyncAPIOperation,
   args: BindingInvocationArgs,
   h: Handle,
+  preparedInput?: { ok: true; value: unknown },
 ): Promise<void> {
   // Unary: the one input IS the message payload (ASYNC-P-03). A publish
   // invocation requires an input value — this family defines no empty
@@ -664,20 +788,20 @@ async function runUnaryPublish(
   // (ASYNC-P-03); an excluded declared family refuses BEFORE dispatch.
   let codec: InputCodec;
   try {
-    codec = resolveInputCodec(doc, governingMessages(asyncOp, ch));
+    codec = resolveInputCodec(doc, selectedInputMessages(asyncOp, ch, args.context), args.context);
   } catch (e: unknown) {
     h.fireError(new InvocationError(ERR_SOURCE_CONFIG_ERROR, errorMessage(e)));
     return;
   }
 
-  const first = await readFirstInput(h);
+  const first = preparedInput ?? await readFirstInput(h);
   if (!first.ok) {
     h.fireError(
       new InvocationError(ERR_MISSING_INPUT, "publish invocation requires an input message"),
     );
     return;
   }
-  void h.closeInput();
+  await h.closeInput();
 
   let body: string;
   try {
@@ -691,15 +815,24 @@ async function runUnaryPublish(
 
   const headers = new Headers();
   if (codec.contentType !== "") headers.set("Content-Type", codec.contentType);
-  // Direction-correct Accept: the reply-side governing declaration, when it
-  // names exactly one type (ASYNC-P-05); nothing is advertised when the
-  // declaration names none. Accept is never hardcoded.
-  const replyDecode = decodeContentType(doc, replyGoverningMessages(asyncOp));
-  if (replyDecode !== "") headers.set("Accept", replyDecode);
+  const fields = protocolFieldValues(args.context);
+  let requestQuery: Record<string, string> | undefined;
+  try {
+    requestQuery = resolveHTTPQuery(asyncOp, fields.httpQuery);
+  } catch (e: unknown) {
+    h.fireError(new InvocationError(ERR_SOURCE_CONFIG_ERROR, errorMessage(e)));
+    return;
+  }
+  if (requestQuery) url = appendQuery(url, requestQuery);
   const authQueryParams = applyContext(headers, asyncOp, target.securityServer, args.context);
   if (authQueryParams) {
-    const sep = url.includes("?") ? "&" : "?";
-    url += sep + new URLSearchParams(authQueryParams).toString();
+    for (const name of Object.keys(authQueryParams)) {
+      if (requestQuery?.[name] !== undefined) {
+        h.fireError(new InvocationError(ERR_SOURCE_CONFIG_ERROR, `credential query destination ${JSON.stringify(name)} collides with an HTTP protocol field`));
+        return;
+      }
+    }
+    url = appendQuery(url, authQueryParams);
   }
 
   const doFetch = args.fetch ?? fetch;
@@ -712,6 +845,7 @@ async function runUnaryPublish(
       headers,
       body,
       signal: h.signal,
+      redirect: "manual",
     });
   } catch (e: unknown) {
     if (h.signal.aborted) return;
@@ -754,6 +888,27 @@ async function runUnaryPublish(
     // value: an acknowledgment is not a message and emits no value (§8).
     // The rule is body-based, never status-based.
     h.closeOutput();
+    return;
+  }
+
+  if (!asyncOp.reply) {
+    // The artifact declares no result message. Do not promote an arbitrary
+    // HTTP response body into the OpenBindings operation boundary.
+    h.closeOutput();
+    return;
+  }
+
+  let replyDecode: string;
+  try {
+    replyDecode = resolveReplyContentType(
+      doc,
+      asyncOp,
+      resp.status,
+      resp.headers.get("Content-Type") ?? "",
+      args.context,
+    );
+  } catch (e: unknown) {
+    h.fireError(new InvocationError(ERR_PROTOCOL, errorMessage(e)));
     return;
   }
 
@@ -1008,16 +1163,19 @@ async function runWSSubscribe(
   args: BindingInvocationArgs,
   h: Handle,
 ): Promise<void> {
+  // This cell is server-streaming, not bidirectional: the selected send
+  // operation defines only what the described application emits.
+  await h.closeInput();
   // Outputs decode by the operation's own message declarations
   // (direction-correct decode, ASYNC-P-05); forwarded input frames use the
   // same governing declaration (§9.1). An excluded declared family refuses
   // only when an input frame actually arrives — a duplex subscription's
   // inputs are optional, and the exclusion belongs to the input lane.
-  const wsContentType = decodeContentType(doc, governingMessages(asyncOp, ch));
+  const wsContentType = decodeContentType(doc, governingMessages(asyncOp, ch), args.context);
   let codec: InputCodec | undefined;
   let codecErr: unknown;
   try {
-    codec = resolveInputCodec(doc, governingMessages(asyncOp, ch));
+    codec = resolveInputCodec(doc, selectedInputMessages(asyncOp, ch, args.context), args.context);
   } catch (e: unknown) {
     codecErr = e;
   }
@@ -1250,7 +1408,7 @@ async function runWSPublish(
   // before any socket is dialed.
   let codec: InputCodec;
   try {
-    codec = resolveInputCodec(doc, governingMessages(asyncOp, ch));
+    codec = resolveInputCodec(doc, selectedInputMessages(asyncOp, ch, args.context), args.context);
   } catch (e: unknown) {
     h.fireError(new InvocationError(ERR_SOURCE_CONFIG_ERROR, errorMessage(e)));
     return;
@@ -1303,7 +1461,8 @@ async function runWSPublish(
         h.fireError(new InvocationError(ERR_VALIDATION_FAILED, errorMessage(e)));
         return;
       }
-      pooled.send(frame);
+      const messageType = contextConfiguration(args.context)["websocketMessageType"];
+      pooled.send(messageType === "binary" ? new TextEncoder().encode(frame) : frame);
       sent++;
     }
     if (sent === 0) {
@@ -1339,6 +1498,12 @@ async function readFirstInput(
     return { ok: true, value: v };
   }
   return { ok: false };
+}
+
+function appendQuery(url: string, values: Record<string, string>): string {
+  const parsed = new URL(url);
+  for (const [name, value] of Object.entries(values)) parsed.searchParams.append(name, value);
+  return parsed.toString();
 }
 
 function headersToMetadata(headers: Headers): Metadata {
