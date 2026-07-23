@@ -9,7 +9,13 @@ import type {
 } from "./asyncapi-types.js";
 import { BINDING_SPEC, DEFAULT_SOURCE_NAME } from "./constants.js";
 import { codePointCompare, operationRef, sanitizeKey, uniqueKey } from "./util.js";
-import { decodeContentType, governingMessages } from "./content.js";
+import {
+  decodeContentType,
+  governingMessages,
+  messageEffectiveContentType,
+  supportedMessageContentType,
+} from "./content.js";
+import { effectiveServers } from "./target.js";
 
 // eslint-disable-next-line @typescript-eslint/require-await -- the synthesizer contract is Promise-returning; this format synthesizes synchronously
 export async function convertToInterface(
@@ -63,7 +69,7 @@ export async function convertToInterface(
         {
           // The application sends; invoking subscribes — the operation's
           // messages are the invoker's OUTPUT.
-          const payload = operationPayloadSchema(asyncOp, false);
+          const payload = operationPayloadSchema(doc, asyncOp, false);
           if (payload) obiOp.output = payload;
         }
         break;
@@ -72,11 +78,11 @@ export async function convertToInterface(
           // The application receives; invoking publishes — the operation's
           // messages are the invoker's INPUT, and a declared reply is what
           // the publish's response decodes to.
-          const inputPayload = operationPayloadSchema(asyncOp, true);
+          const inputPayload = operationPayloadSchema(doc, asyncOp, true);
           if (inputPayload) obiOp.input = inputPayload;
           const reply = asyncOp.reply;
           if (reply) {
-            const outputPayload = replyPayloadSchema(reply);
+            const outputPayload = replyPayloadSchema(doc, reply);
             if (outputPayload) obiOp.output = outputPayload;
           }
         }
@@ -104,33 +110,122 @@ export function bindableOperationEntries(doc: AsyncAPIDocument): Array<[string, 
     .sort(([a], [b]) => codePointCompare(a, b));
 }
 
+export interface AuthoringExclusion {
+  status: "excluded" | "invalid";
+  code: string;
+  rule: string;
+  message: string;
+}
+
 function operationBindable(doc: AsyncAPIDocument, op: AsyncAPIOperation): boolean {
+  return operationExclusion(doc, op) === undefined;
+}
+
+export function operationExclusion(
+  doc: AsyncAPIDocument,
+  op: AsyncAPIOperation,
+): AuthoringExclusion | undefined {
   const unresolvedRef = (op as unknown as Record<string, unknown>)["$ref"];
-  if (typeof unresolvedRef === "string" || (op.action !== "send" && op.action !== "receive")) return false;
+  if (typeof unresolvedRef === "string") {
+    return {
+      status: "invalid", code: "asyncapi.dangling_operation_ref", rule: "ASYNC-D-03",
+      message: "the operations-map reference does not resolve to an operation object",
+    };
+  }
+  if (op.action !== "send" && op.action !== "receive") {
+    return {
+      status: "invalid", code: "asyncapi.invalid_action", rule: "ASYNC-D-03",
+      message: "the operation action is neither send nor receive",
+    };
+  }
   const channel = op.channel;
-  if (!channel || typeof (channel as unknown as Record<string, unknown>)["$ref"] === "string") return false;
+  if (!channel || typeof (channel as unknown as Record<string, unknown>)["$ref"] === "string") {
+    return {
+      status: "invalid", code: "asyncapi.dangling_channel_ref", rule: "ASYNC-D-03",
+      message: "the operation channel reference does not resolve",
+    };
+  }
   const httpVersion = op.bindings?.http?.bindingVersion;
-  if (httpVersion !== undefined && httpVersion !== "0.3.0") return false;
+  if (httpVersion !== undefined && httpVersion !== "0.3.0") {
+    return {
+      status: "excluded", code: "asyncapi.unsupported_http_binding_version", rule: "ASYNC-P-02",
+      message: "the HTTP operation binding version is outside revision 1",
+    };
+  }
   const wsVersion = channel.bindings?.ws?.bindingVersion;
-  if (wsVersion !== undefined && wsVersion !== "0.1.0") return false;
+  if (wsVersion !== undefined && wsVersion !== "0.1.0") {
+    return {
+      status: "excluded", code: "asyncapi.unsupported_websocket_binding_version", rule: "ASYNC-P-02",
+      message: "the WebSocket channel binding version is outside revision 1",
+    };
+  }
+  const protocols = new Set(
+    effectiveServers(doc, channel).map(({ server }) => server.protocol.toLowerCase()),
+  );
+  const hasHTTP = protocols.has("http") || protocols.has("https");
+  const hasWS = protocols.has("ws") || protocols.has("wss");
 
   if (op.action === "receive") {
-    const messages = authoringInputMessages(op, channel).filter(messageBindable);
-    if (messages.length === 0) return false;
-    const httpOK = Boolean(op.bindings?.http?.method?.trim()) && requiredPropertiesMayBeStrings(op.bindings?.http?.query);
-    const wsOK = op.reply === undefined && wsFieldsMayBeStrings(channel);
-    return httpOK || wsOK;
+    const messages = authoringInputMessages(op, channel).filter((message) => messageBindable(doc, message));
+    if (messages.length === 0) {
+      return {
+        status: "excluded", code: "asyncapi.no_bindable_message", rule: "ASYNC-P-03",
+        message: "the publish interaction has no message alternative revision 1 can carry",
+      };
+    }
+    const httpOK = hasHTTP
+      && Boolean(op.bindings?.http?.method?.trim())
+      && requiredPropertiesMayBeStrings(op.bindings?.http?.query)
+      && replyMessagesBindable(doc, op);
+    const wsOK = hasWS && op.reply === undefined && wsFieldsMayBeStrings(channel);
+    if (!httpOK && !wsOK) {
+      return {
+        status: "excluded", code: "asyncapi.no_faithful_protocol_cell", rule: "ASYNC-P-02",
+        message: "neither the HTTP publish nor WebSocket publish cell is faithfully representable",
+      };
+    }
+    return undefined;
   }
 
-  if (!wsFieldsMayBeStrings(channel)) return false;
-  if (Object.values(channel.parameters ?? {}).some((parameter) => typeof parameter.location === "string" && parameter.location !== "")) return false;
+  if (!hasWS) {
+    return {
+      status: "excluded", code: "asyncapi.no_faithful_protocol_cell", rule: "ASYNC-P-02",
+      message: "the operation's effective server set provides no WebSocket subscription cell",
+    };
+  }
+  if (!wsFieldsMayBeStrings(channel)) {
+    return {
+      status: "excluded", code: "asyncapi.protocol_fields_unrepresentable", rule: "ASYNC-P-04",
+      message: "required WebSocket protocol fields do not admit string values",
+    };
+  }
+  if (Object.values(channel.parameters ?? {}).some((parameter) => typeof parameter.location === "string" && parameter.location !== "")) {
+    return {
+      status: "excluded", code: "asyncapi.subscription_parameter_location", rule: "ASYNC-P-04",
+      message: "a subscription channel parameter declares a location revision 1 cannot preserve",
+    };
+  }
   const messages = governingMessages(op, channel);
-  if (messages.length === 0 || messages.some((message) => !messageBindable(message))) return false;
+  if (messages.length === 0) {
+    return {
+      status: "excluded", code: "asyncapi.no_resolved_messages", rule: "ASYNC-P-03",
+      message: "the subscription interaction has no resolved message declaration",
+    };
+  }
+  if (messages.some((message) => !messageBindable(doc, message))) {
+    return {
+      status: "excluded", code: "asyncapi.unbindable_subscription_message", rule: "ASYNC-P-03",
+      message: "a subscription message alternative uses carriage outside revision 1",
+    };
+  }
   try {
     decodeContentType(doc, messages, { configuration: { decode: "json" } });
-    return true;
-  } catch {
-    return false;
+    return undefined;
+  } catch (error: unknown) {
+    return {
+      status: "excluded", code: "asyncapi.ambiguous_subscription_content_type", rule: "ASYNC-P-05",
+      message: error instanceof Error ? error.message : String(error),
+    };
   }
 }
 
@@ -138,17 +233,37 @@ function authoringInputMessages(op: AsyncAPIOperation, channel: AsyncAPIChannel)
   return governingMessages(op, channel);
 }
 
-function messageBindable(message: AsyncAPIMessage): boolean {
+export function messageBindable(
+  doc: AsyncAPIDocument,
+  message: AsyncAPIMessage,
+): boolean {
   if (message.headers !== undefined) return false;
   const version = message.bindings?.http?.bindingVersion;
-  return version === undefined || version === "0.3.0";
+  if (version !== undefined && version !== "0.3.0") return false;
+  try {
+    supportedMessageContentType(messageEffectiveContentType(doc, message));
+    return true;
+  } catch {
+    return false;
+  }
 }
 
-function wsFieldsMayBeStrings(channel: AsyncAPIChannel): boolean {
+export function replyMessagesBindable(
+  doc: AsyncAPIDocument,
+  operation: AsyncAPIOperation,
+): boolean {
+  if (!operation.reply) return true;
+  const messages = operation.reply.messages?.length
+    ? operation.reply.messages
+    : Object.values(operation.reply.channel?.messages ?? {});
+  return messages.length > 0 && messages.every((message) => messageBindable(doc, message));
+}
+
+export function wsFieldsMayBeStrings(channel: AsyncAPIChannel): boolean {
   return requiredPropertiesMayBeStrings(channel.bindings?.ws?.query) && requiredPropertiesMayBeStrings(channel.bindings?.ws?.headers);
 }
 
-function requiredPropertiesMayBeStrings(schema: Record<string, unknown> | undefined): boolean {
+export function requiredPropertiesMayBeStrings(schema: Record<string, unknown> | undefined): boolean {
   if (!schema) return true;
   const required = Array.isArray(schema["required"]) ? schema["required"].filter((value): value is string => typeof value === "string") : [];
   const properties = schema["properties"] !== null && typeof schema["properties"] === "object" && !Array.isArray(schema["properties"])
@@ -165,16 +280,17 @@ function requiredPropertiesMayBeStrings(schema: Record<string, unknown> | undefi
   return true;
 }
 
-function operationPayloadSchema(op: AsyncAPIOperation, input: boolean): Record<string, unknown> | undefined {
+function operationPayloadSchema(doc: AsyncAPIDocument, op: AsyncAPIOperation, input: boolean): Record<string, unknown> | undefined {
   const channel = op.channel!;
   const messages = input
-    ? authoringInputMessages(op, channel).filter(messageBindable)
+    ? authoringInputMessages(op, channel).filter((message) => messageBindable(doc, message))
     : governingMessages(op, channel);
   return unionPayloadSchemas(messages);
 }
 
-function replyPayloadSchema(reply: AsyncAPIOperationReply): Record<string, unknown> | undefined {
-  const messages = (reply.messages?.length ? reply.messages : Object.values(reply.channel?.messages ?? {})).filter(messageBindable);
+function replyPayloadSchema(doc: AsyncAPIDocument, reply: AsyncAPIOperationReply): Record<string, unknown> | undefined {
+  const messages = (reply.messages?.length ? reply.messages : Object.values(reply.channel?.messages ?? {}))
+    .filter((message) => messageBindable(doc, message));
   return unionPayloadSchemas(messages);
 }
 

@@ -105,7 +105,7 @@ export function buildJsonPointerRef(path: string, method: string): string {
  * with no location has no base and must be self-contained: a relative
  * external $ref then fails with a readable error (absolute http(s) $refs
  * still resolve — they need no base). The artifact's own `openapi` field
- * discriminates the accepted lines (OAPI-P-01).
+ * discriminates the accepted editions (OAPI-P-01).
  *
  * String content parses as YAML 1.2 (JSON being a valid subset); duplicate
  * mapping keys are refused loudly by the YAML layer itself, satisfying the
@@ -145,14 +145,19 @@ export async function loadOpenAPIDocument(
     const doFetch = fileAwareFetch(fetchFn ?? fetch);
     const resp = await doFetch(location, { signal: options?.signal });
     if (!resp.ok) {
-      throw new Error(`failed to fetch ${location}: ${resp.status} ${resp.statusText}`);
+      throw new Error(
+        `failed to fetch ${location}: ${resp.status} ${resp.statusText}`,
+      );
     }
 
     let text: string;
     try {
       text = await resp.text();
     } catch (e: unknown) {
-      throw new Error(`failed to read response body from ${location}: ${errorMessage(e)}`, { cause: e });
+      throw new Error(
+        `failed to read response body from ${location}: ${errorMessage(e)}`,
+        { cause: e },
+      );
     }
 
     try {
@@ -182,7 +187,9 @@ export async function loadOpenAPIDocument(
   });
 }
 
-function fileAwareFetch(fallback: typeof globalThis.fetch): typeof globalThis.fetch {
+function fileAwareFetch(
+  fallback: typeof globalThis.fetch,
+): typeof globalThis.fetch {
   return async (input, init) => {
     const address = input instanceof Request ? input.url : input.toString();
     const url = new URL(address);
@@ -190,7 +197,9 @@ function fileAwareFetch(fallback: typeof globalThis.fetch): typeof globalThis.fe
     try {
       return new Response(await readFile(fileURLToPath(url)), { status: 200 });
     } catch (error: unknown) {
-      throw new Error(`failed to read ${address}: ${errorMessage(error)}`, { cause: error });
+      throw new Error(`failed to read ${address}: ${errorMessage(error)}`, {
+        cause: error,
+      });
     }
   };
 }
@@ -213,26 +222,34 @@ export function validateDocumentAddress(location: string): void {
 }
 
 /**
- * Discriminates the accepted lines per OAPI-P-01: the artifact's own
- * `openapi` field must declare 3.0.* or 3.1.*; any other value — a Swagger
- * 2.0 `swagger` field included — is refused loudly at load.
+ * Discriminates the exact accepted editions per OAPI-P-01. Patch-looking
+ * values outside the frozen set are not inferred compatible.
  */
 function checkAcceptedOpenAPIVersion(raw: unknown): void {
   const doc = raw as Record<string, unknown> | null;
   const v = doc && typeof doc === "object" ? doc["openapi"] : undefined;
   if (typeof v !== "string" || v === "") {
     throw new Error(
-      "document declares no `openapi` field: openbindings.openapi@1 accepts OpenAPI 3.0.x and 3.1.x documents only (OAPI-P-01; Swagger 2.0 is not accepted)",
+      "document declares no `openapi` field: openbindings.openapi@1 requires one of its exact accepted OpenAPI editions (OAPI-P-01; Swagger 2.0 is not accepted)",
     );
   }
-  const parts = v.split(".");
-  const mm = parts.length >= 2 ? `${parts[0]}.${parts[1]}` : v;
-  if (mm !== "3.0" && mm !== "3.1") {
+  if (!ACCEPTED_OPENAPI_VERSIONS.has(v)) {
     throw new Error(
-      `unsupported OpenAPI version "${v}": openbindings.openapi@1 accepts the 3.0.x and 3.1.x lines only (OAPI-P-01)`,
+      `unsupported OpenAPI version "${v}": openbindings.openapi@1 accepts exactly 3.0.0–3.0.4 and 3.1.0–3.1.2 (OAPI-P-01)`,
     );
   }
 }
+
+const ACCEPTED_OPENAPI_VERSIONS = new Set([
+  "3.0.0",
+  "3.0.1",
+  "3.0.2",
+  "3.0.3",
+  "3.0.4",
+  "3.1.0",
+  "3.1.1",
+  "3.1.2",
+]);
 
 /**
  * Rejects any external `$ref` fetch. Used to keep a content-only document
@@ -249,8 +266,10 @@ const blockExternalRefFetch: typeof globalThis.fetch = () => {
  * artifact has no base URI, so a relative reference is unresolvable by
  * definition (§6 — bundle before embedding).
  */
-function selfContainedRefFetch(real: typeof globalThis.fetch): typeof globalThis.fetch {
-  return ((input: RequestInfo | URL, init?: RequestInit) => {
+function selfContainedRefFetch(
+  real: typeof globalThis.fetch,
+): typeof globalThis.fetch {
+  return (input: RequestInfo | URL, init?: RequestInit) => {
     const url = input instanceof Request ? input.url : String(input);
     if (url.startsWith("http://") || url.startsWith("https://")) {
       return real(input, init);
@@ -258,7 +277,7 @@ function selfContainedRefFetch(real: typeof globalThis.fetch): typeof globalThis
     throw new Error(
       `reference "${url}" cannot resolve: embedded content with no co-present location has no base URI and must be self-contained (bundle the document before embedding, or set the source's location)`,
     );
-  });
+  };
 }
 
 /** Merges path-level and operation-level parameters, with operation parameters taking precedence. */

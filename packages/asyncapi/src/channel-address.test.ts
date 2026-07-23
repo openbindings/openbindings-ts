@@ -43,9 +43,13 @@ describe("channel without address", () => {
       info: { title: "t", version: "1.0.0" },
       servers: { test: { host: `127.0.0.1:${port}`, protocol: "http" } },
       // Deliberately no `address` on the channel.
-      channels: { notify: {} },
+      channels: { notify: { messages: { Msg: { contentType: "application/json" } } } },
       operations: {
-        notifyOp: { action: "receive" as const, channel: { $ref: "#/channels/notify" } },
+        notifyOp: {
+          action: "receive" as const,
+          channel: { $ref: "#/channels/notify" },
+          bindings: { http: { method: "POST" } },
+        },
       },
     };
   }

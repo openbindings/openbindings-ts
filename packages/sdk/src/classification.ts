@@ -15,6 +15,7 @@ import {
   ERR_ALREADY_CONSUMED,
   ERR_AUTH_REQUIRED,
   ERR_BINDING_NOT_FOUND,
+  ERR_BINDING_SELECTION_REQUIRED,
   ERR_CANCELLED,
   ERR_CONNECT_FAILED,
   ERR_EVENT_LIMIT_EXCEEDED,
@@ -97,6 +98,7 @@ export const CODE_CATEGORY: Record<string, Category> = {
   [ERR_CANCELLED]: "cancelled",
   [ERR_VALIDATION_FAILED]: "validation",
   [ERR_BINDING_NOT_FOUND]: "permanent",
+  [ERR_BINDING_SELECTION_REQUIRED]: "permanent",
   // Convention codes (recommended spellings for a category member).
   [ERR_AUTH_REQUIRED]: "auth",
   [ERR_PERMISSION_DENIED]: "auth",

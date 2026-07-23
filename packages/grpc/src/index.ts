@@ -6,6 +6,7 @@ import descriptorJSON from "protobufjs/google/protobuf/descriptor.json";
 import sourceContextJSON from "protobufjs/google/protobuf/source_context.json";
 import typeJSON from "protobufjs/google/protobuf/type.json";
 import { fromProtoJSON, toProtoJSON } from "./protojson.js";
+import { assertBoundMethodRange } from "./schema-range.js";
 import {
   InvocationError,
   InvocationImpl,
@@ -289,7 +290,9 @@ class NodeGrpcRuntime implements GrpcRuntime {
 /** Loads either embedded protobuf carriage accepted by openbindings.grpc@1. */
 export function loadProtobufSchema(content: unknown): protobuf.Root {
   if (typeof content === "string") {
-    const parsed = protobuf.parse(content, { keepCase: false });
+    // Preserve the declared proto field name alongside its canonical
+    // lowerCamel/json_name spelling. ProtoJSON accepts both spellings.
+    const parsed = protobuf.parse(content, { keepCase: true });
     for (const imported of parsed.imports ?? []) {
       if (!imported.startsWith("google/protobuf/")) {
         throw new Error(`embedded .proto content may import only google/protobuf/* files; ${JSON.stringify(imported)} is refused`);
@@ -368,6 +371,7 @@ function resolvedMethod(root: protobuf.Root, serviceName: string, methodName: st
     }
     const method = service.methods[methodName];
     if (!method) throw new Error(`method ${serviceName}/${methodName} not found in schema`);
+    assertBoundMethodRange(root, method);
     const requestType = root.lookupType(method.requestType);
     const responseType = root.lookupType(method.responseType);
     const kind: GrpcInteractionKind = method.requestStream

@@ -6,12 +6,12 @@
  */
 import { describe, it, expect } from "vitest";
 // CREDENTIAL_FIELDS is the single credential registry (imported from the
-// internal module, not the public barrel) so the drift guard iterates the
-// SAME source scopeContext and redactContext consume.
+// internal module, not the public barrel) so the drift guard iterates every
+// standard credential field derived from the scoping family table.
 import { redactContext, CREDENTIAL_FIELDS } from "./context.js";
 
 describe("redactContext", () => {
-  it("redacts flat, scheme-scoped, and basic credentials; keeps non-secrets", () => {
+  it("redacts flat, scheme-scoped, and basic credentials; keeps unclassified values", () => {
     const red = redactContext({
       bearerToken: "secret",
       apiKey: "flat-secret",
@@ -53,11 +53,11 @@ describe("redactContext", () => {
       const sentinel = `SENTINEL_${field}_9f3ac1`;
       const out = JSON.stringify(redactContext({ [field]: shaped(field, sentinel), plainCfg: "keepme" }));
       expect(out, `redactContext leaked a ${field} secret`).not.toContain(sentinel);
-      expect(out, `redactContext dropped non-secret config for ${field}`).toContain("keepme");
+      expect(out, `redactContext dropped an unclassified pass-through value for ${field}`).toContain("keepme");
     }
   });
 
-  it("keeps the non-secret structure of nested credential fields", () => {
+  it("keeps structural identifiers of nested credential fields", () => {
     const red = redactContext({
       apiKeys: { stripe: "sk" },
       basic: { username: "alice", password: "pw" },

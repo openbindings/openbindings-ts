@@ -104,8 +104,7 @@ export interface AsyncAPIOperationBindings {
 }
 
 /** The AsyncAPI HTTP operation binding: its `method` selects the request
- *  method (§8 — authoritative where it speaks; where silent, POST for a
- *  publish, GET for an SSE subscription). */
+ *  method and is required for revision 1's HTTP publish cell (§8). */
 export interface AsyncAPIHTTPOperationBinding {
   method?: string;
   query?: Record<string, unknown>;

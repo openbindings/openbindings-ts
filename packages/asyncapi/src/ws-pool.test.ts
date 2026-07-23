@@ -1,4 +1,4 @@
-import { WebSocketServer } from "ws";
+import { WebSocket as ServerWebSocket, WebSocketServer } from "ws";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { WSPool } from "./ws-pool.js";
 import { AsyncAPIInvoker } from "./invoker.js";
@@ -73,6 +73,48 @@ describe("WSPool credentialKey partitioning", () => {
   });
 });
 
+describe("WSPool UTF-8 frame preservation", () => {
+  it("decodes a UTF-8 binary frame without JavaScript object stringification", async () => {
+    const { wss, port } = await startServer();
+    const connected = new Promise<ServerWebSocket>((resolve) => wss.once("connection", resolve));
+    const pool = new WSPool();
+    try {
+      const pooled = await pool.acquire(`ws://127.0.0.1:${port}`, "/binary");
+      const peer = await connected;
+      const received = new Promise<{ data: string; error?: Error }>((resolve) => {
+        pooled.onMessage((data, error) => resolve({ data, error }));
+      });
+      peer.send(Buffer.from('{"ok":true}', "utf8"), { binary: true });
+      await expect(received).resolves.toEqual({ data: '{"ok":true}', error: undefined });
+      pooled.release();
+    } finally {
+      pool.closeAll();
+      wss.close();
+    }
+  });
+
+  it("surfaces an invalid UTF-8 binary frame instead of replacement-decoding it", async () => {
+    const { wss, port } = await startServer();
+    const connected = new Promise<ServerWebSocket>((resolve) => wss.once("connection", resolve));
+    const pool = new WSPool();
+    try {
+      const pooled = await pool.acquire(`ws://127.0.0.1:${port}`, "/invalid");
+      const peer = await connected;
+      const received = new Promise<Error | undefined>((resolve) => {
+        pooled.onMessage((_data, error) => resolve(error));
+      });
+      peer.send(Buffer.from([0xc3, 0x28]), { binary: true });
+      await expect(received).resolves.toEqual(
+        expect.objectContaining({ message: "WebSocket message payload is not valid UTF-8" }),
+      );
+      pooled.release();
+    } finally {
+      pool.closeAll();
+      wss.close();
+    }
+  });
+});
+
 // ---------------------------------------------------------------------------
 // AsyncAPIInvoker: end-to-end, mirrors the Go SDK's
 // TestWSPool_DifferentCredentialsNeverShareConnection.
@@ -104,13 +146,17 @@ describe("AsyncAPIInvoker WebSocket pool credential isolation (real ws server)",
       info: { title: "WS credential pool test", version: "1.0.0" },
       servers: { test: { host: `127.0.0.1:${port}`, protocol: "ws" } },
       channels: {
-        stream: { address: "/", messages: { Msg: { payload: { type: "object" } } } },
+        stream: {
+          address: "/",
+          messages: { Msg: { contentType: "application/json", payload: { type: "object" } } },
+        },
       },
       operations: {
         publish: {
           action: "receive" as const,
           channel: { $ref: "#/channels/stream" },
           messages: [{ $ref: "#/channels/stream/messages/Msg" }],
+          security: [{ type: "http", scheme: "bearer" }],
         },
       },
     };
@@ -120,7 +166,7 @@ describe("AsyncAPIInvoker WebSocket pool credential isolation (real ws server)",
     const call = invoker.invokeBinding({
       source: { bindingSpec: BINDING_SPEC, content: spec() },
       ref: "#/operations/publish",
-      context: { bearerToken },
+      context: { bearerToken, configuration: { websocketMessageType: "text" } },
     });
     await call.write({ seq });
     await call.close();
@@ -149,7 +195,10 @@ describe("AsyncAPIInvoker WebSocket pool credential isolation (real ws server)",
       const call = invoker.invokeBinding({
         source: { bindingSpec: BINDING_SPEC, content: spec() },
         ref: "#/operations/publish",
-        context: { bearerToken: "tenant-zero" },
+        context: {
+          bearerToken: "tenant-zero",
+          configuration: { websocketMessageType: "text" },
+        },
       });
       await call.close();
       await expect(call.closed).rejects.toMatchObject({ code: "ERR_MISSING_INPUT" });
@@ -200,15 +249,11 @@ describe("AsyncAPIInvoker no in-band auth (ASYNC-P-07)", () => {
   }
 
   it("a declared bearer credential rides the upgrade request, never a message frame", async () => {
-    // The server echoes every frame back, so the first output proves no
-    // auth frame preceded the caller's own control frame.
     const { wss, port } = await startServer();
     let upgradeAuth: string | undefined;
     wss.on("connection", (ws, req) => {
       upgradeAuth = req.headers.authorization;
-      ws.on("message", (data) => {
-        ws.send(data.toString());
-      });
+      ws.send(JSON.stringify({ hello: true }));
     });
 
     const invoker = new AsyncAPIInvoker();
@@ -218,13 +263,11 @@ describe("AsyncAPIInvoker no in-band auth (ASYNC-P-07)", () => {
         ref: "#/operations/subscribe",
         context: { bearerToken: "test-bearer-xyz" },
       });
-      await call.write({ hello: true });
       let first: unknown;
       for await (const m of call.outputs) {
         first = m;
         break; // abandoning the sequence cancels the invocation
       }
-      expect(first).not.toHaveProperty("bearerToken");
       expect(first).toEqual({ hello: true });
       expect(upgradeAuth).toBe("Bearer test-bearer-xyz");
       await expect(call.closed).rejects.toMatchObject({ code: "ERR_CANCELLED" });
@@ -236,10 +279,10 @@ describe("AsyncAPIInvoker no in-band auth (ASYNC-P-07)", () => {
 
   it("never volunteers the token into the message stream when no bearer-family scheme is declared", async () => {
     const { wss, port } = await startServer();
-    wss.on("connection", (ws) => {
-      ws.on("message", (data) => {
-        ws.send(data.toString());
-      });
+    let upgradeAuth: string | undefined;
+    wss.on("connection", (ws, req) => {
+      upgradeAuth = req.headers.authorization;
+      ws.send(JSON.stringify({ n: 1 }));
     });
 
     const invoker = new AsyncAPIInvoker();
@@ -249,62 +292,14 @@ describe("AsyncAPIInvoker no in-band auth (ASYNC-P-07)", () => {
         ref: "#/operations/subscribe",
         context: { bearerToken: "tok" },
       });
-      await call.write({ n: 1 });
       let first: unknown;
       for await (const m of call.outputs) {
         first = m;
         break;
       }
       expect(first).toEqual({ n: 1 });
+      expect(upgradeAuth).toBeUndefined();
       await expect(call.closed).rejects.toMatchObject({ code: "ERR_CANCELLED" });
-    } finally {
-      invoker.close();
-      wss.close();
-    }
-  });
-
-  it("sends no auth frame on a fresh dial or a pooled reuse; same-credential subscriptions share one upgrade", async () => {
-    const { wss, port } = await startServer();
-    let upgrades = 0;
-    const frames: Array<Record<string, unknown>> = [];
-    const waiters: Array<() => void> = [];
-    wss.on("connection", (ws) => {
-      upgrades++;
-      ws.on("message", (data) => {
-        frames.push(JSON.parse(data.toString()) as Record<string, unknown>);
-        waiters.splice(0).forEach((w) => w());
-      });
-    });
-    const nextFrame = async (count: number) => {
-      while (frames.length < count) {
-        await new Promise<void>((r) => waiters.push(r));
-      }
-    };
-
-    const invoker = new AsyncAPIInvoker();
-    try {
-      const source = { bindingSpec: BINDING_SPEC, content: subscribeSpec(port, true) };
-      const bindCtx = { bearerToken: "tok" };
-
-      const sub1 = invoker.invokeBinding({ source, ref: "#/operations/subscribe", context: bindCtx });
-      sub1.closed.catch(() => {});
-      await sub1.write({ n: 1 });
-      await nextFrame(1);
-      expect(frames[0]).not.toHaveProperty("bearerToken");
-      expect(frames[0]).toEqual({ n: 1 });
-      await sub1.cancel();
-
-      // Second subscription reuses the pooled socket (same credential
-      // identity): its first frame is likewise its own control frame.
-      const sub2 = invoker.invokeBinding({ source, ref: "#/operations/subscribe", context: bindCtx });
-      sub2.closed.catch(() => {});
-      await sub2.write({ n: 2 });
-      await nextFrame(2);
-      expect(frames[1]).not.toHaveProperty("bearerToken");
-      expect(frames[1]).toEqual({ n: 2 });
-      await sub2.cancel();
-
-      expect(upgrades).toBe(1);
     } finally {
       invoker.close();
       wss.close();
@@ -325,7 +320,10 @@ describe("AsyncAPIInvoker no in-band auth (ASYNC-P-07)", () => {
       const call = invoker.invokeBinding({
         source: { bindingSpec: BINDING_SPEC, content: subscribeSpec(port, true) },
         ref: "#/operations/publish",
-        context: { bearerToken: "tok" },
+        context: {
+          bearerToken: "tok",
+          configuration: { websocketMessageType: "text" },
+        },
       });
       await call.write({ seq: 0 });
       await call.close();

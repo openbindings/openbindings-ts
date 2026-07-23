@@ -35,6 +35,7 @@ const README_CATEGORIES: Record<string, Category> = {
   ERR_CANCELLED: "cancelled",
   ERR_VALIDATION_FAILED: "validation",
   ERR_BINDING_NOT_FOUND: "permanent",
+  ERR_BINDING_SELECTION_REQUIRED: "permanent",
   // Convention codes.
   ERR_AUTH_REQUIRED: "auth",
   ERR_PERMISSION_DENIED: "auth",

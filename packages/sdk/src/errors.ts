@@ -14,6 +14,14 @@ export class NoSynthesizerError extends Error {
   }
 }
 
+/** Thrown when the selected synthesizer has no durable coverage capability. */
+export class SynthesisCoverageUnsupportedError extends Error {
+  constructor(bindingSpec: string) {
+    super(`openbindings: synthesis coverage unsupported for format: ${bindingSpec}`);
+    this.name = "SynthesisCoverageUnsupportedError";
+  }
+}
+
 /** Thrown when the requested operation does not exist in the interface. */
 export class OperationNotFoundError extends Error {
   constructor(operation: string, searched?: string[]) {
@@ -39,6 +47,16 @@ export class BindingNotFoundError extends Error {
       `openbindings: no binding for operation: ${operation}${detail ? ` — ${detail}` : ""}`,
     );
     this.name = "BindingNotFoundError";
+  }
+}
+
+/** Thrown when several invocable bindings remain and the caller must choose. */
+export class BindingSelectionRequiredError extends Error {
+  constructor(operation: string, count: number) {
+    super(
+      `openbindings: binding selection required: operation ${JSON.stringify(operation)} has ${count} invocable bindings; choose one with bindingKey or context.configuration.selection`,
+    );
+    this.name = "BindingSelectionRequiredError";
   }
 }
 

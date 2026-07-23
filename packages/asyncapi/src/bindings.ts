@@ -3,10 +3,10 @@
  * (openbindings.asyncapi@1 §8, ASYNC-P-02): an http operation binding's
  * `method` selects the request method; a websockets channel binding's
  * `method`, `query`, and `headers` govern the upgrade request, with
- * declared query and header values supplied like address parameters (§9.2)
- * and any unsatisfied required declaration a pre-dispatch refusal. Where
- * bindings are silent, the cell defaults apply (POST for a unary publish,
- * GET for an SSE subscription, a GET upgrade). Mirrors the Go SDK's
+ * declared query and header values supplied through `protocolFields`
+ * (§9.2), and any unsatisfied required declaration a pre-dispatch refusal.
+ * Revision 1 requires the HTTP publish method instead of inventing one; the
+ * WebSocket protocol itself fixes the upgrade method. Mirrors the Go SDK's
  * bindings.go.
  */
 
@@ -14,8 +14,8 @@ import type { AsyncAPIChannel, AsyncAPIOperation } from "./asyncapi-types.js";
 import { contextConfiguration } from "@openbindings/sdk";
 
 /**
- * Returns the request method for an http-protocol cell: the http operation
- * binding's `method` where declared, else the cell's default.
+ * Returns the request method for an http-protocol cell. The default
+ * parameter remains only for the package's unreachable legacy SSE helper.
  */
 export function requestMethod(op: AsyncAPIOperation | undefined, cellDefault: string): string {
   const declared = op?.bindings?.http?.method;
@@ -85,8 +85,8 @@ export function resolveHTTPQuery(
 export function resolveWSUpgrade(
   ch: AsyncAPIChannel | undefined,
   channelName: string,
-  params: Record<string, string> | undefined,
-  ctxHeaders: Record<string, string>,
+  queryFields: Record<string, string> | undefined,
+  headerFields: Record<string, string> | undefined,
 ): WSUpgrade {
   const up: WSUpgrade = {};
   const b = ch?.bindings?.ws;
@@ -100,14 +100,14 @@ export function resolveWSUpgrade(
 
   up.query = schemaPropertyValues(
     b.query,
-    params,
+    queryFields,
     undefined,
     `channel ${JSON.stringify(channelName)}: websockets binding query parameter`,
   );
   up.headers = schemaPropertyValues(
     b.headers,
-    params,
-    ctxHeaders,
+    headerFields,
+    undefined,
     `channel ${JSON.stringify(channelName)}: websockets binding header`,
   );
   return up;

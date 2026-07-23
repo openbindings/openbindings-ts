@@ -85,7 +85,7 @@ export function resolveDeliveryUnitLimit(
  * Optional, per-call inputs to `OperationInvoker.invoke`. All fields are
  * usually omitted: invocation context is normally resolved by the invoker's
  * contextResolver via the reactive CONTEXT_REQUIRED path, and the binding is
- * normally selected by the operation-invoker contract's default policy. The
+ * selected automatically only when a sole invocable candidate remains. The
  * operation and interface are not here: the
  * operation comes from the {@link OperationSignature} and the interface is a
  * positional argument, so one signature works against any interface.
@@ -194,6 +194,224 @@ export interface SynthesizerWarning {
   code: string;
   message: string;
   path?: string;
+  details?: Record<string, unknown>;
+}
+
+/** Granularity of one synthesis coverage entry. */
+export type SynthesisCoverageScope = "target" | "alternative" | "projection";
+
+/** Durable disposition of one source interaction unit. */
+export type SynthesisCoverageStatus =
+  | "represented"
+  | "excluded"
+  | "invalid"
+  | "lossy"
+  | "implementation-unsupported";
+
+/**
+ * Disposition of one addressable target or independently selectable source
+ * alternative observed by the same call that produced the synthesized OBI.
+ */
+export interface SynthesisCoverageEntry {
+  /** Zero-based index of the input source containing this interaction unit. */
+  sourceIndex: number;
+  /** Emitted source key; required for represented and lossy entries. */
+  sourceKey?: string;
+  /** Stable source-local identifier; need not be a conformant binding ref. */
+  sourceRef: string;
+  scope: SynthesisCoverageScope;
+  status: SynthesisCoverageStatus;
+  /** Required for represented and lossy entries. */
+  operationKey?: string;
+  /** Emitted binding key; required for represented and lossy entries. */
+  bindingKey?: string;
+  /** Required for represented and lossy entries; empty denotes a binding with omitted ref. */
+  bindingRef?: string;
+  /** Stable family-namespaced code; required for non-represented entries. */
+  reasonCode?: string;
+  /** Governing binding-specification rule or section, when applicable. */
+  rule?: string;
+  /** Human-readable explanation; required for non-represented entries. */
+  message?: string;
+  /** Named runtime prerequisites that do not make a represented unit partial. */
+  requirements?: string[];
+  /** Family-specific structured evidence. */
+  details?: Record<string, unknown>;
+}
+
+/** Durable coverage evidence for one synthesis observation. */
+export interface SynthesisCoverage {
+  entries: SynthesisCoverageEntry[];
+  /** True only when the governing family inventory is completely accounted for. */
+  exhaustive: boolean;
+  /** Derived: exhaustive and every upstream-valid unit is represented. */
+  fullyRepresented: boolean;
+  /** Explains what may be missing when exhaustive is false. */
+  limitation?: SynthesisCoverageLimitation;
+}
+
+/** Machine-readable evidence for a non-exhaustive synthesis inventory. */
+export interface SynthesisCoverageLimitation {
+  code: string;
+  message: string;
+  details?: Record<string, unknown>;
+}
+
+/** A creation-time-sound OBI and coverage evidence from the same observation. */
+export interface SynthesizeResult {
+  interface: OBInterface;
+  coverage: SynthesisCoverage;
+}
+
+const SYNTHESIS_REASON_CODE = /^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)+$/;
+
+/**
+ * Validates durable coverage evidence against an emitted OBI and derives
+ * fullyRepresented. Binding-family synthesizers call this after
+ * finalizeSynthesis at the same observation boundary.
+ */
+export function finalizeSynthesisCoverage(
+  iface: OBInterface,
+  entries: SynthesisCoverageEntry[],
+  exhaustive: boolean,
+  limitation: SynthesisCoverageLimitation | undefined = exhaustive
+    ? undefined
+    : {
+        code: "synthesis.inventory_incomplete",
+        message: "the implementation could not establish that its source interaction inventory was exhaustive",
+      },
+): SynthesizeResult {
+  validateInterface(iface);
+  if (exhaustive && limitation) {
+    throw new Error("exhaustive synthesis coverage must not carry a limitation");
+  }
+  if (!exhaustive) {
+    if (!limitation) {
+      throw new Error("non-exhaustive synthesis coverage requires a limitation");
+    }
+    if (!SYNTHESIS_REASON_CODE.test(limitation.code) || !limitation.message) {
+      throw new Error("synthesis coverage limitation requires a valid code and message");
+    }
+  }
+  const normalizedEntries = entries.map((entry) => ({ ...entry }));
+  const seen = new Set<string>();
+  let fullyRepresented = exhaustive;
+
+  for (const [index, entry] of normalizedEntries.entries()) {
+    if (!Number.isInteger(entry.sourceIndex) || entry.sourceIndex < 0) {
+      throw new Error(`synthesis coverage entry ${index} has invalid sourceIndex`);
+    }
+    if (!entry.sourceRef) {
+      throw new Error(`synthesis coverage entry ${index} has empty sourceRef`);
+    }
+    if (entry.scope !== "target" && entry.scope !== "alternative" && entry.scope !== "projection") {
+      throw new Error(`synthesis coverage entry ${index} has invalid scope`);
+    }
+    const key = `${entry.sourceIndex}\0${entry.scope}\0${entry.sourceRef}`;
+    if (seen.has(key)) {
+      throw new Error(`duplicate synthesis coverage entry for source ${entry.sourceIndex} ${entry.scope} ${JSON.stringify(entry.sourceRef)}`);
+    }
+    seen.add(key);
+
+    const requirements = new Set<string>();
+    for (const requirement of entry.requirements ?? []) {
+      if (!requirement) throw new Error(`synthesis coverage entry ${index} has an empty requirement`);
+      if (requirements.has(requirement)) {
+        throw new Error(`synthesis coverage entry ${index} repeats requirement ${JSON.stringify(requirement)}`);
+      }
+      requirements.add(requirement);
+    }
+
+    if (entry.status === "represented" || entry.status === "lossy") {
+      if (!entry.operationKey || entry.bindingRef === undefined) {
+        throw new Error(`${entry.status} synthesis coverage entry ${index} requires operationKey and bindingRef`);
+      }
+      if (entry.status === "represented" && entry.reasonCode) {
+        throw new Error(`represented synthesis coverage entry ${index} must not carry reasonCode`);
+      }
+      if (!Object.hasOwn(iface.operations, entry.operationKey)) {
+        throw new Error(`${entry.status} synthesis coverage entry ${index} names missing operation ${JSON.stringify(entry.operationKey)}`);
+      }
+      if (!entry.bindingKey) {
+        const matches = Object.entries(iface.bindings ?? {}).filter(
+          ([, binding]) =>
+            binding.operation === entry.operationKey
+            && (binding.ref ?? "") === entry.bindingRef,
+        );
+        if (matches.length > 1) {
+          throw new Error(`${entry.status} synthesis coverage entry ${index} matches several bindings; bindingKey is required to disambiguate`);
+        }
+        entry.bindingKey = matches[0]?.[0];
+      }
+      const matchingBinding = entry.bindingKey
+        ? iface.bindings?.[entry.bindingKey]
+        : undefined;
+      if (
+        !matchingBinding
+        || matchingBinding.operation !== entry.operationKey
+        || (matchingBinding.ref ?? "") !== entry.bindingRef
+      ) {
+        throw new Error(`${entry.status} synthesis coverage entry ${index} has no matching binding for operation ${JSON.stringify(entry.operationKey)} and ref ${JSON.stringify(entry.bindingRef)}`);
+      }
+      entry.sourceKey ??= matchingBinding.source;
+      if (matchingBinding.source !== entry.sourceKey) {
+        throw new Error(`${entry.status} synthesis coverage entry ${index} binding ${JSON.stringify(entry.bindingKey)} uses source ${JSON.stringify(matchingBinding.source)}, not ${JSON.stringify(entry.sourceKey)}`);
+      }
+      if (!iface.sources || !Object.hasOwn(iface.sources, entry.sourceKey)) {
+        throw new Error(`${entry.status} synthesis coverage entry ${index} names missing source ${JSON.stringify(entry.sourceKey)}`);
+      }
+      if (entry.status === "represented") continue;
+    }
+
+    if (
+      entry.status !== "excluded"
+      && entry.status !== "invalid"
+      && entry.status !== "lossy"
+      && entry.status !== "implementation-unsupported"
+    ) {
+      throw new Error(`synthesis coverage entry ${index} has invalid status`);
+    }
+    if (!entry.reasonCode || !SYNTHESIS_REASON_CODE.test(entry.reasonCode)) {
+      throw new Error(`synthesis coverage entry ${index} has invalid reasonCode ${JSON.stringify(entry.reasonCode)}`);
+    }
+    if (!entry.message) {
+      throw new Error(`synthesis coverage entry ${index} requires a message`);
+    }
+    if (entry.status !== "invalid") fullyRepresented = false;
+  }
+
+  return {
+    interface: iface,
+    coverage: {
+      entries: normalizedEntries,
+      exhaustive,
+      fullyRepresented,
+      ...(limitation ? { limitation } : {}),
+    },
+  };
+}
+
+/**
+ * Produces one represented target entry per emitted binding. A family may use
+ * this as exhaustive evidence only after separately proving that its upstream
+ * interaction inventory maps one-to-one to bindings.
+ */
+export function representedCoverageEntries(
+  iface: OBInterface,
+  sourceIndex: number,
+): SynthesisCoverageEntry[] {
+  return Object.entries(iface.bindings ?? {})
+    .sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)
+    .map(([bindingKey, binding]) => ({
+      sourceIndex,
+      sourceKey: binding.source,
+      sourceRef: binding.ref ?? "",
+      scope: "target" as const,
+      status: "represented" as const,
+      operationKey: binding.operation,
+      bindingKey,
+      bindingRef: binding.ref ?? "",
+    }));
 }
 
 /** Describes a binding specification supported by an invoker, by exact identifier. */
@@ -221,4 +439,15 @@ export interface SourceInspection {
    * When false, additional targets may exist that were not enumerated.
    */
   exhaustive: boolean;
+  /** Required when exhaustive is false. */
+  limitation?: InspectionLimitation;
+}
+
+/** Explains why a source inspection is not exhaustive. */
+export interface InspectionLimitation {
+  /** Stable namespaced reason code. */
+  code: string;
+  /** Human-readable explanation of what may be missing and why. */
+  message: string;
+  details?: Record<string, unknown>;
 }

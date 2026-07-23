@@ -23,6 +23,11 @@ unary and carries exactly one JSON value verbatim. Because Connect provides no
 reflection lane, synthesis and source inspection require content rather than
 inventing a method set.
 
+Schema-mode synthesis uses the same directional ProtoJSON projection as the
+gRPC package: input aliases and null-unset semantics, canonical output names,
+recursive `$defs`/`$ref`, exact `oneof` constraints, declared map value/key
+shapes, base64 bytes, and precision-preserving 64-bit string forms.
+
 Refs are exact `package.Service/Method` names. Unary uses `application/json`;
 streaming uses Connect envelopes and an END_STREAM verdict. The protocol's
 classification is authoritative. Explicitly named leading metadata may be

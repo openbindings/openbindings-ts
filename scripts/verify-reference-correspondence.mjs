@@ -20,6 +20,9 @@ for (const family of matrix.families) {
   const declaration = expected.get(family.bindingSpec);
   if (!declaration) throw new Error(`matrix contains unknown family ${family.bindingSpec}`);
   const [directory, invoker, synthesizer] = declaration;
+  if (!family.roles.includes("coverageSynthesizer")) {
+    throw new Error(`${family.bindingSpec} omits the coverageSynthesizer role`);
+  }
   if (family.typescript.invoker !== invoker || family.typescript.synthesizer !== synthesizer) {
     throw new Error(`${family.bindingSpec} TypeScript names diverge from exported correspondence`);
   }
@@ -32,7 +35,7 @@ for (const family of matrix.families) {
   for (const className of [invoker, synthesizer]) {
     if (!source.includes(`export class ${className}`)) throw new Error(`${family.bindingSpec} does not export ${className}`);
   }
-  for (const method of ["bindingSpecs", "invokeBinding", "synthesizeInterface", "inspectSource"]) {
+  for (const method of ["bindingSpecs", "invokeBinding", "synthesizeInterface", "synthesizeInterfaceWithCoverage", "inspectSource"]) {
     if (!source.includes(`${method}(`) && !source.includes(`${method}<`)) throw new Error(`${family.bindingSpec} lacks ${method}`);
   }
 
@@ -49,7 +52,7 @@ for (const family of matrix.families) {
   for (const typeName of ["Invoker", "Synthesizer"]) {
     if (!goSource.includes(`type ${typeName} struct`)) throw new Error(`${family.bindingSpec} does not export Go ${typeName}`);
   }
-  for (const method of ["BindingSpecs", "InvokeBinding", "SynthesizeInterface", "InspectSource"]) {
+  for (const method of ["BindingSpecs", "InvokeBinding", "SynthesizeInterface", "SynthesizeInterfaceWithCoverage", "InspectSource"]) {
     if (!goSource.includes(`) ${method}(`)) throw new Error(`${family.bindingSpec} lacks Go ${method}`);
   }
   expected.delete(family.bindingSpec);

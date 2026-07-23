@@ -35,7 +35,7 @@ describe("Usage authoring and expanded behavior", () => {
       const iface = await synth.synthesizeInterface({ sources: [{ bindingSpec: BINDING_SPEC, location: path }] });
       const inspection = await synth.inspectSource({ bindingSpec: BINDING_SPEC, location: path });
       expect(iface.sources?.default).toEqual({ bindingSpec: BINDING_SPEC, content });
-      expect(inspection.targets.map((target) => target.ref)).toEqual(["run"]);
+      expect(inspection.targets.map((target) => target.ref)).toEqual(["", "run"]);
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
@@ -46,8 +46,8 @@ describe("Usage authoring and expanded behavior", () => {
     const synth = new UsageSynthesizer();
     const iface = await synth.synthesizeInterface({ sources: [source] });
     const inspection = await synth.inspectSource(source);
-    expect(inspection.targets.map((target) => target.ref)).toEqual(["db", "db run"]);
-    expect(Object.values(iface.bindings ?? {}).map((binding) => binding.ref ?? "").sort()).toEqual(["db", "db run"]);
+    expect(inspection.targets.map((target) => target.ref)).toEqual(["", "db", "db run"]);
+    expect(Object.values(iface.bindings ?? {}).map((binding) => binding.ref ?? "").sort()).toEqual(["", "db", "db run"]);
     expect(iface.operations["db.run"]?.input).toMatchObject({
       type: "object",
       properties: { profile: { type: "string" }, force: { type: "boolean" }, file: { type: "string" } },
@@ -63,6 +63,103 @@ describe("Usage authoring and expanded behavior", () => {
     expect(iface.operations).toEqual({});
     expect(iface.bindings).toEqual({});
     expect(inspection).toEqual({ targets: [], exhaustive: true });
+  });
+
+  it("accounts for the root and every exact command-alias path", async () => {
+    const content = `bin "tool"
+flag "--profile <name>" global=#true
+cmd "database" {
+  alias "db"
+  cmd "run" {
+    alias "r"
+    flag "--force"
+  }
+}
+`;
+    const source = { bindingSpec: BINDING_SPEC, content };
+    const synth = new UsageSynthesizer();
+    const result = await synth.synthesizeInterfaceWithCoverage({ sources: [source] });
+    const refs = Object.values(result.interface.bindings ?? {})
+      .map((binding) => binding.ref ?? "")
+      .sort();
+    expect(refs).toEqual([
+      "",
+      "database",
+      "database r",
+      "database run",
+      "db",
+      "db r",
+      "db run",
+    ]);
+    expect(result.coverage).toMatchObject({
+      exhaustive: true,
+      fullyRepresented: true,
+    });
+    expect(result.coverage.entries.map((entry) => entry.sourceRef).sort()).toEqual([
+      "<root>",
+      ...refs.filter(Boolean),
+    ]);
+    expect(result.interface.operations.tool?.input).toMatchObject({
+      properties: { profile: { type: "string" } },
+    });
+  });
+
+  it("refuses ambiguous sibling spellings without discarding unique alternatives", async () => {
+    const content = `bin "tool"
+cmd "x"
+cmd "beta" {
+  alias "x"
+}
+`;
+    const source = { bindingSpec: BINDING_SPEC, content };
+    const synth = new UsageSynthesizer();
+    const result = await synth.synthesizeInterfaceWithCoverage({ sources: [source] });
+    expect(Object.values(result.interface.bindings ?? {}).map((binding) => binding.ref ?? "").sort())
+      .toEqual(["", "beta"]);
+    expect(result.coverage.fullyRepresented).toBe(false);
+    expect(result.coverage.entries).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        sourceRef: "ambiguous-ref:x",
+        scope: "alternative",
+        status: "excluded",
+        reasonCode: "usage.ambiguous_command_spelling",
+      }),
+      expect.objectContaining({
+        sourceRef: "command:x",
+        scope: "target",
+        status: "excluded",
+        reasonCode: "usage.no_unique_command_ref",
+      }),
+    ]));
+
+    const invocation = new UsageInvoker({
+      executor: async () => { throw new Error("ambiguous ref must not dispatch"); },
+    }).invokeBinding({ source, ref: "x" });
+    await invocation.close();
+    await expect(single(invocation.outputs)).rejects.toThrow(/matches 2 sibling commands/);
+  });
+
+  it("does not count navigation-only groups as interactions and still covers descendants", async () => {
+    const content = `bin "tool"
+cmd "group" subcommand_required=#true {
+  alias "g"
+  cmd "run"
+}
+`;
+    const result = await new UsageSynthesizer().synthesizeInterfaceWithCoverage({
+      sources: [{ bindingSpec: BINDING_SPEC, content }],
+    });
+    expect(result.coverage.fullyRepresented).toBe(true);
+    expect(result.coverage.entries).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        sourceRef: "g run",
+        status: "represented",
+      }),
+    ]));
+    expect(result.coverage.entries).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ sourceRef: "group" }),
+      expect.objectContaining({ sourceRef: "g" }),
+    ]));
   });
 
   it("applies ancestor globals and the text decode convention", async () => {

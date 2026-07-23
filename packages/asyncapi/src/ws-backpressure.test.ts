@@ -29,7 +29,10 @@ function spec(port: number) {
     info: { title: "WS backpressure test", version: "1.0.0" },
     servers: { test: { host: `127.0.0.1:${port}`, protocol: "ws" as const } },
     channels: {
-      stream: { address: "/", messages: { Msg: { payload: { type: "object" } } } },
+      stream: {
+        address: "/",
+        messages: { Msg: { contentType: "application/json", payload: { type: "object" } } },
+      },
     },
     operations: {
       subscribe: {
@@ -76,12 +79,7 @@ describe("WS receive backpressure", { timeout: 30_000 }, () => {
       });
 
       wss.on("connection", (ws) => {
-        // Wait for the client's first frame: guarantees the subscription's
-        // onMessage handler is registered (it's registered, synchronously,
-        // strictly before the input pump that could ever get a frame out to
-        // the socket) before the flood starts, so no early frame is lost to
-        // a race with subscription setup.
-        ws.once("message", () => {
+        setTimeout(() => {
           for (let i = 0; i < floodCount; i++) {
             ws.send(JSON.stringify({ n: i }));
           }
@@ -89,7 +87,7 @@ describe("WS receive backpressure", { timeout: 30_000 }, () => {
           // run ends in a visible assertion failure, never a parked drain.
           ws.close();
           resolveFloodDone();
-        });
+        }, 20);
       });
 
       const invoker = new AsyncAPIInvoker();
@@ -98,8 +96,6 @@ describe("WS receive backpressure", { timeout: 30_000 }, () => {
           source: { bindingSpec: BINDING_SPEC, content: spec(port) },
           ref: "#/operations/subscribe",
         });
-        await call.write({ ready: true });
-
         // Let the flood land in the buffer before this test ever iterates
         // outputs: the handle's own output buffer is only
         // OUTPUT_BUFFER_CAPACITY (4) deep, so it's the subscription-local
@@ -142,7 +138,7 @@ describe("WS receive backpressure", { timeout: 30_000 }, () => {
       });
 
       wss.on("connection", (ws) => {
-        ws.once("message", () => {
+        setTimeout(() => {
           for (let i = 0; i < frameCount; i++) {
             ws.send(JSON.stringify({ n: i, pad: payload }));
           }
@@ -150,7 +146,7 @@ describe("WS receive backpressure", { timeout: 30_000 }, () => {
           // assertion failure, never a parked drain.
           ws.close();
           resolveFloodDone();
-        });
+        }, 20);
       });
 
       const invoker = new AsyncAPIInvoker();
@@ -159,7 +155,6 @@ describe("WS receive backpressure", { timeout: 30_000 }, () => {
           source: { bindingSpec: BINDING_SPEC, content: spec(port) },
           ref: "#/operations/subscribe",
         });
-        await call.write({ ready: true });
         await floodDone;
 
         const { vals, err } = await drainOutputs(call);
@@ -182,15 +177,11 @@ describe("WS receive backpressure", { timeout: 30_000 }, () => {
       const { wss, port } = await startServer();
       const total = 512;
       let connections = 0;
-      let readyCount = 0;
       wss.on("connection", (ws) => {
         connections++;
-        ws.on("message", async () => {
-          // Flood only once BOTH subscriptions have signalled readiness
-          // (each writes one frame over the shared socket), paced in small
-          // chunks so the draining sibling's pump gets real turns.
-          readyCount++;
-          if (readyCount < 2) return;
+        setTimeout(async () => {
+          // Both subscriptions are started below before this delayed flood;
+          // server-streaming subscriptions have no client readiness frame.
           for (let i = 0; i < total; i++) {
             ws.send(JSON.stringify({ n: i }));
             if (i % 8 === 7) {
@@ -198,7 +189,7 @@ describe("WS receive backpressure", { timeout: 30_000 }, () => {
             }
           }
           ws.close();
-        });
+        }, 50);
       });
 
       const invoker = new AsyncAPIInvoker();
@@ -207,10 +198,8 @@ describe("WS receive backpressure", { timeout: 30_000 }, () => {
         // Sequence the acquires so the second one provably reuses the first
         // socket (same server|address|credential pool key).
         const slow = invoker.invokeBinding({ source, ref: "#/operations/subscribe" });
-        await slow.write({ ready: true });
         const fast = invoker.invokeBinding({ source, ref: "#/operations/subscribe" });
         const fastDrain = drainOutputs(fast);
-        await fast.write({ ready: true });
 
         const fastResult = await fastDrain;
         // The socket was genuinely shared...

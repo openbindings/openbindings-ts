@@ -18,10 +18,11 @@
  *   - If no new acquire() arrives before the timer fires, the socket
  *     is closed and evicted.
  *
- * The pool is transport-only: it delivers raw frame strings and never
- * interprets payloads. An acquire may carry an AbortSignal; aborting
- * while the dial is in flight rejects the acquire, and the socket — if
- * it lands later — is parked for reuse and reaped by the idle timer.
+ * The pool is transport-only: it preserves text frames and converts binary
+ * frame bytes to strict UTF-8 strings without interpreting their application
+ * payload. An acquire may carry an AbortSignal; aborting while the dial is in
+ * flight rejects the acquire, and the socket — if it lands later — is parked
+ * for reuse and reaped by the idle timer.
  */
 
 const DEFAULT_IDLE_TIMEOUT_MS = 30_000;
@@ -30,8 +31,12 @@ const DEFAULT_IDLE_TIMEOUT_MS = 30_000;
 export interface PooledWS {
   /** The underlying WebSocket. */
   ws: WebSocket;
-  /** Add a raw-frame listener. Returns a removal function. */
-  onMessage(handler: (data: string) => void): () => void;
+  /**
+   * Add a raw-frame listener. A binary frame that is not valid UTF-8 is
+   * delivered as decodeError rather than silently replacement-decoded.
+   * Returns a removal function.
+   */
+  onMessage(handler: (data: string, decodeError?: Error) => void): () => void;
   /**
    * Add a close listener; called with an Error for socket errors and with
    * undefined for a clean close. Returns a removal function.
@@ -80,7 +85,7 @@ interface PoolEntry {
   ws: WebSocket;
   refCount: number;
   idleTimer: ReturnType<typeof setTimeout> | null;
-  messageHandlers: Set<(data: string) => void>;
+  messageHandlers: Set<(data: string, decodeError?: Error) => void>;
   closeHandlers: Set<(err?: Error) => void>;
   ready: Promise<void>;
   key: string;
@@ -186,14 +191,25 @@ export class WSPool {
       headers && Object.keys(headers).length > 0
         ? new WebSocket(url, { headers } as unknown as string[])
         : new WebSocket(url);
+    // WHATWG WebSocket otherwise exposes binary frames as Blob in browsers.
+    // ArrayBuffer gives us one synchronous, ordered byte path in browser and
+    // Node implementations.
+    ws.binaryType = "arraybuffer";
 
-    const messageHandlers = new Set<(data: string) => void>();
+    const messageHandlers = new Set<(data: string, decodeError?: Error) => void>();
     const closeHandlers = new Set<(err?: Error) => void>();
 
     ws.addEventListener("message", (ev) => {
-      const data = typeof ev.data === "string" ? ev.data : String(ev.data);
-      for (const handler of messageHandlers) {
-        handler(data);
+      try {
+        const data = strictUTF8Frame(ev.data);
+        for (const handler of messageHandlers) {
+          handler(data);
+        }
+      } catch (e: unknown) {
+        const err = e instanceof Error ? e : new Error(String(e));
+        for (const handler of messageHandlers) {
+          handler("", err);
+        }
       }
     });
 
@@ -248,7 +264,7 @@ export class WSPool {
     return {
       ws: entry.ws,
 
-      onMessage(handler: (data: string) => void): () => void {
+      onMessage(handler: (data: string, decodeError?: Error) => void): () => void {
         entry.messageHandlers.add(handler);
         return () => {
           entry.messageHandlers.delete(handler);
@@ -292,6 +308,31 @@ export class WSPool {
       }
     }
     this.conns.clear();
+  }
+}
+
+/**
+ * Preserves WebSocket message bytes at the OpenBindings string boundary.
+ * Text frames already arrive as validated DOMStrings. Binary frames may
+ * carry JSON/text bytes, but revision 1 has no opaque bytes value, so they
+ * must be strict UTF-8 rather than implementation stringification.
+ */
+function strictUTF8Frame(data: unknown): string {
+  if (typeof data === "string") return data;
+
+  let bytes: Uint8Array;
+  if (data instanceof ArrayBuffer) {
+    bytes = new Uint8Array(data);
+  } else if (ArrayBuffer.isView(data)) {
+    bytes = new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+  } else {
+    throw new Error("WebSocket binary message was not exposed as an ArrayBuffer");
+  }
+
+  try {
+    return new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes);
+  } catch {
+    throw new Error("WebSocket message payload is not valid UTF-8");
   }
 }
 

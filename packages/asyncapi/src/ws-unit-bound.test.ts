@@ -29,7 +29,10 @@ function spec(port: number) {
     info: { title: "WS delivery-unit bound test", version: "1.0.0" },
     servers: { test: { host: `127.0.0.1:${port}`, protocol: "ws" as const } },
     channels: {
-      stream: { address: "/", messages: { Msg: { payload: { type: "object" } } } },
+      stream: {
+        address: "/",
+        messages: { Msg: { contentType: "text/plain", payload: { type: "string" } } },
+      },
     },
     operations: {
       subscribe: {
@@ -60,11 +63,9 @@ describe("WS delivery-unit bound", { timeout: 15_000 }, () => {
     const payload = "y".repeat(4096); // > bound, single frame
 
     wss.on("connection", (ws) => {
-      // Wait for the client's first frame: guarantees the subscription's
-      // onMessage handler is registered before the oversized frame lands.
-      ws.once("message", () => {
+      setTimeout(() => {
         ws.send(payload);
-      });
+      }, 20);
     });
 
     const invoker = new AsyncAPIInvoker();
@@ -74,8 +75,6 @@ describe("WS delivery-unit bound", { timeout: 15_000 }, () => {
         ref: "#/operations/subscribe",
         maxDeliveryUnitBytes: bound,
       });
-      await call.write({ ready: true });
-
       const { vals, err } = await drainOutputs(call);
       expect(vals).toEqual([]);
       expect(err).toBeInstanceOf(Error);
@@ -92,11 +91,11 @@ describe("WS delivery-unit bound", { timeout: 15_000 }, () => {
     const payload = "z".repeat(64 * 1024 + 1); // > 32KiB, far under the 10MB default
 
     wss.on("connection", (ws) => {
-      ws.once("message", () => {
+      setTimeout(() => {
         ws.send(payload);
         // Clean close after the one frame so the drain terminates.
         ws.close();
-      });
+      }, 20);
     });
 
     const invoker = new AsyncAPIInvoker();
@@ -105,8 +104,6 @@ describe("WS delivery-unit bound", { timeout: 15_000 }, () => {
         source: { bindingSpec: BINDING_SPEC, content: spec(port) },
         ref: "#/operations/subscribe",
       });
-      await call.write({ ready: true });
-
       const { vals, err } = await drainOutputs(call);
       expect(err).toBeUndefined();
       expect(vals).toHaveLength(1);

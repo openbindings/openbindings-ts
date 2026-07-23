@@ -128,8 +128,9 @@ export interface ContextRequirement {
    */
   name?: string;
   /**
-   * Whether resolved context MAY be cached under the target-derived key.
-   * Defaults to true; `durable: false` context MUST be re-satisfied per call.
+   * Whether resolved context MAY be persisted and reused. Defaults to true;
+   * `durable: false` context MUST be re-satisfied per call. The contract
+   * prescribes no store or key derivation.
    */
   durable?: boolean;
   description?: string;
@@ -148,9 +149,9 @@ export interface ContextAlternative {
  */
 export interface ContextRequiredDetails {
   /**
-   * The target the binding addresses (its endpoint URL or host). The
-   * runtime/resolver derives a storage key from it; the invoker does not
-   * key or store.
+   * Opaque identifier for the concrete destination or context scope. A
+   * runtime may use it when resolving or reusing context; key derivation and
+   * persistence are outside the contract.
    */
   target: string;
   alternatives: ContextAlternative[];
@@ -166,15 +167,16 @@ export function contextRequiredError(
 
 /**
  * Builds a `config.value` {@link ContextRequirement} — the binding-invoker
- * family for a non-secret configuration value a binding needs but the artifact
+ * family for a configuration value a binding needs but the artifact
  * does not supply (a server variable with no default, a channel address a
  * service generates at runtime). `point` names the binding-specification
  * configuration point ("server", "address", …); `key` names the specific
  * value within it (a server-variable name, or "address" for a whole channel
- * address); `choices` carries the artifact's declared allowed values when it
- * enumerates them (advisory picker metadata, never a gate). `durable` defaults
- * to true; pass `false` for a per-invocation value (a runtime-generated
- * address). The resolved value is carried in the `configuration` context field
+ * address); `choices` carries values declared by the artifact, while the
+ * governing binding specification decides whether that list is closed or
+ * advisory. `durable` defaults to true, permitting but not requiring reuse;
+ * pass `false` for a value that must be fresh per invocation. The resolved
+ * value is carried in the `configuration` context field
  * under `point`; its shape there is the invoker's own, so this requirement
  * names what is needed, not the resolved structure.
  */
@@ -206,9 +208,9 @@ export function isContextRequired(
 }
 
 /**
- * Maps standard requirement families (the binding-invoker interface) to the well-known
- * context field that satisfies them (the context-store contract). The context store
- * (context.ts) resolves satisfaction against this same map.
+ * Maps standard requirement families from the binding-invoker interface to
+ * their well-known context fields. The optional store-backed resolver in
+ * context.ts checks satisfaction against this same map.
  */
 export const REQUIREMENT_FIELDS: Record<string, string> = {
   "auth.bearer": "bearerToken",

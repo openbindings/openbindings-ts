@@ -13,6 +13,7 @@ also guards the public role and family correspondence.
 | invoke one binding | `InvokeBinding(...)` | `invokeBinding(...)` |
 | side-effect-free context preflight | `PrepareBinding(...)` | `prepareBinding(...)` |
 | artifact → OBI | `InterfaceSynthesizer.SynthesizeInterface(...)` | `InterfaceSynthesizer.synthesizeInterface(...)` |
+| artifact → OBI + exhaustiveness-qualified disposition evidence | `CoverageSynthesizer.SynthesizeInterfaceWithCoverage(...)` | `CoverageSynthesizer.synthesizeInterfaceWithCoverage(...)` |
 | inspect bindable targets | `SourceInspector.InspectSource(...)` | `SourceInspector.inspectSource(...)` |
 | source-less scaffold | `SynthesisSkeleton(...)` | `synthesisSkeleton(...)` |
 | shared authoring directives + validation | `FinalizeSynthesis(...)` | `finalizeSynthesis(...)` |
@@ -35,27 +36,32 @@ the role before learning its language-specific mechanics.
 
 ## Implementation proof
 
-Every family is checked at three boundaries. Family authoring tests exercise
+Every family is checked at four boundaries. Family authoring tests exercise
 artifact loading, inspection, synthesis, and synthesized-document validation.
-Both SDKs then execute the same 97 portable processor scenarios from
-`spec/conformance/binding-specs/processor/`, covering all 47 published P-rules.
-Protocol integration tests exercise actual request framing and response
-decoding. Passing only one column is not sufficient release evidence.
+Both SDKs execute the same portable synthesis scenarios from
+`spec/conformance/binding-specs/synthesis/`, comparing exact emitted target
+identities and exhaustive artifact dispositions. They then execute the same 97
+portable processor scenarios from `spec/conformance/binding-specs/processor/`,
+covering all 47 published P-rules. Protocol integration tests exercise actual
+request framing and response decoding. Passing only one boundary is not
+sufficient release evidence.
 
-| Family | Go authoring evidence | TypeScript authoring evidence | Shared invocation evidence |
-|---|---|---|---|
-| OpenAPI | `formats/openapi/synthesize_test.go`, `list_refs_test.go` | `packages/openapi/src/synthesize.test.ts`, `invoker.test.ts` | `processor/openapi.json` |
-| AsyncAPI | `formats/asyncapi/synthesize_test.go`, `list_refs_test.go` | `packages/asyncapi/src/invoker.test.ts`, `inspect-source.test.ts` | `processor/asyncapi.json` |
-| MCP | `formats/mcp/synthesize_test.go`, `list_refs_test.go` | `packages/mcp/src/invoker.test.ts` | `processor/mcp.json` |
-| gRPC | `formats/grpc/synthesize_test.go`, `list_refs_test.go` | `packages/grpc/src/authoring.test.ts` | `processor/grpc.json` |
-| Connect | `formats/connect/synthesize_test.go`, `list_refs_test.go` | `packages/connect/src/authoring.test.ts` | `processor/connect.json` |
-| usage | `formats/usage/synthesize_interface_test.go`, `list_refs_test.go` | `packages/usage/src/authoring.test.ts` | `processor/usage.json` |
+| Family | Go authoring evidence | TypeScript authoring evidence | Shared synthesis evidence | Shared invocation evidence |
+|---|---|---|---|---|
+| OpenAPI | `formats/openapi/synthesize_test.go`, `list_refs_test.go` | `packages/openapi/src/synthesize.test.ts`, `invoker.test.ts` | `synthesis/openapi.json` | `processor/openapi.json` |
+| AsyncAPI | `formats/asyncapi/synthesize_test.go`, `list_refs_test.go` | `packages/asyncapi/src/invoker.test.ts`, `inspect-source.test.ts` | `synthesis/asyncapi.json` | `processor/asyncapi.json` |
+| MCP | `formats/mcp/synthesize_test.go`, `list_refs_test.go` | `packages/mcp/src/invoker.test.ts` | `synthesis/mcp.json` | `processor/mcp.json` |
+| gRPC | `formats/grpc/synthesize_test.go`, `list_refs_test.go` | `packages/grpc/src/authoring.test.ts` | `synthesis/grpc.json` | `processor/grpc.json` |
+| Connect | `formats/connect/synthesize_test.go`, `list_refs_test.go` | `packages/connect/src/authoring.test.ts` | `synthesis/connect.json` | `processor/connect.json` |
+| usage | `formats/usage/synthesize_interface_test.go`, `list_refs_test.go` | `packages/usage/src/authoring.test.ts` | `synthesis/usage.json` | `processor/usage.json` |
 
-The authoring invariant is creation-time soundness: inspection and synthesis
-apply the same target eligibility used by invocation; no emitted operation is
-statically guaranteed to refuse; and direct synthesis fails as a whole when an
-accepted target cannot be represented faithfully. It is not a promise that a
-live source or peer will never change after synthesis.
+The authoring invariant is creation-time soundness plus explicit completeness:
+inspection and synthesis apply the same target eligibility used by invocation;
+no emitted operation is statically guaranteed to refuse; every observed
+interaction and independently selectable artifact alternative receives a
+durable disposition; and direct synthesis fails as a whole when an accepted
+target cannot be represented faithfully. It is not a promise that a live
+source or peer will never change after synthesis.
 
 ## Intentional revision-1 boundaries
 

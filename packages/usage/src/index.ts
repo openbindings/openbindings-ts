@@ -10,6 +10,7 @@ import {
   MAX_TESTED_VERSION,
   MultipleSourcesError,
   finalizeSynthesis,
+  finalizeSynthesisCoverage,
   synthesisSkeleton,
   contextApiKey,
   contextConfiguration,
@@ -23,6 +24,7 @@ import {
   type BindingInvocationArgs,
   type BindingInvoker,
   type BindingSpecInfo,
+  type CoverageSynthesizer,
   type InterfaceSynthesizer,
   type Invocation,
   type JSONSchema,
@@ -30,7 +32,9 @@ import {
   type Source,
   type SourceInspection,
   type SourceInspector,
+  type SynthesisCoverageEntry,
   type SynthesizeInput,
+  type SynthesizeResult,
 } from "@openbindings/sdk";
 
 export const BINDING_SPEC = "openbindings.usage@1";
@@ -245,7 +249,7 @@ export class UsageInvoker implements BindingInvoker {
 }
 
 /** Authoring implementation for usage descriptor sources. */
-export class UsageSynthesizer implements InterfaceSynthesizer, SourceInspector {
+export class UsageSynthesizer implements InterfaceSynthesizer, CoverageSynthesizer, SourceInspector {
   readonly #executor: ProcessExecutor;
   readonly #authorizeExecAddress?: (argv: string[]) => boolean;
   readonly #fetch?: typeof globalThis.fetch;
@@ -261,8 +265,27 @@ export class UsageSynthesizer implements InterfaceSynthesizer, SourceInspector {
   }
 
   async synthesizeInterface(input: SynthesizeInput, options?: { signal?: AbortSignal }): Promise<OBInterface> {
+    return (await this.#synthesizeObserved(input, options)).interface;
+  }
+
+  async synthesizeInterfaceWithCoverage(
+    input: SynthesizeInput,
+    options?: { signal?: AbortSignal },
+  ): Promise<SynthesizeResult> {
+    const observation = await this.#synthesizeObserved(input, options);
+    return finalizeSynthesisCoverage(
+      observation.interface,
+      observation.descriptor ? synthesisCoverage(observation.descriptor, observation.interface) : [],
+      true,
+    );
+  }
+
+  async #synthesizeObserved(
+    input: SynthesizeInput,
+    options?: { signal?: AbortSignal },
+  ): Promise<{ interface: OBInterface; descriptor?: Descriptor }> {
     const sources = input.sources ?? [];
-    if (sources.length === 0) return synthesisSkeleton(input);
+    if (sources.length === 0) return { interface: synthesisSkeleton(input) };
     if (sources.length > 1) throw new MultipleSourcesError();
     const source = sources[0]!;
     if (source.bindingSpec !== BINDING_SPEC) throw new Error(`synthesizer supports exact binding specification ${JSON.stringify(BINDING_SPEC)}, got ${JSON.stringify(source.bindingSpec)}`);
@@ -286,7 +309,10 @@ export class UsageSynthesizer implements InterfaceSynthesizer, SourceInspector {
       if (source.embed) sourceEntry.content = text;
     }
     const iface = interfaceFromUsage(descriptor, sourceEntry);
-    return finalizeSynthesis(iface, input, "default", BINDING_SPEC);
+    return {
+      interface: finalizeSynthesis(iface, input, "default", BINDING_SPEC),
+      descriptor,
+    };
   }
 
   async inspectSource(source: Source, options?: { signal?: AbortSignal }): Promise<SourceInspection> {
@@ -297,11 +323,12 @@ export class UsageSynthesizer implements InterfaceSynthesizer, SourceInspector {
       signal: options?.signal,
     });
     const descriptor = parseDescriptor(text);
-    const targets = commandPlans(descriptor).map(({ ref, operationKey, command }) => ({
-      ref,
-      operationKey,
-      operation: command.help ? { description: command.help } : undefined,
-    }));
+    const targets = commandPlans(descriptor).flatMap(({ refs, operationKey, command }) =>
+      refs.map((ref) => ({
+        ref,
+        operationKey,
+        operation: command.help ? { description: command.help } : undefined,
+      })));
     return { targets: targets.sort((a, b) => compare(a.ref, b.ref)), exhaustive: true };
   }
 }
@@ -370,36 +397,314 @@ function interfaceFromUsage(descriptor: Descriptor, source: Source): OBInterface
     bindings: {},
     sources: { default: source },
   };
-  for (const { ref, operationKey, command } of commandPlans(descriptor)) {
-    const input = inputSchema(command);
+  for (const { refs, operationKey, command, input } of commandPlans(descriptor)) {
     iface.operations[operationKey] = {
       ...(command.help ? { description: command.help } : {}),
       ...(input ? { input } : {}),
       output: { type: "string", "x-ob": { floor: "text" } },
-      ...(ref.includes(" ") ? { tags: ref.split(" ").slice(0, -1) } : {}),
+      ...(refs[0]?.includes(" ") ? { tags: refs[0].split(" ").slice(0, -1) } : {}),
     };
-    iface.bindings![`${operationKey}.default`] = { operation: operationKey, source: "default", ...(ref ? { ref } : {}) };
+    for (const [index, ref] of refs.entries()) {
+      const bindingKey = index === 0
+        ? `${operationKey}.default`
+        : `${operationKey}.default.alias${index}`;
+      iface.bindings![bindingKey] = {
+        operation: operationKey,
+        source: "default",
+        ...(ref ? { ref } : {}),
+      };
+    }
   }
   return iface;
 }
 
-function commandPlans(descriptor: Descriptor): Array<{ ref: string; operationKey: string; command: Command }> {
-  const plans: Array<{ ref: string; operationKey: string; command: Command }> = [];
+interface CommandPlan {
+  refs: string[];
+  operationKey: string;
+  command: Command;
+  input?: JSONSchema;
+}
+
+function commandPlans(descriptor: Descriptor): CommandPlan[] {
+  const plans: CommandPlan[] = [];
   if (!descriptor.bin) return plans;
-  const rootFields = descriptor.root.fields.filter((field) => !field.global);
-  if (rootFields.length > 0 && descriptor.bin) plans.push({
-    ref: "", operationKey: descriptor.bin, command: { ...descriptor.root, fields: descriptor.root.fields, help: descriptor.about },
-  });
-  const walk = (commands: Command[], path: string[], inherited: Field[]): void => {
+  const used = new Set<string>();
+  const rootKey = uniqueKey(sanitizeKey(descriptor.bin), used);
+  used.add(rootKey);
+  const root = { ...descriptor.root, fields: descriptor.root.fields, help: descriptor.about };
+  try {
+    plans.push({ refs: [""], operationKey: rootKey, command: root, input: inputSchema(root) });
+  } catch {
+    // Coverage records a command-local unresolvable root while preserving
+    // otherwise bindable descendants.
+  }
+  const walk = (
+    commands: Command[],
+    path: string[],
+    inherited: Field[],
+    refPrefixes: string[][],
+  ): void => {
     for (const command of commands) {
       const nextPath = [...path, command.name];
       const effective = { ...command, fields: [...inherited, ...command.fields] };
-      if (!command.subcommandRequired) plans.push({ ref: nextPath.join(" "), operationKey: nextPath.join("."), command: effective });
-      walk(command.commands, nextPath, [...inherited, ...command.fields.filter((field) => field.global)]);
+      const operationKey = uniqueKey(sanitizeKey(nextPath.join(".")), used);
+      used.add(operationKey);
+      const spellings = [...new Set([command.name, ...command.aliases].filter(Boolean))];
+      const nextPrefixes = refPrefixes.flatMap((prefix) => spellings.map((spelling) => [...prefix, spelling]));
+      if (!command.subcommandRequired && command.name) {
+        try {
+          const refs = uniquelyResolvableRefs(descriptor, nextPath, nextPrefixes);
+          if (refs.length > 0) {
+            plans.push({
+              refs,
+              operationKey,
+              command: effective,
+              input: inputSchema(effective),
+            });
+          }
+        } catch {
+          // Coverage records the exact exclusion.
+        }
+      }
+      walk(
+        command.commands,
+        nextPath,
+        [...inherited, ...command.fields.filter((field) => field.global)],
+        nextPrefixes,
+      );
     }
   };
-  walk(descriptor.root.commands, [], descriptor.root.fields.filter((field) => field.global));
+  walk(descriptor.root.commands, [], descriptor.root.fields.filter((field) => field.global), [[]]);
   return plans;
+}
+
+function uniquelyResolvableRefs(
+  descriptor: Descriptor,
+  canonicalPath: string[],
+  candidates: string[][],
+): string[] {
+  const refs: string[] = [];
+  for (const segments of candidates) {
+    const ref = segments.join(" ");
+    try {
+      if (samePath(resolveCommand(descriptor.root, ref).canonicalPath, canonicalPath)) refs.push(ref);
+    } catch {
+      // The artifact is authoritative about its spellings, but declaration
+      // order is not target identity. Ambiguous alternatives are accounted
+      // for by synthesisCoverage and never advertised as invocable bindings.
+    }
+  }
+  return refs;
+}
+
+function samePath(left: string[], right: string[]): boolean {
+  return left.length === right.length && left.every((segment, index) => segment === right[index]);
+}
+
+function synthesisCoverage(descriptor: Descriptor, iface: OBInterface): SynthesisCoverageEntry[] {
+  const represented = new Map<string, { operationKey: string; bindingRef: string }>();
+  for (const binding of Object.values(iface.bindings ?? {})) {
+    represented.set(binding.ref ?? "", {
+      operationKey: binding.operation,
+      bindingRef: binding.ref ?? "",
+    });
+  }
+  const entries: SynthesisCoverageEntry[] = [];
+  const add = (
+    sourceRef: string,
+    bindingRef: string,
+    scope: "target" | "alternative" | "projection" = "target",
+    exclusion?: Omit<SynthesisCoverageEntry, "sourceIndex" | "sourceRef" | "scope">,
+  ): void => {
+    if (exclusion) {
+      entries.push({ sourceIndex: 0, sourceRef, scope, ...exclusion });
+      return;
+    }
+    const match = represented.get(bindingRef);
+    if (match) {
+      entries.push({
+        sourceIndex: 0,
+        sourceRef,
+        scope,
+        status: "represented",
+        ...match,
+      });
+      return;
+    }
+    entries.push({
+      sourceIndex: 0,
+      sourceRef,
+      scope,
+      status: "implementation-unsupported",
+      reasonCode: "usage.missing_emitted_binding",
+      message: "the synthesizer returned without emitting this resolvable command path",
+    });
+  };
+  const excluded = (
+    status: "excluded" | "invalid",
+    reasonCode: string,
+    rule: string,
+    message: string,
+  ): Omit<SynthesisCoverageEntry, "sourceIndex" | "sourceRef" | "scope"> => ({
+    status, reasonCode, rule, message,
+  });
+
+  const missingBin = !descriptor.bin;
+  const root = { ...descriptor.root, fields: descriptor.root.fields, help: descriptor.about };
+  if (missingBin) {
+    add("<root>", "", "target", excluded(
+      "excluded",
+      "usage.missing_target_identity",
+      "USAGE-P-03",
+      "the descriptor has no non-empty bin target identity",
+    ));
+  } else {
+    try {
+      inputSchema(root);
+      add("<root>", "");
+    } catch (error: unknown) {
+      add("<root>", "", "target", excluded(
+        "excluded",
+        "usage.unresolvable_surface",
+        "USAGE-P-04",
+        message(error),
+      ));
+    }
+  }
+
+  const ambiguousReported = new Set<string>();
+  const walk = (
+    commands: Command[],
+    path: string[],
+    inherited: Field[],
+    refPrefixes: string[][],
+  ): void => {
+    for (const command of commands) {
+      const nextPath = [...path, command.name];
+      const spellings = [...new Set([command.name, ...command.aliases].filter(Boolean))];
+      const nextPrefixes = refPrefixes.flatMap((prefix) => spellings.map((spelling) => [...prefix, spelling]));
+      const effective = { ...command, fields: [...inherited, ...command.fields] };
+      let disposition: Omit<SynthesisCoverageEntry, "sourceIndex" | "sourceRef" | "scope"> | undefined;
+      if (!command.name) {
+        disposition = excluded(
+          "invalid",
+          "usage.empty_command_identity",
+          "USAGE-D-01",
+          "a command has no non-empty primary name",
+        );
+      } else if (command.subcommandRequired) {
+        // A subcommand-required group is navigation in the artifact, not an
+        // invocable interaction. Its descendants are still inventoried.
+        walk(
+          command.commands,
+          nextPath,
+          [...inherited, ...command.fields.filter((field) => field.global)],
+          nextPrefixes,
+        );
+        continue;
+      }
+      const refs: string[] = [];
+      for (const segments of nextPrefixes) {
+        const ref = segments.join(" ");
+        try {
+          const resolved = resolveCommand(descriptor.root, ref);
+          if (samePath(resolved.canonicalPath, nextPath)) refs.push(ref);
+        } catch (error: unknown) {
+          if (error instanceof AmbiguousCommandSpellingError && !ambiguousReported.has(ref)) {
+            ambiguousReported.add(ref);
+            add(
+              `ambiguous-ref:${ref}`,
+              "",
+              "alternative",
+              excluded(
+                "excluded",
+                "usage.ambiguous_command_spelling",
+                "USAGE-D-03",
+                "the command path matches more than one sibling command and declaration order is not target identity",
+              ),
+            );
+          }
+        }
+      }
+      if (refs.length === 0 && command.name) {
+        add(
+          `command:${nextPath.join(" ")}`,
+          "",
+          "target",
+          excluded(
+            "excluded",
+            "usage.no_unique_command_ref",
+            "USAGE-D-03",
+            "the command has no spelling path that resolves uniquely through the descriptor",
+          ),
+        );
+        walk(
+          command.commands,
+          nextPath,
+          [...inherited, ...command.fields.filter((field) => field.global)],
+          nextPrefixes,
+        );
+        continue;
+      }
+      if (missingBin) {
+        disposition = excluded(
+          "excluded",
+          "usage.missing_target_identity",
+          "USAGE-P-03",
+          "the descriptor has no non-empty bin target identity",
+        );
+      } else {
+        try {
+          inputSchema(effective);
+        } catch (error: unknown) {
+          disposition = excluded(
+            "excluded",
+            "usage.unresolvable_surface",
+            "USAGE-P-04",
+            message(error),
+          );
+        }
+      }
+      if (refs.length === 0) {
+        add(
+          `<command:${command.name || "missing"}>`,
+          "",
+          "target",
+          disposition ?? excluded(
+            "invalid",
+            "usage.empty_command_identity",
+            "USAGE-D-01",
+            "a command has no usable primary or alias spelling",
+          ),
+        );
+      } else {
+        for (const ref of refs) add(ref, ref, "target", disposition);
+      }
+      walk(
+        command.commands,
+        nextPath,
+        [...inherited, ...command.fields.filter((field) => field.global)],
+        nextPrefixes,
+      );
+    }
+  };
+  walk(descriptor.root.commands, [], descriptor.root.fields.filter((field) => field.global), [[]]);
+  return entries;
+}
+
+function sanitizeKey(name: string): string {
+  let key = name.replace(/[^a-zA-Z0-9._-]/gu, "_").replace(/^_+|_+$/gu, "");
+  if (!key) return "unnamed";
+  if (!/^[A-Za-z_]/u.test(key)) key = `_${key}`;
+  return key;
+}
+
+function uniqueKey(key: string, used: Set<string>): string {
+  if (!used.has(key)) return key;
+  for (let index = 2; ; index += 1) {
+    const candidate = `${key}_${index}`;
+    if (!used.has(candidate)) return candidate;
+  }
 }
 
 function inputSchema(command: Command): JSONSchema | undefined {
@@ -540,20 +845,36 @@ function parseFields(nodes: KDLNode[]): Field[] {
   });
 }
 
-function resolveCommand(root: Command, ref: string): { command: Command; selectedPath: string[] } {
-  const segments = ref.trim() === "" ? [] : ref.trim().split(/\s+/);
+class AmbiguousCommandSpellingError extends Error {}
+
+function resolveCommand(
+  root: Command,
+  ref: string,
+): { command: Command; selectedPath: string[]; canonicalPath: string[] } {
+  const segments = ref === "" ? [] : ref.split(" ");
+  if (segments.some((segment) => segment === "")) {
+    throw new Error(`usage ref ${JSON.stringify(ref)} is malformed: command-path segments are separated by single spaces`);
+  }
   let current = root;
   const inherited: Field[] = root.fields.filter((field) => field.global);
   const selectedPath: string[] = [];
+  const canonicalPath: string[] = [];
   for (const [index, segment] of segments.entries()) {
-    const next = current.commands.find((command) => command.name === segment || command.aliases.includes(segment));
-    if (!next) throw new Error(`usage ref segment ${JSON.stringify(segment)} does not resolve`);
+    const matches = current.commands.filter((command) => command.name === segment || command.aliases.includes(segment));
+    if (matches.length === 0) throw new Error(`usage ref segment ${JSON.stringify(segment)} does not resolve`);
+    if (matches.length > 1) {
+      throw new AmbiguousCommandSpellingError(
+        `usage ref segment ${JSON.stringify(segment)} matches ${matches.length} sibling commands (USAGE-D-03)`,
+      );
+    }
+    const next = matches[0]!;
     current = next;
     selectedPath.push(segment);
+    canonicalPath.push(next.name);
     if (index < segments.length - 1) inherited.push(...current.fields.filter((field) => field.global));
   }
   if (current !== root) current = { ...current, fields: [...inherited, ...current.fields] };
-  return { command: current, selectedPath };
+  return { command: current, selectedPath, canonicalPath };
 }
 
 interface PlannedProcess { request: ProcessRequest; cleanup(): Promise<void> }

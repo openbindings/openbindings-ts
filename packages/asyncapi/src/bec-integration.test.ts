@@ -44,6 +44,7 @@ function makeAsyncAPISpec(port: number) {
         channel: { $ref: "#/channels/messages" },
         messages: [{ $ref: "#/channels/messages/messages/Msg" }],
         reply: { messages: [{ $ref: "#/channels/messages/messages/Msg" }] },
+        bindings: { http: { method: "POST" } },
         security: [{ $ref: "#/components/securitySchemes/bearer" }],
       },
       // No declared security: the server's 401 surfaces as ERR_AUTH_REQUIRED.
@@ -51,6 +52,8 @@ function makeAsyncAPISpec(port: number) {
         action: "receive" as const,
         channel: { $ref: "#/channels/messages" },
         messages: [{ $ref: "#/channels/messages/messages/Msg" }],
+        reply: { messages: [{ $ref: "#/channels/messages/messages/Msg" }] },
+        bindings: { http: { method: "POST" } },
       },
       receiveEvents: {
         action: "send" as const,
@@ -227,42 +230,20 @@ describe("AsyncAPI binding invoker (real HTTP)", () => {
     await expect(call.closed).rejects.toMatchObject({ code: "ERR_MISSING_INPUT" });
   });
 
-  it("streams SSE events as bare outputs on receive", async () => {
+  it("excludes standalone HTTP send operations before dispatch", async () => {
+    const before = requestCount;
     const obi = await buildOBI();
-    const binding = obi.bindings?.["receiveEvents.asyncapi"];
-    if (!binding?.ref) throw new Error("expected receiveEvents.asyncapi binding with ref");
+    expect(obi.bindings?.["receiveEvents.asyncapi"]).toBeUndefined();
 
     const invoker = new AsyncAPIInvoker();
     const call = invoker.invokeBinding({
       source: source(),
-      ref: binding.ref,
+      ref: "#/operations/receiveEvents",
       context: { bearerToken: SECRET },
     });
 
-    const events: unknown[] = [];
-    for await (const m of call.outputs) events.push(m);
-    expect(events).toEqual([{ seq: 1 }, { seq: 2 }]);
-    await call.closed;
-  });
-
-  it("challenges CONTEXT_REQUIRED on receive when context lacks credentials", async () => {
-    const invoker = new AsyncAPIInvoker();
-    const call = invoker.invokeBinding({ source: source(), ref: "#/operations/receiveEvents" });
-
-    await expect(call.closed).rejects.toMatchObject({ code: CONTEXT_REQUIRED });
-  });
-
-  it("cancels a live subscription when the caller abandons the outputs", async () => {
-    const invoker = new AsyncAPIInvoker();
-    const call = invoker.invokeBinding({ source: source(), ref: "#/operations/receiveStream" });
-
-    let first: unknown;
-    for await (const m of call.outputs) {
-      first = m;
-      break; // abandoning the sequence cancels the invocation
-    }
-    expect(first).toEqual({ tick: 1 });
-    await expect(call.closed).rejects.toMatchObject({ code: "ERR_CANCELLED" });
+    await expect(call.closed).rejects.toMatchObject({ code: "ERR_SOURCE_CONFIG_ERROR" });
+    expect(requestCount).toBe(before);
   });
 
   it("fires ERR_REF_NOT_FOUND for an unknown operation", async () => {

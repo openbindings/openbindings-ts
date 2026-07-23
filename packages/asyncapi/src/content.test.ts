@@ -138,10 +138,11 @@ describe("resolveInputCodec", () => {
     expect(() => resolveInputCodec(doc(), mk("application/json", "text/plain"))).toThrow(/exactly one selected message/);
   });
 
-  it("preserves non-JSON declared media types in the string lane", () => {
-    const avro = resolveInputCodec(doc(), mk("application/avro"));
-    expect(avro).toEqual({ json: false, contentType: "application/avro" });
-    expect(encodeInput(avro, "wire bytes represented as a string")).toBe("wire bytes represented as a string");
-    expect(() => encodeInput(avro, { unsupported: "arbitrary bytes" })).toThrow(/must be a string/);
+  it("refuses binary or codec-specific media rather than inventing string carriage", () => {
+    expect(() => resolveInputCodec(doc(), mk("application/avro"))).toThrow(/no revision-1 value carriage/);
+  });
+
+  it("refuses a declared non-UTF-8 text charset", () => {
+    expect(() => resolveInputCodec(doc(), mk("text/plain; charset=iso-8859-1"))).toThrow(/non-UTF-8 charset/);
   });
 });

@@ -25,7 +25,7 @@ import { OpenAPIInvoker } from "@openbindings/openapi";
 const invoker = new OperationInvoker([new OpenAPIInvoker()]);
 ```
 
-The invoker declares the binding specification `openbindings.openapi@1` — it handles OpenAPI 3.0.x and 3.1.x documents, discriminated by the artifact's own `openapi` field. This package implements the published [`openbindings.openapi@1`](https://github.com/openbindings/spec/blob/main/binding-specs/openapi/openbindings.openapi.md) binding specification; that document is normative for input mapping (the flattened model, OAS style/explode serialization), request media selection, server resolution, interaction shape, and channel assembly.
+The invoker declares the binding specification `openbindings.openapi@1` — it handles exactly OpenAPI 3.0.0–3.0.4 and 3.1.0–3.1.2 documents, discriminated by the artifact's own `openapi` field. This package implements the published [`openbindings.openapi@1`](https://github.com/openbindings/spec/blob/main/binding-specs/openapi/openbindings.openapi.md) binding specification; that document is normative for input mapping (the flattened model, OAS style/explode serialization), request media selection, server resolution, interaction shape, and channel assembly.
 
 ### Invoke a binding
 
@@ -75,10 +75,12 @@ import { OpenAPISynthesizer } from "@openbindings/openapi";
 const synth = new OpenAPISynthesizer();
 
 const iface = await synth.synthesizeInterface({
-  sources: [{
-    bindingSpec: "openbindings.openapi@1",
-    location: "https://api.example.com/openapi.json",
-  }],
+  sources: [
+    {
+      bindingSpec: "openbindings.openapi@1",
+      location: "https://api.example.com/openapi.json",
+    },
+  ],
 });
 // iface is a fully-formed OBInterface with operations, bindings, and sources
 ```
@@ -87,7 +89,7 @@ const iface = await synth.synthesizeInterface({
 
 ### Execution flow
 
-1. Loads and caches the OpenAPI document (JSON or YAML, local or remote), discriminating the accepted 3.0.x/3.1.x lines (OAPI-P-01)
+1. Loads and caches the OpenAPI document (JSON or YAML, local or remote), discriminating the exact accepted 3.0.0–3.0.4 and 3.1.0–3.1.2 editions (OAPI-P-01)
 2. Parses the ref as a JSON Pointer (`#/paths/~1users/get` -> path `/users`, method `get`); the method is lowercase exactly as the artifact spells it — an uppercase method is refused, never case-folded (OAPI-D-03)
 3. Resolves the server (the OAS effective list + variables + the `server` configuration point, OAPI-P-05)
 4. Derives auth requirements from the operation's (or document's) `security` and challenges `CONTEXT_REQUIRED` when the context can't satisfy them — before any request is dispatched
@@ -132,13 +134,13 @@ When no security schemes are defined, falls back to bearer -> basic -> apiKey in
 
 When declared security is unsatisfied by the context, the invoker challenges `CONTEXT_REQUIRED` before any input is read or network touched, deriving the challenge from the artifact's `securitySchemes` (the negotiation surface is the [binding-invoker interface](https://openbindings.com/interfaces/binding-invoker); the challenge's `target` is the resolved base URL):
 
-| Scheme | Requirement type | Carried fields |
-| --- | --- | --- |
-| `http` / `basic` | `auth.basic` | — |
-| `http` / `bearer` | `auth.bearer` | — |
-| `apiKey` | `auth.apiKey` | — |
-| `oauth2` | `auth.oauth2` | `grantType`, `authorizeUrl`, `tokenUrl`, `scopes` from the selected flow |
-| `openIdConnect` | `auth.oauth2` | `openIdConnectUrl` |
+| Scheme            | Requirement type | Carried fields                                                           |
+| ----------------- | ---------------- | ------------------------------------------------------------------------ |
+| `http` / `basic`  | `auth.basic`     | —                                                                        |
+| `http` / `bearer` | `auth.bearer`    | —                                                                        |
+| `apiKey`          | `auth.apiKey`    | —                                                                        |
+| `oauth2`          | `auth.oauth2`    | `grantType`, `authorizeUrl`, `tokenUrl`, `scopes` from the selected flow |
+| `openIdConnect`   | `auth.oauth2`    | `openIdConnectUrl`                                                       |
 
 An `oauth2` scheme declaring several flows selects one by fixed preference — `authorizationCode`, then `implicit`, then `password`, then `clientCredentials` — and `grantType` names the selection in its RFC 6749 spelling (`authorization_code`, `implicit`, `password`, `client_credentials`). Every requirement carries the scheme's declared name (its `securitySchemes` key), which disambiguates ANDed requirements of one type and keys the scheme-scoped credential lookup: an API-key scheme named `N` resolves `apiKeys[N]` first, falling back to the single `apiKey` convenience.
 

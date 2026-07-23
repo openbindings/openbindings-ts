@@ -72,8 +72,10 @@ import { ConfigRequired, resolveServer } from "./servers.js";
  * CONTEXT_REQUIRED challenge — retryable after resolution (R1a) — while any
  * other error stays a terminal ERR_SOURCE_CONFIG_ERROR. resolveServer already
  * consulted the supplied context; the operation-invoker's bounded
- * resolve-and-retry loop is the backstop. config values are non-secret, so the
- * challenge carries an empty target (no server URL resolved; best-effort keying).
+ * resolve-and-retry loop is the backstop. No server target has resolved, so
+ * the challenge carries an empty target; a resolver may satisfy it
+ * interactively or from caller-owned policy, but must not invent a reusable
+ * target.
  */
 function configOrSourceError(e: unknown): InvocationError {
   if (e instanceof ConfigRequired) {
@@ -387,7 +389,7 @@ export async function runBinding(
       );
       return;
     }
-    let governingMedia: string | null = null;
+    let governingMedia: string | null;
     try {
       governingMedia = responseDeclaration
         ? governingResponseMedia(responseDeclaration.response, contentType)

@@ -4,17 +4,20 @@ import {
   InvocationImpl,
   MultipleSourcesError,
   finalizeSynthesis,
+  finalizeSynthesisCoverage,
   synthesisSkeleton,
   type BindingInvocationArgs,
   type BindingInvoker,
   type SynthesizeInput,
   type BindingSpecInfo,
+  type CoverageSynthesizer,
   type InterfaceSynthesizer,
   type Invocation,
   type OBInterface,
   type Source,
   type SourceInspection,
   type SourceInspector,
+  type SynthesizeResult,
 } from "@openbindings/sdk";
 import { BINDING_SPEC, DEFAULT_SOURCE_NAME } from "./constants.js";
 import { runMCPBinding, validateEndpoint } from "./invoke.js";
@@ -28,6 +31,7 @@ import {
   bindableDiscovery,
   type MCPDiscovery,
 } from "./synthesize.js";
+import { mcpSynthesisCoverage } from "./coverage.js";
 
 // ---------------------------------------------------------------------------
 // Invoker
@@ -112,7 +116,7 @@ export interface MCPSynthesizerOptions {
 }
 
 /** Synthesizes OBInterface definitions by discovering an MCP server's capabilities. */
-export class MCPSynthesizer implements InterfaceSynthesizer, SourceInspector {
+export class MCPSynthesizer implements InterfaceSynthesizer, CoverageSynthesizer, SourceInspector {
   private readonly fetchImpl?: typeof globalThis.fetch;
 
   constructor(options?: MCPSynthesizerOptions) {
@@ -135,10 +139,29 @@ export class MCPSynthesizer implements InterfaceSynthesizer, SourceInspector {
     input: SynthesizeInput,
     options?: { signal?: AbortSignal },
   ): Promise<OBInterface> {
+    return (await this.synthesizeObserved(input, options)).iface;
+  }
+
+  async synthesizeInterfaceWithCoverage(
+    input: SynthesizeInput,
+    options?: { signal?: AbortSignal },
+  ): Promise<SynthesizeResult> {
+    const observation = await this.synthesizeObserved(input, options);
+    return finalizeSynthesisCoverage(
+      observation.iface,
+      mcpSynthesisCoverage(observation.discovery, observation.iface),
+      true,
+    );
+  }
+
+  private async synthesizeObserved(
+    input: SynthesizeInput,
+    options?: { signal?: AbortSignal },
+  ): Promise<{ iface: OBInterface; discovery?: MCPDiscovery }> {
     const sources = input.sources ?? [];
     const src = sources.at(0);
     if (src === undefined) {
-      return synthesisSkeleton(input);
+      return { iface: synthesisSkeleton(input) };
     }
     if (sources.length > 1) {
       throw new MultipleSourcesError();
@@ -164,7 +187,10 @@ export class MCPSynthesizer implements InterfaceSynthesizer, SourceInspector {
       const emittedSource = iface.sources?.[DEFAULT_SOURCE_NAME];
       if (emittedSource) emittedSource.content = src.content;
     }
-    return finalizeSynthesis(iface, input, DEFAULT_SOURCE_NAME, BINDING_SPEC);
+    return {
+      iface: finalizeSynthesis(iface, input, DEFAULT_SOURCE_NAME, BINDING_SPEC),
+      discovery: disc,
+    };
   }
 
   /**

@@ -1,14 +1,15 @@
-import type { BindingInvoker, InterfaceSynthesizer, SourceInspector } from "./invokers.js";
+import type { BindingInvoker, CoverageSynthesizer, InterfaceSynthesizer, SourceInspector } from "./invokers.js";
 import type {
   BindingInvocationArgs,
   BindingSpecInfo,
   SynthesizeInput,
+  SynthesizeResult,
   SourceInspection,
 } from "./invoker-types.js";
 import type { ContextRequiredDetails, Invocation } from "./invocation.js";
 import type { OBInterface, Source } from "./types.js";
-import { NoInvokerError, NoSynthesizerError } from "./errors.js";
-import { synthesisSkeleton } from "./invoker-types.js";
+import { NoInvokerError, NoSynthesizerError, SynthesisCoverageUnsupportedError } from "./errors.js";
+import { finalizeSynthesisCoverage, synthesisSkeleton } from "./invoker-types.js";
 
 /**
  * Returns a single BindingInvoker that routes to the appropriate inner
@@ -66,7 +67,9 @@ export function combineInvokers(...invokers: BindingInvoker[]): CombinedInvoker 
  * synthesizer by the source's binding-specification identifier (exact
  * match). First registration wins for a given identifier; order matters.
  */
-export function combineSynthesizers(...synthesizers: InterfaceSynthesizer[]): InterfaceSynthesizer {
+export type CombinedSynthesizer = CoverageSynthesizer;
+
+export function combineSynthesizers(...synthesizers: InterfaceSynthesizer[]): CombinedSynthesizer {
   const bySpec = new Map<string, InterfaceSynthesizer>(); // exact identifier -> synthesizer
   const specs: BindingSpecInfo[] = [];
 
@@ -93,6 +96,22 @@ export function combineSynthesizers(...synthesizers: InterfaceSynthesizer[]): In
       const synthesizer = bySpec.get(firstSource.bindingSpec);
       if (!synthesizer) throw new NoSynthesizerError(firstSource.bindingSpec);
       return synthesizer.synthesizeInterface(input, options);
+    },
+    async synthesizeInterfaceWithCoverage(
+      input: SynthesizeInput,
+      options?: { signal?: AbortSignal },
+    ): Promise<SynthesizeResult> {
+      const [firstSource] = input.sources ?? [];
+      if (!firstSource) {
+        return finalizeSynthesisCoverage(synthesisSkeleton(input), [], true);
+      }
+      const synthesizer = bySpec.get(firstSource.bindingSpec);
+      if (!synthesizer) throw new NoSynthesizerError(firstSource.bindingSpec);
+      const candidate = synthesizer as Partial<CoverageSynthesizer>;
+      if (typeof candidate.synthesizeInterfaceWithCoverage !== "function") {
+        throw new SynthesisCoverageUnsupportedError(firstSource.bindingSpec);
+      }
+      return candidate.synthesizeInterfaceWithCoverage(input, options);
     },
   };
 }

@@ -2,6 +2,12 @@
 
 Cloudflare Workers RPC binding invoker for OpenBindings. Dispatches operation calls from one Worker to a sibling Worker exposing a `WorkerEntrypoint` class via a service binding declared in `wrangler.toml`.
 
+> **Legacy experimental adapter.** This package declares the historical
+> `workers-rpc@^1.0.0` token. It is not an implementation of the unpromoted
+> `openbindings.workers-rpc@1` candidate, is not one of the six published 0.2
+> binding specifications, and does not participate in the release's portable
+> synthesis-coverage guarantee.
+
 ## Install
 
 ```bash

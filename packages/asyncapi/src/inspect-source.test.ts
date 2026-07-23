@@ -10,6 +10,7 @@ describe("AsyncAPISynthesizer.inspectSource operationKey", () => {
   const content = JSON.stringify({
     asyncapi: "3.0.0",
     info: { title: "Test API", version: "1.0.0" },
+    servers: { ws: { host: "events.example", protocol: "wss" } },
     channels: {
       messages: { address: "/messages", messages: { event: { payload: { type: "object" } } } },
       events: { address: "/events", messages: { event: { payload: { type: "object" } } } },
@@ -47,6 +48,7 @@ describe("AsyncAPISynthesizer.inspectSource operationKey", () => {
     const specDoc = {
       asyncapi: "3.0.0",
       info: { title: "Test", version: "1.0.0" },
+      servers: { ws: { host: "events.example", protocol: "wss" } },
       channels: { ch: { address: "/ch", messages: { event: { payload: { type: "object" } } } } },
       operations: {
         // Two operation IDs that sanitize to the same key ("send msg" and
@@ -73,6 +75,7 @@ describe("AsyncAPISynthesizer.inspectSource operationKey", () => {
     const artifact = {
       asyncapi: "3.0.0",
       info: { title: "Eligibility", version: "1.0.0" },
+      servers: { ws: { host: "events.example", protocol: "wss" } },
       channels: {
         good: { address: "/good", messages: {
           a: { payload: { type: "string" } },

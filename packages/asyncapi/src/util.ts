@@ -4,7 +4,12 @@ import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 
 import type { AsyncAPIDocument } from "./asyncapi-types.js";
-import { CHANNEL_NAME_TAG, MESSAGE_NAME_TAG, REF_NAME_TAG, SERVER_NAME_TAG } from "./constants.js";
+import {
+  CHANNEL_NAME_TAG,
+  MESSAGE_NAME_TAG,
+  REF_NAME_TAG,
+  SERVER_NAME_TAG,
+} from "./constants.js";
 
 // The u flag makes the class match whole code points, so an astral-plane
 // character replaces as one underscore, not one per surrogate half
@@ -69,7 +74,11 @@ function tagSecurityRefNames(list: unknown): void {
   for (const entry of list) {
     if (entry == null || typeof entry !== "object") continue;
     const e = entry as Record<string, unknown>;
-    if (typeof e.$ref !== "string" || !e.$ref.startsWith(SECURITY_SCHEME_REF_PREFIX)) continue;
+    if (
+      typeof e.$ref !== "string" ||
+      !e.$ref.startsWith(SECURITY_SCHEME_REF_PREFIX)
+    )
+      continue;
     e[REF_NAME_TAG] = e.$ref.slice(SECURITY_SCHEME_REF_PREFIX.length);
   }
 }
@@ -123,13 +132,34 @@ function tagNameKeys(raw: unknown, mapField: string, tag: string): void {
 function tagChannelMessageNames(raw: unknown): void {
   if (raw == null || typeof raw !== "object") return;
   const channels = (raw as Record<string, unknown>)["channels"];
-  if (channels == null || typeof channels !== "object" || Array.isArray(channels)) return;
+  if (
+    channels == null ||
+    typeof channels !== "object" ||
+    Array.isArray(channels)
+  )
+    return;
   for (const channel of Object.values(channels as Record<string, unknown>)) {
-    if (channel == null || typeof channel !== "object" || Array.isArray(channel)) continue;
+    if (
+      channel == null ||
+      typeof channel !== "object" ||
+      Array.isArray(channel)
+    )
+      continue;
     const messages = (channel as Record<string, unknown>)["messages"];
-    if (messages == null || typeof messages !== "object" || Array.isArray(messages)) continue;
-    for (const [name, message] of Object.entries(messages as Record<string, unknown>)) {
-      if (message != null && typeof message === "object" && !Array.isArray(message)) {
+    if (
+      messages == null ||
+      typeof messages !== "object" ||
+      Array.isArray(messages)
+    )
+      continue;
+    for (const [name, message] of Object.entries(
+      messages as Record<string, unknown>,
+    )) {
+      if (
+        message != null &&
+        typeof message === "object" &&
+        !Array.isArray(message)
+      ) {
         (message as Record<string, unknown>)[MESSAGE_NAME_TAG] = name;
       }
     }
@@ -161,7 +191,9 @@ export async function parseAsyncAPIDocument(
     const doFetch = fileAwareFetch(fetchFn ?? fetch);
     const resp = await doFetch(location, { signal: options?.signal });
     if (!resp.ok) {
-      throw new Error(`failed to fetch ${location}: ${resp.status} ${resp.statusText}`);
+      throw new Error(
+        `failed to fetch ${location}: ${resp.status} ${resp.statusText}`,
+      );
     }
     const text = await resp.text();
     raw = yaml.load(text);
@@ -180,19 +212,22 @@ export async function parseAsyncAPIDocument(
 
   // Resolve all $ref pointers. External $refs fetch through the injected
   // fetch (callers that must stay side-effect-free inject a rejecting one).
-  const resolved = await dereference<AsyncAPIDocument>(raw as Record<string, unknown>, {
-    baseUrl: location,
-    fetch: fileAwareFetch(fetchFn ?? fetch),
-    parse: (text) => yaml.load(text),
-    signal: options?.signal,
-  });
+  const resolved = await dereference<AsyncAPIDocument>(
+    raw as Record<string, unknown>,
+    {
+      baseUrl: location,
+      fetch: fileAwareFetch(fetchFn ?? fetch),
+      parse: (text) => yaml.load(text),
+      signal: options?.signal,
+    },
+  );
 
   if (!resolved.asyncapi) {
     throw new Error("not a valid AsyncAPI document (missing 'asyncapi' field)");
   }
   // ASYNC-P-01: the artifact's own `asyncapi` field discriminates the
-  // accepted artifact — exactly 3.0.0. A later patch is adopted only by a
-  // revision of the binding specification, never sight-unseen.
+  // accepted artifact — exactly 3.0.0. A later edition requires a new
+  // binding-specification identifier, never range inference.
   if (resolved.asyncapi !== "3.0.0") {
     throw new Error(
       `unsupported AsyncAPI version "${resolved.asyncapi}": openbindings.asyncapi@1 accepts exactly 3.0.0 (ASYNC-P-01)`,
@@ -202,7 +237,9 @@ export async function parseAsyncAPIDocument(
   return resolved;
 }
 
-function fileAwareFetch(fallback: typeof globalThis.fetch): typeof globalThis.fetch {
+function fileAwareFetch(
+  fallback: typeof globalThis.fetch,
+): typeof globalThis.fetch {
   return async (input, init) => {
     const address = input instanceof Request ? input.url : input.toString();
     const url = new URL(address);
@@ -210,7 +247,9 @@ function fileAwareFetch(fallback: typeof globalThis.fetch): typeof globalThis.fe
     try {
       return new Response(await readFile(fileURLToPath(url)), { status: 200 });
     } catch (error: unknown) {
-      throw new Error(`failed to read ${address}: ${errorMessage(error)}`, { cause: error });
+      throw new Error(`failed to read ${address}: ${errorMessage(error)}`, {
+        cause: error,
+      });
     }
   };
 }
@@ -245,7 +284,9 @@ export function validateDocumentAddress(location: string): void {
 export function parseRef(ref: string): string {
   ref = ref.trim();
   if (!ref) {
-    throw new Error("ref is required and must be a JSON Pointer #/operations/<operation-key> (ASYNC-D-03)");
+    throw new Error(
+      "ref is required and must be a JSON Pointer #/operations/<operation-key> (ASYNC-D-03)",
+    );
   }
 
   const prefix = "#/operations/";
@@ -255,7 +296,8 @@ export function parseRef(ref: string): string {
     );
   }
   const token = ref.slice(prefix.length);
-  if (!token) throw new Error(`empty operation key in ref "${ref}" (ASYNC-D-03)`);
+  if (!token)
+    throw new Error(`empty operation key in ref "${ref}" (ASYNC-D-03)`);
   if (token.includes("/")) {
     throw new Error(
       `ref "${ref}" addresses a deeper path, not an operations-map entry: an operation key containing / carries RFC 6901 escaping (~1) (ASYNC-D-03)`,

@@ -28,6 +28,15 @@ interaction kinds use one cardinality-agnostic invocation handle. Input and
 output values follow canonical ProtoJSON, including well-known types, nested
 unknown-field refusal, and precision-preserving 64-bit strings.
 
+Synthesized schemas are directional rather than one shared approximation:
+inputs admit ProtoJSON field-name aliases and `null`'s unset-field meaning,
+while outputs use canonical JSON names and printer forms. Recursive message
+graphs use `$defs`/`$ref`, `oneof` groups carry null-aware at-most-one
+constraints, map values use their declared value type with key-shape
+constraints, bytes use the accepted base64 spellings, and 64-bit values keep a
+full-range string carriage while limiting number values to the interoperable
+exact-integer range.
+
 The binding invents no authentication convention. Supply explicitly named
 gRPC metadata. Generic credentials without a named carriage raise
 `CONTEXT_REQUIRED` before reflection or method dispatch.

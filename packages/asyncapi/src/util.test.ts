@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { sanitizeKey, uniqueKey, parseRef, parseAsyncAPIDocument } from "./util.js";
+import {
+  sanitizeKey,
+  uniqueKey,
+  parseRef,
+  parseAsyncAPIDocument,
+} from "./util.js";
 
 describe("sanitizeKey", () => {
   it("passes through clean keys", () => {
@@ -79,7 +84,9 @@ describe("parseRef", () => {
   // ASYNC-D-03: operation keys containing `/` or `~` carry RFC 6901
   // escaping in the pointer (~1 → /, ~0 → ~).
   it("unescapes RFC 6901 sequences in the operation key", () => {
-    expect(parseRef("#/operations/orders~1create~0v2")).toBe("orders/create~v2");
+    expect(parseRef("#/operations/orders~1create~0v2")).toBe(
+      "orders/create~v2",
+    );
   });
 });
 
@@ -124,7 +131,9 @@ describe("parseAsyncAPIDocument", () => {
   });
 
   it("throws when neither location nor content is provided", async () => {
-    await expect(parseAsyncAPIDocument()).rejects.toThrow("source must have location or content");
+    await expect(parseAsyncAPIDocument()).rejects.toThrow(
+      "source must have location or content",
+    );
   });
 
   // ASYNC-P-01: the `asyncapi` field discriminates the accepted line —
@@ -134,9 +143,13 @@ describe("parseAsyncAPIDocument", () => {
     const doc2x = JSON.stringify({
       asyncapi: "2.6.0",
       info: { title: "Legacy", version: "1.0.0" },
-      channels: { messages: { subscribe: { message: { payload: { type: "object" } } } } },
+      channels: {
+        messages: { subscribe: { message: { payload: { type: "object" } } } },
+      },
     });
-    await expect(parseAsyncAPIDocument(undefined, doc2x)).rejects.toThrow("ASYNC-P-01");
+    await expect(parseAsyncAPIDocument(undefined, doc2x)).rejects.toThrow(
+      "ASYNC-P-01",
+    );
   });
 
   it("accepts exactly the artifact version adopted by revision 1", async () => {
@@ -147,9 +160,9 @@ describe("parseAsyncAPIDocument", () => {
     ).rejects.toThrow("ASYNC-P-01");
   });
 
-  // ASYNC-P-01: a later 3.x line is adopted by compatible revision of the
-  // binding specification, never sight-unseen.
-  it("refuses a 3.1.x document: 3.0.x only, never sight-unseen 3.x", async () => {
+  // ASYNC-P-01: accepting another edition requires a new binding-specification
+  // identifier, never range inference.
+  it("refuses a 3.1.x document: exactly 3.0.0, never sight-unseen 3.x", async () => {
     await expect(
       parseAsyncAPIDocument(undefined, validDoc.replace("3.0.0", "3.1.2")),
     ).rejects.toThrow("ASYNC-P-01");

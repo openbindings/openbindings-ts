@@ -2,6 +2,7 @@ import type { OBInterface, BindingEntry, Source } from "./types.js";
 import type {
   BindingInvocationArgs,
   SynthesizeInput,
+  SynthesizeResult,
   BindingSpecInfo,
   SourceInspection,
 } from "./invoker-types.js";
@@ -47,6 +48,19 @@ export interface InterfaceSynthesizer {
     input: SynthesizeInput,
     options?: { signal?: AbortSignal },
   ): Promise<OBInterface>;
+}
+
+/**
+ * Extends InterfaceSynthesizer with durable accounting of every source
+ * interaction unit observed by the same synthesis call. Kept as a separate
+ * capability so third-party synthesizers can adopt it without pretending an
+ * incomplete report is exhaustive.
+ */
+export interface CoverageSynthesizer extends InterfaceSynthesizer {
+  synthesizeInterfaceWithCoverage(
+    input: SynthesizeInput,
+    options?: { signal?: AbortSignal },
+  ): Promise<SynthesizeResult>;
 }
 
 /**
@@ -97,9 +111,10 @@ export type BindingSelector = (
  * invoker and to bindings.
  *
  * A CONTEXT_REQUIRED challenge is a scope, not a hint. A resolver MUST return
- * only the context that satisfies the selected alternative (the credentials it
- * names plus non-secret configuration), never other stored credentials.
- * {@link scopeContext} is the reference reduction.
+ * only the context that satisfies the selected alternative and never
+ * unrelated stored values. Headers, cookies, environment values, metadata,
+ * and configuration can all be sensitive; {@link scopeContext} therefore
+ * admits only fields named by the selected requirements.
  */
 export type ContextResolver = (
   details: ContextRequiredDetails,

@@ -17,10 +17,9 @@ describe("defaultContentType fallback", () => {
   beforeAll(async () => {
     await new Promise<void>((resolve) => {
       server = createServer((_req: IncomingMessage, res: ServerResponse) => {
-        // Deliberately NO Content-Type header on the response: the decode
-        // lane must not sniff it, only consult the document's declared
-        // defaultContentType.
-        res.writeHead(200);
+        // The message inherits its declaration from defaultContentType; the
+        // actual HTTP representation must agree with that declaration.
+        res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ ok: true, n: 1 }));
       });
       server.listen(0, "127.0.0.1", () => {
@@ -54,6 +53,7 @@ describe("defaultContentType fallback", () => {
           // The response decodes by the REPLY-side governing set
           // (direction-correct decode, ASYNC-P-05).
           reply: { messages: [{ $ref: "#/channels/reply/messages/Msg" }] },
+          bindings: { http: { method: "POST" } },
         },
       },
     };

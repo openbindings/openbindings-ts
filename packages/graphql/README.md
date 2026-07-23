@@ -2,6 +2,12 @@
 
 GraphQL binding invoker and interface synthesizer for the [OpenBindings](https://openbindings.com) TypeScript SDK.
 
+> **Legacy experimental adapter.** This package declares the historical
+> versionless `graphql` token. It is not an implementation of the unpromoted
+> `openbindings.graphql@1` candidate, is not one of the six published 0.2
+> binding specifications, and does not participate in the release's portable
+> synthesis-coverage guarantee.
+
 This package enables OpenBindings to invoke operations against GraphQL endpoints and synthesize OBI documents from GraphQL schemas via introspection. It builds queries, mutations, and subscriptions from operation refs, applies credentials, and delivers results through the SDK's cardinality-agnostic `Invocation` handle. Subscriptions stream over the `graphql-transport-ws` WebSocket protocol.
 
 See the [spec](https://github.com/openbindings/spec) and the [invocation pattern](https://openbindings.com/spec/invocation-pattern) for how binding invokers and interface synthesizers fit into the OpenBindings architecture.

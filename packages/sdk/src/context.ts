@@ -7,8 +7,9 @@ import type { ContextResolver } from "./invokers.js";
 // ---------------------------------------------------------------------------
 
 /**
- * A document store for binding invocation context.
- * Keys are invoker-determined strings (typically a normalized API origin).
+ * An optional SDK storage seam for binding invocation context.
+ * Keys are caller-chosen strings. {@link storeContextResolver} uses its own
+ * normalized-target convention; other consumers may choose another policy.
  * Values are opaque context records — credentials, headers, cookies,
  * environment, metadata — using well-known field names for cross-invoker
  * interoperability.
@@ -28,16 +29,16 @@ import type { ContextResolver } from "./invokers.js";
  * await store.set(normalizeContextKey(target), { bearerToken: token });
  * ```
  *
- * The SDK stores and retrieves context but never inspects its contents.
- * Setting null removes the entry (the published contract pins
- * set-null ≡ delete, so get's null uniformly means "no entry").
- * The published openbindings.document-store interface standardizes this
- * same get/set/delete capability where a store sits across a wire.
+ * `storeContextResolver` inspects standard requirement fields only to satisfy
+ * and scope a challenge. Other consumers may treat values as wholly opaque.
+ * `delete` removes an entry; `set` accepts an object. The published
+ * `openbindings.document-store` interface is the language-neutral wire
+ * analogue when this optional seam crosses a process boundary.
  * Async because browser/persistent stores are inherently async.
  */
 export interface ContextStore {
   get(key: string): Promise<Record<string, unknown> | null>;
-  set(key: string, value: Record<string, unknown> | null): Promise<void>;
+  set(key: string, value: Record<string, unknown>): Promise<void>;
   delete(key: string): Promise<void>;
 }
 
@@ -191,29 +192,31 @@ export function contextString(ctx: Record<string, unknown> | null | undefined, k
 
 /**
  * Returns a shallow copy of ctx with well-known credential fields replaced
- * by "[REDACTED]". Safe for logging and error messages.
- * Returns null for null/undefined input.
+ * by "[REDACTED]". Returns null for null/undefined input. Other fields may
+ * also contain secrets according to their binding specification or
+ * application meaning, so the result is not automatically safe to log
+ * without an application-specific second pass.
  *
- * The context-confidentiality invariant: no context value the credential
- * taxonomy classifies as secret survives, in cleartext, to any diagnostic
- * surface. The secret set is single-sourced on {@link CREDENTIAL_FIELDS} —
- * the one registry {@link scopeContext} consumes — so redaction and scoping
- * can never disagree about what is secret (a second hand-maintained list is
- * exactly what let scheme-scoped `apiKeys` leak here before). The
- * credential-field list itself is owned by the binding-invoker interface's
- * context table (its confidentiality clause); this SDK implements that
- * contract. Flat credential fields redact to "[REDACTED]"; nested credential
- * fields keep their non-secret structure (basic keeps its username, apiKeys
- * keeps its scheme names) and redact only the secret values. (Store KEYS are
- * the one surface this cannot reach — see {@link normalizeContextKey}, which
- * strips userinfo so no secret rides into a key.)
+ * The context-confidentiality invariant: no context value the standard
+ * credential taxonomy classifies as secret survives, in cleartext, to any
+ * diagnostic surface. {@link CREDENTIAL_FIELDS} is derived from the standard
+ * requirement-family table used by {@link scopeContext}, and drift tests guard
+ * its redaction coverage. The taxonomy itself comes from the binding-invoker
+ * interface's context table and confidentiality clause. Flat credential
+ * fields redact to "[REDACTED]"; nested credential fields retain their
+ * identifiers (basic keeps its username, apiKeys keeps its scheme names) and
+ * redact the known secret values. (Store KEYS are the one surface this cannot
+ * reach — see {@link normalizeContextKey}, which strips userinfo so no secret
+ * rides into a key.)
  */
 export function redactContext(ctx: Record<string, unknown> | null | undefined): Record<string, unknown> | null {
   if (!ctx) return null;
   const redacted: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(ctx)) {
     if (!CREDENTIAL_FIELDS.has(k)) {
-      // Non-secret configuration (headers, cookies, ...) passes through.
+      // Unknown fields pass through because this generic helper cannot infer
+      // their structure. Callers must additionally redact fields their
+      // binding or application classifies as sensitive.
       redacted[k] = v;
     } else if (k === "basic") {
       if (typeof v === "object" && v !== null && !Array.isArray(v)) {
@@ -401,6 +404,20 @@ function requirementSatisfied(ctx: Record<string, unknown>, req: ContextRequirem
   if (req.type === "auth.apiKey") {
     return contextApiKeyFor(ctx, typeof req.name === "string" ? req.name : undefined) !== "";
   }
+  if (req.type === "config.value") {
+    const point = typeof req.point === "string" ? req.point : "";
+    const configuration = ctx["configuration"];
+    if (
+      !point
+      || !configuration
+      || typeof configuration !== "object"
+      || Array.isArray(configuration)
+    ) {
+      return false;
+    }
+    const value = (configuration as Record<string, unknown>)[point];
+    return value !== undefined && value !== null && value !== "";
+  }
   const field = REQUIREMENT_FIELDS[req.type] ?? req.type;
   const v = ctx[field];
   return v !== undefined && v !== null && v !== "";
@@ -426,10 +443,11 @@ export function contextSatisfies(
  * Maps a requirement family to every context field that belongs to it.
  * REQUIREMENT_FIELDS names only the field whose presence gates satisfaction;
  * this names the whole family so scoping can admit (for example) an oauth2
- * refresh token alongside its access token. Any field not listed in a family
- * is treated as non-secret configuration. `auth.apiKey` lists both `apiKey`
- * and `apiKeys` so the whole-map field is withheld from unconditional
- * non-secret passthrough below (`CREDENTIAL_FIELDS`); scopeContext admits
+ * refresh token alongside its access token. Fields outside the selected
+ * requirement family are not admitted: this helper cannot infer whether an
+ * arbitrary header, cookie, environment value, metadata entry, or
+ * configuration point is sensitive. `auth.apiKey` lists both `apiKey`
+ * and `apiKeys`; scopeContext admits
  * `apiKeys` narrowed to the selected alternative's named entries only (never
  * the whole map — see admitApiKey), so this list is not used to copy it
  * verbatim the way it is for every other family.
@@ -442,12 +460,12 @@ const REQUIREMENT_FAMILY_FIELDS: Record<string, string[]> = {
 };
 
 /**
- * The set of context fields the credential taxonomy classifies as secret,
- * derived from REQUIREMENT_FAMILY_FIELDS so there is ONE source of "what is
- * secret". Both {@link scopeContext} (which withholds these from non-secret
- * passthrough) and {@link redactContext} (which scrubs their values) consume
- * it, so the two can never disagree. Exported for the drift-guard test that
- * asserts redaction covers every registered field.
+ * The set of context fields the credential taxonomy always classifies as secret,
+ * derived from REQUIREMENT_FAMILY_FIELDS so the standard requirement-family
+ * and redaction registries evolve together. Exported for the drift-guard test
+ * that asserts redaction covers every registered field. Other fields may also
+ * be sensitive according to their binding specification or application
+ * meaning.
  */
 export const CREDENTIAL_FIELDS = new Set(Object.values(REQUIREMENT_FAMILY_FIELDS).flat());
 
@@ -479,25 +497,22 @@ function admitApiKey(
 /**
  * Returns the least-privilege subset of a stored context for a challenge
  * (binding-invoker interface). A CONTEXT_REQUIRED challenge is a scope, not a hint:
- * the invoker receives only what it declared it needs. Every non-secret
- * configuration field passes through unchanged; among the secret credential
- * fields, only those belonging to the requirement families of the first
- * alternative the context satisfies are admitted, and all other stored
- * credentials are withheld. With no challenge there is nothing to scope, so the
- * full context is returned (copied).
+ * the invoker receives only what the first satisfied alternative declares.
+ * Standard credential requirements admit their corresponding family;
+ * `config.value` admits only its named configuration point; an extension
+ * requirement admits its type-named field. No other stored field passes by
+ * default because this generic helper cannot determine its sensitivity or
+ * relevance. With no challenge there is nothing to scope, so the full context
+ * is returned (copied).
  */
 export function scopeContext(
   stored: Record<string, unknown>,
   details: ContextRequiredDetails | null | undefined,
 ): Record<string, unknown> {
   const out: Record<string, unknown> = {};
-  // Non-secret configuration always passes through.
-  for (const [k, v] of Object.entries(stored)) {
-    if (!CREDENTIAL_FIELDS.has(k)) out[k] = v;
-  }
   if (!details) {
     for (const [k, v] of Object.entries(stored)) {
-      if (CREDENTIAL_FIELDS.has(k)) out[k] = v;
+      out[k] = v;
     }
     return out;
   }
@@ -508,6 +523,29 @@ export function scopeContext(
     for (const req of alt.requirements) {
       if (req.type === "auth.apiKey") {
         admitApiKey(stored, out, typeof req.name === "string" ? req.name : undefined);
+        continue;
+      }
+      if (req.type === "config.value") {
+        const point = typeof req.point === "string" ? req.point : "";
+        const configuration = stored["configuration"];
+        if (
+          point
+          && configuration
+          && typeof configuration === "object"
+          && !Array.isArray(configuration)
+          && point in configuration
+        ) {
+          const existing =
+            out["configuration"]
+            && typeof out["configuration"] === "object"
+            && !Array.isArray(out["configuration"])
+              ? out["configuration"] as Record<string, unknown>
+              : {};
+          out["configuration"] = {
+            ...existing,
+            [point]: (configuration as Record<string, unknown>)[point],
+          };
+        }
         continue;
       }
       const fields = REQUIREMENT_FAMILY_FIELDS[req.type] ?? [req.type];
@@ -522,14 +560,14 @@ export function scopeContext(
 
 /**
  * Builds a read-only {@link ContextResolver} backed by a {@link ContextStore}:
- * the composition of the binding-invoker and context-store contracts. It derives
+ * an optional stored realization of binding-invoker challenges. It derives
  * the store key from the challenge's `target` by normalizing it
  * ({@link normalizeEndpoint}), returns the least-privilege subset of the stored
  * context ({@link scopeContext}) when it satisfies one of the challenge's
  * alternatives, and declines (null) otherwise — at which point the challenge
  * surfaces to the caller unchanged. A CONTEXT_REQUIRED challenge is a scope,
- * not a hint: only the satisfied alternative's credentials plus non-secret
- * config are returned, never other stored credentials.
+ * not a hint: only context fields named by the satisfied alternative are
+ * returned. Arbitrary stored fields are not classified or forwarded.
  *
  * A stored entry that does NOT satisfy the challenge (wrong field name, empty
  * value) is a decline like any other: the challenge surfaces, and the
@@ -539,14 +577,18 @@ export function scopeContext(
  *
  * Apps that resolve interactively (prompt, browser redirect, keychain)
  * supply their own resolver and MAY persist what they obtain for
- * `durable: true` requirements under the target-derived key; non-durable
+ * `durable: true` requirements under an application-chosen key; non-durable
  * context MUST NOT be persisted.
  */
 export function storeContextResolver(store: ContextStore): ContextResolver {
   return async (details: ContextRequiredDetails) => {
-    const ctx = await store.get(normalizeEndpoint(details.target));
+    const key = normalizeEndpoint(details.target);
+    // An empty or unkeyable target cannot safely select reusable stored
+    // context. Interactive or application-specific resolvers may still
+    // satisfy the challenge.
+    if (!key) return null;
+    const ctx = await store.get(key);
     if (!ctx) return null;
     return contextSatisfies(ctx, details) ? scopeContext(ctx, details) : null;
   };
 }
-

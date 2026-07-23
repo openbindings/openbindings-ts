@@ -15,8 +15,9 @@ import type { OpenAPIDocument, OpenAPIOperation, OpenAPIPathItem } from "./types
  * default, no supplied value) — a resolvable-missing value, not a malformed
  * one. The invoke path turns it into a config.value CONTEXT_REQUIRED challenge
  * (retryable after resolution, R1a) rather than a terminal
- * ERR_SOURCE_CONFIG_ERROR. config values are non-secret, so no credential-grade
- * target keying is needed.
+ * ERR_SOURCE_CONFIG_ERROR. Configuration may be sensitive according to its
+ * meaning; consumers decide whether the challenge scope is sufficient for
+ * stored-value release.
  */
 export class ConfigRequired extends Error {
   constructor(

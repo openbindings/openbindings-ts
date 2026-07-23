@@ -473,9 +473,9 @@ export function bindableDiscovery(disc: MCPDiscovery): MCPDiscovery {
   return {
     serverName: disc.serverName,
     serverVersion: disc.serverVersion,
-    tools: disc.tools.filter((v) => toolCounts.get(v.name) === 1 && v.taskSupport !== "required"),
-    resources: disc.resources.filter((v) => resourceCounts.get(v.uri) === 1),
-    resourceTemplates: disc.resourceTemplates.filter((v) => templateCounts.get(v.uriTemplate) === 1 && validTemplate(v.uriTemplate)),
-    prompts: disc.prompts.filter((v) => promptCounts.get(v.name) === 1),
+    tools: disc.tools.filter((v) => v.name !== "" && toolCounts.get(v.name) === 1 && v.taskSupport !== "required"),
+    resources: disc.resources.filter((v) => v.uri !== "" && resourceCounts.get(v.uri) === 1),
+    resourceTemplates: disc.resourceTemplates.filter((v) => v.uriTemplate !== "" && templateCounts.get(v.uriTemplate) === 1 && validTemplate(v.uriTemplate)),
+    prompts: disc.prompts.filter((v) => v.name !== "" && promptCounts.get(v.name) === 1),
   };
 }

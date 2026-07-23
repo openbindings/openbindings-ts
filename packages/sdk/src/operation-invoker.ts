@@ -22,6 +22,7 @@ import {
 } from "./invocation.js";
 import {
   BindingNotFoundError,
+  BindingSelectionRequiredError,
   EmptyTransformExpressionError,
   MissingInterfaceError,
   NoTransformEvaluatorError,
@@ -93,8 +94,8 @@ export interface OperationInvokerOptions {
 
 /**
  * The operation-layer invoker: resolves an OBI operation to a binding
- * (OBI-T-12 name resolution; selection by the operation-invoker contract's
- * default policy, consumer-overridable via context.configuration.selection)
+ * (OBI-T-12 name resolution; explicit caller choice or the
+ * operation-invoker contract's sole-candidate rule)
  * and returns a
  * cardinality-agnostic {@link Invocation} handle.
  *
@@ -302,8 +303,7 @@ export class OperationInvoker {
    * Operation-layer side-effect-free preflight (the operation-invoker interface
    * `prepareOperation`), the by-reference counterpart to `prepareBinding`. It
    * resolves `operation` on `obi` to a concrete binding (OBI-T-12 resolution +
-   * contract-default selection or the context.configuration.selection override
-   * selection, or an `opts.bindingKey`-pinned binding) and reports that
+   * explicit selection or the sole-candidate rule) and reports that
    * binding's context requirements without invoking or causing side effects.
    * Resolves to null when requirements cannot be determined without invoking
    * (the always-satisfiable answer); `opts.context` narrows the result to what
@@ -335,9 +335,8 @@ export class OperationInvoker {
   /**
    * Shared operation-layer resolution behind {@link invoke} and
    * {@link prepareOperation}: resolves `operation` against obi's flat key+alias
-   * namespace (OBI-T-12), selects a binding (the contract's default policy,
-   * displaced by a context.configuration.selection override or the
-   * caller-pinned `bindingKey`), and looks up its source. Throws synchronously
+   * namespace (OBI-T-12), resolves a binding (an explicit caller choice or the
+   * contract's sole-candidate rule), and looks up its source. Throws synchronously
    * on a wiring failure (unknown operation, binding, or source).
    */
   private resolveBinding(
@@ -380,8 +379,8 @@ export class OperationInvoker {
       // The operation-invoker contract's consumer override
       // (context.configuration.selection): an ordered list of binding keys,
       // the first invocable entry winning. It displaces whatever selection
-      // policy is in place; when no listed key is invocable, the policy
-      // applies.
+      // policy is in place. When no listed key is invocable, the
+      // policy-neutral sole-candidate/ambiguity rule applies.
       const overridden = selectionOverride(
         iface,
         opKey,
@@ -855,8 +854,8 @@ function wireError(err: unknown): InvocationError {
  * override: the first listed binding key that is invocable — defined on the
  * interface, targeting the resolved operation, and (when availableSpecs is
  * provided) governed by a specification the invoker can act on — wins.
- * Returns null when no listed key is invocable, in which case the selection
- * policy applies.
+ * Returns null when no listed key is invocable, in which case the
+ * policy-neutral sole-candidate or ambiguity rule applies.
  */
 function selectionOverride(
   iface: OBInterface,
@@ -888,15 +887,11 @@ function contextSelectionOverride(ctx: Record<string, unknown> | null | undefine
 }
 
 /**
- * Picks the best binding for an operation, by the operation-invoker
- * contract's normative default policy: non-deprecated candidates rank before
- * deprecated ones; within a tier, higher declared `preference` ranks first,
- * and a candidate with no declared preference ranks below every candidate
- * with one; remaining ties break by lexicographic binding key. Preference is
- * the binding's own — the core defines no source-level preference and
- * nothing is inherited. When availableSpecs is provided, bindings whose
- * governing binding specification is not in the set (by exact identifier)
- * are skipped.
+ * Resolves the only invocable binding for an operation. It does not invent a
+ * choice from preference, deprecation, key order, source order, or iteration
+ * order. When availableSpecs is provided, bindings whose governing binding
+ * specification is not in the set are skipped. Several remaining candidates
+ * raise BindingSelectionRequiredError.
  */
 export function defaultBindingSelector(
   iface: OBInterface,
@@ -907,11 +902,9 @@ export function defaultBindingSelector(
     throw new BindingNotFoundError(opKey);
   }
 
-  let bestKey: string | undefined;
-  let best: BindingEntry | undefined;
-  let bestPref = -Infinity;
-  let bestDeclared = false;
-  let bestDeprecated = true;
+  let candidateKey: string | undefined;
+  let candidate: BindingEntry | undefined;
+  let candidateCount = 0;
   // Bindings that matched the operation but were skipped because no registered
   // invoker handles their governing binding specification. The distinction is
   // load-bearing for the error: "the document has no binding" sends the reader
@@ -930,34 +923,14 @@ export function defaultBindingSelector(
       continue;
     }
 
-    // The ruled default policy: a candidate with no declared preference
-    // ranks below every candidate with one (a declared negative beats
-    // undeclared). Preference is the binding's own; the core defines no
-    // source-level preference and nothing is inherited.
-    const declared = b.preference != null;
-    const bPref = declared ? b.preference! : -Infinity;
-
-    const betterDeprecation = bestDeprecated && !b.deprecated;
-    const sameTier = (b.deprecated ?? false) === bestDeprecated;
-    const betterPref =
-      (declared !== bestDeclared && declared) || (declared === bestDeclared && bPref > bestPref);
-    const samePref = declared === bestDeclared && bPref === bestPref;
-
-    if (
-      !best ||
-      betterDeprecation ||
-      (sameTier && betterPref) ||
-      (sameTier && samePref && k < bestKey!)
-    ) {
-      bestKey = k;
-      best = b;
-      bestPref = bPref;
-      bestDeclared = declared;
-      bestDeprecated = b.deprecated ?? false;
+    candidateCount += 1;
+    if (!candidate) {
+      candidateKey = k;
+      candidate = b;
     }
   }
 
-  if (!best || !bestKey) {
+  if (!candidate || !candidateKey) {
     if (specSkipped.size > 0) {
       const needs = [...specSkipped.keys()]
         .sort()
@@ -971,7 +944,10 @@ export function defaultBindingSelector(
     }
     throw new BindingNotFoundError(opKey);
   }
-  return { key: bestKey, binding: best };
+  if (candidateCount > 1) {
+    throw new BindingSelectionRequiredError(opKey, candidateCount);
+  }
+  return { key: candidateKey, binding: candidate };
 }
 
 async function applyTransformRef(

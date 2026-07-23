@@ -1,9 +1,8 @@
 /**
  * Conformance corpus adapter: runs this SDK's binding selection against the
  * interfaces repository's operation-invoker selection corpus unmodified
- * (conformance/selection — the contract's default policy, the
- * context.configuration.selection consumer override, and the explicit
- * `binding` bypass).
+ * (conformance/selection — explicit caller choice, sole-candidate inference,
+ * and ambiguity refusal).
  *
  * The corpus is located via OB_INTERFACES_CORPUS or the local-dev sibling
  * path (openbindings/interfaces next to openbindings/openbindings-ts); the
@@ -13,7 +12,7 @@
  * fixture's `supported` set is presented by a stub BindingInvoker (the
  * candidate set is formed from the invoker's registered binding
  * specifications) and `invoke` runs the shared resolution (OBI-T-12 name
- * resolution, override, pinning, default policy). Selection is decided
+ * resolution, ordered choice, pinning, and ambiguity refusal). Selection is decided
  * before the binding layer runs, so the selected key is observed via the
  * invocation-site carriage the invoke path stamps on the binding-layer args
  * (`args.site.bindingKey`) — public contract surface, no test seam added.
@@ -25,7 +24,7 @@ import { describe, expect, it } from "vitest";
 import { OperationInvoker } from "./operation-invoker.js";
 import { operationSignature } from "./operation-signature.js";
 import { validateDocument } from "./parse.js";
-import { BindingNotFoundError } from "./errors.js";
+import { BindingNotFoundError, BindingSelectionRequiredError } from "./errors.js";
 import { InvocationImpl, type Invocation } from "./invocation.js";
 import type { BindingInvoker } from "./invokers.js";
 import type { BindingInvocationArgs, InvokeOptions } from "./invoker-types.js";
@@ -54,7 +53,7 @@ interface SelectionCase {
   expected: {
     binding?: string;
     error?: boolean;
-    kind?: "unknown-binding" | "no-candidate";
+    kind?: "unknown-binding" | "no-candidate" | "ambiguous";
   };
 }
 
@@ -133,11 +132,12 @@ describe.skipIf(!dir)("conformance corpus: operation-invoker binding selection",
         }
 
         if (tc.expected.error) {
-          // Both error kinds — unknown explicit binding key and no invocable
-          // candidate — surface as the contract-named ERR_BINDING_NOT_FOUND;
-          // this SDK raises them synchronously as BindingNotFoundError.
+          const ErrorType =
+            tc.expected.kind === "ambiguous"
+              ? BindingSelectionRequiredError
+              : BindingNotFoundError;
           expect(() => invoker.invoke(iface, operationSignature(tc.operation), opts)).toThrow(
-            BindingNotFoundError,
+            ErrorType,
           );
           return;
         }

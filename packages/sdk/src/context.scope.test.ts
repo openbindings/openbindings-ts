@@ -3,10 +3,10 @@ import { scopeContext } from "./context.js";
 import type { ContextRequiredDetails } from "./invocation.js";
 
 // scopeContext enforces least privilege: a CONTEXT_REQUIRED challenge is a
-// scope, not a hint. Non-secret config always passes; only the satisfied
-// alternative's credential family is admitted; other credentials are withheld.
+// scope, not a hint. Only fields named by the satisfied alternative pass;
+// arbitrary stored context is not assumed public or relevant.
 describe("scopeContext", () => {
-  it("withholds unrelated credentials, keeps non-secret config", () => {
+  it("withholds unrelated credentials and unrequested context", () => {
     const stored = {
       bearerToken: "tok",
       apiKey: "key", // unrelated credential, must be withheld
@@ -16,10 +16,7 @@ describe("scopeContext", () => {
       target: "https://api.example.com",
       alternatives: [{ requirements: [{ type: "auth.bearer" }] }],
     };
-    expect(scopeContext(stored, details)).toEqual({
-      bearerToken: "tok",
-      headers: { Accept: "application/json" },
-    });
+    expect(scopeContext(stored, details)).toEqual({ bearerToken: "tok" });
   });
 
   it("admits the whole oauth2 family but no other credential", () => {
@@ -39,9 +36,9 @@ describe("scopeContext", () => {
       accessToken: "at",
       refreshToken: "rt",
       clientSecret: "cs",
-      headers: { X: "1" },
     });
     expect("apiKey" in got).toBe(false);
+    expect("headers" in got).toBe(false);
   });
 
   it("returns an independent copy when there is no challenge", () => {
@@ -65,10 +62,7 @@ describe("scopeContext", () => {
       target: "https://api.example.com",
       alternatives: [{ requirements: [{ type: "auth.apiKey", name: "headerKey" }] }],
     };
-    expect(scopeContext(stored, details)).toEqual({
-      apiKeys: { headerKey: "k1" },
-      headers: { Accept: "application/json" },
-    });
+    expect(scopeContext(stored, details)).toEqual({ apiKeys: { headerKey: "k1" } });
   });
 
   it("admits every named entry an AND of apiKey requirements needs, and no other", () => {
@@ -98,5 +92,24 @@ describe("scopeContext", () => {
       alternatives: [{ requirements: [{ type: "auth.apiKey" }] }],
     };
     expect(scopeContext(stored, details)).toEqual({ apiKey: "flat" });
+  });
+
+  it("admits only the config.value point named by the requirement", () => {
+    const stored = {
+      configuration: {
+        server: { url: "https://api.example.com" },
+        decode: "text",
+      },
+      headers: { Authorization: "sensitive" },
+    };
+    const details: ContextRequiredDetails = {
+      target: "https://api.example.com",
+      alternatives: [{
+        requirements: [{ type: "config.value", point: "server", key: "url" }],
+      }],
+    };
+    expect(scopeContext(stored, details)).toEqual({
+      configuration: { server: { url: "https://api.example.com" } },
+    });
   });
 });

@@ -266,13 +266,21 @@ describe("contextSatisfies", () => {
     const details: ContextRequiredDetails = {
       target: "k",
       alternatives: [
-        { requirements: [{ type: "auth.basic" }, { type: "config.value" }] },
+        {
+          requirements: [
+            { type: "auth.basic" },
+            { type: "config.value", point: "server", key: "url" },
+          ],
+        },
       ],
     };
     expect(contextSatisfies({ basic: { username: "u", password: "p" } }, details)).toBe(false);
     expect(
       contextSatisfies(
-        { basic: { username: "u", password: "p" }, "config.value": "x" },
+        {
+          basic: { username: "u", password: "p" },
+          configuration: { server: { url: "https://api.example.com" } },
+        },
         details,
       ),
     ).toBe(true);

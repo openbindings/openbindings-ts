@@ -1,5 +1,6 @@
 import type {
   BindingInvoker,
+  CoverageSynthesizer,
   InterfaceSynthesizer,
   SourceInspector,
   BindingInvocationArgs,
@@ -10,12 +11,14 @@ import type {
   Source,
   BindingSpecInfo,
   SourceInspection,
+  SynthesizeResult,
 } from "@openbindings/sdk";
 import {
   InvocationError,
   InvocationImpl,
   MultipleSourcesError,
   finalizeSynthesis,
+  finalizeSynthesisCoverage,
   synthesisSkeleton,
   ERR_RUNTIME,
   ERR_SOURCE_LOAD_FAILED,
@@ -28,6 +31,7 @@ import { BINDING_SPEC, DEFAULT_SOURCE_NAME } from "./constants.js";
 import { runBinding, requiredContext } from "./invoke.js";
 import { resolveTarget } from "./target.js";
 import { bindableOperationEntries, convertToInterface } from "./synthesize.js";
+import { synthesisCoverage } from "./coverage.js";
 import { operationRef, parseAsyncAPIDocument, parseRef, errorMessage, sanitizeKey, uniqueKey, validateDocumentAddress } from "./util.js";
 import { WSPool } from "./ws-pool.js";
 
@@ -85,7 +89,7 @@ async function loadDoc(
 const rejectNetworkFetch: typeof globalThis.fetch = () =>
   Promise.reject(new Error("openbindings: prepareBinding performs no network I/O"));
 
-/** Invokes AsyncAPI 3.x bindings over HTTP, SSE, and WebSocket protocols. */
+/** Invokes revision-1 AsyncAPI cells: unary HTTP publish and WebSocket publish/subscription. */
 export class AsyncAPIInvoker implements BindingInvoker {
   private readonly docCache = new Map<string, AsyncAPIDocument>();
   // Connection pooling is an implementation concern (not part of the
@@ -157,9 +161,8 @@ export class AsyncAPIInvoker implements BindingInvoker {
       const opID = parseRef(args.ref);
       const asyncOp = (doc.operations ?? {})[opID];
       if (!asyncOp) return null;
-      // The server whose declared security applies (§9.5): resolveTarget's
-      // securityServer — the connection's server, or under a full-URL
-      // override the server the default selection would have targeted.
+      // The selected artifact server whose declared security applies (§9.5),
+      // including when configuration replaces only its connection target.
       const target = resolveTarget(doc, asyncOp.channel, args.context);
       return requiredContext(asyncOp, target.securityServer, target.serverURL, args.context);
     } catch {
@@ -194,7 +197,7 @@ export class AsyncAPIInvoker implements BindingInvoker {
 // ---------------------------------------------------------------------------
 
 /** Synthesizes OBInterface definitions from AsyncAPI 3.x documents. */
-export class AsyncAPISynthesizer implements InterfaceSynthesizer, SourceInspector {
+export class AsyncAPISynthesizer implements InterfaceSynthesizer, CoverageSynthesizer, SourceInspector {
   /** Returns the binding specifications this synthesizer supports, by exact identifier. */
   bindingSpecs(): BindingSpecInfo[] {
     return [{ bindingSpec: BINDING_SPEC, description: "AsyncAPI 3.x event-driven APIs" }];
@@ -205,10 +208,29 @@ export class AsyncAPISynthesizer implements InterfaceSynthesizer, SourceInspecto
     input: SynthesizeInput,
     options?: { signal?: AbortSignal },
   ): Promise<OBInterface> {
+    return (await this.synthesizeObserved(input, options)).interface;
+  }
+
+  async synthesizeInterfaceWithCoverage(
+    input: SynthesizeInput,
+    options?: { signal?: AbortSignal },
+  ): Promise<SynthesizeResult> {
+    const observation = await this.synthesizeObserved(input, options);
+    return finalizeSynthesisCoverage(
+      observation.interface,
+      observation.document ? synthesisCoverage(observation.document, observation.interface) : [],
+      true,
+    );
+  }
+
+  private async synthesizeObserved(
+    input: SynthesizeInput,
+    options?: { signal?: AbortSignal },
+  ): Promise<{ interface: OBInterface; document?: AsyncAPIDocument }> {
     const sources = input.sources ?? [];
     const src = sources.at(0);
     if (src === undefined) {
-      return synthesisSkeleton(input);
+      return { interface: synthesisSkeleton(input) };
     }
     if (sources.length > 1) {
       throw new MultipleSourcesError();
@@ -233,7 +255,10 @@ export class AsyncAPISynthesizer implements InterfaceSynthesizer, SourceInspecto
         entry.content = artifactContent;
       }
     }
-    return finalizeSynthesis(iface, input, DEFAULT_SOURCE_NAME, BINDING_SPEC);
+    return {
+      interface: finalizeSynthesis(iface, input, DEFAULT_SOURCE_NAME, BINDING_SPEC),
+      document: doc,
+    };
   }
 
   /** Lists all bindable targets (operation IDs) from an AsyncAPI source. */

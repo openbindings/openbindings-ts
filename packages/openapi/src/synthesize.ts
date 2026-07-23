@@ -1,6 +1,7 @@
 import type { OBInterface, Operation, BindingEntry, JSONSchema, Source, SynthesizerWarning } from "@openbindings/sdk";
 import { MAX_TESTED_VERSION } from "@openbindings/sdk";
 import type {
+  OpenAPIDocument,
   OpenAPIMediaType,
   OpenAPIOperation,
   OpenAPIParameter,
@@ -33,11 +34,13 @@ export async function convertToInterface(
   content?: unknown,
   options?: { signal?: AbortSignal },
   onWarning?: (warning: SynthesizerWarning) => void,
+  onDocument?: (document: OpenAPIDocument) => void,
 ): Promise<OBInterface> {
   // loadOpenAPIDocument fully dereferences (every $ref, internal and
   // external, matching Go's kin-openapi loader), so extracted schemas are
   // already inlined here.
   const doc = await loadOpenAPIDocument(location, content, options);
+  onDocument?.(doc);
   // The schema-dialect translation keys off the artifact's own declared
   // version (3.0 vs 3.1); the identifier stays exact and version-free.
   const formatVersion = majorMinor(doc.openapi ?? "3.0");
@@ -67,7 +70,7 @@ export async function convertToInterface(
 
   for (const [pathStr, pathItemRaw] of sortedEntries(doc.paths)) {
     if (pathStr.startsWith("x-") || !pathItemRaw || typeof pathItemRaw !== "object") continue;
-    const pathItem = pathItemRaw as Record<string, unknown>;
+    const pathItem = pathItemRaw as OpenAPIPathItem;
     for (const method of HTTP_METHODS) {
       const op = pathItem[method];
       if (!op || typeof op !== "object") continue;
@@ -76,7 +79,7 @@ export async function convertToInterface(
       const opKey = deriveOperationKey(opObj, pathStr, method, usedKeys);
       usedKeys.add(opKey);
 
-      const params = effectiveParameters(pathItem as OpenAPIPathItem, opObj);
+      const params = effectiveParameters(pathItem, opObj);
       const unflattenable = unflattenableParam(params);
       if (unflattenable) {
         throw unrealizableOperation(
@@ -100,14 +103,14 @@ export async function convertToInterface(
             ? planError.message
             : planError === undefined
               ? "no artifact-declared request media candidate can realize its required flattened input"
-              : String(planError);
+              : safeErrorMessage(planError);
           throw unrealizableOperation(opKey, reason);
         }
 
         if (requestPlans.length === 0) {
           onWarning?.({
             code: planError instanceof DegenerateMediaError ? "openapi.media_schema_mismatch" : "openapi.unresolvable_request_body",
-            message: `${planError instanceof Error ? planError.message : planError === undefined ? "no artifact-declared request media candidate can realize its flattened input" : String(planError)}; optional body omitted from the synthesized contract`,
+            message: `${planError instanceof Error ? planError.message : planError === undefined ? "no artifact-declared request media candidate can realize its flattened input" : safeErrorMessage(planError)}; optional body omitted from the synthesized contract`,
             path: `operations.${opKey}.input`,
           });
         }
@@ -151,6 +154,16 @@ function unrealizableOperation(operationKey: string, reason: string): Error {
   return new Error(
     `cannot synthesize OpenAPI operation ${JSON.stringify(operationKey)}: ${reason}; synthesis would return a statically unbindable partial interface`,
   );
+}
+
+function safeErrorMessage(value: unknown): string {
+  if (value instanceof Error) return value.message;
+  if (typeof value === "string") return value;
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return "unknown request-body planning error";
+  }
 }
 
 /**
@@ -218,7 +231,7 @@ function buildInputSchema(
   const required: string[] = [];
   // Only JSON-family object candidates can carry undeclared fields by the
   // binding rule. Multipart/form and parameter-only surfaces stay closed.
-  let hasOpenBody = requestPlan?.family === FAMILY_JSON && !requestPlan.synthetic;
+  const hasOpenBody = requestPlan?.family === FAMILY_JSON && !requestPlan.synthetic;
 
   for (const param of allParams) {
     if (!param?.name) continue;

@@ -21,6 +21,7 @@ import type { BindingInvocationArgs } from "./invoker-types.js";
 import type { BindingEntry, OBInterface, Operation } from "./types.js";
 import {
   BindingNotFoundError,
+  BindingSelectionRequiredError,
   NoInvokerError,
   OperationNotFoundError,
   UnknownSourceError,
@@ -338,7 +339,19 @@ function makeInvoker(
   mock: MockBindingInvoker = new MockBindingInvoker(),
   opts?: ConstructorParameters<typeof OperationInvoker>[1],
 ) {
-  return new OperationInvoker([mock], { transformEvaluator: evaluator, ...opts });
+  // Most tests exercise validation, transforms, streaming, or context rather
+  // than binding resolution. Give that test application an explicit policy
+  // for its deliberately multi-bound fixtures; dedicated tests below exercise
+  // the contract's policy-neutral default.
+  const bindingSelector =
+    opts?.bindingSelector ??
+    ((iface: OBInterface, opKey: string) => {
+      const key = `${opKey}.main`;
+      const binding = iface.bindings?.[key];
+      if (binding?.operation === opKey) return { key, binding };
+      return defaultBindingSelector(iface, opKey);
+    });
+  return new OperationInvoker([mock], { transformEvaluator: evaluator, ...opts, bindingSelector });
 }
 
 // ---------------------------------------------------------------------------
@@ -852,7 +865,7 @@ describe("metadata pass-through", () => {
 });
 
 // ---------------------------------------------------------------------------
-// defaultBindingSelector (the operation-invoker contract's default policy)
+// defaultBindingSelector (policy-neutral sole-candidate resolution)
 // ---------------------------------------------------------------------------
 
 describe("defaultBindingSelector", () => {
@@ -867,7 +880,7 @@ describe("defaultBindingSelector", () => {
       .toThrow(BindingNotFoundError);
   });
 
-  it("prefers non-deprecated over deprecated regardless of preference (tier rule)", () => {
+  it("refuses several candidates despite deprecation and preference metadata", () => {
     const iface: OBInterface = {
       openbindings: "0.2.0",
       operations: { op: {} },
@@ -877,10 +890,12 @@ describe("defaultBindingSelector", () => {
         "op.fresh": { operation: "op", source: "s", preference: 1 },
       },
     };
-    expect(defaultBindingSelector(iface, "op").key).toBe("op.fresh");
+    expect(() => defaultBindingSelector(iface, "op")).toThrow(
+      BindingSelectionRequiredError,
+    );
   });
 
-  it("a declared preference outranks every undeclared candidate (a declared negative included); nothing is inherited from sources", () => {
+  it("does not inherit source preference or use binding preference to choose", () => {
     const iface: OBInterface = {
       openbindings: "0.2.0",
       operations: { op: {} },
@@ -894,10 +909,12 @@ describe("defaultBindingSelector", () => {
         "op.undeclared": { operation: "op", source: "boosted" },
       },
     };
-    expect(defaultBindingSelector(iface, "op").key).toBe("op.declared");
+    expect(() => defaultBindingSelector(iface, "op")).toThrow(
+      BindingSelectionRequiredError,
+    );
   });
 
-  it("lexicographic binding key breaks remaining ties", () => {
+  it("does not use lexicographic binding-key order to choose", () => {
     const iface: OBInterface = {
       openbindings: "0.2.0",
       operations: { op: {} },
@@ -907,7 +924,9 @@ describe("defaultBindingSelector", () => {
         "op.a": { operation: "op", source: "s" },
       },
     };
-    expect(defaultBindingSelector(iface, "op").key).toBe("op.a");
+    expect(() => defaultBindingSelector(iface, "op")).toThrow(
+      BindingSelectionRequiredError,
+    );
   });
 
   it("skips bindings whose binding spec no registered invoker can handle", () => {
@@ -933,7 +952,7 @@ describe("defaultBindingSelector", () => {
 // ---------------------------------------------------------------------------
 
 describe("selection override (context.configuration.selection)", () => {
-  it("the first invocable listed key displaces the default policy", async () => {
+  it("the first invocable listed key supplies the caller's choice", async () => {
     const op = makeInvoker();
     // Default policy would pick getUser.main (declared 99 over declared 1);
     // the override routes to getUser.bad, whose wrong-shaped output proves
@@ -945,7 +964,7 @@ describe("selection override (context.configuration.selection)", () => {
     await expect(collect(call.outputs)).rejects.toMatchObject({ code: ERR_VALIDATION_FAILED });
   });
 
-  it("skips undefined and wrong-operation keys; the default policy applies when none is invocable", async () => {
+  it("skips undefined and wrong-operation keys; sole-candidate inference applies when none is invocable", async () => {
     const op = makeInvoker();
     const call = op.invoke(testInterface(), operationSignature("getUser"), {
       context: { configuration: { selection: ["nope", "ping.main"] } },
@@ -1003,4 +1022,3 @@ describe("prepareOperation", () => {
     expect(() => op.prepareOperation(testInterface(), "nope")).toThrow();
   });
 });
-

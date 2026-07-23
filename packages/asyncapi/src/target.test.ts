@@ -3,7 +3,7 @@ import type { AsyncAPIChannel, AsyncAPIDocument, AsyncAPIServer } from "./asynca
 import { SERVER_NAME_TAG } from "./constants.js";
 import { resolveTarget } from "./target.js";
 
-// Unit coverage for resolveTarget's default selection and the legacy
+// Unit coverage for resolveTarget's sole-member selection and the legacy
 // metadata.baseURL override (ASYNC-P-04, §9.5). Mirrors the Go SDK's
 // TestResolveTarget_* in util_test.go; the full configuration-point matrix
 // is exercised end to end in conformance.test.ts.
@@ -27,21 +27,19 @@ describe("resolveTarget", () => {
     expect(target.securityServer).toBe(d.servers!.prod);
   });
 
-  it("honors the legacy metadata.baseURL override below the configuration point, keeping the default-selected server's security", () => {
+  it("honors a same-scheme metadata.baseURL replacement, keeping the selected server's security", () => {
     const d = doc();
     const target = resolveTarget(d, undefined, {
-      metadata: { baseURL: "http://localhost:8080" },
+      metadata: { baseURL: "https://localhost:8080" },
     });
-    expect(target.protocol).toBe("http");
-    expect(target.serverURL).toBe("http://localhost:8080");
-    // Under a full-URL override the declared security of the server the
-    // default selection would have targeted still applies (§9.5).
+    expect(target.protocol).toBe("https");
+    expect(target.serverURL).toBe("https://localhost:8080");
     expect(target.securityServer).toBe(d.servers!.prod);
   });
 
   it("refuses when the document declares no servers", () => {
     const empty: AsyncAPIDocument = { asyncapi: "3.0.0", info: { title: "t", version: "1" } };
-    expect(() => resolveTarget(empty, undefined, undefined)).toThrow(/no resolvable server/);
+    expect(() => resolveTarget(empty, undefined, undefined)).toThrow(/declares no server/);
   });
 
   it("a channel-servers entry naming no OWN servers-map key contributes nothing, leaving the structured no-resolvable-server refusal", () => {
@@ -50,25 +48,19 @@ describe("resolveTarget", () => {
     // Object.prototype under an `in` test, so the effective-set membership
     // check must be an own-key lookup: the entry contributes nothing (the
     // structured refusal below), never surfaces a prototype member as a
-    // "server" (which TypeErrors in default selection). Go-map parity:
+    // "server" (which would otherwise TypeError during server selection). Go-map parity:
     // a Go map lookup never sees anything but its own keys.
     const d = doc();
     const forged = { [SERVER_NAME_TAG]: "constructor" } as unknown as AsyncAPIServer;
     const ch: AsyncAPIChannel = { address: "/x", servers: [forged] };
-    expect(() => resolveTarget(d, ch, undefined)).toThrow(/no resolvable server/);
+    expect(() => resolveTarget(d, ch, undefined)).toThrow(/declares no server/);
   });
 });
 
-// §9.2's configuration value shapes for the server point: {"key":
-// "<server-name>", "variables": {"<variable-name>": "<string-value>"}?}
-// selects a member of the effective server set, optionally supplying its
-// declared server variables, xor {"url": "<connection-url>"} overrides
-// with a complete URL. Mirrors the Go SDK's TestResolveTarget_PinnedShapes
-// / TestResolveTarget_ServerVariablesCarriage /
-// TestResolveTarget_ShapeTeachingErrors in util_test.go — the refusal
-// strings below are byte-identical by construction (the pin exists "so two
-// implementations carry it identically").
-describe("resolveTarget §9.2 pinned value shapes", () => {
+// This SDK's composable carriage for §9.2's server point. Mirrors the Go
+// SDK's target tests; the shape is deliberately similar across languages
+// while remaining implementation surface.
+describe("resolveTarget §9.2 server configuration carriage", () => {
   function twoServerDoc(): AsyncAPIDocument {
     return {
       asyncapi: "3.0.0",
@@ -89,16 +81,16 @@ describe("resolveTarget §9.2 pinned value shapes", () => {
     expect(target.securityServer).toBe(d.servers!.backup);
   });
 
-  it('accepts {"url": ...}: complete connection URL, scheme decides, default-selected security applies', () => {
+  it('accepts {"key", "url"}: selected-member same-scheme URL replacement', () => {
     const d = twoServerDoc();
-    const target = resolveTarget(d, undefined, cfg({ url: "ws://localhost:9090/base" }));
-    expect(target.serverURL).toBe("ws://localhost:9090/base");
-    expect(target.protocol).toBe("ws");
+    const target = resolveTarget(d, undefined, cfg({ key: "backup", url: "wss://localhost:9090/base" }));
+    expect(target.serverURL).toBe("wss://localhost:9090/base");
+    expect(target.protocol).toBe("wss");
     expect(target.securityServer).toBe(d.servers!.backup);
   });
 
   const tail =
-    'the pinned shapes (openbindings.asyncapi@1 §9.2) are {"key": "<server-name>", "variables": {"<variable-name>": "<string-value>"}?} (select a member of the effective server set, "variables" optionally supplying its declared server variables) xor {"url": "<connection-url>"} (override with a complete connection URL); the two forms are mutually exclusive and "variables" composes only with "key"';
+    'this implementation accepts {"key": "<server-name>"?, "variables": {"<variable-name>": "<string-value>"}?, "url": "<connection-url>"?}; "key" selects an artifact member (required when several bindable members remain), "variables" completes that member, and "url" may replace only that selected member\'s target with the same scheme';
 
   const refusals: Array<{ name: string; value: unknown; want: string }> = [
     {
@@ -127,24 +119,9 @@ describe("resolveTarget §9.2 pinned value shapes", () => {
       want: 'configuration.server members "mode", "name" are not pinned: ' + tail,
     },
     {
-      name: "both pinned members",
-      value: { key: "prod", url: "wss://api.example.com/v2" },
-      want: 'configuration.server carries both "key" and "url": ' + tail,
-    },
-    {
-      name: "neither pinned member",
+      name: "empty object",
       value: {},
-      want: 'configuration.server carries neither "key" nor "url": ' + tail,
-    },
-    {
-      name: "variables without key",
-      value: { variables: { env: "staging" } },
-      want: 'configuration.server carries neither "key" nor "url": ' + tail,
-    },
-    {
-      name: "variables with url",
-      value: { url: "wss://api.example.com/v2", variables: { env: "staging" } },
-      want: 'configuration.server carries "variables" with "url": ' + tail,
+      want: 'configuration.server carries none of "key", "variables", or "url": ' + tail,
     },
     {
       name: "key not a string",
@@ -204,6 +181,16 @@ describe("resolveTarget §9.2 pinned value shapes", () => {
       expect(message).toBe(tc.want);
     });
   }
+
+  it("requires key selection before a valid URL replacement when several members remain", () => {
+    expect(() => resolveTarget(twoServerDoc(), undefined, cfg({ url: "wss://override.example" })))
+      .toThrow(/configuration\.server\.key must select/);
+  });
+
+  it("requires key selection before variables can complete one of several members", () => {
+    expect(() => resolveTarget(twoServerDoc(), undefined, cfg({ variables: { env: "staging" } })))
+      .toThrow(/configuration\.server\.key must select/);
+  });
 });
 
 // §9.2's `variables` member of the server pin's key form (ratified
@@ -279,7 +266,7 @@ describe("resolveTarget §9.2 server variables carriage", () => {
       variableDoc(),
       undefined,
       cfg({ key: "tiered", variables: { env: "qa" } }),
-    )).toThrow(/outside the artifact-declared enum/);
+    )).toThrow(/artifact-declared enum/);
   });
 
   it("refuses a supplied name the selected server does not declare, even when every expression would resolve", () => {

@@ -5,6 +5,7 @@ import descriptorJSON from "protobufjs/google/protobuf/descriptor.json";
 import sourceContextJSON from "protobufjs/google/protobuf/source_context.json";
 import typeJSON from "protobufjs/google/protobuf/type.json";
 import { fromProtoJSON, toProtoJSON } from "./protojson.js";
+import { assertBoundMethodRange } from "./schema-range.js";
 import {
   InvocationError,
   InvocationImpl,
@@ -201,6 +202,7 @@ function resolveMethod(content: unknown, serviceName: string, methodName: string
   const service = root.lookupService(serviceName);
   const method = service.methods[methodName];
   if (!method) throw new Error(`method ${serviceName}/${methodName} not found in embedded schema`);
+  assertBoundMethodRange(root, method);
   return {
     kind: method.requestStream
       ? method.responseStream ? "bidirectional" : "client-streaming"
@@ -213,7 +215,9 @@ function resolveMethod(content: unknown, serviceName: string, methodName: string
 
 export function loadProtobufSchema(content: unknown): protobuf.Root {
   if (typeof content === "string") {
-    const parsed = protobuf.parse(content, { keepCase: false });
+    // Preserve the declared proto spelling so the incorporated ProtoJSON
+    // alias rule remains available.
+    const parsed = protobuf.parse(content, { keepCase: true });
     for (const imported of parsed.imports ?? []) {
       if (!imported.startsWith("google/protobuf/")) {
         throw new Error(`embedded .proto content may import only google/protobuf/* files; ${JSON.stringify(imported)} is refused`);

@@ -32,7 +32,10 @@ function mockFetch(
   respond: (req: CapturedRequest) => Response | Promise<Response>,
 ): { fetch: typeof globalThis.fetch; requests: CapturedRequest[] } {
   const requests: CapturedRequest[] = [];
-  const fn = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+  const fn = async (
+    input: RequestInfo | URL,
+    init?: RequestInit,
+  ): Promise<Response> => {
     const req: CapturedRequest = {
       url: input instanceof Request ? input.url : String(input),
       method: init?.method ?? "GET",
@@ -75,11 +78,22 @@ function src(spec: unknown) {
   const visit = (value: unknown): void => {
     if (!value || typeof value !== "object" || Array.isArray(value)) return;
     const object = value as Record<string, unknown>;
-    if (object.responses && typeof object.responses === "object" && !Array.isArray(object.responses)) {
-      for (const response of Object.values(object.responses as Record<string, unknown>)) {
-        if (response && typeof response === "object" && !Array.isArray(response)) {
+    if (
+      object.responses &&
+      typeof object.responses === "object" &&
+      !Array.isArray(object.responses)
+    ) {
+      for (const response of Object.values(
+        object.responses as Record<string, unknown>,
+      )) {
+        if (
+          response &&
+          typeof response === "object" &&
+          !Array.isArray(response)
+        ) {
           const item = response as Record<string, unknown>;
-          if (item.content === undefined) item.content = { "application/json": {} };
+          if (item.content === undefined)
+            item.content = { "application/json": {} };
         }
       }
     }
@@ -100,8 +114,15 @@ const WIDGET_SPEC = {
     "/session": {
       get: {
         operationId: "getSession",
-        parameters: [{ name: "session_id", in: "cookie", schema: { type: "string" } }],
-        responses: { "200": { description: "ok", content: { "application/json": {}, "text/plain": {} } } },
+        parameters: [
+          { name: "session_id", in: "cookie", schema: { type: "string" } },
+        ],
+        responses: {
+          "200": {
+            description: "ok",
+            content: { "application/json": {}, "text/plain": {} },
+          },
+        },
       },
     },
   },
@@ -137,7 +158,10 @@ describe("OAPI-D-03 — ref shape", () => {
       components: {
         pathItems: {
           Shared: {
-            get: { operationId: "sharedGet", responses: { "200": { description: "ok" } } },
+            get: {
+              operationId: "sharedGet",
+              responses: { "200": { description: "ok" } },
+            },
           },
         },
       },
@@ -154,25 +178,41 @@ describe("OAPI-D-03 — ref shape", () => {
 });
 
 // ---------------------------------------------------------------------------
-// OAPI-P-01 / §3 / §6 — accepted lines, duplicate keys, self-containment
+// OAPI-P-01 / §3 / §6 — accepted editions, duplicate keys, self-containment
 // ---------------------------------------------------------------------------
 
 describe("OAPI-P-01 / §3 / §6 — loading", () => {
-  it("discriminates the accepted lines by the artifact's own openapi field", async () => {
-    await expect(
-      loadOpenAPIDocument(undefined, '{"swagger": "2.0", "info": {"title": "t", "version": "1"}, "paths": {}}'),
-    ).rejects.toThrow("OAPI-P-01");
-    await expect(
-      loadOpenAPIDocument(undefined, '{"openapi": "3.2.0", "info": {"title": "t", "version": "1"}, "paths": {}}'),
-    ).rejects.toThrow("OAPI-P-01");
-
-    // Accepted lines load.
-    for (const v of ["3.0.3", "3.1.0"]) {
+  it("accepts every exact edition in the frozen envelope", async () => {
+    for (const v of [
+      "3.0.0",
+      "3.0.1",
+      "3.0.2",
+      "3.0.3",
+      "3.0.4",
+      "3.1.0",
+      "3.1.1",
+      "3.1.2",
+    ]) {
       const doc = await loadOpenAPIDocument(
         undefined,
         `{"openapi": "${v}", "info": {"title": "t", "version": "1"}, "paths": {}}`,
       );
       expect(doc.openapi).toBe(v);
+    }
+  });
+
+  it("refuses values outside the frozen envelope rather than inferring line compatibility", async () => {
+    const rejected = [
+      '{"swagger": "2.0", "info": {"title": "t", "version": "1"}, "paths": {}}',
+      ...["3.0.5", "3.1.3", "3.2.0"].map(
+        (v) =>
+          `{"openapi": "${v}", "info": {"title": "t", "version": "1"}, "paths": {}}`,
+      ),
+    ];
+    for (const content of rejected) {
+      await expect(loadOpenAPIDocument(undefined, content)).rejects.toThrow(
+        "OAPI-P-01",
+      );
     }
   });
 
@@ -190,7 +230,9 @@ describe("OAPI-P-01 / §3 / §6 — loading", () => {
     const content = `{"openapi": "3.0.3", "info": {"title": "t", "version": "1"},
       "paths": {"/a": {"get": {"operationId": "x", "responses": {"200": {"description": "ok",
         "content": {"application/json": {"schema": {"$ref": "shared.json#/Thing"}}}}}}}}}`;
-    await expect(loadOpenAPIDocument(undefined, content)).rejects.toThrow("self-contained");
+    await expect(loadOpenAPIDocument(undefined, content)).rejects.toThrow(
+      "self-contained",
+    );
   });
 });
 
@@ -209,7 +251,12 @@ describe("OAPI-P-03 — flattened-model refusals", () => {
           get: {
             operationId: "get",
             parameters: [
-              { name: "id", in: "path", required: true, schema: { type: "string" } },
+              {
+                name: "id",
+                in: "path",
+                required: true,
+                schema: { type: "string" },
+              },
               { name: "id", in: "query", schema: { type: "string" } },
             ],
             responses: { "200": { description: "ok" } },
@@ -256,21 +303,35 @@ describe("OAPI-P-03 — flattened-model refusals", () => {
     const wantMsg =
       'field(s) stray match no declared parameter, and the declared request body is non-object (its flattened contract carries only the synthetic "body" property)';
     const cases: Array<[string, Record<string, unknown>]> = [
-      ["string JSON body", { "application/json": { schema: { type: "string" } } }],
+      [
+        "string JSON body",
+        { "application/json": { schema: { type: "string" } } },
+      ],
       [
         "array JSON body",
-        { "application/json": { schema: { type: "array", items: { type: "integer" } } } },
+        {
+          "application/json": {
+            schema: { type: "array", items: { type: "integer" } },
+          },
+        },
       ],
       [
         "binary-in-JSON body (3.1 contentEncoding)",
-        { "application/json": { schema: { type: "string", contentEncoding: "base64" } } },
+        {
+          "application/json": {
+            schema: { type: "string", contentEncoding: "base64" },
+          },
+        },
       ],
       ["text/plain body", { "text/plain": { schema: { type: "string" } } }],
       // §9.1's object determination is by declaration alone: a TYPELESS
       // schema — neither `properties` nor an explicit object type — is
       // non-object, so the refusal fires for it exactly as for arrays
       // and scalars.
-      ["typeless JSON body (bare schema)", { "application/json": { schema: {} } }],
+      [
+        "typeless JSON body (bare schema)",
+        { "application/json": { schema: {} } },
+      ],
       [
         "typeless JSON body (description-only schema)",
         { "application/json": { schema: { description: "opaque payload" } } },
@@ -331,7 +392,10 @@ describe("OAPI-P-03 — flattened-model refusals", () => {
           "/echo": {
             post: {
               operationId: "echo",
-              requestBody: { required: true, content: { "application/json": { schema } } },
+              requestBody: {
+                required: true,
+                content: { "application/json": { schema } },
+              },
               responses: { "200": { description: "ok" } },
             },
           },
@@ -366,7 +430,9 @@ describe("OAPI-P-03 — flattened-model refusals", () => {
             requestBody: {
               required: true,
               content: {
-                "application/json": { schema: { properties: { name: { type: "string" } } } },
+                "application/json": {
+                  schema: { properties: { name: { type: "string" } } },
+                },
               },
             },
             responses: { "200": { description: "ok" } },
@@ -402,7 +468,10 @@ describe("OAPI-P-03 — flattened-model refusals", () => {
               required: true,
               content: {
                 "application/json": {
-                  schema: { type: "object", properties: { name: { type: "string" } } },
+                  schema: {
+                    type: "object",
+                    properties: { name: { type: "string" } },
+                  },
                 },
               },
             },
@@ -412,7 +481,11 @@ describe("OAPI-P-03 — flattened-model refusals", () => {
       },
     };
     const { fetch, requests } = mockFetch(() => jsonResponse({}));
-    const call = new OpenAPIInvoker().invokeBinding({ source: src(spec), ref: "#/paths/~1w/post", fetch });
+    const call = new OpenAPIInvoker().invokeBinding({
+      source: src(spec),
+      ref: "#/paths/~1w/post",
+      fetch,
+    });
     await call.write({ name: "x", extra: "y" });
     await single(call.outputs);
     expect(requests[0]?.headers.get("Content-Type")).toBe("application/json");
@@ -436,7 +509,10 @@ describe("OAPI-P-03 — flattened-model refusals", () => {
               required: true,
               content: {
                 "multipart/form-data": {
-                  schema: { type: "object", properties: { description: { type: "string" } } },
+                  schema: {
+                    type: "object",
+                    properties: { description: { type: "string" } },
+                  },
                 },
               },
             },
@@ -479,7 +555,10 @@ describe("OAPI-P-03 — flattened-model refusals", () => {
               required: true,
               content: {
                 "application/x-www-form-urlencoded": {
-                  schema: { type: "object", properties: { name: { type: "string" } } },
+                  schema: {
+                    type: "object",
+                    properties: { name: { type: "string" } },
+                  },
                 },
               },
             },
@@ -496,7 +575,9 @@ describe("OAPI-P-03 — flattened-model refusals", () => {
     });
     await call.write({ name: "a b", extra: "y" });
     await single(call.outputs);
-    expect(requests[0]?.headers.get("Content-Type")).toBe("application/x-www-form-urlencoded");
+    expect(requests[0]?.headers.get("Content-Type")).toBe(
+      "application/x-www-form-urlencoded",
+    );
     expect(requests[0]?.body).toBe("extra=y&name=a%20b");
   });
 
@@ -512,7 +593,14 @@ describe("OAPI-P-03 — flattened-model refusals", () => {
         "/w/{id}": {
           post: {
             operationId: "makeW",
-            parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }],
+            parameters: [
+              {
+                name: "id",
+                in: "path",
+                required: true,
+                schema: { type: "string" },
+              },
+            ],
             requestBody: {
               content: {
                 "application/json": {
@@ -532,14 +620,24 @@ describe("OAPI-P-03 — flattened-model refusals", () => {
     const { fetch, requests } = mockFetch(() => jsonResponse({ ok: true }));
     const inv = new OpenAPIInvoker();
 
-    const call = inv.invokeBinding({ source: src(spec), ref: "#/paths/~1w~1{id}/post", fetch });
+    const call = inv.invokeBinding({
+      source: src(spec),
+      ref: "#/paths/~1w~1{id}/post",
+      fetch,
+    });
     await call.write({ name: "x" });
-    await expect(call.closed).rejects.toMatchObject({ code: ERR_MISSING_INPUT });
+    await expect(call.closed).rejects.toMatchObject({
+      code: ERR_MISSING_INPUT,
+    });
     expect(requests).toHaveLength(0);
 
     // A supplied input missing a required BODY member is sent as-is: with
     // no body fields and a non-required requestBody, the body is omitted.
-    const call2 = inv.invokeBinding({ source: src(spec), ref: "#/paths/~1w~1{id}/post", fetch });
+    const call2 = inv.invokeBinding({
+      source: src(spec),
+      ref: "#/paths/~1w~1{id}/post",
+      fetch,
+    });
     await call2.write({ id: "7" });
     await expect(single(call2.outputs)).resolves.toEqual({ ok: true });
     expect(requests).toHaveLength(1);
@@ -558,7 +656,11 @@ describe("OAPI-P-03 — flattened-model refusals", () => {
           get: {
             operationId: "search",
             parameters: [
-              { name: "tags", in: "query", schema: { type: "array", items: { type: "string" } } },
+              {
+                name: "tags",
+                in: "query",
+                schema: { type: "array", items: { type: "string" } },
+              },
               {
                 name: "flat",
                 in: "query",
@@ -566,7 +668,13 @@ describe("OAPI-P-03 — flattened-model refusals", () => {
                 explode: false,
                 schema: { type: "array", items: { type: "string" } },
               },
-              { name: "filter", in: "query", style: "deepObject", explode: true, schema: { type: "object" } },
+              {
+                name: "filter",
+                in: "query",
+                style: "deepObject",
+                explode: true,
+                schema: { type: "object" },
+              },
             ],
             responses: { "200": { description: "ok" } },
           },
@@ -574,11 +682,21 @@ describe("OAPI-P-03 — flattened-model refusals", () => {
       },
     };
     const { fetch, requests } = mockFetch(() => jsonResponse({}));
-    const call = new OpenAPIInvoker().invokeBinding({ source: src(spec), ref: "#/paths/~1search/get", fetch });
-    await call.write({ tags: ["a", "b"], flat: ["x", "y"], filter: { kind: "big", size: 2 } });
+    const call = new OpenAPIInvoker().invokeBinding({
+      source: src(spec),
+      ref: "#/paths/~1search/get",
+      fetch,
+    });
+    await call.write({
+      tags: ["a", "b"],
+      flat: ["x", "y"],
+      filter: { kind: "big", size: 2 },
+    });
     await single(call.outputs);
     // Declaration order: tags (form explode default), flat, filter.
-    expect(requests[0]?.url).toBe(`${BASE}/search?tags=a&tags=b&flat=x,y&filter[kind]=big&filter[size]=2`);
+    expect(requests[0]?.url).toBe(
+      `${BASE}/search?tags=a&tags=b&flat=x,y&filter[kind]=big&filter[size]=2`,
+    );
   });
 
   // Matrix/label path styles substitute their full expansions into the
@@ -648,10 +766,16 @@ describe("OAPI-P-04 — request media on the wire", () => {
       },
     };
     const { fetch, requests } = mockFetch(() => jsonResponse({}, 201));
-    const call = new OpenAPIInvoker().invokeBinding({ source: src(spec), ref: "#/paths/~1things/post", fetch });
+    const call = new OpenAPIInvoker().invokeBinding({
+      source: src(spec),
+      ref: "#/paths/~1things/post",
+      fetch,
+    });
     await call.write({ k: "v" });
     await single(call.outputs);
-    expect(requests[0]?.headers.get("Content-Type")).toBe("application/vnd.a+json");
+    expect(requests[0]?.headers.get("Content-Type")).toBe(
+      "application/vnd.a+json",
+    );
     expect(requests[0]?.body).toBe('{"k":"v"}');
   });
 
@@ -668,7 +792,11 @@ describe("OAPI-P-04 — request media on the wire", () => {
             operationId: "putBlob",
             requestBody: {
               required: true,
-              content: { "application/octet-stream": { schema: { type: "string", format: "binary" } } },
+              content: {
+                "application/octet-stream": {
+                  schema: { type: "string", format: "binary" },
+                },
+              },
             },
             responses: { "200": { description: "ok" } },
           },
@@ -676,8 +804,14 @@ describe("OAPI-P-04 — request media on the wire", () => {
       },
     };
     const { fetch, requests } = mockFetch(() => jsonResponse({}));
-    const call = new OpenAPIInvoker().invokeBinding({ source: src(spec), ref: "#/paths/~1blob/post", fetch });
-    await expect(call.closed).rejects.toMatchObject({ code: ERR_SOURCE_CONFIG_ERROR });
+    const call = new OpenAPIInvoker().invokeBinding({
+      source: src(spec),
+      ref: "#/paths/~1blob/post",
+      fetch,
+    });
+    await expect(call.closed).rejects.toMatchObject({
+      code: ERR_SOURCE_CONFIG_ERROR,
+    });
     expect(requests).toHaveLength(0);
   });
 
@@ -715,7 +849,11 @@ describe("OAPI-P-04 — request media on the wire", () => {
     ],
     [
       "text-only with an object schema",
-      { "text/plain": { schema: { type: "object", properties: { a: { type: "string" } } } } },
+      {
+        "text/plain": {
+          schema: { type: "object", properties: { a: { type: "string" } } },
+        },
+      },
       TEXT_DEGENERATE_MSG,
     ],
   ];
@@ -736,8 +874,15 @@ describe("OAPI-P-04 — request media on the wire", () => {
         },
       };
       const { fetch, requests } = mockFetch(() => jsonResponse({}));
-      const call = new OpenAPIInvoker().invokeBinding({ source: src(spec), ref: "#/paths/~1op/post", fetch });
-      await expect(call.closed).rejects.toMatchObject({ code: ERR_SOURCE_CONFIG_ERROR, message });
+      const call = new OpenAPIInvoker().invokeBinding({
+        source: src(spec),
+        ref: "#/paths/~1op/post",
+        fetch,
+      });
+      await expect(call.closed).rejects.toMatchObject({
+        code: ERR_SOURCE_CONFIG_ERROR,
+        message,
+      });
       expect(requests).toHaveLength(0);
     });
   }
@@ -769,7 +914,11 @@ describe("OAPI-P-04 — request media on the wire", () => {
       },
     };
     const { fetch, requests } = mockFetch(() => jsonResponse({}));
-    const call = new OpenAPIInvoker().invokeBinding({ source: src(spec), ref: "#/paths/~1op/post", fetch });
+    const call = new OpenAPIInvoker().invokeBinding({
+      source: src(spec),
+      ref: "#/paths/~1op/post",
+      fetch,
+    });
     await call.write({ body: "x" });
     await single(call.outputs);
     expect(requests).toHaveLength(1);
@@ -807,10 +956,16 @@ describe("OAPI-P-04 — request media on the wire", () => {
       },
     };
     const { fetch, requests } = mockFetch(() => jsonResponse({}));
-    const call = new OpenAPIInvoker().invokeBinding({ source: src(spec), ref: "#/paths/~1form/post", fetch });
+    const call = new OpenAPIInvoker().invokeBinding({
+      source: src(spec),
+      ref: "#/paths/~1form/post",
+      fetch,
+    });
     await call.write({ name: "a b", ids: [1, 2] });
     await single(call.outputs);
-    expect(requests[0]?.headers.get("Content-Type")).toBe("application/x-www-form-urlencoded");
+    expect(requests[0]?.headers.get("Content-Type")).toBe(
+      "application/x-www-form-urlencoded",
+    );
     expect(requests[0]?.body).toBe("ids=1&ids=2&name=a%20b");
   });
 
@@ -827,7 +982,11 @@ describe("OAPI-P-04 — request media on the wire", () => {
             operationId: "batch",
             requestBody: {
               required: true,
-              content: { "application/json": { schema: { type: "array", items: { type: "integer" } } } },
+              content: {
+                "application/json": {
+                  schema: { type: "array", items: { type: "integer" } },
+                },
+              },
             },
             responses: { "200": { description: "ok" } },
           },
@@ -835,7 +994,11 @@ describe("OAPI-P-04 — request media on the wire", () => {
       },
     };
     const { fetch, requests } = mockFetch(() => jsonResponse({}));
-    const call = new OpenAPIInvoker().invokeBinding({ source: src(spec), ref: "#/paths/~1batch/post", fetch });
+    const call = new OpenAPIInvoker().invokeBinding({
+      source: src(spec),
+      ref: "#/paths/~1batch/post",
+      fetch,
+    });
     await call.write({ body: [1, 2] });
     await single(call.outputs);
     expect(requests[0]?.body).toBe("[1,2]");
@@ -852,9 +1015,15 @@ describe("OAPI-P-04 — request media on the wire", () => {
         "/echo": {
           post: {
             operationId: "echo",
-            requestBody: { required: true, content: { "text/plain": { schema: { type: "string" } } } },
+            requestBody: {
+              required: true,
+              content: { "text/plain": { schema: { type: "string" } } },
+            },
             responses: {
-              "200": { description: "ok", content: { "text/plain": { schema: { type: "string" } } } },
+              "200": {
+                description: "ok",
+                content: { "text/plain": { schema: { type: "string" } } },
+              },
             },
           },
         },
@@ -862,18 +1031,32 @@ describe("OAPI-P-04 — request media on the wire", () => {
     };
     const inv = new OpenAPIInvoker();
     const { fetch, requests } = mockFetch(
-      () => new Response("pong", { status: 200, headers: { "Content-Type": "text/plain" } }),
+      () =>
+        new Response("pong", {
+          status: 200,
+          headers: { "Content-Type": "text/plain" },
+        }),
     );
-    const call = inv.invokeBinding({ source: src(spec), ref: "#/paths/~1echo/post", fetch });
+    const call = inv.invokeBinding({
+      source: src(spec),
+      ref: "#/paths/~1echo/post",
+      fetch,
+    });
     await call.write({ body: "ping" });
     await expect(single(call.outputs)).resolves.toBe("pong");
     expect(requests[0]?.headers.get("Content-Type")).toBe("text/plain");
     expect(requests[0]?.body).toBe("ping");
 
     // The selection condition: a non-string body value refuses pre-dispatch.
-    const call2 = inv.invokeBinding({ source: src(spec), ref: "#/paths/~1echo/post", fetch });
+    const call2 = inv.invokeBinding({
+      source: src(spec),
+      ref: "#/paths/~1echo/post",
+      fetch,
+    });
     await call2.write({ body: 1 });
-    await expect(call2.closed).rejects.toMatchObject({ code: ERR_VALIDATION_FAILED });
+    await expect(call2.closed).rejects.toMatchObject({
+      code: ERR_VALIDATION_FAILED,
+    });
     expect(requests).toHaveLength(1);
   });
 
@@ -889,15 +1072,25 @@ describe("OAPI-P-04 — request media on the wire", () => {
           get: {
             operationId: "dual",
             responses: {
-              "200": { description: "ok", content: { "application/json": {}, "text/csv": {} } },
-              "404": { description: "nope", content: { "application/problem+json": {} } },
+              "200": {
+                description: "ok",
+                content: { "application/json": {}, "text/csv": {} },
+              },
+              "404": {
+                description: "nope",
+                content: { "application/problem+json": {} },
+              },
             },
           },
         },
       },
     };
     const { fetch, requests } = mockFetch(() => jsonResponse({}));
-    const call = new OpenAPIInvoker().invokeBinding({ source: src(spec), ref: "#/paths/~1csvjson/get", fetch });
+    const call = new OpenAPIInvoker().invokeBinding({
+      source: src(spec),
+      ref: "#/paths/~1csvjson/get",
+      fetch,
+    });
     await single(call.outputs);
     const accept = requests[0]?.headers.get("Accept") ?? "";
     expect(accept).toContain("application/json");
@@ -921,7 +1114,10 @@ const DUAL_SPEC = {
         responses: {
           "200": {
             description: "ok",
-            content: { "application/json": { schema: { type: "object" } }, "text/event-stream": {} },
+            content: {
+              "application/json": { schema: { type: "object" } },
+              "text/event-stream": {},
+            },
           },
         },
       },
@@ -950,16 +1146,28 @@ describe("OAPI-P-06 / §8 — interaction shape", () => {
     const inv = new OpenAPIInvoker();
 
     // SSE framing → server-streaming.
-    const { fetch: sseFetch } = mockFetch(() => sseResponse(["data: one\n\ndata: two\n\n"]));
-    const streamCall = inv.invokeBinding({ source: src(DUAL_SPEC), ref: REF_DUAL, fetch: sseFetch });
+    const { fetch: sseFetch } = mockFetch(() =>
+      sseResponse(["data: one\n\ndata: two\n\n"]),
+    );
+    const streamCall = inv.invokeBinding({
+      source: src(DUAL_SPEC),
+      ref: REF_DUAL,
+      fetch: sseFetch,
+    });
     const events: unknown[] = [];
     for await (const e of streamCall.outputs) events.push(e);
     await streamCall.closed;
     expect(events).toEqual(["one", "two"]);
 
     // JSON framing → unary.
-    const { fetch: jsonFetch } = mockFetch(() => jsonResponse({ mode: "unary" }));
-    const unaryCall = inv.invokeBinding({ source: src(DUAL_SPEC), ref: REF_DUAL, fetch: jsonFetch });
+    const { fetch: jsonFetch } = mockFetch(() =>
+      jsonResponse({ mode: "unary" }),
+    );
+    const unaryCall = inv.invokeBinding({
+      source: src(DUAL_SPEC),
+      ref: REF_DUAL,
+      fetch: jsonFetch,
+    });
     await expect(single(unaryCall.outputs)).resolves.toEqual({ mode: "unary" });
   });
 
@@ -975,7 +1183,11 @@ describe("OAPI-P-06 / §8 — interaction shape", () => {
         "data: incomplete-final-event", // no blank line: discarded
       ]),
     );
-    const call = new OpenAPIInvoker().invokeBinding({ source: src(DUAL_SPEC), ref: REF_DUAL, fetch });
+    const call = new OpenAPIInvoker().invokeBinding({
+      source: src(DUAL_SPEC),
+      ref: REF_DUAL,
+      fetch,
+    });
     const events: unknown[] = [];
     for await (const e of call.outputs) events.push(e);
     await call.closed;
@@ -984,8 +1196,14 @@ describe("OAPI-P-06 / §8 — interaction shape", () => {
 
   // CRLF and lone-CR line endings are valid event-stream line terminators.
   it("accepts CRLF and lone-CR line endings", async () => {
-    const { fetch } = mockFetch(() => sseResponse(["data: crlf\r\n\r\n", "data: cr\r\r"]));
-    const call = new OpenAPIInvoker().invokeBinding({ source: src(DUAL_SPEC), ref: REF_DUAL, fetch });
+    const { fetch } = mockFetch(() =>
+      sseResponse(["data: crlf\r\n\r\n", "data: cr\r\r"]),
+    );
+    const call = new OpenAPIInvoker().invokeBinding({
+      source: src(DUAL_SPEC),
+      ref: REF_DUAL,
+      fetch,
+    });
     const events: unknown[] = [];
     for await (const e of call.outputs) events.push(e);
     expect(events).toEqual(["crlf", "cr"]);
@@ -994,7 +1212,11 @@ describe("OAPI-P-06 / §8 — interaction shape", () => {
   // One leading U+FEFF BOM is ignored per the WHATWG stream grammar.
   it("ignores one leading BOM", async () => {
     const { fetch } = mockFetch(() => sseResponse(["﻿data: x\n\n"]));
-    const call = new OpenAPIInvoker().invokeBinding({ source: src(DUAL_SPEC), ref: REF_DUAL, fetch });
+    const call = new OpenAPIInvoker().invokeBinding({
+      source: src(DUAL_SPEC),
+      ref: REF_DUAL,
+      fetch,
+    });
     await expect(single(call.outputs)).resolves.toBe("x");
   });
 
@@ -1049,7 +1271,11 @@ describe("OAPI-P-07 — decode", () => {
           headers: { "Content-Type": "text/plain; charset=iso-8859-1" },
         }),
     );
-    const call = new OpenAPIInvoker().invokeBinding({ source: src(WIDGET_SPEC), ref: PING_REF, fetch });
+    const call = new OpenAPIInvoker().invokeBinding({
+      source: src(WIDGET_SPEC),
+      ref: PING_REF,
+      fetch,
+    });
     await call.close();
     await expect(single(call.outputs)).resolves.toBe("é");
   });
@@ -1062,7 +1288,11 @@ describe("OAPI-P-07 — decode", () => {
           headers: { "Content-Type": "text/plain" },
         }),
     );
-    const call = new OpenAPIInvoker().invokeBinding({ source: src(WIDGET_SPEC), ref: PING_REF, fetch });
+    const call = new OpenAPIInvoker().invokeBinding({
+      source: src(WIDGET_SPEC),
+      ref: PING_REF,
+      fetch,
+    });
     await call.close();
     await expect(call.closed).rejects.toMatchObject({
       code: ERR_RESPONSE_ERROR,
@@ -1078,7 +1308,11 @@ describe("OAPI-P-07 — decode", () => {
           headers: { "Content-Type": "text/plain; charset=shift_jis" },
         }),
     );
-    const call = new OpenAPIInvoker().invokeBinding({ source: src(WIDGET_SPEC), ref: PING_REF, fetch });
+    const call = new OpenAPIInvoker().invokeBinding({
+      source: src(WIDGET_SPEC),
+      ref: PING_REF,
+      fetch,
+    });
     await call.close();
     await expect(call.closed).rejects.toMatchObject({
       code: ERR_RESPONSE_ERROR,
@@ -1088,7 +1322,11 @@ describe("OAPI-P-07 — decode", () => {
 
   it("emits no value for an empty body (204 included)", async () => {
     const { fetch } = mockFetch(() => new Response(null, { status: 204 }));
-    const call = new OpenAPIInvoker().invokeBinding({ source: src(WIDGET_SPEC), ref: PING_REF, fetch });
+    const call = new OpenAPIInvoker().invokeBinding({
+      source: src(WIDGET_SPEC),
+      ref: PING_REF,
+      fetch,
+    });
     await call.close();
     const outs: unknown[] = [];
     for await (const o of call.outputs) outs.push(o);
@@ -1139,7 +1377,9 @@ describe("OAPI-P-10 — channel assembly", () => {
     await single(call.outputs);
     // ONE header: declared params in declaration order (zeta before alpha),
     // the credential appended after.
-    expect(requests[0]?.headers.get("Cookie")).toBe("zeta=z; alpha=a; auth_token=secret");
+    expect(requests[0]?.headers.get("Cookie")).toBe(
+      "zeta=z; alpha=a; auth_token=secret",
+    );
   });
 
   // A name collision between a credential and a caller-populated declared
@@ -1159,7 +1399,9 @@ describe("OAPI-P-10 — channel assembly", () => {
             get: {
               operationId: "x",
               security: [{ key: [] }],
-              parameters: [{ name: tc.param, in: tc.in, schema: { type: "string" } }],
+              parameters: [
+                { name: tc.param, in: tc.in, schema: { type: "string" } },
+              ],
               responses: { "200": { description: "ok" } },
             },
           },
@@ -1200,14 +1442,21 @@ describe("OAPI-P-05 — the server configuration point end to end", () => {
       info: { title: "t", version: "1" },
       servers: [{ url: "https://unreachable.invalid" }],
       paths: {
-        "/ping": { get: { operationId: "ping", responses: { "200": { description: "ok" } } } },
+        "/ping": {
+          get: {
+            operationId: "ping",
+            responses: { "200": { description: "ok" } },
+          },
+        },
       },
     };
     const { fetch, requests } = mockFetch(() => jsonResponse({ ok: true }));
     const call = new OpenAPIInvoker().invokeBinding({
       source: src(spec),
       ref: "#/paths/~1ping/get",
-      context: { configuration: { server: { baseUrl: "https://real.example.test" } } },
+      context: {
+        configuration: { server: { baseUrl: "https://real.example.test" } },
+      },
       fetch,
     });
     await expect(single(call.outputs)).resolves.toEqual({ ok: true });

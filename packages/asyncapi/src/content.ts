@@ -3,11 +3,11 @@
  * (ASYNC-P-03, input encoding) and §9.3 (ASYNC-P-05, decode). Effective
  * content type resolves PER MESSAGE first — the message's own
  * `contentType`, else the document's `defaultContentType`, the AsyncAPI
- * rule — and the governing set's distinct effective types decide the lane:
- * exactly one selects it; none, or more than one (an ambiguous
- * declaration), falls to the text lane rather than guessing. Everything
- * here is decided by declarations, never payload bytes. Mirrors the Go
- * SDK's content.go.
+ * rule — and the governing set's distinct effective types decide the lane.
+ * Only JSON-family and UTF-8 text-family declarations have revision-1 value
+ * carriage; binary codecs are refused rather than mapped to strings.
+ * Everything here is decided by declarations, never payload bytes. Mirrors
+ * the Go SDK's content.go.
  */
 
 import type {
@@ -128,11 +128,8 @@ export function distinctEffectiveTypes(
 }
 
 /**
- * Collapses a governing set to the declaration the decode point consults
- * (§9.3, ASYNC-P-05): exactly one distinct effective type selects the lane
- * (strict JSON for application/json and +json, text otherwise); none, or
- * more than one distinct type, is the text lane ("" — builtinDecodeFor's
- * non-JSON lane), never a guess.
+ * Collapses a governing set to the supported declaration the decode point
+ * consults (§9.3, ASYNC-P-05). Binary/codec-specific media are refused.
  */
 export function decodeContentType(
   doc: AsyncAPIDocument,
@@ -143,6 +140,7 @@ export function decodeContentType(
   for (const message of msgs) {
     validateMessageBindingVersion(message);
     if (message.headers !== undefined) throw new Error("output message declares headers, which revision 1 cannot carry");
+    supportedMessageContentType(messageEffectiveContentType(doc, message));
   }
   const types = completeEffectiveTypes(doc, msgs);
   if (types.length > 1) throw new Error("output messages declare conflicting effective content types");
@@ -167,12 +165,13 @@ export interface InputCodec {
 
 /**
  * Resolves the input encoding from the governing request-side declaration
- * (§9.1, ASYNC-P-03): a JSON-family type serializes the value as JSON;
- * every other declared type carries a string value as character bytes.
- * With no declaration, configuration.encode must choose the JSON or text
- * lane. More or fewer than one selected message is refused; payload bytes
- * never select among artifact alternatives. Forwarded frames on the duplex
- * subscription cell use the same rule.
+ * (§9.1, ASYNC-P-03): a JSON-family type serializes the value as JSON; a
+ * supported text-family type carries a UTF-8 string. Binary/codec-specific
+ * media and explicit non-UTF-8 charsets are refused: revision 1 has no
+ * bytes value or common transcode surface. With no declaration,
+ * configuration.encode must choose the JSON or text lane. More or fewer
+ * than one selected message is refused; payload bytes never select among
+ * artifact alternatives.
  */
 export function resolveInputCodec(
   doc: AsyncAPIDocument,
@@ -188,8 +187,36 @@ export function resolveInputCodec(
     const lane = requiredLane(context, "encode");
     return { json: lane === "application/json", contentType: lane === "application/json" ? "application/json" : "text/plain; charset=utf-8" };
   }
-  if (isJSONMediaType(t)) return { json: true, contentType: t };
-  return { json: false, contentType: t };
+  const effective = messageEffectiveContentType(doc, msgs[0]!);
+  supportedMessageContentType(effective);
+  if (isJSONMediaType(t)) return { json: true, contentType: effective };
+  if (isTextContentType(t)) return { json: false, contentType: effective };
+  throw new Error(`effective content type ${JSON.stringify(effective)} has no revision-1 value carriage`);
+}
+
+export function messageEffectiveContentType(
+  doc: AsyncAPIDocument,
+  message: AsyncAPIMessage,
+): string {
+  return message.contentType ?? doc.defaultContentType ?? "";
+}
+
+/**
+ * Enforces revision 1's value boundary. JSON-family and UTF-8 text-family
+ * media are representable; absence is completed by encode/decode
+ * configuration. Binary codecs and non-UTF-8 charsets are not assigned an
+ * invented bytes convention.
+ */
+export function supportedMessageContentType(contentType: string): void {
+  if (contentType.trim() === "") return;
+  const parsed = parseMedia(contentType);
+  if (!isJSONMediaType(parsed.type) && !parsed.type.startsWith("text/")) {
+    throw new Error(`effective content type ${JSON.stringify(contentType)} has no revision-1 value carriage`);
+  }
+  const charset = parsed.parameters.get("charset")?.trim().toLowerCase();
+  if (charset && charset !== "utf-8" && charset !== "utf8") {
+    throw new Error(`effective content type ${JSON.stringify(contentType)} declares unsupported non-UTF-8 charset ${JSON.stringify(charset)}`);
+  }
 }
 
 /** Selects the reply declaration governing a non-empty HTTP response. */
@@ -208,6 +235,7 @@ export function resolveReplyContentType(
   for (const message of candidates) {
     validateMessageBindingVersion(message);
     if (message.headers !== undefined) throw new Error("selected reply message declares headers, which revision 1 cannot carry");
+    supportedMessageContentType(messageEffectiveContentType(doc, message));
   }
 
   const declared = candidates.map((message) => message.contentType ?? doc.defaultContentType ?? "");
@@ -286,7 +314,24 @@ export function encodeInput(codec: InputCodec, v: unknown): string {
       `the governing declaration selects the text lane: the input value must be a string, got ${typeof v}`,
     );
   }
+  if (!isWellFormedUnicode(v)) {
+    throw new Error("the text-lane input is not valid UTF-8");
+  }
   return v;
+}
+
+/** ES2022-compatible equivalent of String.prototype.isWellFormed(). */
+export function isWellFormedUnicode(value: string): boolean {
+  for (let index = 0; index < value.length; index++) {
+    const unit = value.charCodeAt(index);
+    if (unit >= 0xd800 && unit <= 0xdbff) {
+      const next = value.charCodeAt(++index);
+      if (!(next >= 0xdc00 && next <= 0xdfff)) return false;
+    } else if (unit >= 0xdc00 && unit <= 0xdfff) {
+      return false;
+    }
+  }
+  return true;
 }
 
 /**
@@ -302,9 +347,8 @@ export function normalizeMediaType(contentType: string): string {
 }
 
 /**
- * Reports MIME's text family. The boundary correspondence itself uses the
- * broader non-JSON string lane; this predicate is retained for callers that
- * specifically need the MIME family.
+ * Reports MIME's text family, the only declared non-JSON string lane in
+ * revision 1.
  */
 export function isTextContentType(contentType: string): boolean {
   return normalizeMediaType(contentType).startsWith("text/");

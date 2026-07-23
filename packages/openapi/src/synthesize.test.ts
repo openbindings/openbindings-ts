@@ -380,6 +380,77 @@ describeMS("multi-source refusal", () => {
   });
 });
 
+describe("synthesis coverage", () => {
+  it("accounts for request alternatives and reverse interactions", async () => {
+    const result = await new OpenAPISynthesizer().synthesizeInterfaceWithCoverage({
+      sources: [{
+        bindingSpec: "openbindings.openapi@1",
+        content: {
+          openapi: "3.1.0",
+          info: { title: "coverage", version: "1" },
+          paths: {
+            "/jobs": {
+              post: {
+                operationId: "createJob",
+                requestBody: {
+                  required: true,
+                  content: {
+                    "application/json": { schema: { type: "object", properties: { name: { type: "string" } } } },
+                    "application/x-custom": { schema: { type: "string" } },
+                  },
+                },
+                callbacks: {
+                  completed: {
+                    "{$request.body#/callbackUrl}": {
+                      post: { responses: { "200": { description: "ok" } } },
+                    },
+                  },
+                },
+                responses: { "200": { description: "ok" } },
+              },
+            },
+          },
+          webhooks: {
+            jobChanged: {
+              post: { responses: { "200": { description: "ok" } } },
+            },
+          },
+        },
+      }],
+    });
+    expect(result.coverage).toMatchObject({
+      exhaustive: true,
+      fullyRepresented: false,
+    });
+    const statusByRef = new Map(result.coverage.entries.map((entry) => [entry.sourceRef, entry.status]));
+    expect(statusByRef.get("#/paths/~1jobs/post")).toBe("represented");
+    expect(statusByRef.get("#/paths/~1jobs/post/requestBody/content/application~1json")).toBe("represented");
+    expect(statusByRef.get("#/paths/~1jobs/post/requestBody/content/application~1x-custom")).toBe("excluded");
+    expect(statusByRef.get("#/webhooks/jobChanged/post")).toBe("excluded");
+  });
+
+  it("can prove full representation for an ordinary paths-only document", async () => {
+    const result = await new OpenAPISynthesizer().synthesizeInterfaceWithCoverage({
+      sources: [{
+        bindingSpec: "openbindings.openapi@1",
+        content: {
+          openapi: "3.1.0",
+          info: { title: "coverage", version: "1" },
+          paths: {
+            "/users": {
+              get: {
+                operationId: "listUsers",
+                responses: { "200": { description: "ok" } },
+              },
+            },
+          },
+        },
+      }],
+    });
+    expect(result.coverage.fullyRepresented).toBe(true);
+  });
+});
+
 // Field-collision rule, synthesis half: the parameter/body merge is
 // deterministic (body schema wins) and never silent — a synthesizer
 // warning names the field and the delivery rule. Also closes the TS
@@ -588,6 +659,41 @@ describe("candidate-specific synthesized input", () => {
       expect.objectContaining({ properties: expect.objectContaining({ metadata: { type: "string" } }), additionalProperties: false }),
       expect.objectContaining({ properties: expect.objectContaining({ body: { type: "string" } }), required: ["body"], additionalProperties: false }),
     ]));
+  });
+});
+
+describe("synthesis coverage disposition identity", () => {
+  it("does not misclassify an out-of-revision media declaration as a flattening collision", async () => {
+    const result = await new OpenAPISynthesizer().synthesizeInterfaceWithCoverage({
+      sources: [{
+        bindingSpec: "openbindings.openapi@1",
+        content: {
+          openapi: "3.1.0",
+          info: { title: "coverage", version: "1" },
+          paths: {
+            "/jobs": {
+              post: {
+                operationId: "createJob",
+                requestBody: {
+                  required: true,
+                  content: {
+                    "application/json": { schema: { type: "object", properties: { name: { type: "string" } } } },
+                    "application/x-custom": { schema: { type: "string" } },
+                  },
+                },
+                responses: { "200": { description: "ok" } },
+              },
+            },
+          },
+        },
+      }],
+    });
+    expect(result.coverage.entries).toContainEqual(expect.objectContaining({
+      sourceRef: "#/paths/~1jobs/post/requestBody/content/application~1x-custom",
+      status: "excluded",
+      reasonCode: "openapi.request_media_excluded",
+      rule: "OAPI-P-04",
+    }));
   });
 });
 

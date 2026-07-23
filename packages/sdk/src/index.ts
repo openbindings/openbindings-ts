@@ -36,15 +36,24 @@ export type {
   SynthesizeSource,
   SynthesizeInput,
   SynthesizerWarning,
+  SynthesisCoverageScope,
+  SynthesisCoverageStatus,
+  SynthesisCoverageEntry,
+  SynthesisCoverage,
+  SynthesisCoverageLimitation,
+  SynthesizeResult,
   BindingSpecInfo,
   BindableTarget,
   SourceInspection,
+  InspectionLimitation,
 } from "./invoker-types.js";
 export {
   DEFAULT_MAX_DELIVERY_UNIT_BYTES,
   resolveDeliveryUnitLimit,
   synthesisSkeleton,
   finalizeSynthesis,
+  finalizeSynthesisCoverage,
+  representedCoverageEntries,
 } from "./invoker-types.js";
 
 export type {
@@ -77,6 +86,7 @@ export {
 export type {
   BindingInvoker,
   InterfaceSynthesizer,
+  CoverageSynthesizer,
   SourceInspector,
   TransformEvaluator,
   TransformEvaluatorWithBindings,
@@ -94,7 +104,13 @@ export type { OperationInvokerOptions } from "./operation-invoker.js";
 export { operationSignature } from "./operation-signature.js";
 export type { OperationSignature } from "./operation-signature.js";
 
-export { combineInvokers, combineSynthesizers, combineSourceInspectors, type CombinedInvoker } from "./combiners.js";
+export {
+  combineInvokers,
+  combineSynthesizers,
+  combineSourceInspectors,
+  type CombinedInvoker,
+  type CombinedSynthesizer,
+} from "./combiners.js";
 
 export { validateInterface } from "./validate.js";
 export type { ValidateOptions } from "./validate.js";
@@ -106,8 +122,10 @@ export { compileEmbeddedSchema, type CompiledSchema } from "./schema-validation.
 export {
   NoInvokerError,
   NoSynthesizerError,
+  SynthesisCoverageUnsupportedError,
   OperationNotFoundError,
   BindingNotFoundError,
+  BindingSelectionRequiredError,
   MissingInterfaceError,
   UnknownSourceError,
   NoTransformEvaluatorError,
@@ -176,6 +194,7 @@ export {
   ERR_ALREADY_CONSUMED,
   ERR_AUTH_REQUIRED,
   ERR_BINDING_NOT_FOUND,
+  ERR_BINDING_SELECTION_REQUIRED,
   ERR_CANCELLED,
   ERR_CONNECT_FAILED,
   ERR_EVENT_LIMIT_EXCEEDED,
@@ -230,6 +249,18 @@ export type {
   ProcessorObservation,
   ProcessorMatch,
 } from "./processor-scenarios.js";
+
+export {
+  matchSynthesisScenario,
+  normalizeSynthesis,
+} from "./synthesis-scenarios.js";
+export type {
+  SynthesisScenarioFile,
+  SynthesisScenario,
+  NormalizedSynthesis,
+  SynthesisBindingIdentity,
+  NormalizedSynthesisCoverageEntry,
+} from "./synthesis-scenarios.js";
 
 export { Normalizer, inputCompatible, outputCompatible } from "./schema-profile/index.js";
 export type { Fetcher, JSONValue, JSONObject, CompatResult } from "./schema-profile/index.js";

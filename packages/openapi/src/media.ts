@@ -732,7 +732,7 @@ export function governingResponse(
   const exact = String(status);
   const range = `${Math.floor(status / 100)}XX`;
   for (const key of [exact, range, "default"]) {
-    const response = responses[key] as OpenAPIResponse | undefined;
+    const response = responses[key];
     if (response && typeof response === "object") return { key, response };
   }
   return null;

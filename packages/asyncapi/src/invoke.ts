@@ -11,14 +11,14 @@
  * One entrypoint ({@link runBinding}) drives every cell against the
  * binding-facing {@link BindingHandle}:
  *
- *   - receive + http/https  unary publish: one input -> request body (POST,
- *                           or the http binding's declared method),
+ *   - receive + http/https  unary publish: one input -> request body using
+ *                           the http binding's declared method,
  *                           response -> at most one output
  *   - receive + ws/wss      client-streaming publish: every input -> one
  *                           socket frame; the caller closing input ends it
- *   - send + http/https     SSE subscription: server events -> outputs
- *   - send + ws/wss         streaming subscription (bidi-capable): socket
- *                           frames -> outputs, caller inputs forward as frames
+ *   - send + http/https     excluded in revision 1
+ *   - send + ws/wss         server-streaming subscription: socket frames
+ *                           -> outputs, no caller input values
  *
  * All pre-dispatch failures (bad ref, no resolvable server, missing
  * context, an unresolved address or server variable, an unsatisfied
@@ -33,7 +33,6 @@ import {
   configValueRequirement,
   contextSatisfies,
   contextBearerToken,
-  contextApiKey,
   contextApiKeyFor,
   contextBasicAuth,
   contextString,
@@ -87,8 +86,8 @@ import {
   decodeContentType,
   encodeInput,
   governingMessages,
+  isWellFormedUnicode,
   normalizeMediaType,
-  replyGoverningMessages,
   resolveReplyContentType,
   validateMessageBindingVersion,
   resolveInputCodec,
@@ -96,6 +95,7 @@ import {
   type InputCodec,
 } from "./content.js";
 import { streamSSE } from "./sse.js";
+import { replyMessagesBindable } from "./synthesize.js";
 import {
   addressConfiguration,
   channelNameOf,
@@ -113,9 +113,9 @@ import {
  * other error stays a terminal ERR_SOURCE_CONFIG_ERROR. resolveTarget/
  * resolveAddress already consulted the supplied context and found the value
  * absent, so the challenge fires unconditionally; the operation-invoker's
- * bounded resolve-and-retry loop is the backstop. config values are
- * non-secret, so a best-effort target (the resolved server URL when known)
- * suffices for keying.
+ * bounded resolve-and-retry loop is the backstop. The resolved server URL
+ * when known is the strongest available scope; configuration is not assumed
+ * public, so a resolver decides whether that scope is sufficient.
  */
 function configOrSourceError(e: unknown, serverURL: string): InvocationError {
   if (e instanceof ConfigRequired) {
@@ -196,9 +196,8 @@ export async function runBinding(
   }
 
   // Context negotiation: challenge BEFORE any connection is opened. The
-  // requirements derive from the server whose declared security applies
-  // (§9.5): the server the connection targets — or, under a full-URL
-  // override, the server the default selection would have targeted.
+  // requirements derive from the selected artifact server (§9.5), including
+  // when configuration replaces only its connection target.
   const required = requiredContext(asyncOp, target.securityServer, target.serverURL, args.context);
   if (required) {
     h.fireError(
@@ -265,7 +264,7 @@ export async function runBinding(
       let up: ReturnType<typeof resolveWSUpgrade>;
       try {
         const fields = protocolFieldValues(args.context);
-        up = resolveWSUpgrade(ch, channelName, fields.webSocketQuery, fields.webSocketHeaders ?? contextHeaders(args.context));
+        up = resolveWSUpgrade(ch, channelName, fields.webSocketQuery, fields.webSocketHeaders);
       } catch (e: unknown) {
         h.fireError(new InvocationError(ERR_SOURCE_CONFIG_ERROR, errorMessage(e)));
         return;
@@ -327,6 +326,9 @@ function validateCell(
     const selected = selectedInputMessages(op, ch, context);
     validateMessageBindingVersion(selected[0]!);
     resolveInputCodec(doc, selected, context);
+    if (!replyMessagesBindable(doc, op)) {
+      throw new Error("an HTTP reply message uses carriage outside revision 1");
+    }
     resolveHTTPQuery(op, protocolFieldValues(context).httpQuery);
     return;
   }
@@ -559,9 +561,8 @@ function schemeRequirement(
  * the provided context already satisfies it (or the doc declares nothing
  * checkable). The declaration semantics are AsyncAPI 3.0's, incorporated,
  * and they are CONJUNCTIVE (ASYNC-P-07): the targeted server's `security`
- * applies (`server` is the server whose declared security applies per §9.5:
- * resolveTarget's securityServer — the connection's server, or under a
- * full-URL override the server the default selection would have targeted),
+ * applies (`server` is resolveTarget's selected artifact server per §9.5,
+ * including when configuration replaces only its connection target),
  * and the operation's `security`, when declared, applies IN ADDITION.
  * Within each declared list one entry suffices, so the challenge is the
  * cross product: each alternative pairs one server entry with one operation
@@ -709,24 +710,6 @@ function applyCredentialsViaSchemes(
   return { applied, queryParams };
 }
 
-function applyCredentialsFallback(headers: Headers, ctx: Record<string, unknown>): void {
-  const token = contextBearerToken(ctx);
-  if (token) {
-    headers.set("Authorization", `Bearer ${token}`);
-    return;
-  }
-  const basic = contextBasicAuth(ctx);
-  if (basic) {
-    const encoded = btoa(`${basic.username}:${basic.password}`);
-    headers.set("Authorization", `Basic ${encoded}`);
-    return;
-  }
-  const apiKey = contextApiKey(ctx);
-  if (apiKey) {
-    headers.set("Authorization", `ApiKey ${apiKey}`);
-  }
-}
-
 function applyContext(
   headers: Headers,
   asyncOp: AsyncAPIOperation,
@@ -755,7 +738,7 @@ function applyContext(
 }
 
 // ---------------------------------------------------------------------------
-// Publish over HTTP (`receive` action): unary POST
+// Publish over HTTP (`receive` action): unary, artifact-declared method
 // ---------------------------------------------------------------------------
 
 async function runUnaryPublish(
@@ -838,10 +821,10 @@ async function runUnaryPublish(
   const doFetch = args.fetch ?? fetch;
   let resp: Response;
   try {
-    // The request method is the http operation binding's `method` where
-    // declared, else POST (§8, ASYNC-P-02).
+    // The request method is the required http operation binding's `method`
+    // (§8, ASYNC-P-02); validateCell already refused its absence.
     resp = await doFetch(url, {
-      method: requestMethod(asyncOp, "POST"),
+      method: requestMethod(asyncOp, ""),
       headers,
       body,
       signal: h.signal,
@@ -1209,6 +1192,7 @@ async function runWSSubscribe(
   let bufferedBytes = 0;
   let overflowed = false;
   let overflowMessage = "";
+  let frameDecodeError: Error | undefined;
   let socketClosed = false;
   let socketError: Error | undefined;
   let wake: (() => void) | undefined;
@@ -1225,8 +1209,13 @@ async function runWSSubscribe(
   // never tears down the shared pooled socket under sibling subscriptions.
   const maxUnitBytes = resolveDeliveryUnitLimit(args);
 
-  const removeMsg = pooled.onMessage((data) => {
-    if (overflowed) return;
+  const removeMsg = pooled.onMessage((data, decodeError) => {
+    if (overflowed || frameDecodeError) return;
+    if (decodeError) {
+      frameDecodeError = decodeError;
+      notify();
+      return;
+    }
     const frameBytes = byteEncoder.encode(data).length;
     if (frameBytes > maxUnitBytes) {
       // Refuse loudly: mark terminal (the output pump drains what was
@@ -1305,6 +1294,10 @@ async function runWSSubscribe(
       }
       if (overflowed) {
         h.fireError(new InvocationError(ERR_STREAM_ERROR, overflowMessage));
+        return;
+      }
+      if (frameDecodeError) {
+        h.fireError(new InvocationError(ERR_VALIDATION_FAILED, frameDecodeError.message));
         return;
       }
       if (h.signal.aborted) return;
@@ -1549,6 +1542,12 @@ export function builtinDecodeFor(contentType: string): OutputDecoder {
         );
       }
     }
+    if (!isWellFormedUnicode(raw.body)) {
+      throw new InvocationError(
+        ERR_RESPONSE_ERROR,
+        `message declares ${JSON.stringify(contentType)} but the payload is not valid UTF-8`,
+      );
+    }
     return raw.body;
   };
 }
@@ -1594,7 +1593,10 @@ async function readResponseText(resp: Response, maxBytes: number): Promise<strin
   if (!resp.body) return resp.text();
 
   const reader = resp.body.getReader();
-  const decoder = new TextDecoder();
+  // Preserve a leading BOM as U+FEFF rather than silently stripping source
+  // bytes. JSON decoding then rejects it consistently with Go; the text lane
+  // returns it as declared payload content.
+  const decoder = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
   const chunks: string[] = [];
   let total = 0;
 

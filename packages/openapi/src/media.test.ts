@@ -1,7 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
   FAMILY_JSON,
-  FAMILY_MULTIPART,
   FAMILY_TEXT,
   FAMILY_URLENCODED,
   acceptHeader,

@@ -42,9 +42,9 @@ export interface NamedServer {
  * The outcome of the server configuration point: the assembled connection
  * base (scheme://host[/pathname], variables substituted, no trailing
  * slash), the deciding protocol, and the server whose declared security
- * applies (§9.5: the server the connection actually goes to — or, under a
- * full-URL override, the server the default selection would have
- * targeted; undefined when the artifact declares no such server).
+ * applies (§9.5: the selected artifact server, including when consumer
+ * configuration replaces only its target URL; undefined when no artifact
+ * server was selected).
  */
 export interface ResolvedTarget {
   serverURL: string;
@@ -88,7 +88,7 @@ export function effectiveServers(
       // Own-key lookup only (Go-map parity): a forged inline entry whose
       // name tag matches an Object.prototype member ("constructor", ...)
       // must contribute nothing, not surface a prototype member as a
-      // server (which would TypeError in default selection).
+      // server (which would otherwise TypeError during server selection).
       const server = name !== "" && Object.hasOwn(docServers, name) ? docServers[name] : undefined;
       if (server !== undefined) {
         out.push({ name, server });
@@ -102,24 +102,29 @@ export function effectiveServers(
 }
 
 /**
- * Returns the server the default selection targets: the first candidate of
- * the effective set whose protocol revision 1 binds (§9.2), or undefined
- * when none exists.
+ * Returns the sole effective-set member whose protocol revision 1 binds
+ * (§9.2). With zero or several bound members there is no artifact-selected
+ * default; declaration order never chooses identity.
  */
 export function defaultServer(candidates: NamedServer[]): NamedServer | undefined {
-  return candidates.find((c) => isBoundProtocol(c.server.protocol.toLowerCase()));
+  const bound = candidates.filter((candidate) => isBoundProtocol(candidate.server.protocol.toLowerCase()));
+  return bound.length === 1 ? bound[0] : undefined;
 }
 
-const NO_RESOLVABLE_SERVER =
-  "no resolvable server: the effective server set declares no server with a supported protocol (http, https, ws, wss)";
+function boundServerNames(candidates: NamedServer[]): string[] {
+  return candidates
+    .filter((candidate) => isBoundProtocol(candidate.server.protocol.toLowerCase()))
+    .map((candidate) => candidate.name);
+}
 
 /**
  * The typed signal a resolution helper throws when a named configuration point
  * cannot resolve because a value is absent (no default, no supplied value) — a
  * resolvable-missing value, not a malformed one. The invoke path turns it into
  * a config.value CONTEXT_REQUIRED challenge (retryable after resolution, R1a)
- * rather than a terminal ERR_SOURCE_CONFIG_ERROR. config values are non-secret,
- * so no credential-grade target keying is needed.
+ * rather than a terminal ERR_SOURCE_CONFIG_ERROR. The best artifact-derived
+ * scope is carried when no server URL has resolved; configuration may be
+ * sensitive, so a resolver decides whether that scope is sufficient.
  */
 export class ConfigRequired extends Error {
   constructor(
@@ -136,31 +141,20 @@ export class ConfigRequired extends Error {
 
 /**
  * Resolves the server configuration point for the operation's channel
- * (ASYNC-P-04): consumer configuration may select another member of the
- * effective set or supply a complete connection URL outright; the default
- * is the effective set's first bound-protocol candidate. Under a full-URL
- * override the URL's scheme decides the protocol (out-of-revision schemes
- * refused) and the declared security of the server the default would have
- * selected still applies (§9.5). No resolvable server is a pre-dispatch
- * refusal.
+ * (ASYNC-P-04): the sole bound member selects itself; several require
+ * consumer selection. A complete URL may replace the selected member's
+ * target only with the same scheme, while that member's declarations and
+ * security continue to govern. Declaration order never selects a member.
  *
  * The `configuration.server` value is pinned by §9.2 ("Configuration value
- * shapes") so two implementations carry it identically — an object, exactly
- * one of two mutually exclusive forms:
+ * semantics while its concrete shape remains implementation surface. This
+ * SDK uses one composable object:
  *
- *   {"key": "<server-name>", "variables": {"<variable-name>": "<string-value>"}?}
- *                                  // select a member of the effective server set,
- *                                  // optionally supplying its declared server variables
- *   {"url": "<connection-url>"}    // override with a complete connection URL
+ *   {"key": "<server-name>"?, "variables": {"<variable-name>": "<string-value>"}?, "url": "<connection-url>"?}
  *
- * Every other spelling (a bare string, the retired `name` member, key+url
- * together, variables riding the url form) is refused loudly with a
- * teaching error naming the two pinned forms. Under {"key": ...} selection,
- * server variables substitute supplied-else-default-else-refusal: names are
- * the selected server's own declared variable names (an undeclared supplied
- * name is refused, never ignored), values are strings, and a supplied value
- * outside the variable's declared enum is refused (upstream SHOULD,
- * hardened to a refusal — the specification's own pin).
+ * `key` is required when several bound members remain and optional when one
+ * remains. `variables` and `url` complete or replace the selected member;
+ * an object with none of the three is refused.
  *
  * The legacy context.metadata.baseURL override is honored below the
  * configuration point (the configuration point is the contract surface).
@@ -181,15 +175,35 @@ export function resolveTarget(
   const meta = contextMetadata(ctx);
   const base = meta["baseURL"];
   if (typeof base === "string" && base !== "") {
+    if (!def) {
+      const names = boundServerNames(candidates);
+      if (names.length === 0) {
+        throw new Error("the effective server set declares no server with a protocol bound by openbindings.asyncapi@1");
+      }
+      throw new ConfigRequired(
+        "server",
+        "key",
+        "configuration.server.key must select one artifact server before metadata.baseURL can replace its target",
+        names,
+        true,
+      );
+    }
     return fullURLOverride(base, def);
   }
 
-  if (!def)
+  if (!def) {
+    const names = boundServerNames(candidates);
+    if (names.length === 0) {
+      throw new Error("the effective server set declares no server with a protocol bound by openbindings.asyncapi@1");
+    }
     throw new ConfigRequired(
       "server",
-      "url",
-      `${NO_RESOLVABLE_SERVER}; supply a connection URL at the server configuration point`,
+      "key",
+      "the effective server set declares several bindable servers; configuration.server.key must select one artifact member",
+      names,
+      true,
     );
+  }
   return assembleServer(def);
 }
 
@@ -199,14 +213,13 @@ export function resolveTarget(
  * identically", and silently tolerating extra spellings would defeat the
  * pin.
  */
-const SERVER_CONFIG_PINNED_SHAPES =
-  'the pinned shapes (openbindings.asyncapi@1 §9.2) are {"key": "<server-name>", "variables": {"<variable-name>": "<string-value>"}?} (select a member of the effective server set, "variables" optionally supplying its declared server variables) xor {"url": "<connection-url>"} (override with a complete connection URL); the two forms are mutually exclusive and "variables" composes only with "key"';
+const SERVER_CONFIG_SHAPE =
+  'this implementation accepts {"key": "<server-name>"?, "variables": {"<variable-name>": "<string-value>"}?, "url": "<connection-url>"?}; "key" selects an artifact member (required when several bindable members remain), "variables" completes that member, and "url" may replace only that selected member\'s target with the same scheme';
 
 /**
  * Applies one configured `server` value against the effective set,
- * accepting exactly §9.2's pinned value shapes: {"key": "<server-name>",
- * "variables": {...}?} xor {"url": "<connection-url>"}. Every other form
- * is a loud refusal carrying SERVER_CONFIG_PINNED_SHAPES.
+ * using this SDK's composable object carriage. Every unrecognized or
+ * ambiguous form is a loud refusal carrying SERVER_CONFIG_SHAPE.
  */
 function resolveServerConfig(
   raw: unknown,
@@ -214,7 +227,7 @@ function resolveServerConfig(
   def: NamedServer | undefined,
 ): ResolvedTarget {
   if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
-    throw new Error(`configuration.server must be an object: ${SERVER_CONFIG_PINNED_SHAPES}`);
+    throw new Error(`configuration.server must be an object: ${SERVER_CONFIG_SHAPE}`);
   }
   const v = raw as Record<string, unknown>;
 
@@ -226,57 +239,63 @@ function resolveServerConfig(
     const noun = unpinned.length > 1 ? "members" : "member";
     const verb = unpinned.length > 1 ? "are" : "is";
     throw new Error(
-      `configuration.server ${noun} ${quoted} ${verb} not pinned: ${SERVER_CONFIG_PINNED_SHAPES}`,
+      `configuration.server ${noun} ${quoted} ${verb} not pinned: ${SERVER_CONFIG_SHAPE}`,
     );
   }
 
   const hasKey = "key" in v;
   const hasURL = "url" in v;
   const hasVars = "variables" in v;
-  if (hasKey && hasURL) {
+  if (!hasKey && !hasURL && !hasVars) {
     throw new Error(
-      `configuration.server carries both "key" and "url": ${SERVER_CONFIG_PINNED_SHAPES}`,
+      `configuration.server carries none of "key", "variables", or "url": ${SERVER_CONFIG_SHAPE}`,
     );
   }
-  if (!hasKey && !hasURL) {
+  const supplied = suppliedServerVariables(v);
+  const full = v.url;
+  if (hasURL && (typeof full !== "string" || full === "")) {
     throw new Error(
-      `configuration.server carries neither "key" nor "url": ${SERVER_CONFIG_PINNED_SHAPES}`,
+      `configuration.server.url must be a non-empty string: ${SERVER_CONFIG_SHAPE}`,
     );
   }
-  if (hasVars && hasURL) {
-    throw new Error(
-      `configuration.server carries "variables" with "url": ${SERVER_CONFIG_PINNED_SHAPES}`,
-    );
-  }
+
+  let member = def;
   if (hasKey) {
     const key = v.key;
     if (typeof key !== "string" || key === "") {
       throw new Error(
-        `configuration.server.key must be a non-empty string: ${SERVER_CONFIG_PINNED_SHAPES}`,
+        `configuration.server.key must be a non-empty string: ${SERVER_CONFIG_SHAPE}`,
       );
     }
-    const supplied = suppliedServerVariables(v);
-    const member = serverByKey(candidates, key);
+    member = serverByKey(candidates, key);
     if (!member) {
       throw new Error(
         `configuration.server.key ${JSON.stringify(key)} names no member of the effective server set`,
       );
     }
-    return assembleServer(member, supplied);
   }
-  const full = v.url;
-  if (typeof full !== "string" || full === "") {
-    throw new Error(
-      `configuration.server.url must be a non-empty string: ${SERVER_CONFIG_PINNED_SHAPES}`,
+  if (!member) {
+    const names = boundServerNames(candidates);
+    if (names.length === 0) {
+      throw new Error("the effective server set declares no server with a protocol bound by openbindings.asyncapi@1");
+    }
+    throw new ConfigRequired(
+      "server",
+      "key",
+      "configuration.server.key must select one artifact server before variables or a URL replacement can be applied",
+      names,
+      true,
     );
   }
-  return fullURLOverride(full, def);
+  validateSuppliedServerVariables(member, supplied);
+  if (!hasURL) return assembleServer(member, supplied);
+  return fullURLOverride(full as string, member);
 }
 
 /**
  * Decodes the key form's optional `variables` member: an object of string
  * values (§9.2 — upstream's Server Variable value space), any other shape
- * a loud refusal carrying SERVER_CONFIG_PINNED_SHAPES. Which NAMES are
+ * a loud refusal carrying SERVER_CONFIG_SHAPE. Which NAMES are
  * admissible is the selected server's business, checked in assembleServer.
  */
 function suppliedServerVariables(v: Record<string, unknown>): Record<string, string> | undefined {
@@ -284,7 +303,7 @@ function suppliedServerVariables(v: Record<string, unknown>): Record<string, str
   const rawVars = v.variables;
   if (rawVars === null || typeof rawVars !== "object" || Array.isArray(rawVars)) {
     throw new Error(
-      `configuration.server.variables must be an object of string values: ${SERVER_CONFIG_PINNED_SHAPES}`,
+      `configuration.server.variables must be an object of string values: ${SERVER_CONFIG_SHAPE}`,
     );
   }
   const entries = rawVars as Record<string, unknown>;
@@ -293,7 +312,7 @@ function suppliedServerVariables(v: Record<string, unknown>): Record<string, str
     const val = entries[name];
     if (typeof val !== "string") {
       throw new Error(
-        `configuration.server.variables[${JSON.stringify(name)}] must be a string value: ${SERVER_CONFIG_PINNED_SHAPES}`,
+        `configuration.server.variables[${JSON.stringify(name)}] must be a string value: ${SERVER_CONFIG_SHAPE}`,
       );
     }
     supplied[name] = val;
@@ -312,7 +331,7 @@ function serverByKey(candidates: NamedServer[], key: string): NamedServer | unde
  * refusal (§9.2). The declared security of the server the default
  * selection would have targeted still applies (§9.5).
  */
-function fullURLOverride(full: string, def: NamedServer | undefined): ResolvedTarget {
+function fullURLOverride(full: string, selected: NamedServer): ResolvedTarget {
   let u: URL;
   try {
     u = new URL(full);
@@ -325,11 +344,37 @@ function fullURLOverride(full: string, def: NamedServer | undefined): ResolvedTa
       `connection URL ${JSON.stringify(full)}: scheme ${JSON.stringify(scheme)} is not bound by openbindings.asyncapi@1 (supported: http, https, ws, wss)`,
     );
   }
+  const selectedProtocol = selected.server.protocol.toLowerCase();
+  if (scheme !== selectedProtocol) {
+    throw new Error(
+      `connection URL ${JSON.stringify(full)} uses scheme ${JSON.stringify(scheme)}, but selected server ${JSON.stringify(selected.name)} declares protocol ${JSON.stringify(selected.server.protocol)}`,
+    );
+  }
   return {
     serverURL: full.replace(/\/+$/, ""),
     protocol: scheme,
-    securityServer: def?.server,
+    securityServer: selected.server,
   };
+}
+
+function validateSuppliedServerVariables(
+  member: NamedServer,
+  supplied: Record<string, string> | undefined,
+): void {
+  if (!supplied) return;
+  for (const [name, value] of Object.entries(supplied).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) {
+    const declared = member.server.variables?.[name];
+    if (!declared) {
+      throw new Error(
+        `configuration.server.variables[${JSON.stringify(name)}] names no declared variable of server ${JSON.stringify(member.name)}`,
+      );
+    }
+    if (declared.enum && declared.enum.length > 0 && !declared.enum.includes(value)) {
+      throw new Error(
+        `configuration.server.variables[${JSON.stringify(name)}] value ${JSON.stringify(value)} is outside server ${JSON.stringify(member.name)}'s artifact-declared enum`,
+      );
+    }
+  }
 }
 
 /**
@@ -356,22 +401,7 @@ function assembleServer(
     );
   }
 
-  if (supplied) {
-    const sorted = Object.entries(supplied).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
-    for (const [name] of sorted) {
-      const declared = srv.variables?.[name];
-      if (!declared) {
-        throw new Error(
-          `configuration.server.variables[${JSON.stringify(name)}] names no declared variable of server ${JSON.stringify(member.name)}`,
-        );
-      }
-      if (declared?.enum && declared.enum.length > 0 && !declared.enum.includes(supplied[name]!)) {
-        throw new Error(
-          `configuration.server.variables[${JSON.stringify(name)}] value ${JSON.stringify(supplied[name])} is outside the artifact-declared enum`,
-        );
-      }
-    }
-  }
+  validateSuppliedServerVariables(member, supplied);
 
   const host = substituteServerVariables(member, srv.host, supplied);
   const pathname = substituteServerVariables(member, srv.pathname ?? "", supplied);

@@ -656,6 +656,36 @@ describe("MCPSynthesizer pinned listings", () => {
     expect(inspection.targets.map((target) => target.operationKey).sort()).toEqual(["good", "ok"]);
   });
 
+  it("returns exhaustive dispositions for every pinned listing entry", async () => {
+    const content = {
+      tools: [
+        { name: "ok" },
+        { name: "duplicate" },
+        { name: "duplicate" },
+        { name: "" },
+      ],
+      resourceTemplates: [{ name: "bad", uriTemplate: "{" }],
+    };
+    const result = await new MCPSynthesizer().synthesizeInterfaceWithCoverage({
+      sources: [{ bindingSpec: "openbindings.mcp@1", location: ENDPOINT, content }],
+    });
+    expect(result.coverage).toMatchObject({
+      exhaustive: true,
+      fullyRepresented: false,
+    });
+    expect(result.coverage.entries).toEqual(expect.arrayContaining([
+      expect.objectContaining({ sourceRef: "tools/ok", status: "represented" }),
+      expect.objectContaining({
+        status: "excluded",
+        reasonCode: "mcp.ambiguous_identity",
+      }),
+      expect.objectContaining({
+        status: "invalid",
+        reasonCode: "mcp.invalid_entity",
+      }),
+    ]));
+  });
+
   it("inspects OFFLINE from a pinned listing, previewing the keys pinned synthesis assigns", async () => {
     const { fn, fetches } = discoveryServer();
     const inspection = await new MCPSynthesizer({ fetch: fn }).inspectSource({

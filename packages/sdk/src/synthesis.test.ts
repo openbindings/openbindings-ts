@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { finalizeSynthesis, synthesisSkeleton } from "./invoker-types.js";
+import {
+  finalizeSynthesis,
+  finalizeSynthesisCoverage,
+  representedCoverageEntries,
+  synthesisSkeleton,
+} from "./invoker-types.js";
 import type { OBInterface } from "./types.js";
 
 describe("shared synthesis behavior", () => {
@@ -50,5 +55,102 @@ describe("shared synthesis behavior", () => {
     expect(() => finalizeSynthesis(iface, {
       sources: [{ bindingSpec: "example.spec@2" }],
     }, "default", "example.spec@1")).toThrow(/exact binding specification/);
+  });
+
+  it("derives durable full-coverage state from dispositions", () => {
+    const iface: OBInterface = {
+      openbindings: "0.2.0",
+      operations: { getUser: {} },
+      sources: { api: { bindingSpec: "example.spec@1", location: "https://example.com/spec" } },
+      bindings: { "getUser.api": { operation: "getUser", source: "api", ref: "#/getUser" } },
+    };
+    const result = finalizeSynthesisCoverage(iface, [
+      {
+        sourceIndex: 0,
+        sourceRef: "#/getUser",
+        scope: "target",
+        status: "represented",
+        operationKey: "getUser",
+        bindingRef: "#/getUser",
+      },
+      {
+        sourceIndex: 0,
+        sourceRef: "#/callbacks/onUser",
+        scope: "target",
+        status: "excluded",
+        reasonCode: "example.reverse_direction",
+        rule: "EXAMPLE-P-07",
+        message: "reverse-direction callbacks are outside revision 1",
+      },
+    ], true);
+    expect(result.coverage).toMatchObject({
+      exhaustive: true,
+      fullyRepresented: false,
+    });
+    expect(result.coverage.entries[0]).toMatchObject({
+      sourceKey: "api",
+      bindingKey: "getUser.api",
+    });
+  });
+
+  it("rejects represented coverage without a matching binding", () => {
+    const iface: OBInterface = {
+      openbindings: "0.2.0",
+      operations: { getUser: {} },
+      sources: { api: { bindingSpec: "example.spec@1", location: "https://example.com/spec" } },
+      bindings: { "getUser.api": { operation: "getUser", source: "api", ref: "#/getUser" } },
+    };
+    expect(() => finalizeSynthesisCoverage(iface, [{
+      sourceIndex: 0,
+      sourceRef: "#/missing",
+      scope: "target",
+      status: "represented",
+      operationKey: "getUser",
+      bindingRef: "#/missing",
+    }], true)).toThrow(/no matching binding/);
+  });
+
+  it("never describes a non-exhaustive report as fully represented", () => {
+    const iface: OBInterface = {
+      openbindings: "0.2.0",
+      operations: { getUser: {} },
+      sources: { api: { bindingSpec: "example.spec@1", location: "https://example.com/spec" } },
+      bindings: { "getUser.api": { operation: "getUser", source: "api", ref: "#/getUser" } },
+    };
+    const result = finalizeSynthesisCoverage(iface, representedCoverageEntries(iface, 0), false);
+    expect(result.coverage.fullyRepresented).toBe(false);
+    expect(result.coverage.limitation).toMatchObject({
+      code: "synthesis.inventory_incomplete",
+    });
+  });
+
+  it("validates custom limitation evidence for a non-exhaustive inventory", () => {
+    const iface: OBInterface = {
+      openbindings: "0.2.0",
+      operations: { getUser: {} },
+      sources: { api: { bindingSpec: "example.spec@1", location: "https://example.com/spec" } },
+      bindings: { "getUser.api": { operation: "getUser", source: "api", ref: "#/getUser" } },
+    };
+    const result = finalizeSynthesisCoverage(
+      iface,
+      representedCoverageEntries(iface, 0),
+      false,
+      {
+        code: "example.bounded_listing",
+        message: "the live listing stopped at its declared page bound",
+        details: { pages: 10 },
+      },
+    );
+    expect(result.coverage.limitation).toEqual({
+      code: "example.bounded_listing",
+      message: "the live listing stopped at its declared page bound",
+      details: { pages: 10 },
+    });
+    expect(() => finalizeSynthesisCoverage(
+      iface,
+      representedCoverageEntries(iface, 0),
+      false,
+      { code: "bad", message: "" },
+    )).toThrow(/valid code and message/);
   });
 });

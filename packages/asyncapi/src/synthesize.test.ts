@@ -2,10 +2,12 @@ import { describe, it, expect } from "vitest";
 import { convertToInterface } from "./synthesize.js";
 import { BINDING_SPEC } from "./constants.js";
 import { parseAsyncAPIDocument } from "./util.js";
+import { AsyncAPISynthesizer } from "./invoker.js";
 
 const MINIMAL_DOC = {
   asyncapi: "3.0.0",
   info: { title: "Event API", version: "2.0.0", description: "An event-driven API" },
+  servers: { ws: { host: "events.example", protocol: "wss" } },
   channels: {
     messages: {
       address: "/messages",
@@ -131,6 +133,7 @@ describe("convertToInterface", () => {
     const specWithSecurity = {
       asyncapi: "3.0.0",
       info: { title: "Secure API", version: "1.0.0" },
+      servers: { ws: { host: "events.example", protocol: "wss" } },
       channels: {
         messages: {
           address: "/messages",
@@ -171,6 +174,7 @@ describe("convertToInterface", () => {
     const doc = await parsedDoc({
       asyncapi: "3.0.0",
       info: { title: "Event API", version: "1.0.0" },
+      servers: { ws: { host: "events.example", protocol: "wss" } },
       channels: {
         messages: {
           address: "/messages",
@@ -197,5 +201,64 @@ describe("convertToInterface", () => {
     // "Z" (U+005A) < "a" (U+0061) by code point — the order Go's byte-wise
     // comparison produces; ICU locale collation would flip the pair.
     expect(Object.keys(iface.operations)).toEqual(["Zulu", "alpha"]);
+  });
+});
+
+describe("AsyncAPI synthesis coverage", () => {
+  it("accounts for message alternatives and declared protocol cells", async () => {
+    const content = {
+      asyncapi: "3.0.0",
+      info: { title: "Events", version: "1" },
+      servers: {
+        http: { host: "api.example", protocol: "https" },
+        ws: { host: "api.example", protocol: "wss" },
+        broker: { host: "api.example", protocol: "mqtt" },
+      },
+      channels: {
+        events: {
+          address: "/events",
+          messages: {
+            good: { payload: { type: "object" } },
+            headers: { headers: { type: "object" }, payload: { type: "object" } },
+          },
+        },
+        replies: {
+          messages: { reply: { payload: { type: "string" } } },
+        },
+      },
+      operations: {
+        publish: {
+          action: "receive",
+          channel: { $ref: "#/channels/events" },
+          bindings: { http: { method: "POST" } },
+          reply: { channel: { $ref: "#/channels/replies" } },
+        },
+      },
+    };
+    const result = await new AsyncAPISynthesizer().synthesizeInterfaceWithCoverage({
+      sources: [{ bindingSpec: BINDING_SPEC, content }],
+    });
+    expect(result.coverage).toMatchObject({
+      exhaustive: true,
+      fullyRepresented: false,
+    });
+    expect(result.coverage.entries).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        sourceRef: "#/operations/publish",
+        status: "represented",
+      }),
+      expect.objectContaining({
+        status: "excluded",
+        reasonCode: "asyncapi.message_headers",
+      }),
+      expect.objectContaining({
+        status: "excluded",
+        reasonCode: "asyncapi.websocket_reply",
+      }),
+      expect.objectContaining({
+        status: "excluded",
+        reasonCode: "asyncapi.protocol_outside_revision",
+      }),
+    ]));
   });
 });

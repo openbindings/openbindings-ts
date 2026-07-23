@@ -26,6 +26,7 @@ function makeSpec(port: number) {
         action: "receive" as const,
         channel: { $ref: "#/channels/messages" },
         messages: [{ $ref: "#/channels/messages/messages/Msg" }],
+        bindings: { http: { method: "POST" } },
       },
     },
   };

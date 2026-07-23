@@ -36,6 +36,23 @@ function source() {
 }
 
 describe("AsyncAPI readResponseText cap (C6f)", () => {
+  it("refuses an invalid UTF-8 reply instead of replacement-decoding it", async () => {
+    const customFetch = async () =>
+      new Response(new Uint8Array([0xc3, 0x28]), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+
+    const invoker = new AsyncAPIInvoker();
+    const call = invoker.invokeBinding({
+      source: source(),
+      ref: "#/operations/sendOpenMessage",
+      fetch: customFetch,
+    });
+    await call.write({ text: "hi" });
+    await expect(call.closed).rejects.toMatchObject({ code: "ERR_RESPONSE_ERROR" });
+  });
+
   it("cancels the response reader on an over-cap body, not just releaseLock", async () => {
     let cancelled = false;
     const oversized = new Uint8Array(10 * 1024 * 1024 + 16); // > MAX_RESPONSE_BYTES

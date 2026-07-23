@@ -113,6 +113,9 @@ export const ERR_UNAVAILABLE = "ERR_UNAVAILABLE";
 /** No binding found for the requested operation. */
 export const ERR_BINDING_NOT_FOUND = "ERR_BINDING_NOT_FOUND";
 
+/** Several invocable bindings remain and the caller supplied no effective choice. */
+export const ERR_BINDING_SELECTION_REQUIRED = "ERR_BINDING_SELECTION_REQUIRED";
+
 /** Transform evaluation failed. */
 export const ERR_TRANSFORM_ERROR = "ERR_TRANSFORM_ERROR";
 
@@ -202,6 +205,7 @@ export type InvocationErrorCode =
   | typeof ERR_TIMEOUT
   | typeof ERR_UNAVAILABLE
   | typeof ERR_BINDING_NOT_FOUND
+  | typeof ERR_BINDING_SELECTION_REQUIRED
   | typeof ERR_TRANSFORM_ERROR
   | typeof ERR_VALIDATION_FAILED
   | typeof ERR_SCHEMA_UNRESOLVED

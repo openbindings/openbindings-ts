@@ -3,6 +3,7 @@ import {
   InvocationImpl,
   MultipleSourcesError,
   finalizeSynthesis,
+  finalizeSynthesisCoverage,
   synthesisSkeleton,
   ERR_RUNTIME,
   ERR_SOURCE_LOAD_FAILED,
@@ -12,6 +13,8 @@ import {
   type SynthesizeInput,
   type BindingSpecInfo,
   type InterfaceSynthesizer,
+  type CoverageSynthesizer,
+  type SynthesizeResult,
   type Invocation,
   type OBInterface,
   type Source,
@@ -25,6 +28,7 @@ import type { OpenAPIDocument } from "./types.js";
 import { DEFAULT_SOURCE_NAME, BINDING_SPEC } from "./constants.js";
 import { preflightTarget, requiredContext, runBinding } from "./invoke.js";
 import { convertToInterface } from "./synthesize.js";
+import { openAPISynthesisCoverage } from "./coverage.js";
 import { codePointCompare, errorMessage, loadOpenAPIDocument, validateDocumentAddress } from "./util.js";
 
 function authoringLocation(location?: string): string | undefined {
@@ -177,7 +181,7 @@ export class OpenAPIInvoker implements BindingInvoker {
 // ---------------------------------------------------------------------------
 
 /** Synthesizes OBInterface definitions from OpenAPI specification documents. */
-export class OpenAPISynthesizer implements InterfaceSynthesizer, SourceInspector {
+export class OpenAPISynthesizer implements InterfaceSynthesizer, CoverageSynthesizer, SourceInspector {
   /** Returns the binding specifications this synthesizer supports, by exact identifier. */
   bindingSpecs(): BindingSpecInfo[] {
     return [{ bindingSpec: BINDING_SPEC, description: "OpenAPI 3.x HTTP APIs" }];
@@ -188,10 +192,27 @@ export class OpenAPISynthesizer implements InterfaceSynthesizer, SourceInspector
     input: SynthesizeInput,
     options?: { signal?: AbortSignal },
   ): Promise<OBInterface> {
+    const { iface } = await this.synthesizeObserved(input, options);
+    return iface;
+  }
+
+  /** Synthesizes an OBI and durable interaction coverage from the same OpenAPI load. */
+  async synthesizeInterfaceWithCoverage(
+    input: SynthesizeInput,
+    options?: { signal?: AbortSignal },
+  ): Promise<SynthesizeResult> {
+    const { iface, document } = await this.synthesizeObserved(input, options);
+    return finalizeSynthesisCoverage(iface, openAPISynthesisCoverage(document, iface), true);
+  }
+
+  private async synthesizeObserved(
+    input: SynthesizeInput,
+    options?: { signal?: AbortSignal },
+  ): Promise<{ iface: OBInterface; document?: OpenAPIDocument }> {
     const sources = input.sources ?? [];
     const src = sources[0];
     if (src === undefined) {
-      return synthesisSkeleton(input);
+      return { iface: synthesisSkeleton(input) };
     }
     if (sources.length > 1) {
       throw new MultipleSourcesError();
@@ -202,7 +223,16 @@ export class OpenAPISynthesizer implements InterfaceSynthesizer, SourceInspector
     const artifactContent = src.content === undefined && src.embed && location
       ? await readAuthoringArtifact(location, options?.signal)
       : src.content;
-    const iface = await convertToInterface(location, artifactContent, options, input.onWarning);
+    let document: OpenAPIDocument | undefined;
+    const iface = await convertToInterface(
+      location,
+      artifactContent,
+      options,
+      input.onWarning,
+      (observed) => {
+        document = observed;
+      },
+    );
     // Content is authoritative and remains verbatim in the synthesized
     // source. A co-present location is its base/provenance, not permission
     // to replace the embedded artifact with a later fetch.
@@ -210,7 +240,10 @@ export class OpenAPISynthesizer implements InterfaceSynthesizer, SourceInspector
       const entry = iface.sources?.[DEFAULT_SOURCE_NAME];
       if (entry) entry.content = artifactContent;
     }
-    return finalizeSynthesis(iface, input, DEFAULT_SOURCE_NAME, BINDING_SPEC);
+    return {
+      iface: finalizeSynthesis(iface, input, DEFAULT_SOURCE_NAME, BINDING_SPEC),
+      document,
+    };
   }
 
   /** Lists all bindable targets (path+method combinations) from an OpenAPI source. */

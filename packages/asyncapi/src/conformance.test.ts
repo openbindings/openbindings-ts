@@ -154,6 +154,7 @@ function paramDoc(port: number) {
     channels: {
       rooms: {
         address: "/rooms/{roomId}/{lane}",
+        messages: { json: { name: "json", contentType: "application/json" } },
         parameters: {
           roomId: {},
           lane: { default: "main" },
@@ -161,7 +162,11 @@ function paramDoc(port: number) {
       },
     },
     operations: {
-      post: { action: "receive" as const, channel: { $ref: "#/channels/rooms" } },
+      post: {
+        action: "receive" as const,
+        channel: { $ref: "#/channels/rooms" },
+        bindings: { http: { method: "POST" } },
+      },
     },
   };
 }
@@ -201,7 +206,7 @@ describe("address parameters (ASYNC-P-04)", () => {
     }
   });
 
-  it("does not gate a supplied parameter value on the declared enum (§9.2, R1)", async () => {
+  it("refuses a supplied parameter value outside the declared enum", async () => {
     const srv = await startHTTP((_req, res) => {
       res.writeHead(202);
       res.end();
@@ -211,13 +216,12 @@ describe("address parameters (ASYNC-P-04)", () => {
 
     const invoker = new AsyncAPIInvoker();
     try {
-      // The enum is the author's expectation, not a boundary: the value is
-      // substituted and the invocation dispatches.
+      // The artifact-declared enum is authoritative.
       const r = await publish(invoker, doc, "#/operations/post", {
         configuration: { address: { parameters: { roomId: "backstage" } } },
       });
-      expect(r.err).toBeUndefined();
-      expect(srv.requests()).toBe(1);
+      expect(codeOf(r.err)).toBe("ERR_SOURCE_CONFIG_ERROR");
+      expect(srv.requests()).toBe(0);
     } finally {
       invoker.close();
     }
@@ -247,9 +251,18 @@ describe("server variables and pathname assembly (ASYNC-P-04)", () => {
           },
         },
       },
-      channels: { events: { address: "/events" } },
+      channels: {
+        events: {
+          address: "/events",
+          messages: { json: { name: "json", contentType: "application/json" } },
+        },
+      },
       operations: {
-        post: { action: "receive" as const, channel: { $ref: "#/channels/events" } },
+        post: {
+          action: "receive" as const,
+          channel: { $ref: "#/channels/events" },
+          bindings: { http: { method: "POST" } },
+        },
       },
     };
 
@@ -268,17 +281,14 @@ describe("server variables and pathname assembly (ASYNC-P-04)", () => {
       expect(r.err).toBeUndefined();
       expect(srv.lastPath()).toBe("/v2/events");
 
-      // A supplied value outside the variable's declared enum is NOT refused
-      // (§9.2, R1): the enum is the author's expectation, not a boundary. The
-      // value substitutes and the invocation dispatches.
+      // A supplied value outside the variable's declared enum is refused.
       r = await publish(invoker, doc, "#/operations/post", {
         configuration: { server: { key: "test", variables: { version: "v9" } } },
       });
-      expect(r.err).toBeUndefined();
-      expect(srv.lastPath()).toBe("/v9/events");
+      expect(codeOf(r.err)).toBe("ERR_SOURCE_CONFIG_ERROR");
 
-      // A declared default outside the variable's own declared enum is
-      // likewise not refused — enum gates neither supplied values nor defaults.
+      // A declared default outside the variable's own enum is likewise
+      // inconsistent and refused.
       const badDefault = {
         ...doc,
         servers: {
@@ -291,7 +301,7 @@ describe("server variables and pathname assembly (ASYNC-P-04)", () => {
         },
       };
       r = await publish(invoker, badDefault, "#/operations/post");
-      expect(r.err).toBeUndefined();
+      expect(codeOf(r.err)).toBe("ERR_SOURCE_CONFIG_ERROR");
 
       // No default and no supplied value: pre-dispatch refusal.
       const noDefault = {
@@ -351,39 +361,54 @@ describe("effective server set (ASYNC-P-04)", () => {
         zHTTP: { host: `127.0.0.1:${srvB.port}`, protocol: "http" },
       },
       channels: {
-        c: { address: "/c", ...(channelServers ? { servers: channelServers } : {}) },
+        c: {
+          address: "/c",
+          messages: { json: { name: "json", contentType: "application/json" } },
+          ...(channelServers ? { servers: channelServers } : {}),
+        },
       },
       operations: {
-        post: { action: "receive" as const, channel: { $ref: "#/channels/c" } },
+        post: {
+          action: "receive" as const,
+          channel: { $ref: "#/channels/c" },
+          bindings: { http: { method: "POST" } },
+        },
       },
     });
 
     const invoker = new AsyncAPIInvoker();
     try {
-      // Non-empty channel servers subset: array order wins — zHTTP is listed
-      // FIRST, so it is the default even though bHTTP sorts before it.
+      // Several bindable subset members require explicit selection;
+      // declaration order never chooses identity.
       let r = await publish(
         invoker,
         mkDoc([{ $ref: "#/servers/zHTTP" }, { $ref: "#/servers/bHTTP" }]),
         "#/operations/post",
       );
+      expect(codeOf(r.err)).toBe("CONTEXT_REQUIRED");
+      expect(srvB.requests()).toBe(0);
+      expect(srvA.requests()).toBe(0);
+      r = await publish(
+        invoker,
+        mkDoc([{ $ref: "#/servers/zHTTP" }, { $ref: "#/servers/bHTTP" }]),
+        "#/operations/post",
+        { configuration: { server: { key: "zHTTP" } } },
+      );
       expect(r.err).toBeUndefined();
       expect(srvB.requests()).toBe(1);
+
+      // Absent channel servers means all document members; the unbound
+      // broker is excluded but the two HTTP members still require choice.
+      r = await publish(invoker, mkDoc(), "#/operations/post");
+      expect(codeOf(r.err)).toBe("CONTEXT_REQUIRED");
       expect(srvA.requests()).toBe(0);
 
-      // Absent channel servers = ALL doc servers in lexicographic key order:
-      // aKafka (unbound) is skipped, bHTTP selected.
-      r = await publish(invoker, mkDoc(), "#/operations/post");
-      expect(r.err).toBeUndefined();
-      expect(srvA.requests()).toBe(1);
-
-      // Consumer configuration selects another member of the effective set
-      // by its servers-map key ({"key": ...}, the §9.2 pinned form).
+      // Consumer configuration selects a member by servers-map key.
       r = await publish(invoker, mkDoc(), "#/operations/post", {
-        configuration: { server: { key: "zHTTP" } },
+        configuration: { server: { key: "bHTTP" } },
       });
       expect(r.err).toBeUndefined();
-      expect(srvB.requests()).toBe(2);
+      expect(srvA.requests()).toBe(1);
 
       // A key outside the effective set is a refusal.
       r = await publish(
@@ -399,7 +424,7 @@ describe("effective server set (ASYNC-P-04)", () => {
     }
   });
 
-  it("accepts exactly the §9.2 pinned server value shapes, refusing every other spelling pre-dispatch with the teaching error", async () => {
+  it("accepts the composable server carriage and refuses malformed spellings pre-dispatch", async () => {
     const srv = await startHTTP((_req, res) => {
       res.writeHead(202);
       res.end();
@@ -410,8 +435,14 @@ describe("effective server set (ASYNC-P-04)", () => {
       servers: {
         test: { host: `127.0.0.1:${srv.port}`, protocol: "http" },
       },
-      channels: { c: { address: "/c" } },
-      operations: { post: { action: "receive" as const, channel: { $ref: "#/channels/c" } } },
+      channels: { c: { address: "/c", messages: { json: { name: "json", contentType: "application/json" } } } },
+      operations: {
+        post: {
+          action: "receive" as const,
+          channel: { $ref: "#/channels/c" },
+          bindings: { http: { method: "POST" } },
+        },
+      },
     };
 
     const invoker = new AsyncAPIInvoker();
@@ -419,15 +450,7 @@ describe("effective server set (ASYNC-P-04)", () => {
       const refused: Array<{ cfg: unknown; teach: string }> = [
         { cfg: "test", teach: "must be an object" },
         { cfg: { name: "test" }, teach: 'member "name" is not pinned' },
-        {
-          cfg: { key: "test", url: `http://127.0.0.1:${srv.port}` },
-          teach: 'carries both "key" and "url"',
-        },
-        { cfg: {}, teach: 'carries neither "key" nor "url"' },
-        {
-          cfg: { url: `http://127.0.0.1:${srv.port}`, variables: { env: "staging" } },
-          teach: 'carries "variables" with "url"',
-        },
+        { cfg: {}, teach: 'carries none of "key", "variables", or "url"' },
       ];
       for (const tc of refused) {
         const before = srv.requests();
@@ -436,14 +459,14 @@ describe("effective server set (ASYNC-P-04)", () => {
         });
         expect(codeOf(r.err)).toBe("ERR_SOURCE_CONFIG_ERROR");
         expect(String(r.err)).toContain(
-          '{"key": "<server-name>", "variables": {"<variable-name>": "<string-value>"}?}',
+          '{"key": "<server-name>"?',
         );
         expect(String(r.err)).toContain(tc.teach);
-        expect(String(r.err)).toContain('{"url": "<connection-url>"}');
+        expect(String(r.err)).toContain('"url": "<connection-url>"?');
         expect(srv.requests()).toBe(before);
       }
 
-      // The two pinned forms dispatch.
+      // Selection, sole-member URL replacement, and their composition dispatch.
       let r = await publish(invoker, doc, "#/operations/post", {
         configuration: { server: { key: "test" } },
       });
@@ -452,7 +475,11 @@ describe("effective server set (ASYNC-P-04)", () => {
         configuration: { server: { url: `http://127.0.0.1:${srv.port}` } },
       });
       expect(r.err).toBeUndefined();
-      expect(srv.requests()).toBe(2);
+      r = await publish(invoker, doc, "#/operations/post", {
+        configuration: { server: { key: "test", url: `http://127.0.0.1:${srv.port}` } },
+      });
+      expect(r.err).toBeUndefined();
+      expect(srv.requests()).toBe(3);
     } finally {
       invoker.close();
     }
@@ -465,8 +492,14 @@ describe("effective server set (ASYNC-P-04)", () => {
       servers: {
         broker: { host: "broker.example.com:9092", protocol: "kafka" },
       },
-      channels: { c: { address: "/c" } },
-      operations: { post: { action: "receive" as const, channel: { $ref: "#/channels/c" } } },
+      channels: { c: { address: "/c", messages: { json: { name: "json", contentType: "application/json" } } } },
+      operations: {
+        post: {
+          action: "receive" as const,
+          channel: { $ref: "#/channels/c" },
+          bindings: { http: { method: "POST" } },
+        },
+      },
     };
     const invoker = new AsyncAPIInvoker();
     try {
@@ -475,11 +508,9 @@ describe("effective server set (ASYNC-P-04)", () => {
         ref: "#/operations/post",
       });
       const { err } = await drainOutputs(call);
-      // R1a: no server with a supported protocol is resolvable by supplying a
-      // connection URL — a config.value CONTEXT_REQUIRED, not a terminal error.
-      expect(codeOf(err)).toBe("CONTEXT_REQUIRED");
-      expect(configReq(err).point).toBe("server");
-      expect(configReq(err).key).toBe("url");
+      // No bound artifact member exists for configuration to select or
+      // replace, so this is a terminal source-configuration refusal.
+      expect(codeOf(err)).toBe("ERR_SOURCE_CONFIG_ERROR");
     } finally {
       invoker.close();
     }
@@ -487,7 +518,7 @@ describe("effective server set (ASYNC-P-04)", () => {
 });
 
 describe("full-URL override (ASYNC-P-04, §9.5)", () => {
-  it("refuses out-of-revision schemes; the default-selected server's security still applies; the override URL is dialed", async () => {
+  it("refuses scheme changes; the selected server's security still applies; a same-scheme override is dialed", async () => {
     const srv = await startHTTP((_req, res) => {
       res.writeHead(202);
       res.end();
@@ -498,12 +529,18 @@ describe("full-URL override (ASYNC-P-04, §9.5)", () => {
       servers: {
         prod: {
           host: "unreachable.example.com",
-          protocol: "https",
+          protocol: "http",
           security: [{ $ref: "#/components/securitySchemes/bearer" }],
         },
       },
-      channels: { c: { address: "/c" } },
-      operations: { post: { action: "receive" as const, channel: { $ref: "#/channels/c" } } },
+      channels: { c: { address: "/c", messages: { json: { name: "json", contentType: "application/json" } } } },
+      operations: {
+        post: {
+          action: "receive" as const,
+          channel: { $ref: "#/channels/c" },
+          bindings: { http: { method: "POST" } },
+        },
+      },
       components: { securitySchemes: { bearer: { type: "http", scheme: "bearer" } } },
     };
 
@@ -515,8 +552,8 @@ describe("full-URL override (ASYNC-P-04, §9.5)", () => {
       });
       expect(codeOf(r.err)).toBe("ERR_SOURCE_CONFIG_ERROR");
 
-      // The default-selected server's declared security still applies under
-      // a full-URL override: the challenge fires before any I/O.
+      // The selected server's declared security still applies under a
+      // same-scheme URL replacement: challenge before I/O.
       const before = srv.requests();
       r = await publish(invoker, doc, "#/operations/post", {
         configuration: { server: { url: `http://127.0.0.1:${srv.port}` } },
@@ -565,8 +602,8 @@ describe("http operation binding method override (ASYNC-P-02)", () => {
       info: { title: "t", version: "1" },
       servers: { test: { host: `127.0.0.1:${srv.port}`, protocol: "http" } },
       channels: {
-        in: { address: "/in" },
-        out: { address: "/out" },
+        in: { address: "/in", messages: { json: { name: "json", contentType: "application/json" } } },
+        out: { address: "/out", messages: { json: { name: "json", contentType: "application/json" } } },
       },
       operations: {
         post: {
@@ -592,10 +629,9 @@ describe("http operation binding method override (ASYNC-P-02)", () => {
         source: { bindingSpec: BINDING_SPEC, content: doc },
         ref: "#/operations/sub",
       });
-      const { vals, err } = await drainOutputs(sub);
-      expect(err).toBeUndefined();
-      expect(vals).toHaveLength(1);
-      expect(sseMethod).toBe("POST");
+      const { err } = await drainOutputs(sub);
+      expect(codeOf(err)).toBe("ERR_SOURCE_CONFIG_ERROR");
+      expect(sseMethod).toBeUndefined();
     } finally {
       invoker.close();
     }
@@ -612,6 +648,7 @@ function wsBindingDoc(port: number) {
     channels: {
       stream: {
         address: "/ws",
+        messages: { json: { name: "json", contentType: "application/json" } },
         bindings: {
           ws: {
             method: "GET",
@@ -636,7 +673,10 @@ function wsBindingDoc(port: number) {
       },
     },
     operations: {
-      publish: { action: "receive" as const, channel: { $ref: "#/channels/stream" } },
+      publish: {
+        action: "receive" as const,
+        channel: { $ref: "#/channels/stream" },
+      },
     },
   };
 }
@@ -667,14 +707,19 @@ describe("ws channel binding governs the upgrade (ASYNC-P-02, §8)", () => {
 
     const invoker = new AsyncAPIInvoker();
     try {
-      // Required query via the parameter bag; required header via the
-      // generic header carriage; defaults fill the rest.
+      // All concrete upgrade values ride their distinct protocolFields
+      // maps; JSON Schema defaults remain annotations.
       const sawUpgrade = new Promise<void>((r) => {
         seenResolve = r;
       });
       const r = await publish(invoker, wsBindingDoc(srv.port), "#/operations/publish", {
-        headers: { "X-Trace": "trace-1" },
-        configuration: { address: { parameters: { token: "qtok" } } },
+        configuration: {
+          websocketMessageType: "text",
+          protocolFields: {
+            webSocketQuery: { token: "qtok", lane: "live" },
+            webSocketHeaders: { "X-Trace": "trace-1", "X-Client": "ob" },
+          },
+        },
       });
       expect(r.err).toBeUndefined();
       await sawUpgrade;
@@ -683,11 +728,17 @@ describe("ws channel binding governs the upgrade (ASYNC-P-02, §8)", () => {
       // Unsatisfied required declarations: pre-dispatch refusals, no upgrade.
       const before = srv.upgrades();
       const missingQuery = await publish(invoker, wsBindingDoc(srv.port), "#/operations/publish", {
-        headers: { "X-Trace": "trace-2" },
+        configuration: {
+          websocketMessageType: "text",
+          protocolFields: { webSocketHeaders: { "X-Trace": "trace-2" } },
+        },
       });
       expect(codeOf(missingQuery.err)).toBe("ERR_SOURCE_CONFIG_ERROR");
       const missingHeader = await publish(invoker, wsBindingDoc(srv.port), "#/operations/publish", {
-        configuration: { address: { parameters: { token: "qtok" } } },
+        configuration: {
+          websocketMessageType: "text",
+          protocolFields: { webSocketQuery: { token: "qtok" } },
+        },
       });
       expect(codeOf(missingHeader.err)).toBe("ERR_SOURCE_CONFIG_ERROR");
       expect(srv.upgrades()).toBe(before);
@@ -705,7 +756,9 @@ describe("ws channel binding governs the upgrade (ASYNC-P-02, §8)", () => {
 
     const invoker = new AsyncAPIInvoker();
     try {
-      const r = await publish(invoker, doc, "#/operations/publish");
+      const r = await publish(invoker, doc, "#/operations/publish", {
+        configuration: { websocketMessageType: "text" },
+      });
       expect(codeOf(r.err)).toBe("ERR_SOURCE_CONFIG_ERROR");
       expect(srv.upgrades()).toBe(0);
     } finally {
@@ -730,57 +783,22 @@ function sseDoc(port: number, path: string) {
   };
 }
 
-describe("SSE establishment pin (§8, ASYNC-P-06)", () => {
-  it("fails ERR_PROTOCOL on a 2xx response without the text/event-stream content type", async () => {
+describe("standalone HTTP send exclusion (§8, ASYNC-P-02)", () => {
+  it("does not infer SSE even when the endpoint would return an event stream", async () => {
     const srv = await startHTTP((_req, res) => {
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ not: "a stream" }));
+      res.writeHead(200, { "Content-Type": "text/event-stream" });
+      res.end("data: should-not-dispatch\n\n");
     });
     const invoker = new AsyncAPIInvoker();
     try {
+      const before = srv.requests();
       const call = invoker.invokeBinding({
         source: { bindingSpec: BINDING_SPEC, content: sseDoc(srv.port, "/") },
         ref: "#/operations/receiveCaps",
       });
       const { err } = await drainOutputs(call);
-      expect(codeOf(err)).toBe("ERR_PROTOCOL");
-    } finally {
-      invoker.close();
-    }
-  });
-});
-
-describe("SSE WHATWG event framing (§8)", () => {
-  it("joins data lines with U+000A, strips one leading space, drops comment-only/empty-data events, keeps framing fields out of values, and discards an incomplete final event", async () => {
-    const body = [
-      ": stream comment", // comment-only event
-      "",
-      "event: greeting",
-      "id: 41",
-      "data: hello",
-      "data:  indented", // ONE leading space stripped: " indented"
-      "",
-      "data:", // empty-data event: emits nothing
-      "",
-      "retry: 5000", // framing only; never acted on (no reconnect in @1)
-      "data: second",
-      "",
-      "data: never dispatched (EOF before blank line)",
-    ].join("\n");
-    const srv = await startHTTP((_req, res) => {
-      res.writeHead(200, { "Content-Type": "text/event-stream" });
-      res.end(body);
-    });
-
-    const invoker = new AsyncAPIInvoker();
-    try {
-      const call = invoker.invokeBinding({
-        source: { bindingSpec: BINDING_SPEC, content: sseDoc(srv.port, "/") },
-        ref: "#/operations/receiveCaps",
-      });
-      const { vals, err } = await drainOutputs(call);
-      expect(err).toBeUndefined();
-      expect(vals).toEqual(["hello\n indented", "second"]);
+      expect(codeOf(err)).toBe("ERR_SOURCE_CONFIG_ERROR");
+      expect(srv.requests()).toBe(before);
     } finally {
       invoker.close();
     }
@@ -809,6 +827,7 @@ function laneDoc(port: number, proto: string, contentType: string, address = "/c
         channel: { $ref: "#/channels/c" },
         messages: [{ $ref: "#/channels/c/messages/m" }],
         reply: { messages: [{ $ref: "#/channels/c/messages/m" }] },
+        bindings: { http: { method: "POST" } },
       },
       sub: {
         action: "send" as const,
@@ -884,14 +903,11 @@ describe("excluded input families (§9.1, ASYNC-P-03)", () => {
 });
 
 describe("decode text lane and reply direction (§9.3, ASYNC-P-05)", () => {
-  it("decodes a publish output by the REPLY-side declaration and an ambiguous governing set on the text lane", async () => {
+  it("decodes a publish output by the reply-side declaration", async () => {
     const srv = await startHTTP((req, res) => {
       if (req.url === "/c") {
-        res.writeHead(200, { "Content-Type": "application/json" });
+        res.writeHead(200, { "Content-Type": "text/plain" });
         res.end('{"looks":"like json"}');
-      } else if (req.url === "/mixed") {
-        res.writeHead(200, { "Content-Type": "text/event-stream" });
-        res.end('data: {"seq":1}\n\n');
       } else {
         res.writeHead(404);
         res.end();
@@ -912,33 +928,6 @@ describe("decode text lane and reply direction (§9.3, ASYNC-P-05)", () => {
       );
       expect(r.err).toBeUndefined();
       expect(r.vals).toEqual(['{"looks":"like json"}']);
-
-      // Two distinct effective types govern the subscription: ambiguous →
-      // text lane, events stay strings.
-      const mixed = {
-        asyncapi: "3.0.0",
-        info: { title: "t", version: "1" },
-        servers: { test: { host: `127.0.0.1:${srv.port}`, protocol: "http" } },
-        channels: {
-          mixed: {
-            address: "/mixed",
-            messages: {
-              j: { name: "j", contentType: "application/json" },
-              t: { name: "t", contentType: "text/plain" },
-            },
-          },
-        },
-        operations: {
-          sub: { action: "send" as const, channel: { $ref: "#/channels/mixed" } },
-        },
-      };
-      const sub = invoker.invokeBinding({
-        source: { bindingSpec: BINDING_SPEC, content: mixed },
-        ref: "#/operations/sub",
-      });
-      const { vals, err } = await drainOutputs(sub);
-      expect(err).toBeUndefined();
-      expect(vals).toEqual(['{"seq":1}']);
     } finally {
       invoker.close();
     }

@@ -27,10 +27,6 @@ import {
   type BindingHandle,
   type BindingInvocationArgs,
   type Metadata,
-  decodeThroughHooks,
-  type InvokeSite,
-  type InvokeHooks,
-  type RawResult,
 } from "@openbindings/sdk";
 import { CLIENT_NAME, CLIENT_VERSION } from "./constants.js";
 import { liveListing, parsePinnedListing, resolveRef, type Listing, type TargetKind } from "./listing.js";
@@ -392,7 +388,6 @@ export async function runMCPBinding(
     inv.setHeader(responseHeaders);
   };
 
-  const site = siteFor(args, location);
   try {
     // --- Live resolution (no pin): the capability-gated, pagination-
     // exhausted listing for the ref's entity family, then the same
@@ -434,14 +429,14 @@ export async function runMCPBinding(
     switch (kind) {
       case "tool": {
         const solicit = resolveSolicit(args.context, opts?.solicitProgress);
-        await runTool(client, name, toolArgs, solicit, inv, setHeaderOnce, site, args.hooks);
+        await runTool(client, name, toolArgs, solicit, inv, setHeaderOnce);
         break;
       }
       case "prompt":
         await runPrompt(client, name, promptArgs, inv, setHeaderOnce);
         break;
       default: // static resource, or a template expanded to targetURI
-        await runResource(client, targetURI, inv, setHeaderOnce, site, args.hooks);
+        await runResource(client, targetURI, inv, setHeaderOnce);
         break;
     }
   } catch (e: unknown) {
@@ -547,7 +542,10 @@ async function expandTemplateInput(
           `MCP resource-template input names variable ${JSON.stringify(k)}, which template ${JSON.stringify(template)} does not declare`,
         );
       }
-      const stringMap = v !== null && typeof v === "object" && !Array.isArray(v) && Object.values(v).every((item) => typeof item === "string");
+      const stringMap = v !== null
+        && typeof v === "object"
+        && !Array.isArray(v)
+        && Object.values(v as Record<string, unknown>).every((item) => typeof item === "string");
       if (typeof v !== "string" && !(Array.isArray(v) && v.every((item) => typeof item === "string")) && !stringMap) {
         throw new InvocationError(
           ERR_VALIDATION_FAILED,
@@ -662,8 +660,6 @@ async function runTool(
   solicit: boolean,
   inv: BindingHandle<unknown, unknown>,
   setHeaderOnce: () => void,
-  site: InvokeSite,
-  hooks: InvokeHooks | null | undefined,
 ): Promise<void> {
   // A supplied input maps whole and verbatim; an absent input omits the
   // arguments member ENTIRELY (§9.1) — never arguments: {}. The TS MCP SDK
@@ -679,7 +675,7 @@ async function runTool(
     // attaches _meta.progressToken only when an onprogress handler is
     // registered, so not registering one IS the wire-level off switch.
     const result = await client.callTool(params, undefined, { signal: inv.signal });
-    await emitToolResult(result, toolName, inv, setHeaderOnce, site, hooks);
+    await emitToolResult(result, toolName, inv, setHeaderOnce);
     return;
   }
 
@@ -725,7 +721,7 @@ async function runTool(
   resultArrived = true;
   await progressChain;
 
-  await emitToolResult(result, toolName, inv, setHeaderOnce, site, hooks);
+  await emitToolResult(result, toolName, inv, setHeaderOnce);
 }
 
 /**
@@ -738,8 +734,6 @@ async function emitToolResult(
   toolName: string,
   inv: BindingHandle<unknown, unknown>,
   setHeaderOnce: () => void,
-  site: InvokeSite,
-  hooks: InvokeHooks | null | undefined,
 ): Promise<void> {
   if (result.isError) {
     // Application-level tool failure (CallToolResult.isError). The server
@@ -761,32 +755,6 @@ async function emitToolResult(
 }
 
 /**
- * Returns the text of a sole `{ type: "text" }` content entry, or undefined
- * when the completed result's content is not exactly one text block.
- */
-function soleTextContent(content: unknown): string | undefined {
-  if (!Array.isArray(content) || content.length !== 1) return undefined;
-  const sole: unknown = content[0];
-  if (sole === null || typeof sole !== "object") return undefined;
-  const rec = sole as Record<string, unknown>;
-  return rec.type === "text" && typeof rec.text === "string" ? rec.text : undefined;
-}
-
-/**
- * The MCP text builtin: the value is the text, verbatim.
- * Content-independent per the specification's decode point (§9.3);
- * JSON-in-text consumers opt in with a decode hook.
- */
-function builtinTextDecode(_site: InvokeSite, raw: RawResult): unknown {
-  return typeof raw.body === "string" ? raw.body : String(raw.body);
-}
-
-/** Names the decode lane for the x-ob-decode stamp ("hook" when a hook decided). */
-function decodeStampFor(hooks: InvokeHooks | null | undefined, builtin: string): string {
-  return hooks?.decodeDecidedBy?.() === "hook" ? "hook" : builtin;
-}
-
-/**
  * Read an MCP resource. The output value is ALWAYS the array of decoded
  * contents items, in order (§9.3, MCP-P-05) — uniformly, so the value's
  * shape never depends on how many items the server returned: contents: []
@@ -803,8 +771,6 @@ async function runResource(
   uri: string,
   inv: BindingHandle<unknown, unknown>,
   setHeaderOnce: () => void,
-  site: InvokeSite,
-  hooks: InvokeHooks | null | undefined,
 ): Promise<void> {
   const result = await client.readResource({ uri }, { signal: inv.signal });
 
@@ -812,46 +778,6 @@ async function runResource(
   inv.setTrailer({ "x-ob-decode": ["protocol/result"] });
   await inv.emitOutput(result);
   inv.closeOutput();
-}
-
-/**
- * The resource builtin: the declared mimeType decides the lane.
- * application/json and +json parse strictly; a declared-JSON body that
- * does not parse is a loud invocation error.
- */
-function builtinMimeDecode(mimeType: string): (site: InvokeSite, raw: RawResult) => unknown {
-  return (_site, raw) => {
-    const semi = mimeType.indexOf(";");
-    const mt = (semi >= 0 ? mimeType.slice(0, semi) : mimeType).trim();
-    const body = typeof raw.body === "string" ? raw.body : String(raw.body);
-    if (mt === "application/json" || mt.endsWith("+json")) {
-      try {
-        return JSON.parse(body) as unknown;
-      } catch (e) {
-        throw new InvocationError(
-          ERR_EXECUTION_FAILED,
-          `resource declares ${mimeType} but its text is not valid JSON: ${(e as Error).message}`,
-        );
-      }
-    }
-    return body;
-  };
-}
-
-/** Builds the hook-consultation site for an MCP binding. */
-function siteFor(args: BindingInvocationArgs, target: string): InvokeSite {
-  const site: InvokeSite = args.site
-    ? { ...args.site }
-    : {
-        operation: args.binding?.operation ?? "",
-        invokedAs: args.binding?.operation ?? "",
-        bindingKey: "",
-        bindingSpec: args.source.bindingSpec,
-        ref: args.ref,
-        target: "",
-      };
-  if (site.target === "") site.target = target;
-  return site;
 }
 
 /** Get an MCP prompt. */
