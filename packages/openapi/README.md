@@ -85,11 +85,18 @@ const iface = await synth.synthesizeInterface({
 // iface is a fully-formed OBInterface with operations, bindings, and sources
 ```
 
+The package uses web-platform APIs and has no Node import. HTTP(S) locations
+are fetched directly. Process-local paths are intentionally not a synthesizer
+capability: a Node-based CLI or build step can read the file and pass the
+result as `content`, while browsers and Workers keep the same package graph.
+
 ## How it works
 
 ### Execution flow
 
-1. Loads and caches the OpenAPI document (JSON or YAML, local or remote), discriminating the exact accepted 3.0.0–3.0.4 and 3.1.0–3.1.2 editions (OAPI-P-01)
+1. Loads and caches the OpenAPI document (JSON or YAML, from embedded content
+   or an absolute URI), discriminating the exact accepted 3.0.0–3.0.4 and
+   3.1.0–3.1.2 editions (OAPI-P-01)
 2. Parses the ref as a JSON Pointer (`#/paths/~1users/get` -> path `/users`, method `get`); the method is lowercase exactly as the artifact spells it — an uppercase method is refused, never case-folded (OAPI-D-03)
 3. Resolves the server (the OAS effective list + variables + the `server` configuration point, OAPI-P-05)
 4. Derives auth requirements from the operation's (or document's) `security` and challenges `CONTEXT_REQUIRED` when the context can't satisfy them — before any request is dispatched

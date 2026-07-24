@@ -1,0 +1,195 @@
+:root {
+  color: #18211c;
+  background: #f2f0e8;
+  font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+  font-synthesis: none;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+button {
+  border: 1px solid #234c39;
+  border-radius: 999px;
+  padding: 0.55rem 0.9rem;
+  color: #173e2b;
+  background: #f8fff9;
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.controls {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: grid;
+  gap: 0.7rem;
+  padding: 1rem max(1rem, calc((100vw - 1080px) / 2));
+  color: #f5fff7;
+  background: #173e2b;
+}
+
+.controls div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.dashboard {
+  display: grid;
+  gap: 1.2rem;
+  width: min(1080px, calc(100% - 2rem));
+  margin: 2rem auto 5rem;
+}
+
+.hero,
+.panel {
+  border: 1px solid #cad3cb;
+  border-radius: 1.2rem;
+  background: #fffefa;
+  box-shadow: 0 16px 45px rgb(25 55 40 / 8%);
+}
+
+.hero {
+  display: grid;
+  grid-template-columns: 1.4fr 1fr;
+  gap: 2rem;
+  padding: clamp(1.5rem, 4vw, 3rem);
+}
+
+h1,
+h2,
+p {
+  margin-top: 0;
+}
+
+h1 {
+  max-width: 16ch;
+  font-family: Georgia, serif;
+  font-size: clamp(2.4rem, 6vw, 5rem);
+  line-height: 0.95;
+}
+
+.eyebrow {
+  color: #50715f;
+  font-size: 0.76rem;
+  font-weight: 800;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+}
+
+.state-grid {
+  display: grid;
+  align-content: center;
+  gap: 0.7rem;
+}
+
+.state-grid div,
+.tasks li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.status {
+  border-radius: 999px;
+  padding: 0.25rem 0.6rem;
+  color: #284033;
+  background: #e6ece7;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.status-available {
+  color: #0e5a32;
+  background: #d8f7e4;
+}
+
+.status-ambiguous,
+.status-failed {
+  color: #78471f;
+  background: #ffebc9;
+}
+
+.panel {
+  padding: 1.5rem;
+}
+
+.panel-heading,
+.form-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.tasks,
+.events {
+  display: grid;
+  gap: 0.65rem;
+  padding: 0;
+  list-style: none;
+}
+
+.tasks li,
+.events li,
+.notice {
+  border-radius: 0.75rem;
+  padding: 0.8rem 1rem;
+  background: #f0f4f0;
+}
+
+form {
+  display: grid;
+  gap: 0.5rem;
+  margin-top: 1.5rem;
+}
+
+input {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid #9caf9f;
+  border-radius: 0.7rem;
+  padding: 0.75rem;
+  background: white;
+}
+
+.message {
+  min-height: 1.5rem;
+  margin: 1rem 0 0;
+  color: #50715f;
+}
+
+.unmounted {
+  width: min(1080px, calc(100% - 2rem));
+  margin: 4rem auto;
+  text-align: center;
+}
+
+@media (max-width: 720px) {
+  .hero {
+    grid-template-columns: 1fr;
+  }
+
+  .panel-heading,
+  .form-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}

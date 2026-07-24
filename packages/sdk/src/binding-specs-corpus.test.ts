@@ -18,13 +18,10 @@
 // carry no core-level assertion here.
 //
 // FAMILY-LANE coverage (routing each fixture through the family's own
-// loader/validator) lives with each family package's corpus.test.ts:
-// openapi, mcp, and asyncapi in this workspace. The usage, grpc, and
-// connect families are Go-only BY DESIGN — TS format parity is a non-goal
-// (this workspace ships no usage/grpc/connect invokers; browser consumers
-// delegate to a local `ob start`) — so their family-lane judging is
-// explicitly skipped below and owned by the Go SDK's per-module
-// corpus_test.go harnesses.
+// loader/validator) lives with every published family package's
+// corpus.test.ts. Keeping those assertions beside the implementation makes
+// it impossible for a newly implemented family to appear covered merely
+// because its documents remain core-valid.
 //
 // The corpus root is located via OB_SPEC_CORPUS (the spec repo's
 // conformance/ directory) or the local-dev sibling path (the
@@ -37,8 +34,7 @@ import { fileURLToPath } from "node:url";
 
 import { validateDocument } from "./parse.js";
 
-const ALL_FAMILIES = ["asyncapi", "connect", "grpc", "mcp", "openapi", "usage"] as const;
-const TS_COVERED_FAMILIES = new Set(["asyncapi", "mcp", "openapi"]);
+const ALL_FAMILIES = ["asyncapi", "connect", "graphql", "grpc", "mcp", "openapi", "usage"] as const;
 
 function corpusRoot(): string | undefined {
   const root =
@@ -95,13 +91,6 @@ describe.skipIf(!root)("binding-specs subcorpus, core-level checks", () => {
           }
           // Family-only negatives carry no core-level claim.
         }
-      }
-
-      if (!TS_COVERED_FAMILIES.has(family)) {
-        // Go-only family: TS ships no invoker for it by design (format
-        // parity is a non-goal), so the family-lane judging of these
-        // fixtures is owned by the Go SDK's corpus_test.go harness.
-        it.skip(`family-lane judging (${family} is Go-only by design)`, () => {});
       }
     });
   }

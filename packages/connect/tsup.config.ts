@@ -1,3 +1,10 @@
 import { defineConfig } from "tsup";
 
-export default defineConfig({ entry: ["src/index.ts"], format: ["esm", "cjs"], dts: true, sourcemap: true, clean: true });
+export default defineConfig({
+  entry: ["src/index.ts"],
+  format: ["esm", "cjs"],
+  target: "node22",
+  dts: true,
+  sourcemap: true,
+  clean: true,
+});

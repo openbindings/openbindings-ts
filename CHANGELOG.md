@@ -4,6 +4,30 @@
 
 ### Changed
 
+- **Per-operation dependencies compose compatibility, invocability, and
+  caller policy without introducing a registry.** The core SDK now exposes
+  `OperationRequirement`, `checkOperationCompatibility`,
+  `matchOperationRequirement`, and `resolveOperationRequirement`. A consumer
+  pairs an ordinary required OBI with a typed operation signature; an
+  application supplies concrete interfaces and its explicitly installed
+  `OperationInvoker`s. Matching is alias-aware, checks only the requested
+  operation against both complete schema graphs, performs side-effect-free
+  binding preflight, and carries advisory context requirements. The neutral
+  matcher returns every invocable match; the route-to-one convenience selects
+  a unique highest caller preference and refuses a tie as `ambiguous`.
+  Binding packages remain optional and separately installed. Matching also
+  accepts an `AbortSignal` and forwards it through side-effect-free preflight,
+  allowing reactive consumers to abandon stale candidate sets.
+
+- **Browser and edge-runtime suitability is now an executable build
+  contract.** The core, OpenAPI, and AsyncAPI ESM graphs contain no Node
+  imports; the workspace rejects regressions and bundles a Cloudflare
+  Worker-shaped core + OpenAPI entry. Portable OpenAPI and AsyncAPI
+  synthesizers fetch HTTP(S) artifacts and refuse process-local paths unless
+  the host reads the artifact and supplies `content`. Runnable React and
+  Svelte examples prove reactive operation availability without publishing a
+  framework or registry abstraction.
+
 - **`fetchInterface` retains synthesis coverage.** A synthesized
   `FetchedInterface` now carries the durable `SynthesisCoverage` emitted by a
   coverage-capable synthesizer instead of discarding it at acquisition. A
@@ -340,6 +364,16 @@
   reference tooling, not spec primitives.
 
 ### Fixed
+
+- **Every published binding family now runs its shared D-rule corpus through
+  the TypeScript package's own family lanes.** Connect, gRPC, and Usage gained
+  the missing adapters, GraphQL rejoined the core corpus inventory, and the
+  stale Go-only skips were removed. The new proof exposed and fixed two real
+  runtime divergences: Connect no longer normalizes binding-spec-excluded
+  trailing-slash, query, fragment, or userinfo base URLs into dispatchable
+  targets; gRPC now accepts the specified bracketed IPv6 dial-address form.
+  Connect and gRPC refs also enforce their incorporated exactly-one-`/`,
+  byte-exact grammar before dispatch.
 
 - **Synthesis and inspection order names by Unicode code point in all four
   format packages (`@openbindings/openapi`, `@openbindings/mcp`,

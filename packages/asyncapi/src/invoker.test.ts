@@ -1,8 +1,4 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { pathToFileURL } from "node:url";
 import { CONTEXT_REQUIRED, single } from "@openbindings/sdk";
 import { AsyncAPIInvoker, AsyncAPISynthesizer } from "./invoker.js";
 import { BINDING_SPEC, DEFAULT_SOURCE_NAME } from "./constants.js";
@@ -179,19 +175,14 @@ describe("AsyncAPISynthesizer content-fed synthesis", () => {
     });
   });
 
-  it("normalizes an authoring file path into an invocable file URI", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "openbindings-asyncapi-"));
-    const path = join(directory, "api.json");
-    try {
-      await writeFile(path, JSON.stringify({ asyncapi: "3.0.0", info: { title: "T", version: "1" }, operations: {} }));
-      const iface = await new AsyncAPISynthesizer().synthesizeInterface({
-        sources: [{ bindingSpec: BINDING_SPEC, location: path, embed: true }],
-      });
-      expect(iface.sources?.[DEFAULT_SOURCE_NAME]?.location).toBe(pathToFileURL(path).href);
-      expect(iface.sources?.[DEFAULT_SOURCE_NAME]?.content).toContain(`"asyncapi":"3.0.0"`);
-    } finally {
-      await rm(directory, { recursive: true, force: true });
-    }
+  it("refuses a process-local path rather than introducing a Node dependency", async () => {
+    await expect(new AsyncAPISynthesizer().synthesizeInterface({
+      sources: [{
+        bindingSpec: BINDING_SPEC,
+        location: "./api.json",
+        embed: true,
+      }],
+    })).rejects.toThrow(/process-local authoring path.*embedded content.*absolute artifact URI/);
   });
 
   it("embeds the provided content verbatim when the source has no location", async () => {

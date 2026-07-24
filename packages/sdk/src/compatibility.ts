@@ -1,6 +1,7 @@
 import type { OBInterface } from "./types.js";
 import { schemaObjectForm } from "./types.js";
-import { resolveOperation } from "./resolve-operation.js";
+import { OperationNotFoundError } from "./errors.js";
+import { allOperationIdentifiers, resolveOperation } from "./resolve-operation.js";
 import { Normalizer, inputCompatible, outputCompatible } from "./schema-profile/index.js";
 
 export type CompatibilityIssue = {
@@ -9,14 +10,19 @@ export type CompatibilityIssue = {
   detail?: string;
 };
 
+type RequiredOperationEntry = {
+  name: string;
+  operation: OBInterface["operations"][string];
+};
+
 /**
- * Checks whether a provided interface satisfies the requirements of a
- * required interface. For each operation the required interface declares by
- * key, the provided interface is searched by that name against its flat
+ * Checks whether a provided interface is compatible with a required
+ * interface. For each operation the required interface declares by key, the
+ * provided interface is searched by that name against its flat
  * key+aliases namespace (OBI-T-12): a provided operation matches if its key
  * equals the required key or one of its aliases does. Carrying the required
- * contract's operation name as an alias is exactly how an implementation
- * claims to fulfill that contract.
+ * contract's operation name asserts correspondence; the schema checks below
+ * separately evaluate structural compatibility.
  *
  * For each matched pair, schemas are normalized (resolving $ref pointers,
  * flattening allOf, etc.) and checked:
@@ -32,18 +38,53 @@ export async function checkInterfaceCompatibility(
   required: OBInterface,
   provided: OBInterface,
 ): Promise<CompatibilityIssue[]> {
+  const requiredOperations = Object.entries(required.operations)
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+    .map(([name, operation]) => ({ name, operation }));
+  return checkCompatibility(required, requiredOperations, provided);
+}
+
+/**
+ * Checks one operation requirement against a provided interface.
+ *
+ * `operation` is resolved against the required interface's flat key+aliases
+ * namespace, then that exact identifier is matched against the provided
+ * interface. This is the per-operation primitive behind opportunistic use:
+ * carrying part of a contract is normal, so unrelated operations in
+ * `required` neither help nor prevent this result. Each side still normalizes
+ * schemas against its complete containing document, preserving local `$ref`
+ * meaning.
+ *
+ * Throws when `operation` is not an identifier carried by `required`.
+ */
+export async function checkOperationCompatibility(
+  required: OBInterface,
+  operation: string,
+  provided: OBInterface,
+): Promise<CompatibilityIssue[]> {
+  const resolved = resolveOperation(required, operation);
+  if (!resolved) {
+    throw new OperationNotFoundError(operation, allOperationIdentifiers(required));
+  }
+  return checkCompatibility(
+    required,
+    [{ name: operation, operation: resolved.operation }],
+    provided,
+  );
+}
+
+async function checkCompatibility(
+  required: OBInterface,
+  requiredOperations: RequiredOperationEntry[],
+  provided: OBInterface,
+): Promise<CompatibilityIssue[]> {
   const issues: CompatibilityIssue[] = [];
 
   // Normalizers resolve $refs against their respective interface's schemas.
   const reqNorm = new Normalizer({ root: required as unknown as Record<string, unknown> });
   const provNorm = new Normalizer({ root: provided as unknown as Record<string, unknown> });
 
-  // Sorted like the Go SDK's lane: issue order must never leak the
-  // document's declaration order. Code-unit comparator matches
-  // Object.keys(...).sort(); iterating entries types each value as present.
-  const opEntries = Object.entries(required.operations)
-    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
-  for (const [opKey, requiredOp] of opEntries) {
+  for (const { name: opKey, operation: requiredOp } of requiredOperations) {
     const providedOp = resolveOperation(provided, opKey)?.operation;
     if (!providedOp) {
       issues.push({ operation: opKey, kind: "missing" });

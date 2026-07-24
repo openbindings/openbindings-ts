@@ -1,9 +1,9 @@
 import * as protobuf from "protobufjs";
 import descriptor from "protobufjs/ext/descriptor/index.js";
-import apiJSON from "protobufjs/google/protobuf/api.json";
-import descriptorJSON from "protobufjs/google/protobuf/descriptor.json";
-import sourceContextJSON from "protobufjs/google/protobuf/source_context.json";
-import typeJSON from "protobufjs/google/protobuf/type.json";
+import apiJSON from "protobufjs/google/protobuf/api.json" with { type: "json" };
+import descriptorJSON from "protobufjs/google/protobuf/descriptor.json" with { type: "json" };
+import sourceContextJSON from "protobufjs/google/protobuf/source_context.json" with { type: "json" };
+import typeJSON from "protobufjs/google/protobuf/type.json" with { type: "json" };
 import { fromProtoJSON, toProtoJSON } from "./protojson.js";
 import { assertBoundMethodRange } from "./schema-range.js";
 import {
@@ -182,8 +182,10 @@ export class ConnectInvoker implements BindingInvoker {
 class UnplacedCredential extends Error {}
 
 function parseRef(ref: string): { service: string; method: string } {
-  const index = ref.lastIndexOf("/");
-  if (index <= 0 || index === ref.length - 1) throw new Error(`Connect ref ${JSON.stringify(ref)} must be <fully-qualified-service>/<method>`);
+  const index = ref.indexOf("/");
+  if (index <= 0 || index !== ref.lastIndexOf("/") || index === ref.length - 1) {
+    throw new Error(`Connect ref ${JSON.stringify(ref)} must be <fully-qualified-service>/<method> with exactly one "/"`);
+  }
   return { service: ref.slice(0, index), method: ref.slice(index + 1) };
 }
 
@@ -191,8 +193,19 @@ function resolveTarget(args: BindingInvocationArgs): string {
   const configured = contextConfiguration(args.context)["target"];
   const target = typeof configured === "string" ? configured : args.source.location;
   if (!target) throw new Error("Connect source requires an absolute HTTP(S) base URL");
-  const url = new URL(target);
+  if (target !== target.trim()) throw new Error("Connect target must not carry surrounding whitespace");
+  let url: URL;
+  try {
+    url = new URL(target);
+  } catch {
+    throw new Error("Connect target must be an absolute HTTP(S) base URL");
+  }
   if (url.protocol !== "http:" && url.protocol !== "https:") throw new Error("Connect target must use http or https");
+  if (!url.hostname) throw new Error("Connect target must name a host");
+  if (url.username || url.password) throw new Error("Connect target must not carry userinfo");
+  if (target.includes("?")) throw new Error("Connect target must not carry a query component");
+  if (target.includes("#")) throw new Error("Connect target must not carry a fragment component");
+  if (target.endsWith("/")) throw new Error("Connect target path prefix must not have a trailing slash");
   return url.toString().replace(/\/+$/, "");
 }
 

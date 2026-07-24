@@ -31,6 +31,8 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm run build
+      - run: pnpm run pack:verify
+      - run: pnpm correspondence
       - run: pnpm run lint
       # Absolute: `pnpm -r` runs each package from its own directory, so a
       # relative corpus path would resolve to nothing and silently skip the

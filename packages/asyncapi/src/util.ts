@@ -1,7 +1,5 @@
 import yaml from "js-yaml";
 import { dereference } from "@openbindings/sdk";
-import { readFile } from "node:fs/promises";
-import { fileURLToPath } from "node:url";
 
 import type { AsyncAPIDocument } from "./asyncapi-types.js";
 import {
@@ -188,8 +186,7 @@ export async function parseAsyncAPIDocument(
     // `location` must be an absolute URI (ASYNC-D-02) — a bare filesystem
     // path is refused loudly before any fetch is attempted.
     validateDocumentAddress(location);
-    const doFetch = fileAwareFetch(fetchFn ?? fetch);
-    const resp = await doFetch(location, { signal: options?.signal });
+    const resp = await (fetchFn ?? fetch)(location, { signal: options?.signal });
     if (!resp.ok) {
       throw new Error(
         `failed to fetch ${location}: ${resp.status} ${resp.statusText}`,
@@ -216,7 +213,7 @@ export async function parseAsyncAPIDocument(
     raw as Record<string, unknown>,
     {
       baseUrl: location,
-      fetch: fileAwareFetch(fetchFn ?? fetch),
+      fetch: fetchFn ?? fetch,
       parse: (text) => yaml.load(text),
       signal: options?.signal,
     },
@@ -235,23 +232,6 @@ export async function parseAsyncAPIDocument(
   }
 
   return resolved;
-}
-
-function fileAwareFetch(
-  fallback: typeof globalThis.fetch,
-): typeof globalThis.fetch {
-  return async (input, init) => {
-    const address = input instanceof Request ? input.url : input.toString();
-    const url = new URL(address);
-    if (url.protocol !== "file:") return fallback(input, init);
-    try {
-      return new Response(await readFile(fileURLToPath(url)), { status: 200 });
-    } catch (error: unknown) {
-      throw new Error(`failed to read ${address}: ${errorMessage(error)}`, {
-        cause: error,
-      });
-    }
-  };
 }
 
 /**

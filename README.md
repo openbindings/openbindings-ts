@@ -68,7 +68,7 @@ for (const [name, op] of Object.entries(iface.operations)) {
 import { OperationInvoker, operationSignature, fetchInterface } from "@openbindings/sdk";
 import { OpenAPIInvoker, OpenAPISynthesizer } from "@openbindings/openapi";
 
-// Create an operation invoker with format support
+// Create an operation invoker with the binding implementation you need
 const invoker = new OperationInvoker([new OpenAPIInvoker()]);
 
 // Resolve an OBI from a URL (well-known discovery, with synthesis as the
@@ -101,6 +101,59 @@ for (const issue of issues) {
   console.log(`${issue.operation}: ${issue.kind} — ${issue.detail}`);
 }
 ```
+
+### Consume an operation contract
+
+An operation requirement is one typed signature paired with the ordinary,
+typically unbound OBI contract a consumer expects. The application supplies
+concrete, invocable interfaces; the consumer does not choose their protocols:
+
+```typescript
+import {
+  OperationInvoker,
+  operationRequirement,
+  resolveOperationRequirement,
+  single,
+} from "@openbindings/sdk";
+import { OpenAPIInvoker } from "@openbindings/openapi";
+
+const requirement = operationRequirement(
+  requiredInterface,
+  OperationSignatures.createTask,
+);
+const resolution = await resolveOperationRequirement(requirement, [{
+  interface: tasksAPI,
+  invoker: new OperationInvoker([new OpenAPIInvoker()]),
+  label: "tasks-api",
+}]);
+
+if (resolution.status === "available") {
+  const invocation = resolution.match.invoke();
+  await invocation.write({ title: "Ship it" });
+  const task = await single(invocation.outputs);
+}
+```
+
+Matching is per operation, alias-aware, schema-checked, and verifies that the
+supplied invoker can resolve a binding without side effects. Route-to-one
+resolution uses only caller-owned preference and refuses an equal tie as
+`ambiguous`. `matchOperationRequirement` returns every match without imposing
+route, aggregate, race, fan-out, or fallback semantics. The SDK owns no
+registry; applications retain and refresh their own interface/delegate state.
+
+The core package imports no binding package. An OpenAPI-only application ships
+only `@openbindings/sdk` and `@openbindings/openapi`; other binding
+implementations are neither installed nor bundled.
+
+Runnable framework proofs live in
+[`examples/react-operation-dependencies`](examples/react-operation-dependencies)
+and
+[`examples/svelte-operation-dependencies`](examples/svelte-operation-dependencies).
+The React example performs actual OpenAPI-backed reads and writes and exercises
+reactive replacement, ambiguity, streams, cancellation, unmount/remount, and
+SSR. The Svelte example implements the same lifecycle contract as a thin
+component, guarding the framework-neutral boundary rather than proposing an
+official UI package.
 
 ## Invocation model
 
@@ -239,12 +292,24 @@ The profile handles: type sets, const/enum, object properties and required field
 
 ## Platform support
 
-The core `@openbindings/sdk` package works in Node.js, Deno, Bun, and modern
-browsers using standard web APIs. Format packages document narrower runtime
-requirements: `@openbindings/grpc` uses the Node gRPC transport and
-`@openbindings/usage` spawns local processes; HTTP-oriented packages accept
-custom `fetch` implementations where their constructors or invocation args
-expose one.
+The core `@openbindings/sdk` package uses web-platform APIs and imports no Node
+built-ins. It is intended for Cloudflare Workers and comparable edge runtimes
+as well as browsers, Node.js, Deno, and Bun. The workspace build bundles a
+Worker entry that imports the core and OpenAPI packages and rejects any Node
+dependency in that graph.
+
+Binding packages remain modular and may have narrower runtime requirements.
+`@openbindings/openapi` is web-platform-only and can invoke directly wherever
+the target is reachable and permits the request. `@openbindings/asyncapi` also
+has a Node-free import graph, although individual WebSocket credential
+carriers depend on host capabilities. `@openbindings/grpc` uses a Node gRPC
+transport and `@openbindings/usage` spawns local processes; use a companion
+such as `ob start` when a browser or Worker needs those implementations.
+
+Portable synthesizers do not read process-local paths. A host that has a
+filesystem reads the artifact itself and passes `content`; HTTP(S) artifact
+locations use standard `fetch`. This keeps filesystem policy in the
+application or tooling that chose it.
 
 ## License
 

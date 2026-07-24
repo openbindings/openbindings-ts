@@ -1,10 +1,10 @@
 import * as grpc from "@grpc/grpc-js";
 import * as protobuf from "protobufjs";
 import descriptor from "protobufjs/ext/descriptor/index.js";
-import apiJSON from "protobufjs/google/protobuf/api.json";
-import descriptorJSON from "protobufjs/google/protobuf/descriptor.json";
-import sourceContextJSON from "protobufjs/google/protobuf/source_context.json";
-import typeJSON from "protobufjs/google/protobuf/type.json";
+import apiJSON from "protobufjs/google/protobuf/api.json" with { type: "json" };
+import descriptorJSON from "protobufjs/google/protobuf/descriptor.json" with { type: "json" };
+import sourceContextJSON from "protobufjs/google/protobuf/source_context.json" with { type: "json" };
+import typeJSON from "protobufjs/google/protobuf/type.json" with { type: "json" };
 import { fromProtoJSON, toProtoJSON } from "./protojson.js";
 import { assertBoundMethodRange } from "./schema-range.js";
 import {
@@ -226,8 +226,10 @@ export class GrpcInvoker implements BindingInvoker {
 class UnplacedCredential extends Error {}
 
 function parseRef(ref: string): { service: string; method: string } {
-  const index = ref.lastIndexOf("/");
-  if (index <= 0 || index === ref.length - 1) throw new Error(`gRPC ref ${JSON.stringify(ref)} must be <fully-qualified-service>/<method>`);
+  const index = ref.indexOf("/");
+  if (index <= 0 || index !== ref.lastIndexOf("/") || index === ref.length - 1) {
+    throw new Error(`gRPC ref ${JSON.stringify(ref)} must be <fully-qualified-service>/<method> with exactly one "/"`);
+  }
   return { service: ref.slice(0, index), method: ref.slice(index + 1) };
 }
 
@@ -236,7 +238,7 @@ function resolveTarget(args: BindingInvocationArgs): { target: string; transport
   const configuredTarget = cfg["target"];
   let raw = typeof configuredTarget === "string" ? configuredTarget : args.source.location;
   if (!raw) throw new Error("gRPC source requires a dial target");
-  raw = raw.trim();
+  if (raw !== raw.trim()) throw new Error("gRPC target must not carry surrounding whitespace");
   let transport: "plaintext" | "tls" | undefined;
   if (raw.startsWith("grpc://")) {
     transport = "plaintext";
@@ -244,6 +246,8 @@ function resolveTarget(args: BindingInvocationArgs): { target: string; transport
   } else if (raw.startsWith("grpcs://")) {
     transport = "tls";
     raw = raw.slice("grpcs://".length);
+  } else if (raw.includes("://")) {
+    throw new Error("gRPC target must use host:port, grpc://host:port, or grpcs://host:port");
   }
   const configuredTransport = cfg["transport"];
   if (configuredTransport !== undefined) {
@@ -252,7 +256,16 @@ function resolveTarget(args: BindingInvocationArgs): { target: string; transport
     }
     transport = configuredTransport;
   }
-  if (!/^[^/:\s]+:\d+$/.test(raw)) throw new Error(`gRPC target ${JSON.stringify(raw)} must be host:port`);
+  if (/[/?#@]/u.test(raw)) throw new Error(`gRPC target ${JSON.stringify(raw)} must not carry path, query, fragment, or userinfo`);
+  const bracketed = /^\[([^\]]+)\]:(\d+)$/u.exec(raw);
+  const ordinary = /^([^/:\s]+):(\d+)$/u.exec(raw);
+  if (!bracketed && !ordinary) throw new Error(`gRPC target ${JSON.stringify(raw)} must be host:port with an explicit numeric port`);
+  try {
+    // URL parsing supplies strict host validation, including bracketed IPv6.
+    new URL(`http://${raw}`);
+  } catch {
+    throw new Error(`gRPC target ${JSON.stringify(raw)} carries an invalid host`);
+  }
   if (!transport) throw new Error("bare host:port supplies no transport identity; select configuration.transport");
   return { target: raw, transport };
 }

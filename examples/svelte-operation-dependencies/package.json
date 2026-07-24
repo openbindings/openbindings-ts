@@ -1,0 +1,17 @@
+{
+  "name": "@openbindings/example-svelte-operation-dependencies",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "build": "svelte-check --tsconfig ./tsconfig.json && node scripts/compile.mjs"
+  },
+  "dependencies": {
+    "@openbindings/sdk": "workspace:*",
+    "svelte": "^5.55.4"
+  },
+  "devDependencies": {
+    "svelte-check": "^4.4.2",
+    "typescript": "^5.9.3"
+  }
+}

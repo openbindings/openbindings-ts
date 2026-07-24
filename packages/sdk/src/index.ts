@@ -105,6 +105,21 @@ export { operationSignature } from "./operation-signature.js";
 export type { OperationSignature } from "./operation-signature.js";
 
 export {
+  operationRequirement,
+  matchOperationRequirement,
+  resolveOperationRequirement,
+} from "./operation-requirement.js";
+export type {
+  OperationRequirement,
+  OperationImplementation,
+  OperationImplementationAssessment,
+  OperationRequirementMatchOptions,
+  OperationMatch,
+  OperationRequirementMatches,
+  OperationRequirementResolution,
+} from "./operation-requirement.js";
+
+export {
   combineInvokers,
   combineSynthesizers,
   combineSourceInspectors,
@@ -154,7 +169,11 @@ export { canonicalizeLocation, resolveRef, unknownFields } from "./uri.js";
 export { fetchInterface, MEDIA_TYPE, WELL_KNOWN_PATH } from "./fetch.js";
 export type { FetchInterfaceOptions, FetchedInterface } from "./fetch.js";
 
-export { checkInterfaceCompatibility, isOBInterface } from "./compatibility.js";
+export {
+  checkInterfaceCompatibility,
+  checkOperationCompatibility,
+  isOBInterface,
+} from "./compatibility.js";
 export type { CompatibilityIssue } from "./compatibility.js";
 
 export { resolveOperation, allOperationIdentifiers } from "./resolve-operation.js";

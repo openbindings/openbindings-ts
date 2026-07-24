@@ -2,7 +2,7 @@
 
 AsyncAPI 3.x binding invoker and interface synthesizer for the [OpenBindings](https://openbindings.com) TypeScript SDK.
 
-This package enables OpenBindings to invoke operations against AsyncAPI documents and synthesize OBI documents from them. Revision 1 supports unary HTTP publishes using the artifact-declared method, WebSocket client-streaming publishes, and WebSocket server-streaming subscriptions. Standalone HTTP `send` operations, broker protocols, and message carriage the core value boundary cannot preserve are reported as explicit exclusions. Documents are parsed with `js-yaml` and `$ref` pointers resolved with `@openbindings/sdk`'s built-in dereferencer. The Node.js reference implementation also accepts local authoring paths, normalizing them to `file:` addresses; invocation still requires the binding specification's absolute address form. Credentials are applied only through the document's security schemes.
+This package enables OpenBindings to invoke operations against AsyncAPI documents and synthesize OBI documents from them. Revision 1 supports unary HTTP publishes using the artifact-declared method, WebSocket client-streaming publishes, and WebSocket server-streaming subscriptions. Standalone HTTP `send` operations, broker protocols, and message carriage the core value boundary cannot preserve are reported as explicit exclusions. Documents are parsed with `js-yaml` and `$ref` pointers resolved with `@openbindings/sdk`'s built-in dereferencer. The package has no Node import: HTTP(S) artifact locations use web-platform `fetch`, and a filesystem-owning host passes process-local artifacts as `content`. Credentials are applied only through the document's security schemes.
 
 See the [spec](https://github.com/openbindings/spec) and the [invocation pattern](https://openbindings.com/spec/invocation-pattern) for how binding invokers and interface synthesizers fit into the OpenBindings architecture.
 
@@ -102,6 +102,10 @@ const iface = await synth.synthesizeInterface({
   ],
 });
 ```
+
+A bare process-local path is refused rather than made into an implicit Node
+dependency. A CLI or build tool can read the artifact itself and pass its text
+as `content`; the same synthesizer then runs in browsers, Workers, and servers.
 
 ## How it works
 

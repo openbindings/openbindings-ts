@@ -329,6 +329,7 @@ export class OperationInvoker {
       inputSchema: op.input ?? undefined,
       interface: obi,
       context: opts?.context,
+      signal: opts?.signal,
     });
   }
 

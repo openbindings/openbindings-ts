@@ -23,16 +23,20 @@ pnpm lint       # per-package tsc --noEmit across the workspace
 so it is the full suite, not just the SDK's. To exercise one package, use
 `pnpm --filter @openbindings/<pkg> test`.
 
-## Format parity is a non-goal
+## Cross-SDK correspondence
 
-The Go and TS **core** SDKs are behaviorally identical (same types, error
-codes, invocation semantics). **Format coverage is not paritized.** The TS
-workspace ships no gRPC, Connect, or CLI/usage invoker by design: a browser or
-Worker consumer delegates protocol work to a running `ob start` rather than
-reimplementing every wire protocol in the page. Do not port those formats to
-TS; the real gap worth closing is a single frame-protocol client that delegates
-to `ob`. See `ob-pj/.claude/release-readiness.md` for the named, deliberate
-non-mirrors.
+The Go and TypeScript SDKs target the same observable OpenBindings behavior:
+the same published binding families, validation decisions, error codes,
+invocation state transitions, synthesis coverage accounting, and portable
+conformance scenarios. Their public names should correspond where language
+idioms permit so knowledge transfers readily between SDKs.
+
+This does not require identical goroutine and promise structure, cancellation
+plumbing, connection management, incidental error prose, or other details that
+are not observable at the OpenBindings boundary. Runtime constraints may also
+differ: browser and Worker consumers can use the host-neutral packages
+directly and delegate Node-only protocol work to `ob start`. Such deployment
+differences do not relax the family package's conformance obligations.
 
 ## Releasing
 

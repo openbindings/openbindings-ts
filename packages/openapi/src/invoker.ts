@@ -21,36 +21,16 @@ import {
   type SourceInspection,
   type SourceInspector,
 } from "@openbindings/sdk";
-import { resolve } from "node:path";
-import { pathToFileURL, fileURLToPath } from "node:url";
-import { readFile } from "node:fs/promises";
 import type { OpenAPIDocument } from "./types.js";
 import { DEFAULT_SOURCE_NAME, BINDING_SPEC } from "./constants.js";
 import { preflightTarget, requiredContext, runBinding } from "./invoke.js";
 import { convertToInterface } from "./synthesize.js";
 import { openAPISynthesisCoverage } from "./coverage.js";
 import { codePointCompare, errorMessage, loadOpenAPIDocument, validateDocumentAddress } from "./util.js";
-
-function authoringLocation(location?: string): string | undefined {
-  if (!location) return location;
-  try {
-    new URL(location);
-    return location;
-  } catch {
-    return pathToFileURL(resolve(location)).href;
-  }
-}
-
-async function readAuthoringArtifact(location: string, signal?: AbortSignal): Promise<string> {
-  const url = new URL(location);
-  if (url.protocol === "file:") return readFile(fileURLToPath(url), "utf8");
-  if (url.protocol === "http:" || url.protocol === "https:") {
-    const response = await fetch(url, { signal });
-    if (!response.ok) throw new Error(`failed to fetch ${location}: ${response.status} ${response.statusText}`);
-    return response.text();
-  }
-  throw new Error(`location scheme ${JSON.stringify(url.protocol)} cannot be embedded`);
-}
+import {
+  normalizeAuthoringLocation,
+  readAuthoringArtifact,
+} from "./platform.js";
 
 // ---------------------------------------------------------------------------
 // Shared doc-cache helper
@@ -139,6 +119,7 @@ export class OpenAPIInvoker implements BindingInvoker {
         // I/O").
         doc = await loadOpenAPIDocument(args.source.location, args.source.content, {
           allowExternalRefs: false,
+          signal: args.signal,
         });
       } catch {
         return null;
@@ -219,7 +200,7 @@ export class OpenAPISynthesizer implements InterfaceSynthesizer, CoverageSynthes
     }
     if (src.bindingSpec !== BINDING_SPEC) throw new Error(`synthesizer supports exact binding specification ${JSON.stringify(BINDING_SPEC)}, got ${JSON.stringify(src.bindingSpec)}`);
     if (src.outputLocation) validateDocumentAddress(src.outputLocation);
-    const location = authoringLocation(src.location);
+    const location = normalizeAuthoringLocation(src.location);
     const artifactContent = src.content === undefined && src.embed && location
       ? await readAuthoringArtifact(location, options?.signal)
       : src.content;
@@ -254,7 +235,8 @@ export class OpenAPISynthesizer implements InterfaceSynthesizer, CoverageSynthes
     // Inspection and synthesis share the same realizability filter. A ref
     // whose revision-1 flattened boundary cannot be represented is not
     // advertised as a bindable target merely because it appears in paths.
-    const iface = await convertToInterface(authoringLocation(source.location), source.content, options);
+    const location = normalizeAuthoringLocation(source.location);
+    const iface = await convertToInterface(location, source.content, options);
     const targets: SourceInspection["targets"] = [];
     for (const binding of Object.values(iface.bindings ?? {})) {
       targets.push({

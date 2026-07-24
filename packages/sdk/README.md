@@ -6,7 +6,7 @@ OpenBindings is an open standard: one interface, limitless bindings. An OBI (Ope
 
 **Spec version:** implements OpenBindings 0.2. To ask whether this SDK will accept a document of a given version, call `isSupportedVersion(version)` — the OBI-T-04 acceptance oracle: it returns true exactly when `validateInterface` / `parseDocument` would process (not refuse) that version, so it is patch-lenient within a supported minor line (a 0.2.0 SDK accepts 0.2.1, 0.2.99, …) and refuses a different major, a pre-1.0 different minor, and unsupported prereleases. `MIN_SUPPORTED_VERSION` / `MAX_TESTED_VERSION` / `supportedRange()` are a distinct, narrower notion — the maintainer-*tested* range — and a version can be accepted without falling inside it.
 
-**Conformance:** `parseDocument(data)` rejects malformed JSON and duplicate object keys (OBI-D-01), then `validateInterface(iface)` enforces OBI-D-02 through OBI-D-12, OBI-D-16, and OBI-T-04 (OBI-D-13/D-14/D-15 take per-format knowledge; see §14.2's partial-verification posture). OBI-D-02 (document validates against `openbindings.schema.json`) and OBI-D-11 (examples validate against their operation's input/output schemas) are enforced via [@cfworker/json-schema](https://github.com/cfworker/cfworker/tree/main/packages/json-schema) (JSON Schema 2020-12). The schema is embedded at build time (synced via `scripts/sync-schema.sh`). In this monorepo, run `pnpm conformance` with the spec repo checked out alongside the workspace (at `../spec`, or `./spec` inside it) to exercise the core conformance corpus.
+**Conformance:** `parseDocument(data)` rejects malformed JSON and duplicate object keys (OBI-D-01), then `validateInterface(iface)` enforces OBI-D-02 through OBI-D-12 and OBI-D-16 through OBI-D-18, plus the OBI-T-04 version-refusal rule. OBI-D-13 and the binding-specification-defined address cases of OBI-D-05 require knowledge of the exact governing binding specification; a core-only validator leaves those conclusions unverified rather than claiming conformity or non-conformity, per [§10.5](https://github.com/openbindings/spec/blob/main/openbindings.md#105-verification-conclusions). OBI-D-14 and OBI-D-15 are retired identifiers. OBI-D-02, OBI-D-11, and OBI-D-17 use [@cfworker/json-schema](https://github.com/cfworker/cfworker/tree/main/packages/json-schema); the core schema and locally required JSON Schema 2020-12 meta-schemas are embedded at build time. In this monorepo, run `pnpm conformance` with the spec repo checked out alongside the workspace (at `../spec`, or `./spec` inside it) to exercise the core conformance corpus.
 
 ## Install
 
@@ -51,6 +51,70 @@ For compile-time-typed operations, run `ob codegen <obi> --lang typescript` to g
 
 See the [monorepo README](https://github.com/openbindings/openbindings-ts#readme) for full documentation.
 
+## Consuming operations without choosing an implementation
+
+An operation requirement pairs one typed signature with the ordinary,
+typically unbound OBI contract a consumer expects. Candidate implementations
+remain application state: each supplies a concrete OBI, the operation invoker
+configured with exactly the binding packages that application installed, and
+an optional caller-owned preference.
+
+```typescript
+import {
+  OperationInvoker,
+  operationRequirement,
+  resolveOperationRequirement,
+  single,
+} from "@openbindings/sdk";
+import { OperationSignatures } from "./requirements.generated.js";
+
+// requiredInterface is the consumer's unbound OBI contract.
+// tasksAPI is a resolved, actionable OBI supplied by the application.
+const requirement = operationRequirement(
+  requiredInterface,
+  OperationSignatures.createTask,
+);
+
+const resolution = await resolveOperationRequirement(requirement, [{
+  interface: tasksAPI,
+  invoker: new OperationInvoker([openapiInvoker]),
+  label: "tasks-api",
+}]);
+
+if (resolution.status === "available") {
+  const invocation = resolution.match.invoke();
+  await invocation.write({ title: "Ship it" });
+  const task = await single(invocation.outputs);
+}
+```
+
+Resolution is per operation and alias-aware. It checks directional schema
+compatibility and side-effect-free invocability; it never treats an
+identifier claim as proof. A unique highest preference is selected for the
+common route-to-one case, an equal tie is `ambiguous`, and no match is
+`unavailable`. For aggregate, fan-out, race, or fallback behavior,
+`matchOperationRequirement` returns every compatible, invocable match in
+preference order and selects nothing.
+
+`knownContextRequirements` on a match is advisory preflight. A null value
+means no requirement was knowable at resolution time; live
+`CONTEXT_REQUIRED` remains authoritative. The SDK owns no implementation or
+delegate registry—applications re-run matching whenever their own state
+changes, and reactive UI adapters can render a transient resolving state while
+that promise is pending.
+
+Nothing in this surface imports a binding package. An OpenAPI-only application
+installs and registers only `@openbindings/openapi`; a browser using `ob start`
+can register only the binding implementation needed to reach that host and
+leave the upstream protocol implementations outside its bundle entirely.
+
+Matching accepts an `AbortSignal` and forwards it into binding preflight. A
+reactive adapter should abort stale resolution when its candidate collection
+changes and cancel active invocation handles when its consumer unmounts. See
+the runnable
+[React](../../examples/react-operation-dependencies) and
+[Svelte](../../examples/svelte-operation-dependencies) proofs.
+
 ## Results, errors, and idioms
 
 Outputs stream as bare values; a terminal failure rejects the output iteration (and `call.closed`) with an `InvocationError`:
@@ -87,22 +151,48 @@ Client-streaming and bidirectional callers own `close()` (and drive `write()` an
 
 ## Running in the browser
 
-The core SDK is isomorphic (standard `fetch`, `AbortSignal`, `structuredClone` — no Node built-ins). But the format packages that reach a service — gRPC, Connect, the CLI/usage lane — are not portable to the browser, and a same-origin policy blocks a page from calling most third-party APIs directly. So the browser story is delegation, not native invocation:
+The core SDK is web-platform plumbing: `fetch`, `AbortSignal`,
+`structuredClone`, streams, and no Node built-ins. The same package graph is
+bundle-tested as a Cloudflare Worker entry. Applications install only the
+binding implementations they actually use:
 
-- Run `ob start` (the OpenBindings CLI) as a local companion. It exposes a served OBI whose bindings the browser invokes over HTTP against `localhost`, and `ob` performs the real protocol work (gRPC, Connect, MCP, credentials) out of the page.
-- For OpenAPI/AsyncAPI targets that send permissive CORS headers, `@openbindings/openapi` and `@openbindings/asyncapi` invoke directly from the page; inject a `fetch` via `OperationInvokerOptions` if you need to route through a proxy for the ones that do not.
+- For OpenAPI/AsyncAPI targets reachable from the runtime, install the
+  corresponding Node-free binding package and invoke directly. Browser CORS
+  still applies; Workers are not subject to browser CORS but retain their own
+  network and WebSocket capabilities.
+- For gRPC, local CLI, or another host-specific implementation, run `ob start`
+  or an application backend as a companion. The UI or Worker invokes that
+  HTTP-facing OBI while the companion performs the upstream protocol work.
 
-This is deliberate: format parity with the Go SDK is a non-goal (see [CONTRIBUTING](../../CONTRIBUTING.md)). A browser consumer delegates to `ob` rather than reimplementing every wire protocol in the page.
+Synthesis follows the same boundary. HTTP(S) artifacts use standard `fetch`.
+Process-local paths are not a portable SDK capability: Node-based tooling may
+read a file and pass its text as source `content`, while UI code need never
+ship filesystem access.
 
 ## Consumer configuration (hooks)
 
-Where a binding format's specification doesn't answer a wire question, the consumer configures the answer — the SDK never guesses from payload bytes. Three hook axes cover the three wire questions:
+Where a binding specification exposes a consumer choice because its upstream
+authority does not answer a wire question, the consumer configures that
+choice — the SDK never guesses from payload bytes. Three hook axes cover the
+three wire questions:
 
-- **Decode** (`outputDecoder`) — how raw bytes become an output value when the format doesn't say (e.g. which lane a CLI's stdout carries).
-- **Classify** (`resultClassifier`) — which outcomes are success when the format doesn't say (e.g. diff(1)-style exit codes).
-- **Route** (`fieldRouter`) — which channel an input field rides; included for cross-SDK parity (no TS-native format consults it today).
+- **Decode** (`outputDecoder`) — how raw bytes become an output value when the
+  binding specification leaves that choice configurable.
+- **Classify** (`resultClassifier`) — which outcomes are success when the
+  binding specification leaves that choice configurable.
+- **Route** (`fieldRouter`) — which channel an input field rides; included for
+  cross-SDK parity (no TS binding package consults it today).
 
-A hook declines by returning the `USE_DEFAULT` sentinel, falling through the chain: per-invocation (`InvokeOptions`) → invoker-level (`OperationInvokerOptions`) → the format's content-independent built-in assumption. Formats over HTTP (OpenAPI, AsyncAPI) consult the seam because the transport leaves decode and success genuinely open — a `Content-Type`-less body, a 200 that wraps an application error — and ship decidable built-ins a hook may override. Self-describing formats (gRPC, MCP, Connect, GraphQL) never consult: message type and status determine everything, so there is nothing to override. The configuration burden is the honest signal of a format's completeness. See the [invocation-configuration guide](https://openbindings.com/spec/invocation-configuration) for the full model.
+A hook declines by returning the `USE_DEFAULT` sentinel, falling through the
+chain: per-invocation (`InvokeOptions`) → invoker-level
+(`OperationInvokerOptions`) → the governing binding specification's
+explicitly documented fallback, if one exists. OpenAPI and AsyncAPI expose
+choices where their upstream authorities leave decode or success open.
+Self-describing protocols (gRPC, MCP, Connect, GraphQL) determine those
+answers from their own message and status semantics, so there is no choice to
+override. See the [invocation-configuration
+guide](https://openbindings.com/spec/invocation-configuration) for the full
+model.
 
 ## Transforms (invoking tools only)
 

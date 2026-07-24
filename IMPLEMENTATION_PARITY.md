@@ -17,6 +17,10 @@ also guards the public role and family correspondence.
 | inspect bindable targets | `SourceInspector.InspectSource(...)` | `SourceInspector.inspectSource(...)` |
 | source-less scaffold | `SynthesisSkeleton(...)` | `synthesisSkeleton(...)` |
 | shared authoring directives + validation | `FinalizeSynthesis(...)` | `finalizeSynthesis(...)` |
+| one consumed operation contract | `NewOperationRequirement(...)` | `operationRequirement(...)` |
+| per-operation compatibility check | `CheckOperationCompatibility(...)` | `checkOperationCompatibility(...)` |
+| all compatible, invocable matches | `MatchOperationRequirement(...)` | `matchOperationRequirement(...)` |
+| conservative route-to-one resolution | `ResolveOperationRequirement(...)` | `resolveOperationRequirement(...)` |
 
 All seven published artifact/protocol binding families implement invocation,
 synthesis, and source inspection in both SDKs: OpenAPI, AsyncAPI, MCP, gRPC,
@@ -35,17 +39,27 @@ allows: `GrpcInvoker` corresponds to `grpc.Invoker`, `synthesizeInterface` to
 `SynthesizeInterface`, and so on. A user moving between SDKs should recognize
 the role before learning its language-specific mechanics.
 
+Operation-requirement parity includes per-operation alias correspondence,
+directional schema comparison, side-effect-free invocability preflight,
+advisory context requirements, higher-preference ordering, stable input order
+across equal preferences when returning all matches, and refusal of a
+route-to-one tie as ambiguous. Go cancellation uses `context.Context`;
+TypeScript matching accepts `AbortSignal` and forwards it to preflight.
+Neither SDK owns a registry or infers route-versus-aggregate semantics.
+
 ## Implementation proof
 
-Every family is checked at four boundaries. Family authoring tests exercise
-artifact loading, inspection, synthesis, and synthesized-document validation.
-Both SDKs execute the same portable synthesis scenarios from
-`spec/conformance/binding-specs/synthesis/`, comparing exact emitted target
-identities and exhaustive artifact dispositions. They then execute the same 109
-portable processor scenarios from `spec/conformance/binding-specs/processor/`,
-covering all 52 published P-rules. Protocol integration tests exercise actual
-request framing and response decoding. Passing only one boundary is not
-sufficient release evidence.
+Every family is checked at five boundaries. Its `corpus.test.ts` adapter runs
+the shared D-rule fixtures from `spec/conformance/binding-specs/<family>/`
+through the package's own artifact, location, and ref lanes. Family authoring
+tests then exercise artifact loading, inspection, synthesis, and
+synthesized-document validation. Both SDKs execute the same portable synthesis
+scenarios from `spec/conformance/binding-specs/synthesis/`, comparing exact
+emitted target identities and exhaustive artifact dispositions. They then
+execute the same 109 portable processor scenarios from
+`spec/conformance/binding-specs/processor/`, covering all 52 published P-rules.
+Protocol integration tests exercise actual request framing and response
+decoding. Passing only one boundary is not sufficient release evidence.
 
 | Family | Go authoring evidence | TypeScript authoring evidence | Shared synthesis evidence | Shared invocation evidence |
 |---|---|---|---|---|
@@ -85,9 +99,12 @@ before dispatch; they do not rewrite the binding specification's interaction
 shape.
 
 Authoring directives follow the same rule. Both SDKs honor source naming,
-description, `outputLocation`, and complete `embed` requests. Location-fed
-OpenAPI, AsyncAPI, and usage artifacts can be embedded losslessly. Live MCP
-discovery and gRPC reflection currently refuse `embed` because their internal
-discovery views do not retain every member needed to publish a complete pinned
-listing or descriptor closure; silently emitting a partial artifact would be
-less conformant than the refusal.
+description, `outputLocation`, and complete `embed` requests. OpenAPI,
+AsyncAPI, and usage artifacts can be embedded losslessly when the host can
+read their locations. The portable TypeScript OpenAPI and AsyncAPI packages
+fetch HTTP(S) locations; a filesystem-owning caller reads a process-local
+artifact and supplies `content`, keeping Node out of the package graph. Live
+MCP discovery and gRPC reflection currently refuse `embed` because their
+internal discovery views do not retain every member needed to publish a
+complete pinned listing or descriptor closure; silently emitting a partial
+artifact would be less conformant than the refusal.
