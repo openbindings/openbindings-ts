@@ -14,6 +14,7 @@ const expected = new Map([
   ["openbindings.grpc@1", ["grpc", "GrpcInvoker", "GrpcSynthesizer"]],
   ["openbindings.connect@1", ["connect", "ConnectInvoker", "ConnectSynthesizer"]],
   ["openbindings.usage@1", ["usage", "UsageInvoker", "UsageSynthesizer"]],
+  ["openbindings.graphql@1", ["graphql", "GraphQLInvoker", "GraphQLSynthesizer"]],
 ]);
 
 for (const family of matrix.families) {

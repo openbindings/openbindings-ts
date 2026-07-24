@@ -1,0 +1,143 @@
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import {
+  CONTEXT_REQUIRED,
+  matchProcessorObservation,
+  type InvocationError,
+  type ProcessorObservation,
+  type ProcessorScenario,
+  type ProcessorScenarioFile,
+} from "@openbindings/sdk";
+import { describe, expect, it } from "vitest";
+import type { GraphQLWebSocketInit } from "./configuration.js";
+import { GraphQLInvoker } from "./invoker.js";
+
+const root = process.env.OB_SPEC_CORPUS
+  ?? resolve(dirname(fileURLToPath(import.meta.url)), "../../../../spec/conformance");
+const corpus = JSON.parse(
+  readFileSync(resolve(root, "binding-specs/processor/graphql.json"), "utf8"),
+) as ProcessorScenarioFile;
+
+describe("portable GraphQL processor scenarios", () => {
+  for (const scenario of corpus.scenarios) {
+    it(scenario.id, async () => {
+      const observation = await runScenario(scenario);
+      expect(() => matchProcessorObservation(scenario, observation)).not.toThrow();
+    });
+  }
+});
+
+async function runScenario(scenario: ProcessorScenario): Promise<ProcessorObservation> {
+  const peer = scenario.given.peer ?? {};
+  const introspectionRequests: unknown[] = [];
+  let dispatch: Record<string, unknown> | undefined;
+  const fetchImpl: typeof fetch = async (input, init) => {
+    const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+    if (String(body.query).includes("__schema")) introspectionRequests.push(body);
+    const headers: Record<string, string> = {};
+    new Headers(init?.headers).forEach((value, name) => { headers[name.toLowerCase()] = value; });
+    dispatch = { target: String(input), method: init?.method ?? "GET", headers, body };
+    const responseHeaders = new Headers();
+    if (typeof peer.contentType === "string") responseHeaders.set("content-type", peer.contentType);
+    return new Response(JSON.stringify(peer.body ?? {}), {
+      status: typeof peer.status === "number" ? peer.status : 200,
+      headers: responseHeaders,
+    });
+  };
+
+  let socket: ScenarioWebSocket | undefined;
+  let socketInit: GraphQLWebSocketInit | undefined;
+  const invoker = new GraphQLInvoker((init) => {
+    socketInit = init;
+    socket = new ScenarioWebSocket();
+    return socket as unknown as WebSocket;
+  });
+  const context: Record<string, unknown> = {};
+  if (scenario.given.configuration) context.configuration = scenario.given.configuration;
+  const credentials = scenario.given.runtime?.credentials;
+  if (credentials !== null && typeof credentials === "object" && !Array.isArray(credentials)) {
+    Object.assign(context, credentials);
+  }
+  const invocation = invoker.invokeBinding({
+    source: {
+      bindingSpec: corpus.bindingSpec,
+      ...(typeof scenario.given.source.location === "string" ? { location: scenario.given.source.location } : {}),
+      ...(Object.hasOwn(scenario.given.source, "content") ? { content: scenario.given.source.content } : {}),
+    },
+    ref: typeof scenario.given.binding.ref === "string" ? scenario.given.binding.ref : "",
+    context,
+    ...(scenario.given.invocation.inputPresent ? { inputSchema: { type: "object" } } : {}),
+    fetch: fetchImpl,
+  });
+  if (scenario.given.invocation.inputPresent) {
+    await invocation.write(scenario.given.invocation.input).catch(() => {});
+  } else {
+    await invocation.close().catch(() => {});
+  }
+
+  const outputTask = collectOutputs(invocation);
+  if (
+    typeof scenario.given.binding.ref === "string"
+    && scenario.given.binding.ref.startsWith("subscription/")
+  ) {
+    for (let i = 0; i < 20 && !socket; i++) await Promise.resolve();
+    if (socket) {
+      socket.open();
+      socket.message({ type: "connection_ack" });
+      for (const message of Array.isArray(peer.messages) ? peer.messages.slice(1) : []) {
+        socket.message(message);
+      }
+    }
+  }
+  const { outputs, terminal } = await outputTask;
+
+  if (socket && socketInit) {
+    const initMessage = socket.sent[0] as Record<string, unknown> | undefined;
+    const subscribe = socket.sent[1] as Record<string, unknown> | undefined;
+    dispatch = {
+      target: socketInit.url,
+      headers: socketInit.headers,
+      connectionInit: initMessage,
+      body: subscribe?.payload,
+    };
+  }
+  const data: Record<string, unknown> = { outputs, introspectionRequests };
+  if (dispatch) data.dispatch = dispatch;
+  if (terminal?.code === CONTEXT_REQUIRED) data.context = terminal.details;
+  if (!terminal) return { disposition: "complete", phase: "completion", data };
+  if (terminal.code === CONTEXT_REQUIRED) return { disposition: "context-required", phase: "pre-dispatch", data };
+  if (!dispatch) return { disposition: "refusal", phase: "pre-dispatch", data };
+  return {
+    disposition: "error",
+    phase: scenario.id === "GQL-PS-07" ? "response" : "completion",
+    data,
+  };
+}
+
+async function collectOutputs(invocation: ReturnType<GraphQLInvoker["invokeBinding"]>): Promise<{
+  outputs: unknown[];
+  terminal?: InvocationError;
+}> {
+  const outputs: unknown[] = [];
+  try {
+    for await (const output of invocation.outputs) outputs.push(output);
+    return { outputs };
+  } catch (error: unknown) {
+    return { outputs, terminal: error as InvocationError };
+  }
+}
+
+class ScenarioWebSocket {
+  readyState = 0;
+  onopen: (() => void) | null = null;
+  onmessage: ((event: { data: string }) => void) | null = null;
+  onerror: (() => void) | null = null;
+  onclose: (() => void) | null = null;
+  sent: unknown[] = [];
+
+  send(value: string): void { this.sent.push(JSON.parse(value)); }
+  close(): void { this.readyState = 3; }
+  open(): void { this.readyState = WebSocket.OPEN; this.onopen?.(); }
+  message(value: unknown): void { this.onmessage?.({ data: JSON.stringify(value) }); }
+}

@@ -18,8 +18,9 @@ also guards the public role and family correspondence.
 | source-less scaffold | `SynthesisSkeleton(...)` | `synthesisSkeleton(...)` |
 | shared authoring directives + validation | `FinalizeSynthesis(...)` | `finalizeSynthesis(...)` |
 
-All six published binding families implement invocation, synthesis, and source
-inspection in both SDKs: OpenAPI, AsyncAPI, MCP, gRPC, Connect, and usage.
+All seven published artifact/protocol binding families implement invocation,
+synthesis, and source inspection in both SDKs: OpenAPI, AsyncAPI, MCP, gRPC,
+Connect, usage, and GraphQL.
 
 Parity means the same behavior at the OpenBindings boundary: exact
 `bindingSpec` support, resolution and refusal decisions, input/output values,
@@ -40,9 +41,9 @@ Every family is checked at four boundaries. Family authoring tests exercise
 artifact loading, inspection, synthesis, and synthesized-document validation.
 Both SDKs execute the same portable synthesis scenarios from
 `spec/conformance/binding-specs/synthesis/`, comparing exact emitted target
-identities and exhaustive artifact dispositions. They then execute the same 97
+identities and exhaustive artifact dispositions. They then execute the same 109
 portable processor scenarios from `spec/conformance/binding-specs/processor/`,
-covering all 47 published P-rules. Protocol integration tests exercise actual
+covering all 52 published P-rules. Protocol integration tests exercise actual
 request framing and response decoding. Passing only one boundary is not
 sufficient release evidence.
 
@@ -54,6 +55,7 @@ sufficient release evidence.
 | gRPC | `formats/grpc/synthesize_test.go`, `list_refs_test.go` | `packages/grpc/src/authoring.test.ts` | `synthesis/grpc.json` | `processor/grpc.json` |
 | Connect | `formats/connect/synthesize_test.go`, `list_refs_test.go` | `packages/connect/src/authoring.test.ts` | `synthesis/connect.json` | `processor/connect.json` |
 | usage | `formats/usage/synthesize_interface_test.go`, `list_refs_test.go` | `packages/usage/src/authoring.test.ts` | `synthesis/usage.json` | `processor/usage.json` |
+| GraphQL | `formats/graphql/synthesize_test.go`, `list_refs_test.go` | `packages/graphql/src/synthesize.test.ts`, `invoker.test.ts` | `synthesis/graphql.json` | `processor/graphql.json` |
 
 The authoring invariant is creation-time soundness plus explicit completeness:
 inspection and synthesis apply the same target eligibility used by invocation;
@@ -75,6 +77,7 @@ These are specification boundaries, not SDK parity gaps:
 | gRPC | schemas outside the canonical ProtoJSON-compatible bound closure; metadata is not promoted into operation values |
 | Connect | binary protobuf, gRPC-Web, GET dispatch, descriptorless streaming, and full-duplex use where the selected transport cannot provide HTTP/2 |
 | usage | includes, mounts, config-file/external-parse lanes, interactive/PTY/streaming commands, and binary output without a configured decoder |
+| GraphQL | batching, multipart incremental delivery, uploads, live queries, GET, persisted-query extensions, multi-root documents, and subscription protocols other than the pinned `graphql-transport-ws` revision |
 
 Within those boundaries, an implementation refuses rather than inventing a
 private approximation. Runtime capability limitations are declared and refuse

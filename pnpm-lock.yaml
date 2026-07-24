@@ -173,15 +173,6 @@ importers:
         specifier: ^22.0.0
         version: 22.19.17
 
-  packages/workers-rpc:
-    devDependencies:
-      '@openbindings/sdk':
-        specifier: workspace:*
-        version: link:../sdk
-      '@types/node':
-        specifier: ^22.0.0
-        version: 22.19.17
-
 packages:
 
   '@bgotink/kdl@0.4.0':

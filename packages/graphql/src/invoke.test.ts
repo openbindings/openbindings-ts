@@ -1,217 +1,131 @@
-import { describe, it, expect } from "vitest";
-import { parseRef, typeRefToGraphQL, buildSelectionSet, buildQueryFromIntrospection, queryFromSchema, parseIntrospectionContent } from "./invoke.js";
-import type { IntrospectionSchema, FullType, TypeMap } from "./introspection.js";
+import { describe, expect, it } from "vitest";
+import { parseExecutableDocument } from "./document.js";
+import {
+  parseIntrospectionContent,
+  parseRef,
+  wellFormedGraphQLResponse,
+} from "./invoke.js";
+import type { IntrospectionSchema } from "./introspection.js";
+
+const schema: IntrospectionSchema = {
+  queryType: { kind: "OBJECT", name: "RootQuery", ofType: null },
+  mutationType: { kind: "OBJECT", name: "RootMutation", ofType: null },
+  subscriptionType: null,
+  types: [
+    {
+      kind: "OBJECT",
+      name: "RootQuery",
+      fields: [
+        { name: "viewer", args: [], type: { kind: "SCALAR", name: "String", ofType: null }, isDeprecated: false },
+        { name: "health", args: [], type: { kind: "SCALAR", name: "String", ofType: null }, isDeprecated: false },
+      ],
+    },
+    {
+      kind: "OBJECT",
+      name: "RootMutation",
+      fields: [
+        { name: "save", args: [], type: { kind: "SCALAR", name: "String", ofType: null }, isDeprecated: false },
+      ],
+    },
+    { kind: "SCALAR", name: "String" },
+  ],
+};
 
 describe("parseRef", () => {
-  it("parses query ref", () => {
-    expect(parseRef("Query/users")).toEqual({ rootType: "Query", fieldName: "users" });
-  });
-  it("parses mutation ref", () => {
-    expect(parseRef("Mutation/createUser")).toEqual({ rootType: "Mutation", fieldName: "createUser" });
-  });
-  it("parses subscription ref", () => {
-    expect(parseRef("Subscription/onOrder")).toEqual({ rootType: "Subscription", fieldName: "onOrder" });
-  });
-  it("rejects empty", () => {
-    expect(() => parseRef("")).toThrow();
-  });
-  it("rejects no slash", () => {
-    expect(() => parseRef("QueryUsers")).toThrow();
-  });
-  it("rejects invalid root", () => {
-    expect(() => parseRef("Invalid/users")).toThrow(/invalid root type/);
-  });
-  it("rejects trailing slash", () => {
-    expect(() => parseRef("Query/")).toThrow();
-  });
-  it("rejects lowercase root", () => {
-    expect(() => parseRef("query/users")).toThrow(/invalid root type/);
-  });
+  it.each([
+    ["query/viewer", { rootType: "query", fieldName: "viewer" }],
+    ["mutation/save", { rootType: "mutation", fieldName: "save" }],
+    ["subscription/updates", { rootType: "subscription", fieldName: "updates" }],
+  ])("accepts %s", (ref, expected) => expect(parseRef(ref)).toEqual(expected));
+
+  it.each(["Query/viewer", "query/", "query/viewer/nested", "query/not-valid", ""])(
+    "rejects noncanonical %s",
+    (ref) => expect(() => parseRef(ref)).toThrow(),
+  );
 });
 
-describe("typeRefToGraphQL", () => {
-  it("scalar", () => {
-    expect(typeRefToGraphQL({ kind: "SCALAR", name: "String", ofType: null })).toBe("String");
-  });
-  it("non-null scalar", () => {
-    expect(typeRefToGraphQL({ kind: "NON_NULL", name: null, ofType: { kind: "SCALAR", name: "ID", ofType: null } })).toBe("ID!");
-  });
-  it("list", () => {
-    expect(typeRefToGraphQL({ kind: "LIST", name: null, ofType: { kind: "SCALAR", name: "String", ofType: null } })).toBe("[String]");
-  });
-  it("non-null list of non-null", () => {
-    expect(typeRefToGraphQL({
-      kind: "NON_NULL", name: null, ofType: {
-        kind: "LIST", name: null, ofType: {
-          kind: "NON_NULL", name: null, ofType: { kind: "SCALAR", name: "Int", ofType: null },
-        },
-      },
-    })).toBe("[Int!]!");
-  });
-});
-
-describe("buildSelectionSet", () => {
-  const makeTM = (types: FullType[]): TypeMap => new Map(types.map((t) => [t.name, t]));
-
-  it("flat object", () => {
-    const tm = makeTM([{
-      kind: "OBJECT", name: "User",
-      fields: [
-        { name: "id", type: { kind: "SCALAR", name: "ID", ofType: null }, args: [], isDeprecated: false },
-        { name: "name", type: { kind: "SCALAR", name: "String", ofType: null }, args: [], isDeprecated: false },
-      ],
-    }]);
-    expect(buildSelectionSet("User", tm, 0, new Set())).toBe("{ id name }");
+describe("executable document correspondence", () => {
+  it("selects a named operation and follows root fragments and aliases", () => {
+    const doc = parseExecutableDocument(`
+      query Other { health }
+      query Viewer($skip: Boolean!) {
+        ...RootFields
+      }
+      fragment RootFields on RootQuery {
+        result: viewer @skip(if: $skip)
+        health @include(if: $skip)
+      }
+    `);
+    expect(() => doc.verifySelection("Viewer", "query", "viewer", { skip: false }, schema)).not.toThrow();
   });
 
-  it("nested object", () => {
-    const tm = makeTM([
-      {
-        kind: "OBJECT", name: "User",
-        fields: [
-          { name: "id", type: { kind: "SCALAR", name: "ID", ofType: null }, args: [], isDeprecated: false },
-          { name: "posts", type: { kind: "LIST", name: null, ofType: { kind: "OBJECT", name: "Post", ofType: null } }, args: [], isDeprecated: false },
-        ],
-      },
-      {
-        kind: "OBJECT", name: "Post",
-        fields: [
-          { name: "title", type: { kind: "SCALAR", name: "String", ofType: null }, args: [], isDeprecated: false },
-        ],
-      },
-    ]);
-    expect(buildSelectionSet("User", tm, 0, new Set())).toBe("{ id posts { title } }");
+  it("refuses operation-kind, multi-root, and root-field mismatches", () => {
+    expect(() => parseExecutableDocument("mutation { save }").verifySelection(undefined, "query", "save", {}, schema)).toThrow(/kind/);
+    expect(() => parseExecutableDocument("{ viewer health }").verifySelection(undefined, "query", "viewer", {}, schema)).toThrow(/exactly one/);
+    expect(() => parseExecutableDocument("{ health }").verifySelection(undefined, "query", "viewer", {}, schema)).toThrow(/does not match/);
   });
 
-  it("cycle detection", () => {
-    const tm = makeTM([{
-      kind: "OBJECT", name: "User",
-      fields: [
-        { name: "id", type: { kind: "SCALAR", name: "ID", ofType: null }, args: [], isDeprecated: false },
-        { name: "friends", type: { kind: "LIST", name: null, ofType: { kind: "OBJECT", name: "User", ofType: null } }, args: [], isDeprecated: false },
-      ],
-    }]);
-    expect(buildSelectionSet("User", tm, 0, new Set())).toBe("{ id }");
+  it("requires operationName for a multi-operation document", () => {
+    const doc = parseExecutableDocument("query A { viewer } query B { health }");
+    expect(() => doc.verifySelection(undefined, "query", "viewer", {}, schema)).toThrow(/operationName/);
   });
 
-  it("depth limit", () => {
-    const tm = makeTM([
-      { kind: "OBJECT", name: "A", fields: [
-        { name: "a_val", type: { kind: "SCALAR", name: "String", ofType: null }, args: [], isDeprecated: false },
-        { name: "b", type: { kind: "OBJECT", name: "B", ofType: null }, args: [], isDeprecated: false },
-      ] },
-      { kind: "OBJECT", name: "B", fields: [
-        { name: "b_val", type: { kind: "SCALAR", name: "String", ofType: null }, args: [], isDeprecated: false },
-        { name: "c", type: { kind: "OBJECT", name: "C", ofType: null }, args: [], isDeprecated: false },
-      ] },
-      { kind: "OBJECT", name: "C", fields: [
-        { name: "c_val", type: { kind: "SCALAR", name: "String", ofType: null }, args: [], isDeprecated: false },
-        { name: "d", type: { kind: "OBJECT", name: "D", ofType: null }, args: [], isDeprecated: false },
-      ] },
-      { kind: "OBJECT", name: "D", fields: [
-        { name: "value", type: { kind: "SCALAR", name: "String", ofType: null }, args: [], isDeprecated: false },
-      ] },
-    ]);
-    expect(buildSelectionSet("A", tm, 0, new Set())).toBe("{ a_val b { b_val c { c_val } } }");
+  it.each([
+    "query Viewer() { viewer }",
+    "query Viewer($id) { viewer(id: $id) }",
+    "query Viewer($id: ID = $other) { viewer }",
+    "query { viewer() }",
+    "query { viewer(id) }",
+    "query { viewer(filter: {id}) }",
+    "query { viewer(limit: 01) }",
+    String.raw`query { viewer(arg: "bad\q") }`,
+    "query { éxample }",
+  ])("rejects malformed GraphQL syntax: %s", (source) => {
+    expect(() => parseExecutableDocument(source)).toThrow();
   });
 
-  it("union with inline fragments", () => {
-    const tm = makeTM([
-      { kind: "UNION", name: "SearchResult", possibleTypes: [{ kind: "OBJECT", name: "User", ofType: null }, { kind: "OBJECT", name: "Post", ofType: null }] },
-      { kind: "OBJECT", name: "User", fields: [{ name: "name", type: { kind: "SCALAR", name: "String", ofType: null }, args: [], isDeprecated: false }] },
-      { kind: "OBJECT", name: "Post", fields: [{ name: "title", type: { kind: "SCALAR", name: "String", ofType: null }, args: [], isDeprecated: false }] },
-    ]);
-    expect(buildSelectionSet("SearchResult", tm, 0, new Set())).toBe("{ __typename ... on User { name } ... on Post { title } }");
-  });
-});
-
-describe("buildQueryFromIntrospection", () => {
-  it("builds query with variables and selection set", () => {
-    const schema: IntrospectionSchema = {
-      queryType: { kind: "OBJECT", name: "Query", ofType: null },
-      mutationType: null,
-      subscriptionType: null,
-      types: [
-        {
-          kind: "OBJECT", name: "Query",
-          fields: [{
-            name: "user",
-            args: [{ name: "id", type: { kind: "NON_NULL", name: null, ofType: { kind: "SCALAR", name: "ID", ofType: null } } }],
-            type: { kind: "OBJECT", name: "User", ofType: null },
-            isDeprecated: false,
-          }],
-        },
-        {
-          kind: "OBJECT", name: "User",
-          fields: [
-            { name: "id", type: { kind: "SCALAR", name: "ID", ofType: null }, args: [], isDeprecated: false },
-            { name: "name", type: { kind: "SCALAR", name: "String", ofType: null }, args: [], isDeprecated: false },
-          ],
-        },
-      ],
-    };
-
-    const { query, variables } = buildQueryFromIntrospection(schema, "Query", "user", { id: "123" });
-    expect(query).toBe("query($id: ID!) { user(id: $id) { id name } }");
-    expect(variables).toEqual({ id: "123" });
-  });
-});
-
-describe("queryFromSchema", () => {
-  it("returns null for undefined schema", () => {
-    expect(queryFromSchema(undefined)).toBeNull();
-  });
-  it("returns null for schema without _query", () => {
-    expect(queryFromSchema({ type: "object", properties: { id: { type: "string" } } })).toBeNull();
-  });
-  it("returns null for _query without const", () => {
-    expect(queryFromSchema({ type: "object", properties: { _query: { type: "string" } } })).toBeNull();
-  });
-  it("returns const value", () => {
-    expect(queryFromSchema({
-      type: "object",
-      properties: { _query: { type: "string", const: "query { users { id } }" } },
-    })).toBe("query { users { id } }");
+  it.each([
+    String.raw`query { viewer(arg: "\u{1F4A9}") }`,
+    String.raw`query { viewer(arg: """embedded \""" triple quote""") }`,
+  ])("accepts GraphQL string syntax: %s", (source) => {
+    const document = parseExecutableDocument(source);
+    expect(() => document.verifySelection(undefined, "query", "viewer", {}, schema)).not.toThrow();
   });
 });
 
 describe("parseIntrospectionContent", () => {
-  const minimalSchema = {
-    queryType: { kind: "OBJECT", name: "Query", ofType: null },
-    mutationType: null,
-    subscriptionType: null,
-    types: [],
-  };
+  const successful = { data: { __schema: schema } };
 
-  it("parses full response shape", () => {
-    const result = parseIntrospectionContent({ data: { __schema: minimalSchema } });
-    expect(result.queryType?.name).toBe("Query");
+  it("accepts only a successful execution-result object", () => {
+    expect(parseIntrospectionContent(successful).queryType?.name).toBe("RootQuery");
   });
 
-  it("parses __schema wrapper", () => {
-    const result = parseIntrospectionContent({ __schema: minimalSchema });
-    expect(result.queryType?.name).toBe("Query");
+  it.each([
+    { __schema: schema },
+    schema,
+    JSON.stringify(successful),
+    { data: { __schema: schema }, errors: [] },
+    null,
+  ])("rejects noncanonical content %#", (content) => {
+    expect(() => parseIntrospectionContent(content)).toThrow();
+  });
+});
+
+describe("GraphQL response envelope", () => {
+  it.each([
+    { data: { viewer: "Ada" } },
+    { data: null, errors: [{ message: "failed" }] },
+    { errors: [{ message: "request rejected" }] },
+  ])("accepts well-formed response %#", (value) => {
+    expect(wellFormedGraphQLResponse(value)).toBe(true);
   });
 
-  it("parses bare schema", () => {
-    const result = parseIntrospectionContent(minimalSchema);
-    expect(result.queryType?.name).toBe("Query");
-  });
-
-  it("parses JSON string", () => {
-    const result = parseIntrospectionContent(JSON.stringify({ data: { __schema: minimalSchema } }));
-    expect(result.queryType?.name).toBe("Query");
-  });
-
-  it("rejects invalid content", () => {
-    expect(() => parseIntrospectionContent("not json")).toThrow(/unrecognized/);
-  });
-
-  it("rejects null", () => {
-    expect(() => parseIntrospectionContent(null)).toThrow(/unrecognized/);
-  });
-
-  it("rejects empty object", () => {
-    expect(() => parseIntrospectionContent({})).toThrow(/unrecognized/);
+  it.each([
+    {},
+    { data: "not an object" },
+    { errors: [] },
+    { errors: [{ code: "NO_MESSAGE" }] },
+  ])("rejects malformed response %#", (value) => {
+    expect(wellFormedGraphQLResponse(value)).toBe(false);
   });
 });

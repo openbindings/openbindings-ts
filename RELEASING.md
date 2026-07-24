@@ -1,15 +1,15 @@
 # Releasing openbindings-ts
 
-This is a pnpm workspace monorepo. All seven packages under `packages/`
-(`sdk`, `openapi`, `asyncapi`, `graphql`, `mcp`, `operationgraph`,
-`workers-rpc`) version in lockstep: a single **annotated** `vX.Y.Z` tag
+This is a pnpm workspace monorepo. All nine packages under `packages/`
+(`sdk`, `openapi`, `asyncapi`, `graphql`, `mcp`, `grpc`, `connect`, `usage`,
+`operationgraph`) version in lockstep: a single **annotated** `vX.Y.Z` tag
 covers every package.
 
 ## Flow
 
 1. Verify the `version` field in every `packages/*/package.json` reads
    `X.Y.Z` (in practice the fields are bumped when the working-draft
-   changelog section opens, so this is a check that all seven agree, not
+   changelog section opens, so this is a check that all nine agree, not
    an edit).
 2. Retitle the `## X.Y.Z (working draft)` section in `CHANGELOG.md` to
    `## X.Y.Z — YYYY-MM-DD`, where the date is the tag date.

@@ -1,627 +1,311 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  ERR_AUTH_REQUIRED,
-  ERR_CANCELLED,
+  CONTEXT_REQUIRED,
   ERR_EXECUTION_FAILED,
-  ERR_INVALID_REF,
-  ERR_PERMISSION_DENIED,
   ERR_REF_NOT_FOUND,
-  ERR_SOURCE_LOAD_FAILED,
-  ERR_STREAM_ERROR,
-  single,
+  ERR_SOURCE_CONFIG_ERROR,
+  type Invocation,
 } from "@openbindings/sdk";
+import { BINDING_SPEC } from "./constants.js";
 import { GraphQLInvoker, GraphQLSynthesizer } from "./invoker.js";
-import type { IntrospectionSchema } from "./introspection.js";
+import type { GraphQLWebSocketInit } from "./configuration.js";
 
-// ---------------------------------------------------------------------------
-// Fixtures
-// ---------------------------------------------------------------------------
-
-const ENDPOINT = "https://api.example.com/graphql";
-
-const testSchema: IntrospectionSchema = {
-  queryType: { kind: "OBJECT", name: "Query", ofType: null },
+const endpoint = "https://api.example.test/graphql";
+const schema = {
+  queryType: { kind: "OBJECT", name: "RootQuery", ofType: null },
   mutationType: null,
-  subscriptionType: { kind: "OBJECT", name: "Subscription", ofType: null },
+  subscriptionType: { kind: "OBJECT", name: "RootSubscription", ofType: null },
   types: [
     {
-      kind: "OBJECT", name: "Query",
+      kind: "OBJECT",
+      name: "RootQuery",
       fields: [
         {
-          name: "user",
-          args: [{ name: "id", type: { kind: "NON_NULL", name: null, ofType: { kind: "SCALAR", name: "ID", ofType: null } } }],
-          type: { kind: "OBJECT", name: "User", ofType: null },
+          name: "viewer",
+          args: [],
+          type: { kind: "SCALAR", name: "String", ofType: null },
           isDeprecated: false,
         },
-        { name: "ping", args: [], type: { kind: "SCALAR", name: "String", ofType: null }, isDeprecated: false },
-      ],
-    },
-    {
-      kind: "OBJECT", name: "User",
-      fields: [
-        { name: "id", type: { kind: "SCALAR", name: "ID", ofType: null }, args: [], isDeprecated: false },
-        { name: "name", type: { kind: "SCALAR", name: "String", ofType: null }, args: [], isDeprecated: false },
-      ],
-    },
-    {
-      kind: "OBJECT", name: "Subscription",
-      fields: [
-        { name: "onOrder", args: [], type: { kind: "OBJECT", name: "Order", ofType: null }, isDeprecated: false },
         {
-          name: "onStatus",
-          args: [{ name: "topic", type: { kind: "SCALAR", name: "String", ofType: null } }],
+          name: "health",
+          args: [],
           type: { kind: "SCALAR", name: "String", ofType: null },
           isDeprecated: false,
         },
       ],
     },
     {
-      kind: "OBJECT", name: "Order",
+      kind: "OBJECT",
+      name: "RootSubscription",
       fields: [
-        { name: "id", type: { kind: "SCALAR", name: "ID", ofType: null }, args: [], isDeprecated: false },
-        { name: "status", type: { kind: "SCALAR", name: "String", ofType: null }, args: [], isDeprecated: false },
+        {
+          name: "updates",
+          args: [],
+          type: { kind: "SCALAR", name: "String", ofType: null },
+          isDeprecated: false,
+        },
       ],
     },
+    { kind: "SCALAR", name: "String" },
   ],
 };
+const source = {
+  bindingSpec: BINDING_SPEC,
+  location: endpoint,
+  content: { data: { __schema: schema } },
+};
 
-const source = { bindingSpec: "graphql", location: ENDPOINT, content: testSchema };
-
-interface CapturedRequest {
-  url: string;
-  body: { query: string; variables?: Record<string, unknown> };
-  headers: Record<string, string>;
+async function outputs(invocation: Invocation<unknown, unknown>): Promise<unknown[]> {
+  const values: unknown[] = [];
+  for await (const value of invocation.outputs) values.push(value);
+  return values;
 }
 
-function jsonResponse(body: unknown, init?: ResponseInit): Response {
+function response(
+  body: unknown,
+  status = 200,
+  contentType = "application/graphql-response+json",
+  headers: Record<string, string> = {},
+): Response {
   return new Response(JSON.stringify(body), {
-    status: 200,
-    headers: { "content-type": "application/json" },
-    ...init,
+    status,
+    headers: { "content-type": contentType, ...headers },
   });
 }
 
-/** A fetch stub that records each GraphQL POST and responds via the handler. */
-function mockFetch(respond: (body: { query: string; variables?: Record<string, unknown> }) => Response) {
-  const calls: CapturedRequest[] = [];
-  const fn: typeof fetch = async (input, init) => {
-    const body = JSON.parse(String(init?.body)) as { query: string; variables?: Record<string, unknown> };
-    calls.push({ url: String(input), body, headers: (init?.headers ?? {}) as Record<string, string> });
-    return respond(body);
-  };
-  return { fn, calls };
-}
-
-// ---------------------------------------------------------------------------
-// Unary (Query / Mutation)
-// ---------------------------------------------------------------------------
-
-describe("GraphQLInvoker unary", () => {
-  it("invokes a query: write + single", async () => {
-    const { fn, calls } = mockFetch(() => jsonResponse({ data: { user: { id: "123", name: "Ada" } } }));
-    const call = new GraphQLInvoker().invokeBinding({ source, ref: "Query/user", fetch: fn });
-
-    await call.write({ id: "123" });
-    await expect(single(call.outputs)).resolves.toEqual({ id: "123", name: "Ada" });
-    await expect(call.closed).resolves.toBeUndefined();
-
-    expect(calls).toHaveLength(1);
-    expect(calls[0]?.body.query).toBe("query($id: ID!) { user(id: $id) { id name } }");
-    expect(calls[0]?.body.variables).toEqual({ id: "123" });
-  });
-
-  it("dispatches a no-argument field without any input (no-input recipe)", async () => {
-    const { fn, calls } = mockFetch(() => jsonResponse({ data: { ping: "pong" } }));
-    const call = new GraphQLInvoker().invokeBinding({ source, ref: "Query/ping", fetch: fn });
-
-    // No write, no close: the binding closes input on entry.
-    await expect(single(call.outputs)).resolves.toBe("pong");
-    expect(calls).toHaveLength(1);
-    expect(calls[0]?.body.variables).toBeUndefined();
-  });
-
-  it("treats close-without-write as empty variables", async () => {
-    const { fn, calls } = mockFetch(() => jsonResponse({ data: { user: null } }));
-    const call = new GraphQLInvoker().invokeBinding({ source, ref: "Query/user", fetch: fn });
-
-    await call.close();
-    await expect(single(call.outputs)).resolves.toBeNull();
-    expect(calls).toHaveLength(1);
-    expect(calls[0]?.body.variables).toBeUndefined();
-  });
-
-  it("honors the operation-layer no-input convention even when the field takes GraphQL arguments", async () => {
-    // A caller through the operation layer for an operation the OBI declares
-    // with NO input schema must dispatch without ever reading — even though
-    // "Query/user" takes a GraphQL `id` argument per the introspected
-    // schema. The operation's own declared contract wins (parity with
-    // openapi/asyncapi/mcp's identical operation-layer override).
-    const { fn, calls } = mockFetch(() => jsonResponse({ data: { user: null } }));
-    const call = new GraphQLInvoker().invokeBinding({
+describe("GraphQLInvoker HTTP", () => {
+  it("carries the exact document and wholesale variables, preserving the whole envelope", async () => {
+    let dispatched: Record<string, unknown> | undefined;
+    const fetchFn: typeof fetch = vi.fn(async (_url, init) => {
+      dispatched = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      return response(
+        { data: { viewer: null }, errors: [{ message: "resolver warning" }] },
+        200,
+        "application/graphql-response+json; charset=utf-8",
+        { "x-request-id": "req-1" },
+      );
+    });
+    const invocation = new GraphQLInvoker().invokeBinding({
       source,
-      ref: "Query/user",
-      binding: { operation: "user", source: "graphql" },
-      // inputSchema deliberately omitted (undefined).
-      fetch: fn,
-    });
-
-    // No write, no close: the binding must close input on entry.
-    await expect(single(call.outputs)).resolves.toBeNull();
-    expect(calls).toHaveLength(1);
-    expect(calls[0]?.body.variables).toBeUndefined();
-  }, 2000);
-
-  it("exposes HTTP response headers as leading metadata", async () => {
-    const { fn } = mockFetch(() =>
-      jsonResponse({ data: { ping: "pong" } }, {
-        headers: { "content-type": "application/json", "x-request-id": "r1" },
-      }),
-    );
-    const call = new GraphQLInvoker().invokeBinding({ source, ref: "Query/ping", fetch: fn });
-
-    await expect(single(call.outputs)).resolves.toBe("pong");
-    await expect(call.header).resolves.toMatchObject({ "x-request-id": ["r1"] });
-  });
-
-  it("applies bearer context to the Authorization header", async () => {
-    const { fn, calls } = mockFetch(() => jsonResponse({ data: { ping: "pong" } }));
-    const call = new GraphQLInvoker().invokeBinding({
-      source, ref: "Query/ping", fetch: fn, context: { bearerToken: "tok_123" },
-    });
-
-    await expect(single(call.outputs)).resolves.toBe("pong");
-    expect(calls[0]?.headers["Authorization"]).toBe("Bearer tok_123");
-  });
-
-  it("uses a prebuilt _query const and skips schema loading", async () => {
-    const { fn, calls } = mockFetch(() => jsonResponse({ data: { users: [{ id: "1" }] } }));
-    const call = new GraphQLInvoker().invokeBinding({
-      source: { bindingSpec: "graphql", location: ENDPOINT }, // no inline content
-      ref: "Query/users",
-      inputSchema: {
-        type: "object",
-        properties: {
-          _query: { type: "string", const: "query($limit: Int) { users(limit: $limit) { id } }" },
-          limit: { type: "integer" },
+      ref: "query/viewer",
+      inputSchema: { type: "object" },
+      context: {
+        configuration: {
+          document: {
+            source: "query Viewer($id: ID!) { viewer(id: $id) }",
+            operationName: "Viewer",
+          },
         },
       },
-      fetch: fn,
+      fetch: fetchFn,
     });
+    await invocation.write({ id: "u-1", unused: 7, _query: "ordinary variable" });
 
-    await call.write({ limit: 10 });
-    await expect(single(call.outputs)).resolves.toEqual([{ id: "1" }]);
-
-    // Exactly one request: no introspection round-trip.
-    expect(calls).toHaveLength(1);
-    expect(calls[0]?.body.query).toBe("query($limit: Int) { users(limit: $limit) { id } }");
-    expect(calls[0]?.body.variables).toEqual({ limit: 10 });
-  });
-
-  it("dispatches a prebuilt _query with no variable properties without input", async () => {
-    const { fn, calls } = mockFetch(() => jsonResponse({ data: { users: [] } }));
-    const call = new GraphQLInvoker().invokeBinding({
-      source: { bindingSpec: "graphql", location: ENDPOINT },
-      ref: "Query/users",
-      inputSchema: {
-        type: "object",
-        properties: { _query: { type: "string", const: "query { users { id } }" } },
-      },
-      fetch: fn,
+    await expect(outputs(invocation)).resolves.toEqual([
+      { data: { viewer: null }, errors: [{ message: "resolver warning" }] },
+    ]);
+    expect(dispatched).toEqual({
+      query: "query Viewer($id: ID!) { viewer(id: $id) }",
+      operationName: "Viewer",
+      variables: { id: "u-1", unused: 7, _query: "ordinary variable" },
     });
-
-    await expect(single(call.outputs)).resolves.toEqual([]);
-    expect(calls).toHaveLength(1);
-    expect(calls[0]?.body.variables).toBeUndefined();
+    await expect(invocation.header).resolves.toMatchObject({ "x-request-id": ["req-1"] });
   });
 
-  it("introspects once per endpoint when no inline content is given", async () => {
-    const { fn, calls } = mockFetch((body) =>
-      body.query.includes("__schema")
-        ? jsonResponse({ data: { __schema: testSchema } })
-        : jsonResponse({ data: { ping: "pong" } }),
-    );
-    const invoker = new GraphQLInvoker();
-    const src = { bindingSpec: "graphql", location: ENDPOINT };
-
-    await expect(single(invoker.invokeBinding({ source: src, ref: "Query/ping", fetch: fn }).outputs)).resolves.toBe("pong");
-    await expect(single(invoker.invokeBinding({ source: src, ref: "Query/ping", fetch: fn }).outputs)).resolves.toBe("pong");
-
-    const introspections = calls.filter((c) => c.body.query.includes("__schema"));
-    expect(introspections).toHaveLength(1);
-    expect(calls).toHaveLength(3);
-  });
-
-  it("keys the introspection cache by the full endpoint URL, not the host", async () => {
-    const { fn, calls } = mockFetch((body) =>
-      body.query.includes("__schema")
-        ? jsonResponse({ data: { __schema: testSchema } })
-        : jsonResponse({ data: { ping: "pong" } }),
-    );
-    const invoker = new GraphQLInvoker();
-    const srcA = { bindingSpec: "graphql", location: "https://api.example.com/graphql" };
-    const srcB = { bindingSpec: "graphql", location: "https://api.example.com/tenant-b/graphql" };
-
-    await expect(single(invoker.invokeBinding({ source: srcA, ref: "Query/ping", fetch: fn }).outputs)).resolves.toBe("pong");
-    await expect(single(invoker.invokeBinding({ source: srcB, ref: "Query/ping", fetch: fn }).outputs)).resolves.toBe("pong");
-
-    // Two endpoints on one host: each must be introspected separately.
-    const introspections = calls.filter((c) => c.body.query.includes("__schema"));
-    expect(introspections).toHaveLength(2);
-    expect(new Set(introspections.map((c) => c.url)).size).toBe(2);
-  });
-
-  it("collapses a trailing slash in the introspection cache key (Go parity)", async () => {
-    const { fn, calls } = mockFetch((body) =>
-      body.query.includes("__schema")
-        ? jsonResponse({ data: { __schema: testSchema } })
-        : jsonResponse({ data: { ping: "pong" } }),
-    );
-    const invoker = new GraphQLInvoker();
-    const bare = { bindingSpec: "graphql", location: "https://api.example.com/graphql" };
-    const trailingSlash = { bindingSpec: "graphql", location: "https://api.example.com/graphql/" };
-
-    await expect(single(invoker.invokeBinding({ source: bare, ref: "Query/ping", fetch: fn }).outputs)).resolves.toBe("pong");
-    await expect(single(invoker.invokeBinding({ source: trailingSlash, ref: "Query/ping", fetch: fn }).outputs)).resolves.toBe("pong");
-
-    // Same endpoint, trailing slash aside: one cached schema (matches the
-    // Go invoker's introspectionCacheKey, which TrimRights the path).
-    const introspections = calls.filter((c) => c.body.query.includes("__schema"));
-    expect(introspections).toHaveLength(1);
-  });
-
-  it("maps GraphQL response errors to ERR_EXECUTION_FAILED with errors details", async () => {
-    const { fn } = mockFetch(() => jsonResponse({ errors: [{ message: "boom" }] }));
-    const call = new GraphQLInvoker().invokeBinding({ source, ref: "Query/ping", fetch: fn });
-
-    await expect(call.closed).rejects.toMatchObject({
-      code: ERR_EXECUTION_FAILED,
-      details: { errors: [{ message: "boom" }] },
-    });
-  });
-
-  it("maps HTTP 401 to ERR_AUTH_REQUIRED with status and body details", async () => {
-    const { fn } = mockFetch(() => new Response("denied", { status: 401 }));
-    const call = new GraphQLInvoker().invokeBinding({ source, ref: "Query/ping", fetch: fn });
-
-    await expect(call.closed).rejects.toMatchObject({
-      code: ERR_AUTH_REQUIRED,
-      details: { status: 401, body: "denied" },
-    });
-  });
-
-  it("maps HTTP 403 to ERR_PERMISSION_DENIED", async () => {
-    const { fn } = mockFetch(() => new Response("forbidden", { status: 403 }));
-    const call = new GraphQLInvoker().invokeBinding({ source, ref: "Query/ping", fetch: fn });
-
-    await expect(call.closed).rejects.toMatchObject({
-      code: ERR_PERMISSION_DENIED,
-      details: { status: 403 },
-    });
-  });
-
-  it("refuses an oversized response with the same cap and error as the Go invoker", async () => {
-    let bodyCancelled = false;
-    const huge = new Uint8Array(1024 * 1024); // 1 MiB per chunk
-    const stream = new ReadableStream<Uint8Array>({
-      pull(controller) {
-        controller.enqueue(huge);
-      },
-      cancel() {
-        bodyCancelled = true;
-      },
-    });
-    const fn: typeof fetch = async () => new Response(stream, { status: 200 });
-    const call = new GraphQLInvoker().invokeBinding({ source, ref: "Query/ping", fetch: fn });
-
-    // Go's doGraphQLHTTP maps a non-httpError (the cap overflow) through the
-    // query/mutation dispatch's generic branch to ErrCodeExecutionFailed;
-    // this mirrors that exactly rather than reusing openapi's
-    // ERR_RESPONSE_ERROR (a deliberate graphql-format choice, not a gap).
-    await expect(call.closed).rejects.toMatchObject({
-      code: ERR_EXECUTION_FAILED,
-      message: expect.stringContaining("byte limit"),
-    });
-    expect(bodyCancelled).toBe(true);
-  });
-
-  it("honors a caller-tuned delivery-unit bound with the unchanged error identity", async () => {
-    // The ruled knob (sdk-review ruling 4(a), 2026-07-20): a tiny
-    // args.maxDeliveryUnitBytes trips the SAME lane identity as the default
-    // cap — graphql's deliberate ERR_EXECUTION_FAILED mapping, same message
-    // template, only the value dynamic.
-    const fn: typeof fetch = async () => new Response("x".repeat(4096), { status: 200 });
-    const call = new GraphQLInvoker().invokeBinding({
+  it("omits variables when caller input is absent", async () => {
+    let dispatched: Record<string, unknown> | undefined;
+    const invocation = new GraphQLInvoker().invokeBinding({
       source,
-      ref: "Query/ping",
-      fetch: fn,
-      maxDeliveryUnitBytes: 1024,
+      ref: "query/health",
+      context: { configuration: { document: "query { health }" } },
+      fetch: vi.fn(async (_url, init) => {
+        dispatched = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        return response({ data: { health: "ok" } });
+      }),
     });
+    await expect(outputs(invocation)).resolves.toEqual([{ data: { health: "ok" } }]);
+    expect(dispatched).not.toHaveProperty("variables");
+  });
 
-    await expect(call.closed).rejects.toMatchObject({
-      code: ERR_EXECUTION_FAILED,
-      message: expect.stringContaining("response exceeds 1024 byte limit"),
+  it("emits a +json request-error response even at HTTP 400", async () => {
+    const body = { errors: [{ message: "request rejected" }] };
+    const invocation = new GraphQLInvoker().invokeBinding({
+      source,
+      ref: "query/viewer",
+      context: { configuration: { document: "query { viewer }" } },
+      fetch: vi.fn(async () => response(body, 400)),
     });
+    await expect(outputs(invocation)).resolves.toEqual([body]);
   });
 
-  it("fails a malformed ref pre-dispatch without any I/O", async () => {
-    const { fn, calls } = mockFetch(() => jsonResponse({ data: {} }));
-    const call = new GraphQLInvoker().invokeBinding({ source, ref: "bogus", fetch: fn });
-
-    await expect(call.closed).rejects.toMatchObject({ code: ERR_INVALID_REF });
-    expect(calls).toHaveLength(0);
-  });
-
-  it("fails a missing endpoint pre-dispatch with ERR_SOURCE_LOAD_FAILED", async () => {
-    const { fn, calls } = mockFetch(() => jsonResponse({ data: {} }));
-    const call = new GraphQLInvoker().invokeBinding({
-      source: { bindingSpec: "graphql" }, ref: "Query/ping", fetch: fn,
+  it("treats an application/json non-2xx response as terminal", async () => {
+    const invocation = new GraphQLInvoker().invokeBinding({
+      source,
+      ref: "query/viewer",
+      context: { configuration: { document: "query { viewer }" } },
+      fetch: vi.fn(async () => response({ errors: [{ message: "rejected" }] }, 400, "application/json")),
     });
-
-    await expect(call.closed).rejects.toMatchObject({ code: ERR_SOURCE_LOAD_FAILED });
-    expect(calls).toHaveLength(0);
+    await expect(invocation.closed).rejects.toMatchObject({ code: ERR_EXECUTION_FAILED });
   });
 
-  it("fails an unknown field with ERR_REF_NOT_FOUND before dispatch", async () => {
-    const { fn, calls } = mockFetch(() => jsonResponse({ data: {} }));
-    const call = new GraphQLInvoker().invokeBinding({ source, ref: "Query/nope", fetch: fn });
-
-    await expect(call.closed).rejects.toMatchObject({ code: ERR_REF_NOT_FOUND });
-    expect(calls).toHaveLength(0);
-  });
-
-  it("cancel aborts an in-flight request", async () => {
-    const fn: typeof fetch = (_input, init) =>
-      new Promise((_resolve, reject) => {
-        init?.signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")), { once: true });
-      });
-    const call = new GraphQLInvoker().invokeBinding({ source, ref: "Query/ping", fetch: fn });
-
-    // Let the dispatch start, then cancel.
-    await new Promise((r) => setTimeout(r, 0));
-    await call.cancel();
-    await expect(call.closed).rejects.toMatchObject({ code: ERR_CANCELLED });
-  });
-
-  it("cancel during introspection surfaces ERR_CANCELLED, not ERR_SOURCE_LOAD_FAILED", async () => {
-    // No inline content: the binding introspects over the network first.
-    // Aborting the introspection fetch must surface as the cancellation
-    // terminal, never get re-wrapped as a source-load failure.
-    const fn: typeof fetch = (_input, init) =>
-      new Promise((_resolve, reject) => {
-        init?.signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")), { once: true });
-      });
-    const call = new GraphQLInvoker().invokeBinding({
-      source: { bindingSpec: "graphql", location: ENDPOINT }, // forces introspection
-      ref: "Query/ping",
-      fetch: fn,
+  it("challenges for a missing document before source loading or dispatch", async () => {
+    const fetchFn = vi.fn();
+    const invoker = new GraphQLInvoker();
+    await expect(invoker.prepareBinding({ source, ref: "query/viewer" })).resolves.toMatchObject({
+      alternatives: [{ requirements: [{ type: "config.value", point: "document" }] }],
     });
+    const invocation = invoker.invokeBinding({ source: { bindingSpec: BINDING_SPEC, location: endpoint }, ref: "query/viewer", fetch: fetchFn });
+    await expect(invocation.closed).rejects.toMatchObject({ code: CONTEXT_REQUIRED });
+    expect(fetchFn).not.toHaveBeenCalled();
+  });
 
-    // Let the introspection fetch start, then cancel.
-    await new Promise((r) => setTimeout(r, 0));
-    await call.cancel();
-    await expect(call.closed).rejects.toMatchObject({ code: ERR_CANCELLED });
+  it("refuses root mismatch and processor-owned header collision before dispatch", async () => {
+    const fetchFn = vi.fn();
+    const mismatch = new GraphQLInvoker().invokeBinding({
+      source,
+      ref: "query/viewer",
+      context: { configuration: { document: "query { health }" } },
+      fetch: fetchFn,
+    });
+    await expect(mismatch.closed).rejects.toMatchObject({ code: ERR_SOURCE_CONFIG_ERROR });
+
+    const collision = new GraphQLInvoker().invokeBinding({
+      source,
+      ref: "query/viewer",
+      context: {
+        configuration: {
+          document: "query { viewer }",
+          protocolFields: { httpHeaders: { "content-TYPE": "text/plain" } },
+        },
+      },
+      fetch: fetchFn,
+    });
+    await expect(collision.closed).rejects.toMatchObject({ code: ERR_SOURCE_CONFIG_ERROR });
+
+    const unnamedCredential = new GraphQLInvoker().invokeBinding({
+      source,
+      ref: "query/viewer",
+      context: {
+        bearerToken: "ambiguous",
+        configuration: { document: "query { viewer }" },
+      },
+      fetch: fetchFn,
+    });
+    await expect(unnamedCredential.closed).rejects.toMatchObject({ code: ERR_SOURCE_CONFIG_ERROR });
+    expect(fetchFn).not.toHaveBeenCalled();
+  });
+
+  it("resolves refs against pinned content and never supplements a pin", async () => {
+    const fetchFn = vi.fn();
+    const invocation = new GraphQLInvoker().invokeBinding({
+      source,
+      ref: "query/missing",
+      context: { configuration: { document: "query { missing }" } },
+      fetch: fetchFn,
+    });
+    await expect(invocation.closed).rejects.toMatchObject({ code: ERR_REF_NOT_FOUND });
+    expect(fetchFn).not.toHaveBeenCalled();
   });
 });
-
-// ---------------------------------------------------------------------------
-// Subscriptions (graphql-transport-ws)
-// ---------------------------------------------------------------------------
 
 class FakeWebSocket {
-  static readonly CONNECTING = 0;
   static readonly OPEN = 1;
-  static readonly CLOSING = 2;
-  static readonly CLOSED = 3;
-  static instances: FakeWebSocket[] = [];
-
+  static readonly CONNECTING = 0;
   readyState = FakeWebSocket.CONNECTING;
-  sent: Array<Record<string, unknown>> = [];
-  onopen: ((ev?: unknown) => void) | null = null;
-  onmessage: ((ev: { data: string }) => void) | null = null;
-  onerror: ((ev?: unknown) => void) | null = null;
-  onclose: ((ev?: unknown) => void) | null = null;
+  onopen: (() => void) | null = null;
+  onmessage: ((event: { data: string }) => void) | null = null;
+  onerror: (() => void) | null = null;
+  onclose: (() => void) | null = null;
+  readonly sent: unknown[] = [];
+  closed = false;
 
-  constructor(public url: string, public protocols?: string | string[]) {
-    FakeWebSocket.instances.push(this);
-  }
-
-  send(data: string): void {
-    const msg = JSON.parse(data) as Record<string, unknown>;
-    this.sent.push(msg);
-    // Auto-ack the handshake so tests only drive subscription frames.
-    if (msg.type === "connection_init") {
-      queueMicrotask(() => this.receive({ type: "connection_ack" }));
-    }
-  }
-
-  close(): void {
-    if (this.readyState === FakeWebSocket.CLOSED) return;
-    this.readyState = FakeWebSocket.CLOSED;
-    this.onclose?.();
-  }
-
-  // Test drivers.
-  open(): void {
-    this.readyState = FakeWebSocket.OPEN;
-    this.onopen?.();
-  }
-
-  receive(obj: unknown): void {
-    this.onmessage?.({ data: JSON.stringify(obj) });
-  }
-
-  fail(): void {
-    this.onerror?.();
-  }
+  send(value: string): void { this.sent.push(JSON.parse(value)); }
+  close(): void { this.closed = true; this.readyState = 3; }
+  open(): void { this.readyState = FakeWebSocket.OPEN; this.onopen?.(); }
+  message(value: unknown): void { this.onmessage?.({ data: JSON.stringify(value) }); }
 }
 
-describe("GraphQLInvoker subscriptions", () => {
+describe("GraphQLInvoker subscription", () => {
+  const priorWebSocket = globalThis.WebSocket;
   beforeEach(() => {
-    FakeWebSocket.instances = [];
-    vi.stubGlobal("WebSocket", FakeWebSocket);
+    Object.defineProperty(globalThis, "WebSocket", { configurable: true, value: FakeWebSocket });
   });
-
   afterEach(() => {
-    vi.unstubAllGlobals();
+    Object.defineProperty(globalThis, "WebSocket", { configurable: true, value: priorWebSocket });
   });
 
-  async function start(ref: string, opts?: { context?: Record<string, unknown>; write?: Record<string, unknown>; maxDeliveryUnitBytes?: number }) {
-    const call = new GraphQLInvoker().invokeBinding({ source, ref, context: opts?.context, maxDeliveryUnitBytes: opts?.maxDeliveryUnitBytes });
-    if (opts?.write) await call.write(opts.write);
-    await vi.waitFor(() => { expect(FakeWebSocket.instances.length).toBeGreaterThan(0); });
-    const ws = FakeWebSocket.instances.at(-1);
-    if (ws === undefined) throw new Error("no FakeWebSocket instance despite waitFor");
-    ws.open();
-    await vi.waitFor(() => { expect(ws.sent.some((m) => m.type === "subscribe")).toBe(true); });
-    return { call, ws };
-  }
+  it("uses the explicit target and emits complete next envelopes including errors", async () => {
+    let init: GraphQLWebSocketInit | undefined;
+    let socket: FakeWebSocket | undefined;
+    const invoker = new GraphQLInvoker((value) => {
+      init = value;
+      socket = new FakeWebSocket();
+      return socket as unknown as WebSocket;
+    });
+    const invocation = invoker.invokeBinding({
+      source,
+      ref: "subscription/updates",
+      context: {
+        configuration: {
+          document: { source: "subscription Watch { updates }", operationName: "Watch" },
+          subscriptionTarget: "wss://stream.example.test/graphql",
+          protocolFields: {
+            websocketHeaders: { "x-tenant": "demo" },
+            connectionInitPayload: { tenant: "demo" },
+          },
+        },
+      },
+    });
+    await vi.waitFor(() => expect(socket).toBeDefined());
+    socket!.open();
+    expect(socket!.sent[0]).toEqual({ type: "connection_init", payload: { tenant: "demo" } });
+    socket!.message({ type: "connection_ack" });
+    expect(socket!.sent[1]).toEqual({
+      id: "1",
+      type: "subscribe",
+      payload: { query: "subscription Watch { updates }", operationName: "Watch" },
+    });
+    socket!.message({
+      type: "next",
+      id: "1",
+      payload: { data: { updates: null }, errors: [{ message: "warning" }] },
+    });
+    socket!.message({ type: "complete", id: "1" });
 
-  it("streams events with for-await and ends cleanly on complete", async () => {
-    const { call, ws } = await start("Subscription/onOrder");
-
-    ws.receive({ type: "next", payload: { data: { onOrder: { id: "o1", status: "created" } } } });
-    ws.receive({ type: "next", payload: { data: { onOrder: { id: "o1", status: "paid" } } } });
-    ws.receive({ type: "complete" });
-
-    const events: unknown[] = [];
-    for await (const ev of call.outputs) events.push(ev);
-    expect(events).toEqual([
-      { onOrder: { id: "o1", status: "created" } },
-      { onOrder: { id: "o1", status: "paid" } },
+    await expect(outputs(invocation)).resolves.toEqual([
+      { data: { updates: null }, errors: [{ message: "warning" }] },
     ]);
-    await expect(call.closed).resolves.toBeUndefined();
-    expect(ws.readyState).toBe(FakeWebSocket.CLOSED);
-  });
-
-  it("reads the first input as subscription variables", async () => {
-    const { ws } = await start("Subscription/onStatus", { write: { topic: "orders" } });
-
-    const subscribe = ws.sent.find((m) => m.type === "subscribe") as { payload: { query: string; variables?: unknown } };
-    expect(subscribe.payload.query).toBe("subscription($topic: String) { onStatus(topic: $topic) }");
-    expect(subscribe.payload.variables).toEqual({ topic: "orders" });
-  });
-
-  it("forwards auth via the connection_init payload", async () => {
-    const { ws } = await start("Subscription/onOrder", { context: { bearerToken: "tok_ws" } });
-
-    const init = ws.sent.find((m) => m.type === "connection_init") as { payload?: Record<string, unknown> };
-    expect(init.payload).toEqual({ authorization: "Bearer tok_ws" });
-  });
-
-  it("maps a subscription error frame to ERR_EXECUTION_FAILED", async () => {
-    const { call, ws } = await start("Subscription/onOrder");
-
-    ws.receive({ type: "error", payload: [{ message: "subscribe failed" }] });
-    await expect(call.closed).rejects.toMatchObject({ code: ERR_EXECUTION_FAILED });
-    await vi.waitFor(() => { expect(ws.readyState).toBe(FakeWebSocket.CLOSED); });
-  });
-
-  it("maps a next frame carrying GraphQL errors to ERR_EXECUTION_FAILED even when an element is malformed", async () => {
-    // A broken or hostile server can send `next` with an errors array whose
-    // first element is not an object (JSON `null` here). That must surface
-    // as the same structured ERR_EXECUTION_FAILED a well-formed element
-    // gets (Go parity: a null element unmarshals to the zero graphqlError),
-    // never as a TypeError inside the message handler, which would strand
-    // the invocation with no settled error.
-    const { call, ws } = await start("Subscription/onOrder");
-
-    ws.receive({ type: "next", payload: { errors: [null] } });
-    await expect(call.closed).rejects.toMatchObject({ code: ERR_EXECUTION_FAILED });
-    await vi.waitFor(() => { expect(ws.readyState).toBe(FakeWebSocket.CLOSED); });
-  });
-
-  it("refuses an oversized frame at the delivery-unit bound", async () => {
-    const { call, ws } = await start("Subscription/onOrder", { maxDeliveryUnitBytes: 1024 });
-
-    ws.receive({ type: "next", payload: { data: { onOrder: { blob: "x".repeat(2000) } } } });
-    await expect(call.closed).rejects.toMatchObject({
-      code: ERR_STREAM_ERROR,
-      message: expect.stringContaining("exceeds 1024 byte limit"),
+    expect(init).toEqual({
+      url: "wss://stream.example.test/graphql",
+      protocols: ["graphql-transport-ws"],
+      headers: { "x-tenant": "demo" },
     });
   });
 
-  it("passes a frame above the old accidental 32KiB level at the default bound", async () => {
-    const { call, ws } = await start("Subscription/onOrder");
-
-    const blob = "x".repeat(64 * 1024 + 1);
-    ws.receive({ type: "next", payload: { data: { onOrder: { blob } } } });
-    ws.receive({ type: "complete" });
-
-    const events: unknown[] = [];
-    for await (const ev of call.outputs) events.push(ev);
-    expect(events).toEqual([{ onOrder: { blob } }]);
-    await expect(call.closed).resolves.toBeUndefined();
-  });
-
-  it("maps a mid-stream socket failure to ERR_STREAM_ERROR", async () => {
-    const { call, ws } = await start("Subscription/onOrder");
-
-    ws.receive({ type: "next", payload: { data: { onOrder: { id: "o1", status: "created" } } } });
-    ws.fail();
-    await expect(call.closed).rejects.toMatchObject({ code: ERR_STREAM_ERROR });
-  });
-
-  it("maps an abnormal post-ack close without a complete frame to ERR_STREAM_ERROR", async () => {
-    const { call, ws } = await start("Subscription/onOrder");
-
-    ws.receive({ type: "next", payload: { data: { onOrder: { id: "o1", status: "created" } } } });
-    ws.close(); // server drops the connection without sending `complete`
-
-    await expect(call.closed).rejects.toMatchObject({
-      code: ERR_STREAM_ERROR,
-      message: expect.stringContaining("before subscription complete"),
+  it("refuses explicit upgrade fields when no WebSocket factory can carry them", async () => {
+    const invocation = new GraphQLInvoker().invokeBinding({
+      source,
+      ref: "subscription/updates",
+      context: {
+        configuration: {
+          document: "subscription { updates }",
+          subscriptionTarget: "wss://stream.example.test/graphql",
+          protocolFields: { websocketHeaders: { "x-tenant": "demo" } },
+        },
+      },
     });
-  });
-
-  it("bounds the event queue and fails ERR_STREAM_ERROR on backpressure overflow", async () => {
-    const { call, ws } = await start("Subscription/onOrder");
-
-    // Nobody drains the outputs; flood past the queue bound.
-    for (let i = 0; i < 1100; i++) {
-      ws.receive({ type: "next", payload: { data: { onOrder: { id: String(i), status: "s" } } } });
-    }
-
-    await expect(call.closed).rejects.toMatchObject({
-      code: ERR_STREAM_ERROR,
-      message: expect.stringContaining("backpressure overflow"),
-    });
-    await vi.waitFor(() => { expect(ws.readyState).toBe(FakeWebSocket.CLOSED); });
-  });
-
-  it("cancel tears down the WebSocket", async () => {
-    const { call, ws } = await start("Subscription/onOrder");
-
-    await call.cancel();
-    await expect(call.closed).rejects.toMatchObject({ code: ERR_CANCELLED });
-    await vi.waitFor(() => { expect(ws.readyState).toBe(FakeWebSocket.CLOSED); });
-  });
-
-  it("settles the header to empty at subscription start, before any event", async () => {
-    // A subscription has no HTTP response headers (the WS handshake hides
-    // them), so `header` must resolve to {} up front rather than block until
-    // the first event arrives.
-    const { call } = await start("Subscription/onOrder");
-
-    await expect(call.header).resolves.toEqual({});
+    await expect(invocation.closed).rejects.toMatchObject({ code: ERR_SOURCE_CONFIG_ERROR });
   });
 });
 
-// ---------------------------------------------------------------------------
-// GraphQLSynthesizer.inspectSource
-// ---------------------------------------------------------------------------
-
-describe("GraphQLSynthesizer inspectSource", () => {
-  afterEach(() => {
-    vi.unstubAllGlobals();
-  });
-
-  it("suggests the same operationKey synthesizeInterface would assign (Go parity)", async () => {
-    vi.stubGlobal("fetch", async () => jsonResponse({ data: { __schema: testSchema } }));
-
-    const insp = await new GraphQLSynthesizer().inspectSource({ bindingSpec: "graphql", location: ENDPOINT });
-    const byRef = new Map(insp.targets.map((t) => [t.ref, t]));
-
-    expect(byRef.get("Query/user")?.operationKey).toBe("user");
-    expect(byRef.get("Subscription/onOrder")?.operationKey).toBe("onOrder");
+describe("GraphQLSynthesizer", () => {
+  it("uses pinned content for exhaustive lower-case inspection", async () => {
+    const inspection = await new GraphQLSynthesizer().inspectSource(source);
+    expect(inspection.exhaustive).toBe(true);
+    expect(inspection.targets.map((target) => target.ref)).toEqual([
+      "query/health",
+      "query/viewer",
+      "subscription/updates",
+    ]);
   });
 });

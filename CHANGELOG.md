@@ -4,6 +4,27 @@
 
 ### Changed
 
+- **BREAKING: the experimental `@openbindings/workers-rpc` package was
+  removed.** Its legacy token had no published binding specification, its
+  runtime-local behavior could not participate in the Go/TypeScript
+  equivalence proof, and the adapter did not implement the withdrawn
+  candidate contract. The TypeScript workspace now publishes only complete
+  first-party binding implementations.
+
+- **`@openbindings/graphql` now implements the published
+  `openbindings.graphql@1` specification end to end.** The legacy versionless
+  token, generated selection sets, `_query` metadata, type projection,
+  implicit WebSocket target, generic credential placement, and response
+  unwrapping are removed. Invocation requires the exact executable document
+  (and an explicit subscription target), verifies its selected kind and
+  one-root-field correspondence, passes caller input wholesale as variables,
+  and emits complete GraphQL response envelopes with errors in-band.
+  Synthesis inventories every observed root field using deliberately broad
+  boundary schemas and exhaustive coverage evidence. A
+  `GraphQLWebSocketFactory` carries explicit upgrade fields on runtimes that
+  support them; the default WebSocket path refuses such fields rather than
+  dropping them.
+
 - **BREAKING: `@openbindings/asyncapi`: `configuration.server` accepts
   exactly the §9.2-pinned value shapes** — `{"key": "<server-name>",
   "variables": {"<variable-name>": "<string-value>"}?}` selecting a member

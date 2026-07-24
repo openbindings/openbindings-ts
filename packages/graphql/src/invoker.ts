@@ -2,16 +2,24 @@ import {
   ERR_INVALID_REF,
   ERR_REF_NOT_FOUND,
   ERR_RUNTIME,
+  ERR_SOURCE_CONFIG_ERROR,
   ERR_SOURCE_LOAD_FAILED,
+  ERR_VALIDATION_FAILED,
   InvocationError,
   InvocationImpl,
-  NoSourcesError,
   MultipleSourcesError,
-  buildAuthHeaders,
+  contextRequiredError,
+  finalizeSynthesis,
+  finalizeSynthesisCoverage,
   resolveDeliveryUnitLimit,
+  synthesisSkeleton,
   type BindingInvocationArgs,
   type BindingInvoker,
+  type ContextRequiredDetails,
+  type CoverageSynthesizer,
   type SynthesizeInput,
+  type SynthesizeResult,
+  type SynthesisCoverageEntry,
   type BindingSpecInfo,
   type InterfaceSynthesizer,
   type Invocation,
@@ -20,47 +28,54 @@ import {
   type SourceInspection,
   type SourceInspector,
 } from "@openbindings/sdk";
-import { BINDING_SPEC } from "./constants.js";
+import { BINDING_SPEC, DEFAULT_SOURCE_NAME } from "./constants.js";
 import {
-  buildQueryFromIntrospection,
-  inputToVariablesPassthrough,
   introspect,
   invokeGraphQL,
   isAuthError,
   parseIntrospectionContent,
   parseRef,
-  queryFromSchema,
   resolveField,
-  schemaDeclaresVariables,
   subscribeGraphQL,
 } from "./invoke.js";
-import type { Field, IntrospectionSchema } from "./introspection.js";
+import type { IntrospectionSchema } from "./introspection.js";
 import { buildTypeMap, rootTypeName } from "./introspection.js";
 import { convertToInterface, resolveKey, sanitizeKey, codePointCompare } from "./synthesize.js";
+import {
+  configurationRequirement,
+  emptyMetadata,
+  httpHeaders,
+  readConfiguration,
+  validateHTTPLocation,
+  wantsCallerInput,
+  websocketHeaders,
+  type GraphQLWebSocketFactory,
+} from "./configuration.js";
+import { parseExecutableDocument } from "./document.js";
 
 function errMsg(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
-/** Reads the first input from the handle, or undefined when input closes without one. */
-async function readFirst<T>(it: AsyncIterable<T>): Promise<T | undefined> {
-  for await (const v of it) return v;
-  return undefined;
+/** Reads the first input while preserving absent versus present-undefined. */
+async function readFirst<T>(it: AsyncIterable<T>): Promise<{ present: boolean; value?: T }> {
+  for await (const value of it) return { present: true, value };
+  return { present: false };
 }
 
 /**
  * Invokes GraphQL bindings via HTTP POST (queries/mutations) or the
- * graphql-transport-ws WebSocket protocol (subscriptions), with
- * introspection-driven query construction.
+ * graphql-transport-ws WebSocket protocol (subscriptions). The caller
+ * supplies the exact executable document through configuration; schema
+ * introspection is used only to prove ref/root correspondence.
  *
  * `invokeBinding` returns the Invocation handle synchronously; the GraphQL
- * variables object is the operation's single input message, read from the
- * handle. Fields that take no arguments use the no-input recipe (input is
- * closed on entry and the request dispatches with empty variables), so
- * callers never have to write or close.
+ * variables object is the operation's optional single input message.
  */
 export class GraphQLInvoker implements BindingInvoker {
   private readonly schemaCache = new Map<string, IntrospectionSchema>();
+
+  constructor(private readonly webSocketFactory?: GraphQLWebSocketFactory) {}
 
   bindingSpecs(): BindingSpecInfo[] {
     return [{ bindingSpec: BINDING_SPEC, description: "GraphQL APIs" }];
@@ -89,90 +104,125 @@ export class GraphQLInvoker implements BindingInvoker {
       throw new InvocationError(ERR_INVALID_REF, errMsg(e));
     }
 
-    if (!args.source.location) {
-      throw new InvocationError(ERR_SOURCE_LOAD_FAILED, "GraphQL source requires a location (endpoint URL)");
+    let url: string;
+    try {
+      url = validateHTTPLocation(args.source.location);
+    } catch (e: unknown) {
+      throw new InvocationError(ERR_SOURCE_CONFIG_ERROR, errMsg(e));
     }
 
-    const url = args.source.location;
-    const headers = buildAuthHeaders(args.context);
+    let configuration;
+    try {
+      configuration = readConfiguration(args.context);
+    } catch (e: unknown) {
+      throw new InvocationError(ERR_SOURCE_CONFIG_ERROR, errMsg(e));
+    }
+    if (!configuration.document) {
+      throw contextRequiredError(
+        "GraphQL invocation requires an executable document",
+        configurationRequirement(url, "document", "supply the exact GraphQL executable document and optional operationName"),
+      );
+    }
+    if (rootType === "subscription" && !configuration.subscriptionTarget) {
+      throw contextRequiredError(
+        "GraphQL subscription requires a WebSocket target",
+        configurationRequirement(url, "subscriptionTarget", "supply an absolute ws or wss GraphQL subscription target"),
+      );
+    }
+    let document;
+    try {
+      document = parseExecutableDocument(configuration.document.source);
+    } catch (e: unknown) {
+      throw new InvocationError(ERR_SOURCE_CONFIG_ERROR, `parse configuration.document: ${errMsg(e)}`);
+    }
+    let headers: Record<string, string>;
+    let wsHeaders: Record<string, string> = {};
+    try {
+      headers = httpHeaders(configuration, args.context);
+      if (rootType === "subscription") wsHeaders = websocketHeaders(configuration);
+    } catch (e: unknown) {
+      throw new InvocationError(ERR_SOURCE_CONFIG_ERROR, errMsg(e));
+    }
+    if (rootType === "subscription" && Object.keys(wsHeaders).length > 0 && !this.webSocketFactory) {
+      throw new InvocationError(
+        ERR_SOURCE_CONFIG_ERROR,
+        "configuration.protocolFields websocket headers or cookies require a GraphQLWebSocketFactory that can carry WebSocket upgrade headers",
+      );
+    }
     const fetchFn = args.fetch ?? fetch;
     // One resolved delivery-unit bound for every body this invocation reads
     // (the response, and an introspection load when the plan needs one —
     // both flow through doGraphQLHTTP, the lane's single bounded reader).
     const maxResponseBytes = resolveDeliveryUnitLimit(args);
 
-    // Resolve the query plan. A prebuilt _query const from the operation's
-    // input schema dispatches without loading the schema; otherwise the
-    // field is resolved from inline content or (cached) network introspection.
-    let wantsInput: boolean;
-    let buildFor: (input: unknown) => { query: string; variables: Record<string, unknown> | undefined };
-
-    const prebuilt = queryFromSchema(args.inputSchema);
-    if (prebuilt) {
-      wantsInput = schemaDeclaresVariables(args.inputSchema);
-      buildFor = (input) => ({ query: prebuilt, variables: inputToVariablesPassthrough(input) });
-    } else {
-      let schema: IntrospectionSchema;
-      if (args.source.content !== undefined) {
-        try {
-          schema = parseIntrospectionContent(args.source.content);
-        } catch (e: unknown) {
-          throw new InvocationError(ERR_SOURCE_LOAD_FAILED, `parse inline GraphQL content: ${errMsg(e)}`);
-        }
-      } else {
-        try {
-          schema = await this.cachedIntrospect(url, headers, fetchFn, inv.signal, maxResponseBytes);
-        } catch (e: unknown) {
-          // A cancelled introspection fetch rejects with an AbortError, not
-          // an InvocationError: cancellation is already terminal (the handle
-          // fired ERR_CANCELLED), so return rather than masquerade the abort
-          // as a source-load failure. Mirrors the asyncapi/HTTP runners.
-          if (inv.signal.aborted) return;
-          if (isAuthError(e)) throw e;
-          throw new InvocationError(ERR_SOURCE_LOAD_FAILED, errMsg(e));
-        }
-      }
-
-      let field: Field;
+    let schema: IntrospectionSchema;
+    if (args.source.content !== undefined) {
       try {
-        field = resolveField(schema, rootType, fieldName);
+        schema = parseIntrospectionContent(args.source.content);
       } catch (e: unknown) {
-        throw new InvocationError(ERR_REF_NOT_FOUND, errMsg(e));
+        throw new InvocationError(ERR_SOURCE_LOAD_FAILED, `parse inline GraphQL content: ${errMsg(e)}`);
       }
-      wantsInput = field.args.length > 0;
-      buildFor = (input) => buildQueryFromIntrospection(schema, rootType, fieldName, input);
+    } else {
+      try {
+        schema = await this.cachedIntrospect(url, headers, fetchFn, inv.signal, maxResponseBytes);
+      } catch (e: unknown) {
+        if (inv.signal.aborted) return;
+        if (isAuthError(e)) throw e;
+        throw new InvocationError(ERR_SOURCE_LOAD_FAILED, errMsg(e));
+      }
+    }
+    try {
+      resolveField(schema, rootType, fieldName);
+    } catch (e: unknown) {
+      throw new InvocationError(ERR_REF_NOT_FOUND, errMsg(e));
     }
 
-    // Operation-layer no-input convention (checked last so it can override
-    // the GraphQL-native signal above, mirroring openapi/asyncapi/mcp's
-    // identical operation-layer override): the call came through the
-    // operation layer for an operation that declares no input at all.
-    // Dispatch with empty input even when the field takes GraphQL
-    // arguments the OBI did not express.
-    if (args.binding !== undefined && args.inputSchema === undefined) {
-      wantsInput = false;
-    }
-
-    // The GraphQL variables object is the single input message, read from
-    // the handle. No-argument fields skip the read entirely; a caller that
-    // closes without writing dispatches with empty variables.
-    let input: unknown = {};
-    if (wantsInput) {
-      input = (await readFirst(inv.inputs())) ?? {};
+    let variables: Record<string, unknown> | undefined;
+    if (wantsCallerInput(args)) {
+      const input = await readFirst(inv.inputs());
+      if (input.present) {
+        if (input.value === null || typeof input.value !== "object" || Array.isArray(input.value)) {
+          throw new InvocationError(ERR_VALIDATION_FAILED, "GraphQL caller input must be one JSON object used wholesale as variables");
+        }
+        variables = input.value as Record<string, unknown>;
+      }
     }
     void inv.closeInput();
 
-    const { query, variables } = buildFor(input);
+    try {
+      document.verifySelection(
+        configuration.document.operationName,
+        rootType,
+        fieldName,
+        variables,
+        schema,
+      );
+    } catch (e: unknown) {
+      throw new InvocationError(
+        ERR_SOURCE_CONFIG_ERROR,
+        `configured document does not denote binding ref ${JSON.stringify(args.ref)}: ${errMsg(e)}`,
+      );
+    }
 
     // Subscriptions stream over WebSocket.
-    if (rootType === "Subscription") {
+    if (rootType === "subscription") {
       // The graphql-transport-ws upgrade exposes no HTTP response headers
       // (the browser WebSocket API hides them), so there is no leading
       // metadata to surface. Settle the header to empty up front — before
       // the first emit — so a caller awaiting `header` resolves at
       // subscription start rather than blocking until the first event.
-      inv.setHeader({});
-      for await (const ev of subscribeGraphQL(url, query, variables, headers, maxResponseBytes, inv.signal)) {
+      inv.setHeader(emptyMetadata());
+      for await (const ev of subscribeGraphQL(
+        configuration.subscriptionTarget!,
+        configuration.document,
+        variables,
+        wsHeaders,
+        configuration.protocol.connectionInitPayload,
+        configuration.protocol.connectionInitPayloadSet,
+        maxResponseBytes,
+        inv.signal,
+        this.webSocketFactory,
+      )) {
         // Always await: a rejection means the invocation terminated, and the
         // for-await teardown closes the WebSocket via the generator's finally.
         await inv.emitOutput(ev);
@@ -182,12 +232,39 @@ export class GraphQLInvoker implements BindingInvoker {
     }
 
     // Queries and mutations dispatch one HTTP POST.
-    const { data, headers: responseHeaders } = await invokeGraphQL(
-      url, query, variables, fieldName, headers, fetchFn, inv.signal, maxResponseBytes,
+    const { response, headers: responseHeaders } = await invokeGraphQL(
+      url,
+      configuration.document.source,
+      configuration.document.operationName,
+      variables,
+      headers,
+      fetchFn,
+      inv.signal,
+      maxResponseBytes,
     );
     inv.setHeader(responseHeaders);
-    await inv.emitOutput(data);
+    await inv.emitOutput(response);
     inv.closeOutput();
+  }
+
+  /** Side-effect-free configuration preflight. */
+  prepareBinding(args: BindingInvocationArgs): Promise<ContextRequiredDetails | null> {
+    let rootType: string;
+    try {
+      ({ rootType } = parseRef(args.ref));
+      validateHTTPLocation(args.source.location);
+    } catch {
+      return Promise.resolve(null);
+    }
+    const url = args.source.location!;
+    const configuration = readConfiguration(args.context);
+    if (!configuration.document) {
+      return Promise.resolve(configurationRequirement(url, "document", "supply the exact GraphQL executable document and optional operationName"));
+    }
+    if (rootType === "subscription" && !configuration.subscriptionTarget) {
+      return Promise.resolve(configurationRequirement(url, "subscriptionTarget", "supply an absolute ws or wss GraphQL subscription target"));
+    }
+    return Promise.resolve(null);
   }
 
   private async cachedIntrospect(
@@ -197,7 +274,7 @@ export class GraphQLInvoker implements BindingInvoker {
     signal?: AbortSignal,
     maxResponseBytes?: number,
   ): Promise<IntrospectionSchema> {
-    const key = introspectionCacheKey(url);
+    const key = introspectionCacheKey(url, headers);
     const cached = this.schemaCache.get(key);
     if (cached) return cached;
     const schema = await introspect(url, headers, fetchFn, signal, maxResponseBytes);
@@ -214,12 +291,17 @@ export class GraphQLInvoker implements BindingInvoker {
  * whitespace still collapse to one key (Go parity: introspectionCacheKey
  * in invoker.go).
  */
-function introspectionCacheKey(endpoint: string): string {
+function introspectionCacheKey(endpoint: string, headers: Record<string, string> = {}): string {
   const trimmed = endpoint.trim();
   try {
     const u = new URL(trimmed);
     const path = u.pathname.replace(/\/+$/, "");
-    return u.origin + path + u.search;
+    const identity = Object.entries(headers)
+      .map(([name, value]) => [name.toLowerCase(), value] as const)
+      .sort(([a], [b]) => codePointCompare(a, b))
+      .map(([name, value]) => `\0${name}:${value}`)
+      .join("");
+    return u.origin + path + u.search + identity;
   } catch {
     return trimmed;
   }
@@ -230,7 +312,7 @@ function introspectionCacheKey(endpoint: string): string {
 // ---------------------------------------------------------------------------
 
 /** Synthesizes OBInterface definitions by introspecting GraphQL endpoints. */
-export class GraphQLSynthesizer implements InterfaceSynthesizer, SourceInspector {
+export class GraphQLSynthesizer implements InterfaceSynthesizer, CoverageSynthesizer, SourceInspector {
   bindingSpecs(): BindingSpecInfo[] {
     return [{ bindingSpec: BINDING_SPEC, description: "GraphQL APIs" }];
   }
@@ -239,34 +321,71 @@ export class GraphQLSynthesizer implements InterfaceSynthesizer, SourceInspector
     input: SynthesizeInput,
     options?: { signal?: AbortSignal },
   ): Promise<OBInterface> {
-    const sources = input.sources ?? [];
-    const src = sources[0];
-    if (src === undefined) throw new NoSourcesError();
-    if (sources.length > 1) throw new MultipleSourcesError();
-    if (!src.location) throw new Error("GraphQL source requires a location (endpoint URL)");
-
-    const schema = await introspect(src.location, {}, fetch, options?.signal);
-    const iface = convertToInterface(schema, src.location);
-    if (input.name) iface.name = input.name;
-    if (input.version) iface.version = input.version;
-    if (input.description) iface.description = input.description;
+    const { iface } = await this.synthesizeObserved(input, options);
     return iface;
   }
 
-  /** Lists all bindable targets (Query/Mutation/Subscription fields) from a GraphQL endpoint. */
+  async synthesizeInterfaceWithCoverage(
+    input: SynthesizeInput,
+    options?: { signal?: AbortSignal },
+  ): Promise<SynthesizeResult> {
+    const { iface, schema } = await this.synthesizeObserved(input, options);
+    return finalizeSynthesisCoverage(
+      iface,
+      schema ? graphQLSynthesisCoverage(iface) : [],
+      true,
+    );
+  }
+
+  private async synthesizeObserved(
+    input: SynthesizeInput,
+    options?: { signal?: AbortSignal },
+  ): Promise<{ iface: OBInterface; schema?: IntrospectionSchema }> {
+    const sources = input.sources ?? [];
+    const src = sources[0];
+    if (src === undefined) return { iface: synthesisSkeleton(input) };
+    if (sources.length > 1) throw new MultipleSourcesError();
+    if (src.bindingSpec !== BINDING_SPEC) {
+      throw new Error(`synthesizer supports exact binding specification ${JSON.stringify(BINDING_SPEC)}, got ${JSON.stringify(src.bindingSpec)}`);
+    }
+    const location = validateHTTPLocation(src.location);
+    if (src.outputLocation) validateHTTPLocation(src.outputLocation);
+
+    let schema: IntrospectionSchema;
+    let artifactContent: unknown;
+    if (src.content !== undefined) {
+      schema = parseIntrospectionContent(src.content);
+      artifactContent = src.content;
+    } else {
+      schema = await introspect(location, {}, fetch, options?.signal);
+      if (src.embed) artifactContent = { data: { __schema: schema } };
+    }
+    const iface = convertToInterface(schema, location);
+    if (artifactContent !== undefined) {
+      iface.sources![DEFAULT_SOURCE_NAME]!.content = artifactContent;
+    }
+    return {
+      iface: finalizeSynthesis(iface, input, DEFAULT_SOURCE_NAME, BINDING_SPEC),
+      schema,
+    };
+  }
+
+  /** Lists all bindable query/mutation/subscription root fields. */
   async inspectSource(
     source: Source,
     options?: { signal?: AbortSignal },
   ): Promise<SourceInspection> {
-    if (!source.location) throw new Error("GraphQL source requires a location (endpoint URL)");
-    const schema = await introspect(source.location, {}, fetch, options?.signal);
+    const location = validateHTTPLocation(source.location);
+    const schema = source.content !== undefined
+      ? parseIntrospectionContent(source.content)
+      : await introspect(location, {}, fetch, options?.signal);
     const targets: SourceInspection["targets"] = [];
     const tm = buildTypeMap(schema);
 
     const rootTypes: Array<{ label: string; typeName: string | null }> = [
-      { label: "Query", typeName: rootTypeName(schema, "Query") },
-      { label: "Mutation", typeName: rootTypeName(schema, "Mutation") },
-      { label: "Subscription", typeName: rootTypeName(schema, "Subscription") },
+      { label: "query", typeName: rootTypeName(schema, "query") },
+      { label: "mutation", typeName: rootTypeName(schema, "mutation") },
+      { label: "subscription", typeName: rootTypeName(schema, "subscription") },
     ];
 
     // Suggest the same operation key convertToInterface assigns (same
@@ -290,4 +409,21 @@ export class GraphQLSynthesizer implements InterfaceSynthesizer, SourceInspector
 
     return { targets, exhaustive: true };
   }
+}
+
+function graphQLSynthesisCoverage(iface: OBInterface): SynthesisCoverageEntry[] {
+  return Object.entries(iface.bindings ?? {})
+    .sort(([, a], [, b]) => codePointCompare(a.ref ?? "", b.ref ?? ""))
+    .map(([bindingKey, binding]) => ({
+      sourceIndex: 0,
+      sourceRef: binding.ref!,
+      scope: "target" as const,
+      status: "represented" as const,
+      operationKey: binding.operation,
+      bindingKey,
+      bindingRef: binding.ref!,
+      requirements: binding.ref!.startsWith("subscription/")
+        ? ["document", "subscriptionTarget"]
+        : ["document"],
+    }));
 }

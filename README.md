@@ -17,9 +17,8 @@ OpenBindings is an open standard: one interface, limitless bindings. An OBI (Ope
 | `@openbindings/grpc` | gRPC binding invoker and interface synthesizer | `npm install @openbindings/grpc` |
 | `@openbindings/connect` | Connect binding invoker and interface synthesizer | `npm install @openbindings/connect` |
 | `@openbindings/usage` | jdx usage binding invoker and interface synthesizer | `npm install @openbindings/usage` |
-| `@openbindings/graphql` | Legacy experimental GraphQL adapter (not a published 0.2 binding specification) | `npm install @openbindings/graphql` |
+| `@openbindings/graphql` | GraphQL binding invoker and exhaustive root-field interface synthesizer | `npm install @openbindings/graphql` |
 | `@openbindings/operationgraph` | Operation-graph binding invoker (compose operations) | `npm install @openbindings/operationgraph` |
-| `@openbindings/workers-rpc` | Legacy experimental Cloudflare Workers RPC adapter (not a published 0.2 binding specification) | `npm install @openbindings/workers-rpc` |
 
 ## What the SDK does
 
@@ -43,7 +42,7 @@ pnpm conformance
 
 The Go/TypeScript equivalence policy and corresponding public names are in
 [`IMPLEMENTATION_PARITY.md`](IMPLEMENTATION_PARITY.md). Run `pnpm correspondence`
-to verify the six-family public correspondence matrix. The same six families
+to verify the seven-family public correspondence matrix. The same seven families
 also execute the spec repository's portable synthesis corpus, so operation
 identity and coverage evidence are compared across languages rather than
 asserted only in mirrored package tests.
@@ -166,16 +165,12 @@ const invoker = new OperationInvoker([
 | `@openbindings/grpc` | `openbindings.grpc@1` | yes |
 | `@openbindings/connect` | `openbindings.connect@1` | yes |
 | `@openbindings/usage` | `openbindings.usage@1` | yes |
-| `@openbindings/graphql` | `graphql` | yes |
+| `@openbindings/graphql` | `openbindings.graphql@1` | yes |
 | `@openbindings/operationgraph` | `openbindings.operation-graph@1` | no (graphs are authored, then composed at invoke time) |
-| `@openbindings/workers-rpc` | `workers-rpc@^1.0.0` | no (hand-authored OBIs; runs inside the Workers runtime) |
 
-Only the first six rows are published revision-1 binding specifications and
-participate in the 0.2 cross-SDK coverage guarantee. `graphql` and
-`workers-rpc@^1.0.0` are retained legacy experimental tokens; their candidate
-specification documents have not been promoted and these packages must not be
-presented as implementations of `openbindings.graphql@1` or
-`openbindings.workers-rpc@1`.
+OpenAPI, AsyncAPI, MCP, gRPC, Connect, usage, and GraphQL are published
+revision-1 artifact/protocol binding specifications and participate in the
+0.2 cross-SDK coverage guarantee.
 
 Invokers implement `BindingInvoker`. Interface synthesizers implement
 `InterfaceSynthesizer`; synthesizers that can return durable, explicitly

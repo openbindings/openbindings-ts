@@ -1,4 +1,4 @@
-import type { JSONSchema, Metadata } from "@openbindings/sdk";
+import type { Metadata } from "@openbindings/sdk";
 import {
   DEFAULT_MAX_DELIVERY_UNIT_BYTES,
   ERR_AUTH_REQUIRED,
@@ -11,24 +11,27 @@ import {
   httpErrorCode,
   httpErrorEffects,
 } from "@openbindings/sdk";
-import type { Field, IntrospectionSchema, TypeRef, TypeMap, InputValue } from "./introspection.js";
-import { buildTypeMap, rootTypeName, unwrapTypeName, INTROSPECTION_QUERY } from "./introspection.js";
-import { MAX_SELECTION_DEPTH, QUERY_FIELD_NAME } from "./constants.js";
+import type { Field, IntrospectionSchema } from "./introspection.js";
+import { rootTypeName, INTROSPECTION_QUERY } from "./introspection.js";
+import type { DocumentConfiguration, GraphQLWebSocketFactory } from "./configuration.js";
 
 // ---------------------------------------------------------------------------
 // Ref parsing
 // ---------------------------------------------------------------------------
 
-/** Parse a GraphQL ref in the form "Query/field", "Mutation/field", or "Subscription/field". */
+/** Parse an exact openbindings.graphql@1 ref. */
 export function parseRef(ref: string): { rootType: string; fieldName: string } {
   const idx = ref.indexOf("/");
-  if (idx < 0 || idx === 0 || idx === ref.length - 1) {
-    throw new Error(`GraphQL ref "${ref}" must be in the form Query/fieldName, Mutation/fieldName, or Subscription/fieldName`);
+  if (idx < 0 || idx === 0 || idx === ref.length - 1 || ref.indexOf("/", idx + 1) >= 0) {
+    throw new Error(`GraphQL ref "${ref}" must be in the form query/fieldName, mutation/fieldName, or subscription/fieldName`);
   }
   const rootType = ref.slice(0, idx);
   const fieldName = ref.slice(idx + 1);
-  if (rootType !== "Query" && rootType !== "Mutation" && rootType !== "Subscription") {
-    throw new Error(`GraphQL ref "${ref}" has invalid root type "${rootType}" (must be Query, Mutation, or Subscription)`);
+  if (rootType !== "query" && rootType !== "mutation" && rootType !== "subscription") {
+    throw new Error(`GraphQL ref "${ref}" has invalid operation kind "${rootType}" (must be query, mutation, or subscription)`);
+  }
+  if (!/^[_A-Za-z][_0-9A-Za-z]*$/.test(fieldName)) {
+    throw new Error(`GraphQL ref "${ref}" has invalid field name "${fieldName}"`);
   }
   return { rootType, fieldName };
 }
@@ -45,182 +48,43 @@ export async function introspect(
   signal?: AbortSignal,
   maxResponseBytes: number = DEFAULT_MAX_DELIVERY_UNIT_BYTES,
 ): Promise<IntrospectionSchema> {
-  const { body } = await doGraphQLHTTP(url, INTROSPECTION_QUERY, undefined, headers, fetchFn, signal, maxResponseBytes);
-  if (body.errors?.length) {
-    throw new Error(`introspection errors: ${body.errors.map((e) => e.message).join("; ")}`);
+  const { body } = await doGraphQLHTTP(url, INTROSPECTION_QUERY, undefined, undefined, headers, fetchFn, signal, maxResponseBytes);
+  if (Array.isArray(body.errors)) {
+    const messages = body.errors.map((error) => {
+      if (error !== null && typeof error === "object") {
+        const message = (error as Record<string, unknown>).message;
+        if (typeof message === "string") return message;
+      }
+      return "";
+    });
+    throw new Error(`introspection errors: ${messages.join("; ")}`);
   }
-  const schemaData = body.data?.__schema;
-  if (!schemaData) {
+  const data = body.data;
+  const schemaData = data && typeof data === "object" && !Array.isArray(data)
+    ? (data as Record<string, unknown>).__schema
+    : undefined;
+  if (!schemaData || typeof schemaData !== "object" || Array.isArray(schemaData)) {
     throw new Error("introspection response missing __schema field");
   }
   return schemaData as IntrospectionSchema;
 }
 
-// ---------------------------------------------------------------------------
-// Query building
-// ---------------------------------------------------------------------------
-
-/** Extract a pre-built query from the operation's input schema _query const. */
-export function queryFromSchema(schema: JSONSchema | undefined): string | null {
-  if (!schema) return null;
-  const props = (schema as Record<string, unknown>).properties as Record<string, unknown> | undefined;
-  if (!props) return null;
-  const queryProp = props[QUERY_FIELD_NAME] as Record<string, unknown> | undefined;
-  if (!queryProp) return null;
-  const constVal = queryProp.const;
-  return typeof constVal === "string" && constVal.length > 0 ? constVal : null;
-}
-
-/** True when the operation's input schema declares variable properties beyond the _query const. */
-export function schemaDeclaresVariables(schema: JSONSchema | undefined): boolean {
-  if (!schema) return false;
-  const props = (schema as Record<string, unknown>).properties as Record<string, unknown> | undefined;
-  if (!props) return false;
-  return Object.keys(props).some((k) => k !== QUERY_FIELD_NAME);
-}
-
 /** Resolve a root-type field from the introspected schema. Throws when the root type or field is missing. */
 export function resolveField(schema: IntrospectionSchema, rootType: string, fieldName: string): Field {
   const typeName = rootTypeName(schema, rootType);
-  if (!typeName) throw new Error(`schema has no ${rootType} type`);
+  if (!typeName) throw new Error(`schema has no ${rootType} root type`);
   const t = schema.types.find((x) => x.name === typeName);
   if (!t) throw new Error(`type "${typeName}" not found in schema`);
   const field = t.fields?.find((f) => f.name === fieldName);
-  if (!field) throw new Error(`field "${fieldName}" not found on ${rootType} type "${typeName}"`);
+  if (!field) throw new Error(`field "${fieldName}" not found on ${rootType} root type "${typeName}"`);
   return field;
-}
-
-/** Build a query from the introspected schema with auto-generated selection set. */
-export function buildQueryFromIntrospection(
-  schema: IntrospectionSchema,
-  rootType: string,
-  fieldName: string,
-  input: unknown,
-): { query: string; variables: Record<string, unknown> | undefined } {
-  const targetField = resolveField(schema, rootType, fieldName);
-  const tm = buildTypeMap(schema);
-
-  const { varDecls, argList } = buildVariables(targetField.args);
-
-  const returnType = unwrapTypeName(targetField.type);
-  let selectionSet = "";
-  if (returnType) {
-    const rt = tm.get(returnType);
-    if (rt && (rt.kind === "OBJECT" || rt.kind === "INTERFACE" || rt.kind === "UNION")) {
-      selectionSet = buildSelectionSet(returnType, tm, 0, new Set());
-    }
-  }
-
-  const variables = inputToVariables(input, targetField.args);
-
-  const keyword = rootType === "Query" ? "query" : rootType === "Mutation" ? "mutation" : "subscription";
-  let q = keyword;
-  if (varDecls) q += `(${varDecls})`;
-  q += ` { ${fieldName}`;
-  if (argList) q += `(${argList})`;
-  if (selectionSet) q += ` ${selectionSet}`;
-  q += " }";
-
-  return { query: q, variables };
-}
-
-/** Build variable declarations and argument list from field args. */
-function buildVariables(args: InputValue[]): { varDecls: string; argList: string } {
-  if (!args.length) return { varDecls: "", argList: "" };
-  const decls: string[] = [];
-  const passing: string[] = [];
-  for (const arg of args) {
-    decls.push(`$${arg.name}: ${typeRefToGraphQL(arg.type)}`);
-    passing.push(`${arg.name}: $${arg.name}`);
-  }
-  return { varDecls: decls.join(", "), argList: passing.join(", ") };
-}
-
-/** Convert an introspection TypeRef to a GraphQL type string. */
-export function typeRefToGraphQL(t: TypeRef): string {
-  if (t.kind === "NON_NULL") return t.ofType ? typeRefToGraphQL(t.ofType) + "!" : (t.name ?? "String") + "!";
-  if (t.kind === "LIST") return t.ofType ? `[${typeRefToGraphQL(t.ofType)}]` : `[${t.name ?? "String"}]`;
-  return t.name ?? "String";
-}
-
-/** Build a selection set recursively (depth-limited, cycle-safe). */
-export function buildSelectionSet(typeName: string, tm: TypeMap, depth: number, visited: Set<string>): string {
-  if (depth >= MAX_SELECTION_DEPTH || visited.has(typeName)) return "";
-  const t = tm.get(typeName);
-  if (!t) return "";
-
-  if (t.kind === "UNION" || t.kind === "INTERFACE") {
-    if (!t.possibleTypes?.length) return "";
-    const fragments = ["__typename"];
-    for (const pt of t.possibleTypes) {
-      if (pt.name) {
-        const nested = buildSelectionSet(pt.name, tm, depth, visited);
-        if (nested) fragments.push(`... on ${pt.name} ${nested}`);
-      }
-    }
-    return `{ ${fragments.join(" ")} }`;
-  }
-
-  if (t.kind !== "OBJECT" || !t.fields?.length) return "";
-
-  visited.add(typeName);
-  const fields: string[] = [];
-  for (const f of t.fields) {
-    if (f.name.startsWith("__")) continue;
-    const returnType = unwrapTypeName(f.type);
-    if (!returnType) { fields.push(f.name); continue; }
-    const ft = tm.get(returnType);
-    if (!ft) { fields.push(f.name); continue; }
-    if (ft.kind === "SCALAR" || ft.kind === "ENUM") {
-      fields.push(f.name);
-    } else if (ft.kind === "OBJECT" || ft.kind === "INTERFACE" || ft.kind === "UNION") {
-      const nested = buildSelectionSet(returnType, tm, depth + 1, visited);
-      if (nested) fields.push(`${f.name} ${nested}`);
-    }
-  }
-  visited.delete(typeName);
-
-  return fields.length ? `{ ${fields.join(" ")} }` : "";
-}
-
-/** Pass through all input keys except _query as GraphQL variables. */
-export function inputToVariablesPassthrough(input: unknown): Record<string, unknown> | undefined {
-  if (input == null || typeof input !== "object" || Array.isArray(input)) return undefined;
-  const map = input as Record<string, unknown>;
-  const vars: Record<string, unknown> = {};
-  let count = 0;
-  for (const [k, v] of Object.entries(map)) {
-    if (k === QUERY_FIELD_NAME) continue;
-    vars[k] = v;
-    count++;
-  }
-  return count > 0 ? vars : undefined;
-}
-
-/** Build variables from input, using only keys that match declared field arguments. */
-function inputToVariables(input: unknown, args: InputValue[]): Record<string, unknown> | undefined {
-  if (input == null || !args.length) return undefined;
-  if (typeof input !== "object" || Array.isArray(input)) return undefined;
-  const map = input as Record<string, unknown>;
-  const argNames = new Set(args.map((a) => a.name));
-  const vars: Record<string, unknown> = {};
-  let count = 0;
-  for (const [k, v] of Object.entries(map)) {
-    if (argNames.has(k)) { vars[k] = v; count++; }
-  }
-  return count > 0 ? vars : undefined;
 }
 
 // ---------------------------------------------------------------------------
 // HTTP invocation
 // ---------------------------------------------------------------------------
 
-interface GraphQLError { message: string }
-
-interface GraphQLResponse {
-  data?: Record<string, unknown>;
-  errors?: GraphQLError[];
-}
+type GraphQLResponse = Record<string, unknown>;
 
 /** Multi-valued invocation metadata from a fetch Headers object. */
 function metadataFromHeaders(h: Headers): Metadata {
@@ -279,6 +143,7 @@ async function readResponseText(resp: Response, maxBytes: number): Promise<strin
 async function doGraphQLHTTP(
   url: string,
   query: string,
+  operationName: string | undefined,
   variables: Record<string, unknown> | undefined,
   headers: Record<string, string>,
   fetchFn: typeof globalThis.fetch = fetch,
@@ -286,11 +151,12 @@ async function doGraphQLHTTP(
   maxResponseBytes: number = DEFAULT_MAX_DELIVERY_UNIT_BYTES,
 ): Promise<GraphQLHTTPResult> {
   const body: Record<string, unknown> = { query };
-  if (variables) body.variables = variables;
+  if (operationName) body.operationName = operationName;
+  if (variables !== undefined) body.variables = variables;
 
   const reqHeaders: Record<string, string> = {
     "Content-Type": "application/json",
-    "Accept": "application/json",
+    "Accept": "application/graphql-response+json, application/json;q=0.9",
     ...headers,
   };
 
@@ -299,11 +165,15 @@ async function doGraphQLHTTP(
     headers: reqHeaders,
     body: JSON.stringify(body),
     signal,
+    redirect: "manual",
   });
 
   const text = await readResponseText(resp, maxResponseBytes);
-
-  if (!resp.ok) {
+  const mediaType = (resp.headers.get("content-type") ?? "").split(";", 1)[0]!.trim().toLowerCase();
+  if (mediaType !== "application/graphql-response+json" && mediaType !== "application/json") {
+    throw new InvocationError(ERR_RESPONSE_ERROR, `unsupported GraphQL response media type ${JSON.stringify(mediaType)}`);
+  }
+  if (mediaType === "application/json" && !resp.ok) {
     throw new InvocationError(
       httpErrorCode(resp.status),
       `HTTP ${resp.status}: ${text}`,
@@ -311,28 +181,61 @@ async function doGraphQLHTTP(
       httpErrorEffects(resp.status),
     );
   }
-
-  const respBody = JSON.parse(text) as GraphQLResponse;
+  let respBody: unknown;
+  try {
+    respBody = JSON.parse(text);
+  } catch (e: unknown) {
+    throw new InvocationError(ERR_RESPONSE_ERROR, `parse GraphQL response: ${e instanceof Error ? e.message : String(e)}`);
+  }
+  if (!wellFormedGraphQLResponse(respBody)) {
+    throw new InvocationError(ERR_RESPONSE_ERROR, "response is not a well-formed GraphQL response envelope");
+  }
   return { body: respBody, headers: metadataFromHeaders(resp.headers) };
 }
 
-/** Result of a unary GraphQL invocation: the requested field's bare data plus response headers. */
+export function wellFormedGraphQLResponse(value: unknown): value is GraphQLResponse {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
+  const envelope = value as Record<string, unknown>;
+  const hasData = Object.hasOwn(envelope, "data");
+  const hasErrors = Object.hasOwn(envelope, "errors");
+  if (!hasData && !hasErrors) return false;
+  if (
+    hasData && envelope.data !== null
+    && (typeof envelope.data !== "object" || Array.isArray(envelope.data))
+  ) return false;
+  if (hasErrors) {
+    if (!Array.isArray(envelope.errors) || envelope.errors.length === 0) return false;
+    for (const error of envelope.errors) {
+      if (
+        error === null || typeof error !== "object" || Array.isArray(error)
+        || typeof (error as Record<string, unknown>).message !== "string"
+        || !(error as Record<string, unknown>).message
+      ) return false;
+    }
+  }
+  if (
+    Object.hasOwn(envelope, "extensions")
+    && envelope.extensions !== null
+    && (typeof envelope.extensions !== "object" || Array.isArray(envelope.extensions))
+  ) return false;
+  return true;
+}
+
+/** Result of a unary GraphQL invocation: the complete envelope plus response headers. */
 export interface GraphQLInvokeResult {
-  data: unknown;
+  response: GraphQLResponse;
   headers: Metadata;
 }
 
 /**
- * Invoke a GraphQL query/mutation via HTTP POST. Returns the requested
- * field's data and the response headers; throws an InvocationError on HTTP,
- * network, or GraphQL-level failure (`errors` in the response body map to
- * ERR_EXECUTION_FAILED with `{ errors }` details).
+ * Invoke a GraphQL query/mutation via HTTP POST. GraphQL errors remain
+ * in-band in the returned complete response envelope.
  */
 export async function invokeGraphQL(
   url: string,
   query: string,
+  operationName: string | undefined,
   variables: Record<string, unknown> | undefined,
-  fieldName: string,
   headers: Record<string, string>,
   fetchFn: typeof globalThis.fetch = fetch,
   signal?: AbortSignal,
@@ -340,21 +243,12 @@ export async function invokeGraphQL(
 ): Promise<GraphQLInvokeResult> {
   let res: GraphQLHTTPResult;
   try {
-    res = await doGraphQLHTTP(url, query, variables, headers, fetchFn, signal, maxResponseBytes);
+    res = await doGraphQLHTTP(url, query, operationName, variables, headers, fetchFn, signal, maxResponseBytes);
   } catch (e: unknown) {
     if (e instanceof InvocationError) throw e;
-    throw new InvocationError(ERR_EXECUTION_FAILED, e instanceof Error ? e.message : String(e));
+    throw new InvocationError(ERR_RESPONSE_ERROR, e instanceof Error ? e.message : String(e));
   }
-
-  if (res.body.errors?.length) {
-    throw new InvocationError(
-      ERR_EXECUTION_FAILED,
-      res.body.errors.map((e) => e.message).join("; "),
-      { errors: res.body.errors },
-    );
-  }
-
-  return { data: res.body.data?.[fieldName] ?? null, headers: res.headers };
+  return { response: res.body, headers: res.headers };
 }
 
 /** Check if an error is an HTTP auth failure (401/403). */
@@ -363,56 +257,37 @@ export function isAuthError(e: unknown): boolean {
 }
 
 /**
- * Parse inline Source.Content as a GraphQL introspection result.
- * Accepts the full response shape ({"data": {"__schema": ...}}),
- * the __schema wrapper ({"__schema": ...}), or a bare schema object.
+ * Parse inline Source.Content under GQL-D-02. Only one successful
+ * introspection execution-result object is accepted.
  */
 export function parseIntrospectionContent(content: unknown): IntrospectionSchema {
-  let raw: unknown = content;
-
-  // If content is a string, parse it as JSON.
-  if (typeof content === "string") {
-    try {
-      raw = JSON.parse(content);
-    } catch {
-      throw new Error("unrecognized introspection content format");
-    }
+  if (content === null || typeof content !== "object" || Array.isArray(content)) {
+    throw new Error("content must be an introspection execution-result object");
   }
-
-  if (raw == null || typeof raw !== "object") {
-    throw new Error("unrecognized introspection content format");
+  const result = content as Record<string, unknown>;
+  if (Object.hasOwn(result, "errors")) {
+    throw new Error("introspection content must not contain an errors member");
   }
-
-  const obj = raw as Record<string, unknown>;
-
-  // Try full response: {"data": {"__schema": ...}}
-  const data = obj.data as Record<string, unknown> | undefined;
-  if (data?.__schema && typeof data.__schema === "object") {
-    return data.__schema as IntrospectionSchema;
+  if (result.data === null || typeof result.data !== "object" || Array.isArray(result.data)) {
+    throw new Error("introspection content must contain object data");
   }
-
-  // Try wrapper: {"__schema": ...}
-  if (obj.__schema && typeof obj.__schema === "object") {
-    return obj.__schema as IntrospectionSchema;
+  const schema = (result.data as Record<string, unknown>).__schema;
+  const types = schema !== null && typeof schema === "object" && !Array.isArray(schema)
+    ? (schema as Record<string, unknown>).types
+    : undefined;
+  if (
+    schema === null || typeof schema !== "object" || Array.isArray(schema)
+    || !Array.isArray(types)
+    || types.length === 0
+  ) {
+    throw new Error("introspection content must contain object data.__schema with types");
   }
-
-  // Try bare schema.
-  if (obj.queryType || (Array.isArray(obj.types) && obj.types.length > 0)) {
-    return obj as unknown as IntrospectionSchema;
-  }
-
-  throw new Error("unrecognized introspection content format");
+  return schema as IntrospectionSchema;
 }
 
 // ---------------------------------------------------------------------------
 // WebSocket subscription (graphql-transport-ws protocol)
 // ---------------------------------------------------------------------------
-
-function httpToWS(url: string): string {
-  if (url.startsWith("https://")) return "wss://" + url.slice(8);
-  if (url.startsWith("http://")) return "ws://" + url.slice(7);
-  return url;
-}
 
 /**
  * Maximum number of undelivered subscription events buffered between the
@@ -434,25 +309,30 @@ const byteEncoder = new TextEncoder();
  * WebSocket.
  */
 export async function* subscribeGraphQL(
-  url: string,
-  query: string,
+  target: string,
+  document: DocumentConfiguration,
   variables: Record<string, unknown> | undefined,
   headers: Record<string, string>,
+  connectionInitPayload: Record<string, unknown> | null | undefined,
+  connectionInitPayloadSet: boolean,
   maxUnitBytes: number,
   signal?: AbortSignal,
+  webSocketFactory?: GraphQLWebSocketFactory,
 ): AsyncGenerator<unknown> {
-  const wsURL = httpToWS(url);
-
-  // Browser WebSocket API doesn't support custom headers on the upgrade request.
-  // Pass auth via the graphql-transport-ws connection_init payload instead.
-  const connectionParams: Record<string, unknown> = {};
-  if (headers["Authorization"]) {
-    connectionParams.authorization = headers["Authorization"];
-  }
-
   let ws: WebSocket;
   try {
-    ws = new WebSocket(wsURL, "graphql-transport-ws");
+    if (webSocketFactory) {
+      ws = webSocketFactory({
+        url: target,
+        protocols: ["graphql-transport-ws"],
+        headers,
+      });
+    } else {
+      if (Object.keys(headers).length > 0) {
+        throw new Error("WebSocket upgrade headers require a GraphQLWebSocketFactory that can carry them");
+      }
+      ws = new WebSocket(target, "graphql-transport-ws");
+    }
   } catch (e: unknown) {
     throw new InvocationError(ERR_CONNECT_FAILED, `WebSocket create failed: ${e instanceof Error ? e.message : String(e)}`);
   }
@@ -479,7 +359,7 @@ export async function* subscribeGraphQL(
   ws.onopen = () => {
     ws.send(JSON.stringify({
       type: "connection_init",
-      ...(Object.keys(connectionParams).length > 0 ? { payload: connectionParams } : {}),
+      ...(connectionInitPayloadSet ? { payload: connectionInitPayload } : {}),
     }));
   };
 
@@ -504,8 +384,9 @@ export async function* subscribeGraphQL(
     if (!acked) {
       if (msg.type === "connection_ack") {
         acked = true;
-        const payload: Record<string, unknown> = { query };
-        if (variables) payload.variables = variables;
+        const payload: Record<string, unknown> = { query: document.source };
+        if (document.operationName) payload.operationName = document.operationName;
+        if (variables !== undefined) payload.variables = variables;
         ws.send(JSON.stringify({ id: "1", type: "subscribe", payload }));
       } else {
         finish({ error: new InvocationError(ERR_CONNECT_FAILED, `expected connection_ack, got ${msg.type}`) });
@@ -515,12 +396,9 @@ export async function* subscribeGraphQL(
 
     switch (msg.type) {
       case "next": {
-        const p = msg.payload as { data?: unknown; errors?: Array<{ message: string }> } | undefined;
-        if (p?.errors?.length) {
-          // A malformed first element (e.g. JSON null) still surfaces as
-          // the structured error with an empty message — Go parity: a null
-          // element unmarshals to the zero graphqlError — never a TypeError.
-          finish({ error: new InvocationError(ERR_EXECUTION_FAILED, p.errors[0]?.message ?? "", { errors: p.errors }) });
+        const p = msg.payload;
+        if (!wellFormedGraphQLResponse(p)) {
+          finish({ error: new InvocationError(ERR_RESPONSE_ERROR, "next payload is not a well-formed GraphQL response envelope") });
         } else if (queue.length >= MAX_QUEUED_EVENTS) {
           // The consumer is not draining; fail the stream rather than
           // buffer without bound, and stop the inflow at the socket.
@@ -535,7 +413,7 @@ export async function* subscribeGraphQL(
             ws.close();
           }
         } else {
-          push({ data: p?.data });
+          push({ data: p });
         }
         break;
       }
@@ -570,7 +448,16 @@ export async function* subscribeGraphQL(
     });
   };
 
-  const onAbort = () => finish(null);
+  const onAbort = () => {
+    if (acked && ws.readyState === WebSocket.OPEN) {
+      try {
+        ws.send(JSON.stringify({ id: "1", type: "complete" }));
+      } catch {
+        // The transport may already be closing; cancellation still completes locally.
+      }
+    }
+    finish(null);
+  };
   signal?.addEventListener("abort", onAbort, { once: true });
   if (signal?.aborted) finish(null);
 

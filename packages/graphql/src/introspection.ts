@@ -59,9 +59,9 @@ export function buildTypeMap(schema: IntrospectionSchema): TypeMap {
 
 export function rootTypeName(schema: IntrospectionSchema, rootType: string): string | null {
   switch (rootType) {
-    case "Query": return schema.queryType?.name ?? null;
-    case "Mutation": return schema.mutationType?.name ?? null;
-    case "Subscription": return schema.subscriptionType?.name ?? null;
+    case "query": return schema.queryType?.name ?? null;
+    case "mutation": return schema.mutationType?.name ?? null;
+    case "subscription": return schema.subscriptionType?.name ?? null;
     default: return null;
   }
 }
