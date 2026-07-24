@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { fetchInterface } from "./fetch.js";
-import type { InterfaceSynthesizer } from "./invokers.js";
+import type { CoverageSynthesizer, InterfaceSynthesizer } from "./invokers.js";
+import { finalizeSynthesisCoverage } from "./invoker-types.js";
 
 /** A fetch that returns reachable non-OBI JSON (an HTML-ish API root stand-in). */
 function nonObiFetch(): typeof globalThis.fetch {
@@ -18,6 +19,34 @@ function failingSynthesizer(bindingSpec: string, err: string): InterfaceSynthesi
     synthesizeInterface: async () => {
       throw new Error(err);
     },
+  };
+}
+
+function coverageSynthesizer(): CoverageSynthesizer {
+  const iface = {
+    openbindings: "0.2.0",
+    operations: { ping: {} },
+    sources: {
+      source: { bindingSpec: "fake.coverage@1", location: "https://api.example.com/" },
+    },
+    bindings: {
+      "ping.source": { operation: "ping", source: "source", ref: "ping" },
+    },
+  };
+  return {
+    bindingSpecs: () => [{ bindingSpec: "fake.coverage@1" }],
+    synthesizeInterface: async () => iface,
+    synthesizeInterfaceWithCoverage: async () =>
+      finalizeSynthesisCoverage(iface, [{
+        sourceIndex: 0,
+        sourceKey: "source",
+        sourceRef: "ping",
+        scope: "target",
+        status: "represented",
+        operationKey: "ping",
+        bindingKey: "ping.source",
+        bindingRef: "ping",
+      }], true),
   };
 }
 
@@ -53,5 +82,16 @@ describe("fetchInterface resolution trail", () => {
     await expect(
       fetchInterface("https://down.example.com/", { fetch: netFail }),
     ).rejects.toThrow(/direct fetch: ECONNREFUSED/);
+  });
+
+  it("retains coverage from the synthesis call", async () => {
+    const result = await fetchInterface("https://api.example.com/", {
+      fetch: nonObiFetch(),
+      synthesizers: [coverageSynthesizer()],
+    });
+    expect(result.synthesized).toBe(true);
+    expect(result.coverage?.exhaustive).toBe(true);
+    expect(result.coverage?.fullyRepresented).toBe(true);
+    expect(result.coverage?.entries).toHaveLength(1);
   });
 });

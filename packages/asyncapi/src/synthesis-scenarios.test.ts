@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  matchSynthesisScenario,
+  verifySynthesisScenario,
   type SynthesisScenarioFile,
 } from "@openbindings/sdk";
 import { describe, it } from "vitest";
@@ -17,10 +17,9 @@ const corpus = JSON.parse(
 describe("portable AsyncAPI synthesis scenarios", () => {
   for (const scenario of corpus.scenarios) {
     it(scenario.id, async () => {
-      const result = await new AsyncAPISynthesizer().synthesizeInterfaceWithCoverage({
+      await verifySynthesisScenario(scenario, () => new AsyncAPISynthesizer().synthesizeInterfaceWithCoverage({
         sources: [scenario.source],
-      });
-      matchSynthesisScenario(scenario, result);
+      }));
     });
   }
 });

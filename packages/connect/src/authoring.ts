@@ -51,12 +51,7 @@ export class ConnectSynthesizer implements InterfaceSynthesizer, CoverageSynthes
     if (sources.length > 1) throw new MultipleSourcesError();
     const source = sources[0]!;
     if (source.bindingSpec !== BINDING_SPEC) throw new Error(`synthesizer supports exact binding specification ${JSON.stringify(BINDING_SPEC)}, got ${JSON.stringify(source.bindingSpec)}`);
-    if (source.outputLocation) {
-      const url = new URL(source.outputLocation);
-      if ((url.protocol !== "http:" && url.protocol !== "https:") || !url.host) {
-        throw new Error("Connect outputLocation must be an absolute HTTP(S) service URL");
-      }
-    }
+    if (source.outputLocation) validateBaseURL(source.outputLocation);
     const root = loadSchema(source);
     const warnings: SynthesizerWarning[] = [];
     const observeWarning = (warning: SynthesizerWarning): void => {
@@ -79,12 +74,35 @@ export class ConnectSynthesizer implements InterfaceSynthesizer, CoverageSynthes
 
 function loadSchema(source: ProtoSource): protobuf.Root {
   if (!source.location) throw new Error("Connect source requires an HTTP(S) base URL");
-  const url = new URL(source.location);
-  if (url.protocol !== "http:" && url.protocol !== "https:") throw new Error("Connect source location must use http or https");
+  validateBaseURL(source.location);
   if (source.content === undefined) {
     throw new Error("descriptorless Connect sources expose no discoverable operation set; synthesis requires embedded protobuf content");
   }
   return loadProtobufSchema(source.content);
+}
+
+function validateBaseURL(location: string): void {
+  let url: URL;
+  try {
+    url = new URL(location);
+  } catch {
+    throw new Error(`Connect base URL ${JSON.stringify(location)} must be an absolute HTTP(S) URI`);
+  }
+  if ((url.protocol !== "http:" && url.protocol !== "https:") || !url.host) {
+    throw new Error(`Connect base URL ${JSON.stringify(location)} must be an absolute HTTP(S) URI`);
+  }
+  if (url.username || url.password) {
+    throw new Error(`Connect base URL ${JSON.stringify(location)} must not carry userinfo`);
+  }
+  if (url.search) {
+    throw new Error(`Connect base URL ${JSON.stringify(location)} must not carry a query`);
+  }
+  if (url.hash) {
+    throw new Error(`Connect base URL ${JSON.stringify(location)} must not carry a fragment`);
+  }
+  if (location.endsWith("/")) {
+    throw new Error(`Connect base URL ${JSON.stringify(location)} must not carry a trailing slash`);
+  }
 }
 
 function protobufInterface(

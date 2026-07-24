@@ -27,11 +27,55 @@ describe("convertToInterface", () => {
     expect(Object.keys(iface.operations)).toEqual(["get_weather"]);
     expect(iface.operations.get_weather?.description).toBe("Get weather for a city");
     expect(iface.operations.get_weather?.input).toBeDefined();
+    expect(iface.operations.get_weather?.output).toMatchObject({
+      type: "object",
+      anyOf: [
+        {
+          properties: { progress: { type: "number" } },
+          required: ["progress"],
+        },
+        {
+          properties: {
+            content: { type: "array" },
+            isError: { const: false },
+          },
+          required: ["content"],
+        },
+      ],
+    });
 
     const binding = iface.bindings!["get_weather.mcpServer"];
     if (!binding) throw new Error("missing binding: get_weather.mcpServer");
     expect(binding.ref).toBe("tools/get_weather");
     expect(binding.source).toBe("mcpServer");
+  });
+
+  it("scopes MCP outputSchema to the complete result's structuredContent", () => {
+    const upstream = {
+      type: "object",
+      properties: { temperature: { type: "number" } },
+      required: ["temperature"],
+    };
+    const iface = convertToInterface({
+      tools: [{
+        name: "weather",
+        inputSchema: { type: "object" },
+        outputSchema: upstream,
+      }],
+      resources: [],
+      resourceTemplates: [],
+      prompts: [],
+    });
+    const output = iface.operations.weather?.output as Record<string, unknown>;
+    const alternatives = output.anyOf as Array<Record<string, unknown>>;
+    expect(alternatives[0]).toMatchObject({ required: ["progress"] });
+    expect(alternatives[1]).toMatchObject({
+      properties: {
+        content: { type: "array" },
+        structuredContent: upstream,
+      },
+      required: ["content"],
+    });
   });
 
   it("prefixes digit-leading tool names to a valid key (OBI-D-03, Go parity)", () => {
@@ -65,6 +109,11 @@ describe("convertToInterface", () => {
     if (!op) throw new Error("missing operation: config");
     expect(op.description).toBe("Config file");
     expect(op.input).toBeUndefined();
+    expect(op.output).toMatchObject({
+      type: "object",
+      properties: { contents: { type: "array" } },
+      required: ["contents"],
+    });
 
     const binding = iface.bindings!["config.mcpServer"];
     if (!binding) throw new Error("missing binding: config.mcpServer");

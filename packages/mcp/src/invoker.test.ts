@@ -174,15 +174,16 @@ describe("MCPInvoker tools", () => {
     await expect(call.header).resolves.toMatchObject({ "x-request-id": ["r1"] });
   });
 
-  it("surfaces a generic bearer credential instead of inventing an Authorization mapping", async () => {
+  it("carries bearerToken as Authorization: Bearer per MCP-P-07", async () => {
     const server = mcpServer(() => textResult("ok"), { tools: ["ping"] });
     const call = new MCPInvoker().invokeBinding({
       source, ref: "tools/ping", fetch: server.fn, context: { bearerToken: "tok_123" },
     });
 
     await call.write({});
-    await expect(call.closed).rejects.toMatchObject({ code: "CONTEXT_REQUIRED" });
-    expect(server.fetches()).toBe(0);
+    await expect(single(call.outputs)).resolves.toEqual({ content: [{ type: "text", text: "ok" }] });
+    const toolCall = server.calls.find((c) => c.method === "tools/call");
+    expect(toolCall?.headers["authorization"]).toBe("Bearer tok_123");
   });
 
   it("carries an explicitly named Authorization header", async () => {
@@ -530,10 +531,45 @@ describe("MCPSynthesizer", () => {
     });
   });
 
-  it("refuses live discovery embedding instead of emitting a lossy listing pin", async () => {
-    await expect(new MCPSynthesizer().synthesizeInterface({
+  it("embeds the complete pagination-exhausted live listing", async () => {
+    const { fn } = discoveryServer({ pageSize: 1, toolNames: ["first", "second"] });
+    const iface = await new MCPSynthesizer({ fetch: fn }).synthesizeInterface({
       sources: [{ bindingSpec: "openbindings.mcp@1", location: ENDPOINT, embed: true }],
-    })).rejects.toThrow(/complete pagination-exhausted listing/);
+    });
+    expect(iface.sources?.mcpServer?.content).toMatchObject({
+      tools: [
+        { name: "first", inputSchema: { type: "object" } },
+        { name: "second", inputSchema: { type: "object" } },
+      ],
+      resources: [{ name: "config", uri: "file:///etc/config.json" }],
+      prompts: [{ name: "summarize" }],
+    });
+  });
+
+  it("refuses an unevaluated negotiated revision before listing", async () => {
+    let listRequests = 0;
+    const legacyFetch: typeof fetch = async (_input, init) => {
+      const message = JSON.parse(String(init?.body)) as { id?: number | string; method: string };
+      if (message.method === "initialize") {
+        return jsonResponse({
+          jsonrpc: "2.0",
+          id: message.id,
+          result: {
+            protocolVersion: "2025-06-18",
+            capabilities: { tools: {} },
+            serverInfo: { name: "legacy", version: "1" },
+          },
+        });
+      }
+      if (message.method.endsWith("/list")) listRequests++;
+      return message.id === undefined
+        ? new Response(null, { status: 202 })
+        : jsonResponse({ jsonrpc: "2.0", id: message.id, result: {} });
+    };
+    await expect(new MCPSynthesizer({ fetch: legacyFetch }).synthesizeInterface({
+      sources: [{ bindingSpec: "openbindings.mcp@1", location: ENDPOINT }],
+    })).rejects.toThrow(/2025-06-18.*2025-11-25/);
+    expect(listRequests).toBe(0);
   });
 
   it("inspectSource suggests the same operationKey synthesizeInterface assigns (Go parity)", async () => {

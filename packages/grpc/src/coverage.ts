@@ -11,6 +11,7 @@ export function protobufSynthesisCoverage(
   root: protobuf.Root | undefined,
   iface: OBInterface,
   warnings: SynthesizerWarning[],
+  requirements: string[] = [],
 ): SynthesisCoverageEntry[] {
   if (!root) return [];
   const byRef = new Map<string, { operationKey: string; bindingRef: string }>();
@@ -58,6 +59,7 @@ export function protobufSynthesisCoverage(
         status: "represented",
         operationKey: identity.operationKey,
         bindingRef: identity.bindingRef,
+        requirements: [...requirements],
       });
     }
   }

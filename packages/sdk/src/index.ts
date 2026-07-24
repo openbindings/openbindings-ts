@@ -253,10 +253,14 @@ export type {
 export {
   matchSynthesisScenario,
   normalizeSynthesis,
+  verifySynthesisScenario,
 } from "./synthesis-scenarios.js";
 export type {
+  RefusedScenarioExpected,
   SynthesisScenarioFile,
   SynthesisScenario,
+  SynthesisScenarioExpected,
+  SynthesizedScenarioExpected,
   NormalizedSynthesis,
   SynthesisBindingIdentity,
   NormalizedSynthesisCoverageEntry,

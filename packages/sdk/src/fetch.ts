@@ -1,9 +1,11 @@
 import type { OBInterface } from "./types.js";
 import type { InterfaceSynthesizer } from "./invokers.js";
+import type { SynthesisCoverage } from "./invoker-types.js";
 import { isHttpUrl } from "./helpers.js";
 import { combineSynthesizers } from "./combiners.js";
 import { parseDocument } from "./parse.js";
 import { isOBInterface } from "./compatibility.js";
+import { SynthesisCoverageUnsupportedError } from "./errors.js";
 
 export const WELL_KNOWN_PATH = "/.well-known/openbindings";
 
@@ -25,6 +27,8 @@ export interface FetchedInterface {
   iface: OBInterface;
   /** True when the OBI was synthesized from a non-OBI source. */
   synthesized: boolean;
+  /** Durable evidence from the synthesis call; absent for fetched OBIs. */
+  coverage?: SynthesisCoverage;
 }
 
 /**
@@ -79,17 +83,27 @@ export async function fetchInterface(
 
   for (const info of synthesizer.bindingSpecs()) {
     let iface: OBInterface;
+    let coverage: SynthesisCoverage | undefined;
+    const input = { sources: [{ bindingSpec: info.bindingSpec, location: url }] };
     try {
-      iface = await synthesizer.synthesizeInterface(
-        { sources: [{ bindingSpec: info.bindingSpec, location: url }] },
-        { signal },
-      );
+      const result = await synthesizer.synthesizeInterfaceWithCoverage(input, { signal });
+      iface = result.interface;
+      coverage = result.coverage;
     } catch (e) {
-      trail.push(`synthesize as ${info.bindingSpec}: ${errText(e)}`);
-      continue;
+      if (e instanceof SynthesisCoverageUnsupportedError) {
+        try {
+          iface = await synthesizer.synthesizeInterface(input, { signal });
+        } catch (fallbackError) {
+          trail.push(`synthesize as ${info.bindingSpec}: ${errText(fallbackError)}`);
+          continue;
+        }
+      } else {
+        trail.push(`synthesize as ${info.bindingSpec}: ${errText(e)}`);
+        continue;
+      }
     }
     if (iface && iface.operations && Object.keys(iface.operations).length > 0) {
-      return { iface, synthesized: true };
+      return { iface, synthesized: true, coverage };
     }
     trail.push(`synthesize as ${info.bindingSpec}: no operations derived`);
   }

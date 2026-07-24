@@ -137,7 +137,7 @@ function validateCredentialHeaders(
   location: string,
 ): InvocationError | null {
   const context = args.context;
-  if (contextApiKey(context) || contextBearerToken(context) || contextBasicAuth(context)) {
+  if (contextApiKey(context) || contextBasicAuth(context)) {
     return contextRequiredError(
       "generic credential has no named MCP HTTP-header destination",
       {
@@ -164,6 +164,12 @@ function validateCredentialHeaders(
   const seen = new Map<string, string>();
   for (const name of Object.keys(headers)) {
     const lower = name.toLowerCase();
+    if (contextBearerToken(context) && lower === "authorization") {
+      return new InvocationError(
+        ERR_SOURCE_CONFIG_ERROR,
+        "bearerToken and an explicit Authorization header target the same MCP credential destination",
+      );
+    }
     if (reserved.has(lower)) {
       return new InvocationError(
         ERR_SOURCE_CONFIG_ERROR,
@@ -191,6 +197,8 @@ function validateCredentialHeaders(
 
 function buildMCPHeaders(context: Record<string, unknown> | undefined): Record<string, string> {
   const headers = { ...contextHeaders(context) };
+  const bearer = contextBearerToken(context);
+  if (bearer) headers.Authorization = `Bearer ${bearer}`;
   const cookies = contextCookies(context);
   const names = Object.keys(cookies).sort();
   if (names.length > 0) headers.Cookie = names.map((name) => `${name}=${cookies[name]}`).join("; ");
@@ -742,6 +750,7 @@ async function emitToolResult(
     throw new InvocationError(
       ERR_EXECUTION_FAILED,
       msg || `MCP tool ${JSON.stringify(toolName)} reported an error`,
+      { mcpResult: result },
     );
   }
 

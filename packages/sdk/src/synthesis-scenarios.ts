@@ -6,7 +6,7 @@ import type {
 import type { OBInterface } from "./types.js";
 
 export interface SynthesisScenarioFile {
-  format: "openbindings.binding-spec-synthesis-scenarios@1";
+  format: "openbindings.binding-spec-synthesis-scenarios@2";
   bindingSpec: string;
   family: string;
   description: string;
@@ -17,7 +17,19 @@ export interface SynthesisScenario {
   id: string;
   description: string;
   source: SynthesizeSource;
-  expected: NormalizedSynthesis;
+  expected: SynthesisScenarioExpected;
+}
+
+export type SynthesisScenarioExpected = SynthesizedScenarioExpected | RefusedScenarioExpected;
+
+export interface SynthesizedScenarioExpected extends NormalizedSynthesis {
+  outcome: "synthesized";
+}
+
+export interface RefusedScenarioExpected {
+  outcome: "refused";
+  /** Governing corpus authority; error type and diagnostic prose are non-portable. */
+  rules: string[];
 }
 
 export interface NormalizedSynthesis {
@@ -51,6 +63,9 @@ export function matchSynthesisScenario(
   scenario: SynthesisScenario,
   result: SynthesizeResult,
 ): void {
+  if (scenario.expected.outcome !== "synthesized") {
+    throw new Error(`${scenario.id} expected whole-source refusal but synthesis succeeded`);
+  }
   const got = normalizeSynthesis(result);
   const want = normalizeExpected(scenario.expected);
   if (canonicalJSON(got) !== canonicalJSON(want)) {
@@ -60,6 +75,25 @@ export function matchSynthesisScenario(
       + `want:\n${JSON.stringify(want, undefined, 2)}`,
     );
   }
+}
+
+/**
+ * Executes a portable synthesis scenario without making thrown error shape
+ * part of the shared contract. A refused scenario requires any loud failure;
+ * a synthesized scenario compares the normalized successful boundary.
+ */
+export async function verifySynthesisScenario(
+  scenario: SynthesisScenario,
+  synthesize: () => Promise<SynthesizeResult>,
+): Promise<void> {
+  let result: SynthesizeResult;
+  try {
+    result = await synthesize();
+  } catch (error: unknown) {
+    if (scenario.expected.outcome === "refused") return;
+    throw error;
+  }
+  matchSynthesisScenario(scenario, result);
 }
 
 export function normalizeSynthesis(result: SynthesizeResult): NormalizedSynthesis {

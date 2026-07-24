@@ -168,10 +168,6 @@ export class MCPSynthesizer implements InterfaceSynthesizer, CoverageSynthesizer
     }
     if (src.bindingSpec !== BINDING_SPEC) throw new Error(`synthesizer supports exact binding specification ${JSON.stringify(BINDING_SPEC)}, got ${JSON.stringify(src.bindingSpec)}`);
     if (src.outputLocation) validateEndpoint(src.outputLocation);
-    if (src.embed && src.content === undefined) {
-      throw new Error("MCP live-discovery embedding is not supported: preserving the complete pagination-exhausted listing is required; provide pinned listing content explicitly");
-    }
-
     let disc: MCPDiscovery;
     if (src.content !== undefined) {
       validateEndpoint(src.location);
@@ -186,6 +182,12 @@ export class MCPSynthesizer implements InterfaceSynthesizer, CoverageSynthesizer
     if (src.content !== undefined) {
       const emittedSource = iface.sources?.[DEFAULT_SOURCE_NAME];
       if (emittedSource) emittedSource.content = src.content;
+    } else if (src.embed) {
+      if (disc.pinnedListing === undefined) {
+        throw new Error("MCP live discovery did not yield a complete pagination-exhausted listing to embed");
+      }
+      const emittedSource = iface.sources?.[DEFAULT_SOURCE_NAME];
+      if (emittedSource) emittedSource.content = disc.pinnedListing;
     }
     return {
       iface: finalizeSynthesis(iface, input, DEFAULT_SOURCE_NAME, BINDING_SPEC),

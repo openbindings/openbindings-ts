@@ -13,6 +13,13 @@ export interface MCPDiscovery {
   resources: Array<{ name: string; uri: string; description?: string; mimeType?: string }>;
   resourceTemplates: Array<{ name: string; uriTemplate: string; description?: string; mimeType?: string }>;
   prompts: Array<{ name: string; description?: string; arguments?: Array<{ name: string; description?: string; required?: boolean }> }>;
+  /** Raw pagination-exhausted entity arrays, suitable for source.content. */
+  pinnedListing?: {
+    tools: unknown[];
+    resources: unknown[];
+    resourceTemplates: unknown[];
+    prompts: unknown[];
+  };
 }
 
 /** Options threaded through discovery: cancellation and the fetch seam. */
@@ -38,6 +45,12 @@ export async function discover(url: string, options?: DiscoverOptions): Promise<
   await client.connect(transport, options?.signal ? { signal: options.signal } : undefined);
 
   try {
+    if (transport.protocolVersion !== "2025-11-25") {
+      throw new Error(
+        `negotiated MCP protocol revision ${JSON.stringify(transport.protocolVersion)} is outside openbindings.mcp@1's accepted envelope (2025-11-25)`,
+      );
+    }
+
     const serverVersion = client.getServerVersion();
     const caps = client.getServerCapabilities();
 
@@ -48,6 +61,7 @@ export async function discover(url: string, options?: DiscoverOptions): Promise<
       resources: [],
       resourceTemplates: [],
       prompts: [],
+      pinnedListing: { tools: [], resources: [], resourceTemplates: [], prompts: [] },
     };
 
     // Each list request follows nextCursor to pagination exhaustion
@@ -59,6 +73,7 @@ export async function discover(url: string, options?: DiscoverOptions): Promise<
         (cursor) => client.listTools(cursor !== undefined ? { cursor } : undefined),
         (result) => {
           for (const t of result.tools ?? []) {
+            disc.pinnedListing?.tools.push(t);
             disc.tools.push({
               name: t.name,
               description: t.description,
@@ -76,6 +91,7 @@ export async function discover(url: string, options?: DiscoverOptions): Promise<
         (cursor) => client.listResources(cursor !== undefined ? { cursor } : undefined),
         (result) => {
           for (const r of result.resources ?? []) {
+            disc.pinnedListing?.resources.push(r);
             disc.resources.push({
               name: r.name,
               uri: r.uri,
@@ -90,6 +106,7 @@ export async function discover(url: string, options?: DiscoverOptions): Promise<
         (cursor) => client.listResourceTemplates(cursor !== undefined ? { cursor } : undefined),
         (result) => {
           for (const t of result.resourceTemplates ?? []) {
+            disc.pinnedListing?.resourceTemplates.push(t);
             disc.resourceTemplates.push({
               name: t.name,
               uriTemplate: t.uriTemplate,
@@ -106,6 +123,7 @@ export async function discover(url: string, options?: DiscoverOptions): Promise<
         (cursor) => client.listPrompts(cursor !== undefined ? { cursor } : undefined),
         (result) => {
           for (const p of result.prompts ?? []) {
+            disc.pinnedListing?.prompts.push(p);
             disc.prompts.push({
               name: p.name,
               description: p.description,
@@ -285,6 +303,58 @@ function promptOutputSchema(): JSONSchema {
   };
 }
 
+/** Complete successful CallToolResult; outputSchema constrains structuredContent. */
+function toolResultOutputSchema(outputSchema?: Record<string, unknown>): JSONSchema {
+  const properties: Record<string, unknown> = {
+    _meta: { type: "object" },
+    content: { type: "array", items: { type: "object" } },
+    isError: { const: false },
+  };
+  if (outputSchema) properties.structuredContent = outputSchema;
+  return {
+    type: "object",
+    anyOf: [
+      {
+        properties: {
+          progress: { type: "number" },
+          total: { type: "number" },
+          message: { type: "string" },
+        },
+        required: ["progress"],
+      },
+      { properties, required: ["content"] },
+    ],
+  };
+}
+
+/** Complete ReadResourceResult emitted by either resource binding family. */
+function resourceOutputSchema(): JSONSchema {
+  return {
+    type: "object",
+    properties: {
+      _meta: { type: "object" },
+      contents: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            uri: { type: "string" },
+            mimeType: { type: "string" },
+            text: { type: "string" },
+            blob: { type: "string" },
+          },
+          required: ["uri"],
+          oneOf: [
+            { required: ["text"] },
+            { required: ["blob"] },
+          ],
+        },
+      },
+    },
+    required: ["contents"],
+  };
+}
+
 /**
  * Sanitize a name for use as an OBI operation key. Exported (alongside
  * {@link resolveKey}) so inspectSource can suggest the same operationKey
@@ -362,7 +432,9 @@ export function convertToInterface(disc: MCPDiscovery, location?: string): OBInt
     const op: Operation = {};
     if (tool.description) op.description = tool.description;
     if (tool.inputSchema) op.input = tool.inputSchema;
-    if (tool.outputSchema) op.output = tool.outputSchema;
+    // The binding emits the complete successful CallToolResult. MCP's
+    // outputSchema constrains only its structuredContent member.
+    op.output = toolResultOutputSchema(tool.outputSchema);
 
     operations[opKey] = op;
     bindings[`${opKey}.${DEFAULT_SOURCE_NAME}`] = { operation: opKey, source: DEFAULT_SOURCE_NAME, ref };
@@ -378,6 +450,7 @@ export function convertToInterface(disc: MCPDiscovery, location?: string): OBInt
 
     const op: Operation = {};
     if (res.description) op.description = res.description;
+    op.output = resourceOutputSchema();
 
     operations[opKey] = op;
     bindings[`${opKey}.${DEFAULT_SOURCE_NAME}`] = { operation: opKey, source: DEFAULT_SOURCE_NAME, ref };
@@ -394,6 +467,7 @@ export function convertToInterface(disc: MCPDiscovery, location?: string): OBInt
     if (tmpl.description) op.description = tmpl.description;
     const input = templateInputSchema(tmpl.uriTemplate);
     if (input) op.input = input;
+    op.output = resourceOutputSchema();
 
     operations[opKey] = op;
     bindings[`${opKey}.${DEFAULT_SOURCE_NAME}`] = { operation: opKey, source: DEFAULT_SOURCE_NAME, ref };

@@ -19,6 +19,7 @@ import {
   buildJsonPointerRef,
   codePointCompare,
 } from "./util.js";
+import { resolveServer } from "./servers.js";
 
 /**
  * Inventories path operations, request-media alternatives, callbacks, and
@@ -36,6 +37,8 @@ export function openAPISynthesisCoverage(
   for (const binding of Object.values(iface.bindings ?? {})) {
     if (binding.ref) byRef.set(binding.ref, { operationKey: binding.operation, ref: binding.ref });
   }
+  const sourceLocation = Object.values(iface.sources ?? {})
+    .find((source) => source.bindingSpec === "openbindings.openapi@1")?.location ?? "";
 
   const entries: SynthesisCoverageEntry[] = [];
   for (const [path, rawPathItem] of sortedEntries(doc.paths)) {
@@ -65,6 +68,7 @@ export function openAPISynthesisCoverage(
         status: "represented",
         operationKey: identity.operationKey,
         bindingRef: identity.ref,
+        requirements: serverRequirements(doc, pathItem, operation, sourceLocation),
       });
       entries.push(...requestMediaCoverage(operation, pathItem, identity));
       entries.push(...callbackCoverage(operation, ref));
@@ -72,6 +76,20 @@ export function openAPISynthesisCoverage(
   }
   entries.push(...webhookCoverage(doc));
   return entries;
+}
+
+function serverRequirements(
+  doc: OpenAPIDocument,
+  pathItem: OpenAPIPathItem,
+  operation: OpenAPIOperation,
+  sourceLocation: string,
+): string[] {
+  try {
+    resolveServer(doc, pathItem, operation, undefined, sourceLocation);
+    return [];
+  } catch {
+    return ["configuration.server"];
+  }
 }
 
 function requestMediaCoverage(

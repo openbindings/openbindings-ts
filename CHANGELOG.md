@@ -4,6 +4,31 @@
 
 ### Changed
 
+- **`fetchInterface` retains synthesis coverage.** A synthesized
+  `FetchedInterface` now carries the durable `SynthesisCoverage` emitted by a
+  coverage-capable synthesizer instead of discarding it at acquisition. A
+  synthesizer without that optional surface still falls back to strict
+  synthesis. Direct and well-known OBI fetches leave coverage absent, matching
+  Go.
+
+- **MCP synthesis and invocation now support the same fidelity-tested native
+  round-trip contract as Go.** Synthesized tool output schemas describe the
+  complete `CallToolResult`, scope upstream `outputSchema` to
+  `structuredContent`, and admit solicited progress; resource operations
+  describe complete `ReadResourceResult` values. Live embedding retains the
+  pagination-exhausted listing, discovery gates the negotiated revision,
+  native `isError` results retain the MCP payload in error details, and
+  `bearerToken` uses the declared `Authorization: Bearer` carrier.
+
+- **Portable synthesis conformance now proves refusal as well as successful
+  coverage.** The shared version-2 corpus requires loud whole-source failure
+  where faithful synthesis is impossible, and records runtime configuration
+  prerequisites on represented targets. The resulting loop fixed gRPC and
+  Connect authoring paths that accepted source target spellings their
+  invokers would refuse; OpenAPI coverage now identifies unresolved server
+  selection, and gRPC coverage identifies the transport election required by
+  bare `host:port`.
+
 - **BREAKING: the experimental `@openbindings/workers-rpc` package was
   removed.** Its legacy token had no published binding specification, its
   runtime-local behavior could not participate in the Go/TypeScript

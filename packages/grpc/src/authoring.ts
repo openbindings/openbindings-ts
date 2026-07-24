@@ -60,7 +60,14 @@ export class GrpcSynthesizer implements InterfaceSynthesizer, CoverageSynthesize
     const observation = await this.#synthesizeObserved(input, options);
     return finalizeSynthesisCoverage(
       observation.iface,
-      protobufSynthesisCoverage(observation.root, observation.iface, observation.warnings),
+      protobufSynthesisCoverage(
+        observation.root,
+        observation.iface,
+        observation.warnings,
+        requiresTransportConfiguration(emittedDialLocation(observation.iface))
+          ? ["configuration.transport"]
+          : [],
+      ),
       true,
     );
   }
@@ -74,6 +81,8 @@ export class GrpcSynthesizer implements InterfaceSynthesizer, CoverageSynthesize
     if (sources.length > 1) throw new MultipleSourcesError();
     const source = sources[0]!;
     if (source.bindingSpec !== BINDING_SPEC) throw new Error(`synthesizer supports exact binding specification ${JSON.stringify(BINDING_SPEC)}, got ${JSON.stringify(source.bindingSpec)}`);
+    if (!source.location) throw new Error("gRPC source requires a dial location");
+    validateDialLocation(source.location);
     if (source.outputLocation) validateDialLocation(source.outputLocation);
     if (source.embed && source.content === undefined) {
       throw new Error("gRPC reflection embedding is not supported: preserving the complete reflected descriptor closure is required; provide embedded protobuf content explicitly");
@@ -109,13 +118,24 @@ export class GrpcSynthesizer implements InterfaceSynthesizer, CoverageSynthesize
   }
 }
 
+function emittedDialLocation(iface: OBInterface): string | undefined {
+  return Object.values(iface.sources ?? {})
+    .find((source) => source.bindingSpec === BINDING_SPEC)?.location;
+}
+
+function requiresTransportConfiguration(location: string | undefined): boolean {
+  return location !== undefined
+    && !location.startsWith("grpc://")
+    && !location.startsWith("grpcs://");
+}
+
 function validateDialLocation(location: string): void {
   let address = location;
   if (address.startsWith("grpc://")) address = address.slice("grpc://".length);
   else if (address.startsWith("grpcs://")) address = address.slice("grpcs://".length);
-  else if (address.includes("://")) throw new Error(`gRPC outputLocation ${JSON.stringify(location)} uses an undefined scheme`);
+  else if (address.includes("://")) throw new Error(`gRPC location ${JSON.stringify(location)} uses an undefined scheme`);
   if (!/^(?:\[[^\]]+\]|[^/:\s]+):\d+$/.test(address)) {
-    throw new Error(`gRPC outputLocation ${JSON.stringify(location)} must be host:port with an explicit port`);
+    throw new Error(`gRPC location ${JSON.stringify(location)} must be host:port with an explicit port`);
   }
 }
 
