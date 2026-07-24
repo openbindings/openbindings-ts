@@ -53,6 +53,6 @@
   "dependencies": {
     "canonicalize": "^2.1.0",
     "json-schema-library": "^11.6.1",
-    "jsonata": "^2.1.0"
+    "jsonata": "2.1.1"
   }
 }

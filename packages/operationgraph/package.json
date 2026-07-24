@@ -55,6 +55,6 @@
   "devDependencies": {
     "@openbindings/sdk": "workspace:*",
     "@types/node": "^22.0.0",
-    "jsonata": "^2.1.0"
+    "jsonata": "2.1.1"
   }
 }

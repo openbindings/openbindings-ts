@@ -45,7 +45,7 @@ importers:
         version: 5.56.7(@typescript-eslint/types@8.65.0)
       svelte-check:
         specifier: ^4.4.2
-        version: 4.7.3(picomatch@4.0.4)(svelte@5.56.7(@typescript-eslint/types@8.65.0))(typescript@5.9.3)
+        version: 4.7.3(picomatch@4.0.5)(svelte@5.56.7(@typescript-eslint/types@8.65.0))(typescript@5.9.3)
       tsup:
         specifier: ^8.5.1
         version: 8.5.1(postcss@8.5.16)(tsx@4.21.0)(typescript@5.9.3)
@@ -210,8 +210,8 @@ importers:
         specifier: ^22.0.0
         version: 22.19.17
       jsonata:
-        specifier: ^2.1.0
-        version: 2.2.1
+        specifier: 2.1.1
+        version: 2.1.1
 
   packages/sdk:
     dependencies:
@@ -222,8 +222,8 @@ importers:
         specifier: ^11.6.1
         version: 11.6.1
       jsonata:
-        specifier: ^2.1.0
-        version: 2.2.1
+        specifier: 2.1.1
+        version: 2.1.1
 
   packages/usage:
     dependencies:
@@ -1401,8 +1401,8 @@ packages:
   json-stable-stringify-without-jsonify@1.0.1:
     resolution: {integrity: sha512-Bdboy+l7tA3OGW6FjyFHWkP5LuByj1Tk33Ljyq0axyzdk9//JSi2u3fP1QSmd1KNwq6VOKYGlAu87CisVir6Pw==}
 
-  jsonata@2.2.1:
-    resolution: {integrity: sha512-xd1uwUrKeIcJbsWhaoS3qAX4Ea8m0Mw0G5nlnAQvPT7TbZ5qaPdzBVTQia9KfyuyQm+nenfyjvzUDTRYHsC2sw==}
+  jsonata@2.1.1:
+    resolution: {integrity: sha512-OXOWb1MRKcSy5y8rGUH4GYuVeS6p/QeytoBaCgdzmue/0XyTKH5QHWg7Z/C9AuyRWL+jF4FMkpYqo1TktqImJg==}
     engines: {node: '>= 8'}
 
   keyv@4.5.4:
@@ -3124,7 +3124,7 @@ snapshots:
 
   json-stable-stringify-without-jsonify@1.0.1: {}
 
-  jsonata@2.2.1: {}
+  jsonata@2.1.1: {}
 
   keyv@4.5.4:
     dependencies:
@@ -3531,19 +3531,6 @@ snapshots:
       pirates: 4.0.7
       tinyglobby: 0.2.16
       ts-interface-checker: 0.1.13
-
-  svelte-check@4.7.3(picomatch@4.0.4)(svelte@5.56.7(@typescript-eslint/types@8.65.0))(typescript@5.9.3):
-    dependencies:
-      '@jridgewell/trace-mapping': 0.3.31
-      '@sveltejs/load-config': 0.2.0
-      chokidar: 4.0.3
-      fdir: 6.5.0(picomatch@4.0.4)
-      picocolors: 1.1.1
-      sade: 1.8.1
-      svelte: 5.56.7(@typescript-eslint/types@8.65.0)
-      typescript: 5.9.3
-    transitivePeerDependencies:
-      - picomatch
 
   svelte-check@4.7.3(picomatch@4.0.5)(svelte@5.56.7(@typescript-eslint/types@8.65.0))(typescript@5.9.3):
     dependencies:

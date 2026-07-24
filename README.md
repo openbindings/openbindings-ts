@@ -6,6 +6,12 @@ OpenBindings is an open standard: one interface, limitless bindings. An OBI (Ope
 
 **Spec version:** implements OpenBindings 0.2. To ask whether this SDK will accept a document of a given version, call `isSupportedVersion(version)` — the OBI-T-04 acceptance oracle: it returns true exactly when `validateInterface` / `parseDocument` would process (not refuse) that version, so it is patch-lenient within a supported minor line (a 0.2.0 SDK accepts 0.2.1, 0.2.99, …) and refuses a different major, a pre-1.0 different minor, and unsupported prereleases. `MIN_SUPPORTED_VERSION` / `MAX_TESTED_VERSION` / `supportedRange()` are a distinct, narrower notion — the maintainer-*tested* range — and a version can be accepted without falling inside it.
 
+> **Draft status:** this branch implements the unreleased 0.2 working draft.
+> Package versions are staged at `0.2.0` but are not available from npm until
+> the coordinated release workflow succeeds. The install commands below are
+> the post-release package paths. To evaluate the draft, clone this repository
+> and use the pnpm workspace.
+
 ## Packages
 
 | Package | Description | Install |
@@ -19,6 +25,17 @@ OpenBindings is an open standard: one interface, limitless bindings. An OBI (Ope
 | `@openbindings/usage` | jdx usage binding invoker and interface synthesizer | `npm install @openbindings/usage` |
 | `@openbindings/graphql` | GraphQL binding invoker and exhaustive root-field interface synthesizer | `npm install @openbindings/graphql` |
 | `@openbindings/operationgraph` | Operation-graph binding invoker (compose operations) | `npm install @openbindings/operationgraph` |
+
+For draft development:
+
+```bash
+pnpm install
+pnpm check
+pnpm test
+```
+
+Applications should not publish dependencies on the local workspace or assume
+the staged `0.2.0` versions are registry-visible before the release.
 
 ## What the SDK does
 
