@@ -323,3 +323,318 @@ export function isObjectTypedSchema(schema: Record<string, unknown>): boolean {
   if (Array.isArray(ty)) return ty.length === 1 && ty[0] === "object";
   return false;
 }
+
+// ---------------------------------------------------------------------------
+// Cyclic-schema handling (rev 2a)
+// ---------------------------------------------------------------------------
+
+/**
+ * Maps the identity of each named component schema node to its name.
+ * After full dereference, internal `$ref`s alias the very objects under
+ * `components.schemas`, so object identity recovers the upstream name a
+ * cycle participant was declared under.
+ */
+export function componentSchemaNames(doc: Record<string, unknown>): Map<object, string> {
+  const names = new Map<object, string>();
+  const components = doc["components"];
+  const schemas = components && typeof components === "object"
+    ? (components as Record<string, unknown>)["schemas"]
+    : undefined;
+  if (schemas && typeof schemas === "object" && !Array.isArray(schemas)) {
+    for (const [name, node] of Object.entries(schemas as Record<string, unknown>)) {
+      if (node && typeof node === "object") names.set(node as object, name);
+    }
+  }
+  return names;
+}
+
+/**
+ * Converts a possibly-cyclic dereferenced schema graph into an equivalent
+ * acyclic JSON Schema tree using the dialect's own recursion mechanism:
+ * every occurrence of a cycle-participating named component becomes
+ * `{"$ref": "<refBase>/$defs/<componentName>"}` (a same-document pointer from the OBI root, per OBI-D-16) and the component's definition is
+ * hoisted into `$defs` (itself rewritten under the same rule). An anonymous
+ * cycle (one passing through no named component — only possible via a
+ * non-component `$ref` target upstream) is hoisted under a deterministic
+ * `cycleN` name at its back-edge target.
+ *
+ * This is incorporation, not invention: `$defs`/`$ref` recursion has
+ * identical validation semantics to the infinite unfolding the artifact
+ * declares (JSON Schema 2020-12), and the emitted OBI schema graph is
+ * self-contained and fully evaluable (core §5.2 / OBI-T-16). Mirrors the Go
+ * SDK's inlineRefs cyclic handling (formats/openapi/synthesize.go).
+ */
+/**
+ * Computes, once per document, the set of named component schema nodes that
+ * participate in a reference cycle (can reach themselves). decycleSchema
+ * consumes this set per embedded schema.
+ */
+export function cyclicComponents(names: ReadonlyMap<object, string>): ReadonlySet<object> {
+  const cyclic = new Set<object>();
+  for (const node of names.keys()) {
+    const visited = new Set<object>();
+    const work: unknown[] = [node];
+    let reachesSelf = false;
+    while (work.length > 0 && !reachesSelf) {
+      const current = work.pop();
+      if (current === null || typeof current !== "object") continue;
+      for (const child of Object.values(current as Record<string, unknown>)) {
+        if (child === null || typeof child !== "object") continue;
+        if (child === node) { reachesSelf = true; break; }
+        if (!visited.has(child as object)) { visited.add(child as object); work.push(child); }
+      }
+    }
+    if (reachesSelf) cyclic.add(node);
+  }
+  return cyclic;
+}
+
+/**
+ * Computes the set of nodes in `root`'s object graph that can reach
+ * themselves (members of a strongly connected component with a cycle).
+ * Iterative Tarjan — dereferenced documents can be deep.
+ */
+function selfReachingSCCs(root: object): ReadonlyArray<ReadonlySet<object>> {
+  const index = new Map<object, number>();
+  const low = new Map<object, number>();
+  const onStack = new Set<object>();
+  const sccStack: object[] = [];
+  const groups: Array<Set<object>> = [];
+  let counter = 0;
+
+  type Frame = { node: object; children: object[]; next: number };
+  const childrenOf = (node: object): object[] => {
+    const out: object[] = [];
+    for (const value of Object.values(node)) {
+      if (value !== null && typeof value === "object") out.push(value as object);
+    }
+    return out;
+  };
+
+  const frames: Frame[] = [];
+  const push = (node: object): void => {
+    index.set(node, counter);
+    low.set(node, counter);
+    counter += 1;
+    sccStack.push(node);
+    onStack.add(node);
+    frames.push({ node, children: childrenOf(node), next: 0 });
+  };
+  push(root);
+
+  while (frames.length > 0) {
+    const frame = frames[frames.length - 1];
+    if (frame.next < frame.children.length) {
+      const child = frame.children[frame.next];
+      frame.next += 1;
+      if (!index.has(child)) {
+        push(child);
+      } else if (onStack.has(child)) {
+        low.set(frame.node, Math.min(low.get(frame.node) as number, index.get(child) as number));
+        if (child === frame.node) groups.push(new Set([frame.node])); // self-loop
+      }
+    } else {
+      frames.pop();
+      if (low.get(frame.node) === index.get(frame.node)) {
+        const members: object[] = [];
+        for (;;) {
+          const member = sccStack.pop() as object;
+          onStack.delete(member);
+          members.push(member);
+          if (member === frame.node) break;
+        }
+        if (members.length > 1) groups.push(new Set(members));
+      }
+      const parent = frames[frames.length - 1];
+      if (parent) {
+        low.set(parent.node, Math.min(low.get(parent.node) as number, low.get(frame.node) as number));
+      }
+    }
+  }
+  return groups;
+}
+
+type SchemaPos = "schema" | "schemaMap" | "schemaArray" | "data";
+
+const DECYCLE_SINGLE_KEYS = new Set([
+  "items", "additionalProperties", "not", "if", "then", "else",
+  "propertyNames", "contains", "unevaluatedItems", "unevaluatedProperties",
+]);
+const DECYCLE_MAP_KEYS = new Set([
+  "properties", "patternProperties", "$defs", "definitions", "dependentSchemas",
+]);
+const DECYCLE_ARRAY_KEYS = new Set(["oneOf", "anyOf", "allOf", "prefixItems"]);
+
+export function decycleSchema(
+  schema: unknown,
+  names: ReadonlyMap<object, string>,
+  refBase: string,
+): unknown {
+  if (schema === null || typeof schema !== "object") return schema;
+
+  // Which reachable nodes participate in a cycle? Identity-level, not
+  // name-level: sibling-merged $refs produce anonymous copies whose cycles
+  // never pass through the named component object, so detection is an SCC
+  // computation over the object graph (iterative Tarjan). Within an SCC
+  // that contains named components, only the named members are hoisted —
+  // anonymous intermediates (property maps, array wrappers) inline and the
+  // cycle cuts at the named node. An SCC with no named member hoists all
+  // its members, cutting at the first schema-position encounter; the
+  // on-stack backstop below covers any unnamed sub-loop.
+  const cyclic = new Set<object>();
+  for (const group of selfReachingSCCs(schema as object)) {
+    const named = [...group].filter((member) => names.has(member));
+    for (const member of named.length > 0 ? named : [...group]) cyclic.add(member);
+  }
+
+  const defs: Record<string, unknown> = {};
+  const defName = new Map<object, string>();
+  let anon = 0;
+  const assignName = (node: object): string => {
+    let name = defName.get(node);
+    if (name !== undefined) return name;
+    name = names.get(node) ?? `cycle${anon++}`;
+    while (Object.hasOwn(defs, name) || [...defName.values()].includes(name)) name = `${name}_`;
+    defName.set(node, name);
+    return name;
+  };
+  const pendingDefs: object[] = [];
+  const stack = new Set<object>();
+  // Fully-dereferenced documents are DAGs: shared components appear at many
+  // sites. Memoize the copy of every acyclic completed subtree (per position
+  // kind) so the output shares structure instead of re-expanding it.
+  const memo = new Map<SchemaPos, Map<object, unknown>>();
+
+  const hoistRef = (node: object): Record<string, unknown> => {
+    const name = assignName(node);
+    if (!Object.hasOwn(defs, name)) {
+      defs[name] = null; // reserve; materialized below
+      pendingDefs.push(node);
+    }
+    return { $ref: `${refBase}/$defs/${name}` };
+  };
+
+  const childPos = (parentPos: SchemaPos, key: string): SchemaPos => {
+    switch (parentPos) {
+      case "schema":
+        if (DECYCLE_SINGLE_KEYS.has(key)) return "schema";
+        if (DECYCLE_MAP_KEYS.has(key)) return "schemaMap";
+        if (DECYCLE_ARRAY_KEYS.has(key)) return "schemaArray";
+        return "data"; // annotations, enum/const/default values, unknown keywords
+      case "schemaMap": return "schema";
+      case "schemaArray": return "schema";
+      case "data": return "data";
+    }
+  };
+
+  const copyChildren = (node: object, pos: SchemaPos): unknown => {
+    stack.add(node);
+    let out: unknown;
+    if (Array.isArray(node)) {
+      out = node.map((item) => copy(item, pos === "schemaArray" ? "schema" : pos === "data" ? "data" : pos));
+    } else {
+      const target: Record<string, unknown> = {};
+      for (const key of Object.keys(node).sort(codePointCompare)) {
+        target[key] = copy((node as Record<string, unknown>)[key], childPos(pos, key));
+      }
+      out = target;
+    }
+    stack.delete(node);
+    return out;
+  };
+
+  const copy = (node: unknown, pos: SchemaPos): unknown => {
+    if (node === null || typeof node !== "object") return node;
+    const obj = node as object;
+    // Hoisting emits a {$ref} object, which only means "reference" at a
+    // schema position. Cycle participants at other positions (a shared
+    // properties map behind a sibling-merged reference; annotation data)
+    // are walked through — every reference cycle passes through a schema
+    // position within one lap, where it is cut.
+    if (pos === "schema" && !Array.isArray(obj)) {
+      if (cyclic.has(obj)) return hoistRef(obj);
+      if (stack.has(obj)) return hoistRef(obj); // anonymous cycle backstop
+    } else if (stack.has(obj)) {
+      // On-stack non-schema position: continue without re-adding; the walk
+      // terminates when the cycle re-crosses a schema position.
+      return copyChildrenOnStack(obj, pos);
+    }
+    let posMemo = memo.get(pos);
+    const cached = posMemo?.get(obj);
+    if (cached !== undefined) return cached;
+    const out = copyChildren(obj, pos);
+    if (!posMemo) { posMemo = new Map(); memo.set(pos, posMemo); }
+    posMemo.set(obj, out);
+    return out;
+  };
+
+  const onStackLaps = new Map<object, number>();
+  const copyChildrenOnStack = (node: object, pos: SchemaPos): unknown => {
+    // A cycle that never crosses a schema position (cyclic data reached via
+    // a dereferenced $ref inside an annotation value) has no faithful
+    // tree representation; refuse loudly rather than loop.
+    const laps = (onStackLaps.get(node) ?? 0) + 1;
+    if (laps > 8) {
+      throw new Error("cyclic value at a non-schema position cannot be represented as a JSON tree");
+    }
+    onStackLaps.set(node, laps);
+    try {
+    if (Array.isArray(node)) {
+      return node.map((item) => copy(item, pos === "schemaArray" ? "schema" : pos === "data" ? "data" : pos));
+    }
+    const target: Record<string, unknown> = {};
+    for (const key of Object.keys(node).sort(codePointCompare)) {
+      target[key] = copy((node as Record<string, unknown>)[key], childPos(pos, key));
+    }
+    return target;
+    } finally {
+      onStackLaps.set(node, (onStackLaps.get(node) ?? 1) - 1);
+    }
+  };
+
+  const root = copyChildren(schema as object, "schema");
+  while (pendingDefs.length > 0) {
+    const node = pendingDefs.shift() as object;
+    const name = defName.get(node) as string;
+    defs[name] = copyChildren(node, "schema");
+  }
+
+  if (Object.keys(defs).length === 0) return root;
+  const sortedDefs: Record<string, unknown> = {};
+  for (const key of Object.keys(defs).sort(codePointCompare)) sortedDefs[key] = defs[key];
+  return { ...(root as Record<string, unknown>), $defs: sortedDefs };
+}
+
+
+/**
+ * Escapes a string for use as a JSON Pointer segment (RFC 6901).
+ */
+export function escapePointerSegment(segment: string): string {
+  return segment.replaceAll("~", "~0").replaceAll("/", "~1");
+}
+
+/**
+ * A deduplication KEY for possibly-cyclic values: JSON text with any
+ * back-edge replaced by a cycle marker. Discriminating, deterministic, and
+ * total on cyclic graphs — never used as an emitted value.
+ */
+export function cycleSafeKey(value: unknown): string {
+  const stack = new Set<object>();
+  const walk = (node: unknown): unknown => {
+    if (node === null || typeof node !== "object") return node;
+    if (stack.has(node as object)) return { $cycle: true };
+    stack.add(node as object);
+    let out: unknown;
+    if (Array.isArray(node)) out = node.map(walk);
+    else {
+      const target: Record<string, unknown> = {};
+      for (const key of Object.keys(node).sort(codePointCompare)) {
+        target[key] = walk((node as Record<string, unknown>)[key]);
+      }
+      out = target;
+    }
+    stack.delete(node as object);
+    return out;
+  };
+  return JSON.stringify(walk(value));
+}

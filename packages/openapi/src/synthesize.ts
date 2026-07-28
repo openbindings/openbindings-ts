@@ -23,18 +23,54 @@ import {
   bodySchemaFlattens,
   buildJsonPointerRef,
   codePointCompare,
+  componentSchemaNames,
+  cycleSafeKey,
+  decycleSchema,
+  escapePointerSegment,
   loadOpenAPIDocument,
   sanitizeKey,
   uniqueKey,
 } from "./util.js";
 
-/** Loads an OpenAPI document and converts it into an OBInterface with operations and bindings. */
+/**
+ * A paths operation admitted by the artifact but unrepresentable under
+ * revision 1's flattened boundary. Reported instead of thrown when the
+ * caller opts into per-operation tolerance (the coverage and inspection
+ * surfaces), so one unrepresentable operation narrows coverage rather than
+ * vetoing the document (core §10's posture; interface-synthesizer contract's
+ * "sound partial OBI").
+ */
+export interface UnrealizableTarget {
+  /** JSON-pointer ref of the paths operation. */
+  ref: string;
+  /** The operation key synthesis would have assigned. */
+  operationKey: string;
+  /** Stable family-namespaced reason code. */
+  reasonCode: string;
+  /** Governing binding-specification rule. */
+  rule: string;
+  message: string;
+}
+
+/**
+ * Loads an OpenAPI document and converts it into an OBInterface with
+ * operations and bindings.
+ *
+ * When `onUnrealizable` is provided, an operation whose revision-1 flattened
+ * boundary cannot be represented is reported and skipped — no operation, no
+ * binding — and synthesis continues (tolerant mode: the coverage and
+ * inspection surfaces). When absent, the same condition throws (strict mode:
+ * `synthesizeInterface`), preserving the convenient strict surface's
+ * guarantee that it never returns a statically unbindable partial interface
+ * without evidence.
+ */
 export async function convertToInterface(
   location?: string,
   content?: unknown,
   options?: { signal?: AbortSignal },
   onWarning?: (warning: SynthesizerWarning) => void,
   onDocument?: (document: OpenAPIDocument) => void,
+  onUnrealizable?: (target: UnrealizableTarget) => void,
 ): Promise<OBInterface> {
   // loadOpenAPIDocument fully dereferences (every $ref, internal and
   // external, matching Go's kin-openapi loader), so extracted schemas are
@@ -66,6 +102,11 @@ export async function convertToInterface(
 
   if (!doc.paths) return iface;
 
+  // Full dereference aliases internal $refs to shared nodes, so a recursive
+  // component is a true object cycle here. Schema embedding rewrites cycle
+  // participants to self-contained $defs references (decycleSchema).
+  const schemaNames = componentSchemaNames(doc as unknown as Record<string, unknown>);
+
   const usedKeys = new Set<string>();
 
   for (const [pathStr, pathItemRaw] of sortedEntries(doc.paths)) {
@@ -78,21 +119,32 @@ export async function convertToInterface(
 
       const opKey = deriveOperationKey(opObj, pathStr, method, usedKeys);
       usedKeys.add(opKey);
+      const ref = buildJsonPointerRef(pathStr, method);
 
       const params = effectiveParameters(pathItem, opObj);
       const unflattenable = unflattenableParam(params);
       if (unflattenable) {
-        throw unrealizableOperation(
-          opKey,
-          `parameter ${JSON.stringify(unflattenable)} has no unique revision-1 flattened identity`,
-        );
+        const reason = `parameter ${JSON.stringify(unflattenable)} has no unique revision-1 flattened identity`;
+        if (onUnrealizable) {
+          onUnrealizable({
+            ref,
+            operationKey: opKey,
+            reasonCode: "openapi.flattening_collision",
+            rule: "OAPI-P-03",
+            message: reason,
+          });
+          continue;
+        }
+        throw unrealizableOperation(opKey, reason);
       }
 
       let requestPlans: BodyPlan[] = [];
       if (opObj.requestBody) {
         let planError: unknown;
+        let plannedCount = 0;
         try {
           const plans = planRequestBodies(opObj);
+          plannedCount = plans.length;
           requestPlans = plans.filter((plan) => !candidateCollides(params, plan));
         } catch (error: unknown) {
           planError = error;
@@ -104,6 +156,25 @@ export async function convertToInterface(
             : planError === undefined
               ? "no artifact-declared request media candidate can realize its required flattened input"
               : safeErrorMessage(planError);
+          if (onUnrealizable) {
+            // Every plannable candidate colliding with an independently
+            // declared parameter is the flattening-identity refusal
+            // (OAPI-P-03); a candidate set that never planned is the
+            // media-carriage refusal (OAPI-P-04).
+            const allCollided = planError === undefined && plannedCount > 0;
+            onUnrealizable({
+              ref,
+              operationKey: opKey,
+              reasonCode: allCollided
+                ? "openapi.flattening_collision"
+                : planError instanceof DegenerateMediaError
+                  ? "openapi.media_schema_mismatch"
+                  : "openapi.unresolvable_request_body",
+              rule: allCollided ? "OAPI-P-03" : "OAPI-P-04",
+              message: `${reason}; the required request body has no faithful revision-1 carriage`,
+            });
+            continue;
+          }
           throw unrealizableOperation(opKey, reason);
         }
 
@@ -125,19 +196,24 @@ export async function convertToInterface(
         obiOp.tags = opObj.tags;
       }
 
+      // Embedding rewrites any recursive-component cycle into $defs on the
+      // schema root, referenced by same-document pointers from the OBI root
+      // (OBI-D-16); translation then runs on an acyclic tree.
+      const opPointer = `#/operations/${escapePointerSegment(opKey)}`;
       const inputSchema = buildInputSchemaForPlans(opObj, params, requestPlans);
       if (inputSchema) {
-        obiOp.input = translateSchemaDialect(inputSchema, formatVersion) as JSONSchema;
+        const acyclicInput = decycleSchema(inputSchema, schemaNames, `${opPointer}/input`);
+        obiOp.input = translateSchemaDialect(acyclicInput, formatVersion) as JSONSchema;
       }
 
       const outputSchema = buildOutputSchema(opObj);
       if (outputSchema) {
-        obiOp.output = translateSchemaDialect(outputSchema, formatVersion) as JSONSchema;
+        const acyclicOutput = decycleSchema(outputSchema, schemaNames, `${opPointer}/output`);
+        obiOp.output = translateSchemaDialect(acyclicOutput, formatVersion) as JSONSchema;
       }
 
       iface.operations[opKey] = obiOp;
 
-      const ref = buildJsonPointerRef(pathStr, method);
       const bindingKey = `${opKey}.${DEFAULT_SOURCE_NAME}`;
       (iface.bindings as Record<string, BindingEntry>)[bindingKey] = {
         operation: opKey,
@@ -214,8 +290,11 @@ function buildInputSchemaForPlans(
     const parameterOnly = buildInputSchema(op, allParams);
     if (parameterOnly) variants.unshift(parameterOnly);
   }
+  // cycleSafeKey: the variants may carry object cycles from recursive
+  // components; keys must be total on cyclic graphs. The emitted tree is
+  // made acyclic once, at embed time (decycleSchema in convertToInterface).
   const unique = new Map<string, JSONSchema>();
-  for (const schema of variants) unique.set(JSON.stringify(schema), schema);
+  for (const schema of variants) unique.set(cycleSafeKey(schema), schema);
   const schemas = [...unique.values()];
   if (schemas.length === 0) return undefined;
   if (schemas.length === 1) return schemas[0];
@@ -332,7 +411,7 @@ function buildOutputSchema(op: OpenAPIOperation): JSONSchema | undefined {
       }
     }
   }
-  const unique = [...new Map(schemas.map((schema) => [JSON.stringify(schema), schema])).values()];
+  const unique = [...new Map(schemas.map((schema) => [cycleSafeKey(schema), schema])).values()];
   if (unique.length === 0) return undefined;
   return unique.length === 1 ? unique[0] : { anyOf: unique };
 }

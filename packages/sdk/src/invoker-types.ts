@@ -280,8 +280,18 @@ export function finalizeSynthesisCoverage(
         code: "synthesis.inventory_incomplete",
         message: "the implementation could not establish that its source interaction inventory was exhaustive",
       },
+  options?: {
+    /**
+     * Set false when the SAME interface value was already validated at this
+     * observation boundary (finalizeSynthesis) — interface validation over a
+     * large document is the dominant synthesis cost, and validating an
+     * unchanged value twice buys nothing. Coverage-entry validation always
+     * runs.
+     */
+    revalidateInterface?: boolean;
+  },
 ): SynthesizeResult {
-  validateInterface(iface);
+  if (options?.revalidateInterface !== false) validateInterface(iface);
   if (exhaustive && limitation) {
     throw new Error("exhaustive synthesis coverage must not carry a limitation");
   }

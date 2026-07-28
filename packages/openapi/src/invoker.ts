@@ -24,7 +24,7 @@ import {
 import type { OpenAPIDocument } from "./types.js";
 import { DEFAULT_SOURCE_NAME, BINDING_SPEC } from "./constants.js";
 import { preflightTarget, requiredContext, runBinding } from "./invoke.js";
-import { convertToInterface } from "./synthesize.js";
+import { convertToInterface, type UnrealizableTarget } from "./synthesize.js";
 import { openAPISynthesisCoverage } from "./coverage.js";
 import { codePointCompare, errorMessage, loadOpenAPIDocument, validateDocumentAddress } from "./util.js";
 import {
@@ -177,18 +177,40 @@ export class OpenAPISynthesizer implements InterfaceSynthesizer, CoverageSynthes
     return iface;
   }
 
-  /** Synthesizes an OBI and durable interaction coverage from the same OpenAPI load. */
+  /**
+   * Synthesizes an OBI and durable interaction coverage from the same OpenAPI
+   * load. This surface is per-operation tolerant: an operation whose
+   * revision-1 flattened boundary cannot be represented is omitted from the
+   * OBI and accounted for as an excluded target in coverage — a sound partial
+   * OBI with every omission evidenced, never a whole-document refusal
+   * (interface-synthesizer contract; core §10 posture). Strict synthesis
+   * (`synthesizeInterface`) is unchanged.
+   */
   async synthesizeInterfaceWithCoverage(
     input: SynthesizeInput,
     options?: { signal?: AbortSignal },
   ): Promise<SynthesizeResult> {
-    const { iface, document } = await this.synthesizeObserved(input, options);
-    return finalizeSynthesisCoverage(iface, openAPISynthesisCoverage(document, iface), true);
+    const unrealizable = new Map<string, UnrealizableTarget>();
+    const { iface, document } = await this.synthesizeObserved(
+      input,
+      options,
+      (target) => unrealizable.set(target.ref, target),
+    );
+    // synthesizeObserved already ran finalizeSynthesis (which validates this
+    // same interface value); skip the redundant second validation.
+    return finalizeSynthesisCoverage(
+      iface,
+      openAPISynthesisCoverage(document, iface, unrealizable),
+      true,
+      undefined,
+      { revalidateInterface: false },
+    );
   }
 
   private async synthesizeObserved(
     input: SynthesizeInput,
     options?: { signal?: AbortSignal },
+    onUnrealizable?: (target: UnrealizableTarget) => void,
   ): Promise<{ iface: OBInterface; document?: OpenAPIDocument }> {
     const sources = input.sources ?? [];
     const src = sources[0];
@@ -213,6 +235,7 @@ export class OpenAPISynthesizer implements InterfaceSynthesizer, CoverageSynthes
       (observed) => {
         document = observed;
       },
+      onUnrealizable,
     );
     // Content is authoritative and remains verbatim in the synthesized
     // source. A co-present location is its base/provenance, not permission
@@ -234,9 +257,11 @@ export class OpenAPISynthesizer implements InterfaceSynthesizer, CoverageSynthes
   ): Promise<SourceInspection> {
     // Inspection and synthesis share the same realizability filter. A ref
     // whose revision-1 flattened boundary cannot be represented is not
-    // advertised as a bindable target merely because it appears in paths.
+    // advertised as a bindable target merely because it appears in paths —
+    // it is filtered per operation (tolerant mode), never a reason to refuse
+    // inspecting the rest of the document.
     const location = normalizeAuthoringLocation(source.location);
-    const iface = await convertToInterface(location, source.content, options);
+    const iface = await convertToInterface(location, source.content, options, undefined, undefined, () => {});
     const targets: SourceInspection["targets"] = [];
     for (const binding of Object.values(iface.bindings ?? {})) {
       targets.push({

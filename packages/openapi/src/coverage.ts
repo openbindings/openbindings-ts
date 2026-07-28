@@ -14,6 +14,7 @@ import {
 import { effectiveParameters } from "./params.js";
 import {
   HTTP_METHODS,
+  type UnrealizableTarget,
 } from "./synthesize.js";
 import {
   buildJsonPointerRef,
@@ -31,6 +32,7 @@ import { resolveServer } from "./servers.js";
 export function openAPISynthesisCoverage(
   doc: OpenAPIDocument | undefined,
   iface: OBInterface,
+  unrealizable?: ReadonlyMap<string, UnrealizableTarget>,
 ): SynthesisCoverageEntry[] {
   if (!doc) return [];
   const byRef = new Map<string, { operationKey: string; ref: string }>();
@@ -51,14 +53,29 @@ export function openAPISynthesisCoverage(
       const ref = buildJsonPointerRef(path, method);
       const identity = byRef.get(ref);
       if (!identity) {
-        entries.push({
-          sourceIndex: 0,
-          sourceRef: ref,
-          scope: "target",
-          status: "implementation-unsupported",
-          reasonCode: "openapi.missing_emitted_binding",
-          message: "the synthesizer returned without emitting this admitted paths operation",
-        });
+        // Tolerant synthesis skipped this operation with a recorded,
+        // spec-governed reason: a per-operation exclusion, not an
+        // implementation defect. Anything else genuinely missing remains
+        // an implementation invariant violation.
+        const skipped = unrealizable?.get(ref);
+        entries.push(skipped
+          ? {
+              sourceIndex: 0,
+              sourceRef: ref,
+              scope: "target",
+              status: "excluded",
+              reasonCode: skipped.reasonCode,
+              rule: skipped.rule,
+              message: skipped.message,
+            }
+          : {
+              sourceIndex: 0,
+              sourceRef: ref,
+              scope: "target",
+              status: "implementation-unsupported",
+              reasonCode: "openapi.missing_emitted_binding",
+              message: "the synthesizer returned without emitting this admitted paths operation",
+            });
         continue;
       }
       entries.push({

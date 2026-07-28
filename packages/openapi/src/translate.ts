@@ -55,7 +55,22 @@ const SCHEMA_BEARING_SINGLE_KEYS = new Set([
   "unevaluatedProperties",
 ]);
 
+// The decycled schema is a DAG with shared subtrees; memoize so translation
+// preserves that sharing instead of re-expanding it combinatorially.
+const translated = new WeakMap<object, unknown>();
+
 function translateNode(node: unknown): unknown {
+  if (node !== null && typeof node === "object") {
+    const cached = translated.get(node as object);
+    if (cached !== undefined) return cached;
+    const out = translateNodeUncached(node);
+    translated.set(node as object, out);
+    return out;
+  }
+  return translateNodeUncached(node);
+}
+
+function translateNodeUncached(node: unknown): unknown {
   if (Array.isArray(node)) {
     return node.map(translateNode);
   }
