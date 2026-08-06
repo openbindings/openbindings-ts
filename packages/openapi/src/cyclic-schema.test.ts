@@ -48,6 +48,7 @@ describe("cyclic schema synthesis (rev 2a)", () => {
     });
     const op = result.interface.operations["createTree"];
     expect(op).toBeDefined();
+    if (!op) throw new Error("createTree operation was not synthesized");
 
     // The whole interface must serialize — the OBI is a JSON document.
     const serialized = JSON.stringify(result.interface);

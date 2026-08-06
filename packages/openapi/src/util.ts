@@ -342,7 +342,7 @@ export function componentSchemaNames(doc: Record<string, unknown>): Map<object, 
     : undefined;
   if (schemas && typeof schemas === "object" && !Array.isArray(schemas)) {
     for (const [name, node] of Object.entries(schemas as Record<string, unknown>)) {
-      if (node && typeof node === "object") names.set(node as object, name);
+      if (node && typeof node === "object") names.set(node, name);
     }
   }
   return names;
@@ -381,7 +381,7 @@ export function cyclicComponents(names: ReadonlyMap<object, string>): ReadonlySe
       for (const child of Object.values(current as Record<string, unknown>)) {
         if (child === null || typeof child !== "object") continue;
         if (child === node) { reachesSelf = true; break; }
-        if (!visited.has(child as object)) { visited.add(child as object); work.push(child); }
+        if (!visited.has(child)) { visited.add(child); work.push(child); }
       }
     }
     if (reachesSelf) cyclic.add(node);
@@ -423,9 +423,9 @@ function selfReachingSCCs(root: object): ReadonlyArray<ReadonlySet<object>> {
   push(root);
 
   while (frames.length > 0) {
-    const frame = frames[frames.length - 1];
+    const frame = frames[frames.length - 1]!;
     if (frame.next < frame.children.length) {
-      const child = frame.children[frame.next];
+      const child = frame.children[frame.next]!;
       frame.next += 1;
       if (!index.has(child)) {
         push(child);
@@ -482,7 +482,7 @@ export function decycleSchema(
   // its members, cutting at the first schema-position encounter; the
   // on-stack backstop below covers any unnamed sub-loop.
   const cyclic = new Set<object>();
-  for (const group of selfReachingSCCs(schema as object)) {
+  for (const group of selfReachingSCCs(schema)) {
     const named = [...group].filter((member) => names.has(member));
     for (const member of named.length > 0 ? named : [...group]) cyclic.add(member);
   }
@@ -545,7 +545,7 @@ export function decycleSchema(
 
   const copy = (node: unknown, pos: SchemaPos): unknown => {
     if (node === null || typeof node !== "object") return node;
-    const obj = node as object;
+    const obj = node;
     // Hoisting emits a {$ref} object, which only means "reference" at a
     // schema position. Cycle participants at other positions (a shared
     // properties map behind a sibling-merged reference; annotation data)
@@ -592,7 +592,7 @@ export function decycleSchema(
     }
   };
 
-  const root = copyChildren(schema as object, "schema");
+  const root = copyChildren(schema, "schema");
   while (pendingDefs.length > 0) {
     const node = pendingDefs.shift() as object;
     const name = defName.get(node) as string;
@@ -622,8 +622,8 @@ export function cycleSafeKey(value: unknown): string {
   const stack = new Set<object>();
   const walk = (node: unknown): unknown => {
     if (node === null || typeof node !== "object") return node;
-    if (stack.has(node as object)) return { $cycle: true };
-    stack.add(node as object);
+    if (stack.has(node)) return { $cycle: true };
+    stack.add(node);
     let out: unknown;
     if (Array.isArray(node)) out = node.map(walk);
     else {
@@ -633,7 +633,7 @@ export function cycleSafeKey(value: unknown): string {
       }
       out = target;
     }
-    stack.delete(node as object);
+    stack.delete(node);
     return out;
   };
   return JSON.stringify(walk(value));

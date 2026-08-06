@@ -61,10 +61,10 @@ const translated = new WeakMap<object, unknown>();
 
 function translateNode(node: unknown): unknown {
   if (node !== null && typeof node === "object") {
-    const cached = translated.get(node as object);
+    const cached = translated.get(node);
     if (cached !== undefined) return cached;
     const out = translateNodeUncached(node);
-    translated.set(node as object, out);
+    translated.set(node, out);
     return out;
   }
   return translateNodeUncached(node);

@@ -105,7 +105,7 @@ export async function convertToInterface(
   // Full dereference aliases internal $refs to shared nodes, so a recursive
   // component is a true object cycle here. Schema embedding rewrites cycle
   // participants to self-contained $defs references (decycleSchema).
-  const schemaNames = componentSchemaNames(doc as unknown as Record<string, unknown>);
+  const schemaNames = componentSchemaNames(doc);
 
   const usedKeys = new Set<string>();
 
