@@ -205,20 +205,43 @@ describe("translateSchemaDialect — OpenAPI 3.0 → JSON Schema 2020-12", () =>
     });
   });
 
-  describe("passthrough", () => {
-    it("returns 3.1 schemas unchanged (already 2020-12)", () => {
+  describe("stray-nullable salvage (non-3.0 versions)", () => {
+    // Parity with the Go synthesizer: the wild's 3.1 documents routinely
+    // carry 3.0's removed nullable keyword (DRF pagination schemas via
+    // drf-spectacular — PokeAPI ships 132 of them), and preserved verbatim
+    // it silently rejects the very nulls the author declared.
+    it("translates a stray 3.1 nullable and drops the keyword", () => {
+      const input = {
+        type: ["string", "null"],
+        properties: { x: { type: "string", nullable: true, format: "uri" } },
+      };
+      const out = translateSchemaDialect(input, "3.1") as Record<string, unknown>;
+      expect(out.type).toEqual(["string", "null"]);
+      expect((out.properties as Record<string, unknown>).x).toEqual({
+        type: ["string", "null"],
+        format: "uri",
+      });
+    });
+
+    it("drops a stray nullable without a type", () => {
       const input = {
         type: ["string", "null"],
         properties: { x: { nullable: true } },
       };
-      const out = translateSchemaDialect(input, "3.1");
-      expect(out).toBe(input);
+      const out = translateSchemaDialect(input, "3.1") as Record<string, unknown>;
+      expect((out.properties as Record<string, unknown>).x).toEqual({});
     });
 
-    it("returns unknown-version schemas unchanged", () => {
+    it("leaves 3.1 exclusiveMinimum untouched (already numeric in 2020-12)", () => {
+      const input = { type: "integer", exclusiveMinimum: 5 };
+      const out = translateSchemaDialect(input, "3.1") as Record<string, unknown>;
+      expect(out).toEqual({ type: "integer", exclusiveMinimum: 5 });
+    });
+
+    it("salvages nullable under unknown versions too", () => {
       const input = { type: "string", nullable: true };
-      const out = translateSchemaDialect(input, "4.0");
-      expect(out).toBe(input);
+      const out = translateSchemaDialect(input, "4.0") as Record<string, unknown>;
+      expect(out).toEqual({ type: ["string", "null"] });
     });
 
     it("returns non-object schemas unchanged", () => {

@@ -5,22 +5,35 @@
  * synthesis time.
  *
  * Translations performed when `openapiVersion` is in the 3.0 family:
- *   - `{type: T, nullable: true}`        → `{type: [T, "null"]}`
- *   - `{type: [...], nullable: true}`    → `{type: [..., "null"]}`
- *   - `{nullable: true}` without `type`  → drop the keyword
  *   - `{minimum: N, exclusiveMinimum: true}` → `{exclusiveMinimum: N}`
  *   - `{exclusiveMinimum: false}` (or with no `minimum`) → drop the keyword
  *   - same for `maximum` / `exclusiveMaximum`
  *
- * 3.1 sources pass through unchanged (3.1 schemas are already 2020-12).
- * Unknown versions also pass through (forward-compatible).
+ * Translations performed for EVERY version:
+ *   - `{type: T, nullable: true}`        → `{type: [T, "null"]}`
+ *   - `{type: [...], nullable: true}`    → `{type: [..., "null"]}`
+ *   - `{nullable: true}` without `type`  → drop the keyword
+ *   - `{nullable: false}`                → drop the keyword
+ *
+ * The nullable transform is deliberately NOT gated on 3.0 (parity with the
+ * Go synthesizer, same rationale): OAS 3.1 removed the keyword, but the
+ * median real-world 3.1 document still carries it — DRF hand-writes it into
+ * pagination schemas and drf-spectacular forwards it verbatim even in 3.1
+ * mode, so every DRF-backed 3.1 spec ships it (PokeAPI: 132 occurrences
+ * across 54 of 100 operations). A 2020-12 validator ignores the unknown
+ * keyword, leaving `type: string` to reject the very null the author
+ * declared. The intent is unambiguous, and the schema-comparison profile
+ * already normalizes nullable unconditionally.
+ *
+ * Other 3.1 keywords pass through unchanged (3.1 schemas are already
+ * 2020-12); unknown versions get the nullable salvage only
+ * (forward-compatible).
  */
 export function translateSchemaDialect(
   schema: unknown,
   openapiVersion: string,
 ): unknown {
-  if (!isOpenAPI30(openapiVersion)) return schema;
-  return translateNode(schema);
+  return translateNode(schema, isOpenAPI30(openapiVersion));
 }
 
 function isOpenAPI30(version: string): boolean {
@@ -56,41 +69,50 @@ const SCHEMA_BEARING_SINGLE_KEYS = new Set([
 ]);
 
 // The decycled schema is a DAG with shared subtrees; memoize so translation
-// preserves that sharing instead of re-expanding it combinatorially.
-const translated = new WeakMap<object, unknown>();
+// preserves that sharing instead of re-expanding it combinatorially. One
+// cache per dialect mode: the same shared subtree translates differently
+// under 3.0 rules than under the version-independent nullable salvage.
+const translatedLegacy = new WeakMap<object, unknown>();
+const translatedModern = new WeakMap<object, unknown>();
 
-function translateNode(node: unknown): unknown {
+function translateNode(node: unknown, legacy: boolean): unknown {
   if (node !== null && typeof node === "object") {
-    const cached = translated.get(node as object);
+    const cache = legacy ? translatedLegacy : translatedModern;
+    const cached = cache.get(node as object);
     if (cached !== undefined) return cached;
-    const out = translateNodeUncached(node);
-    translated.set(node as object, out);
+    const out = translateNodeUncached(node, legacy);
+    cache.set(node as object, out);
     return out;
   }
-  return translateNodeUncached(node);
+  return translateNodeUncached(node, legacy);
 }
 
-function translateNodeUncached(node: unknown): unknown {
+function translateNodeUncached(node: unknown, legacy: boolean): unknown {
   if (Array.isArray(node)) {
-    return node.map(translateNode);
+    return node.map(item => translateNode(item, legacy));
   }
   if (node === null || typeof node !== "object") return node;
-  return translateObject(node as Record<string, unknown>);
+  return translateObject(node as Record<string, unknown>, legacy);
 }
 
-function translateObject(input: Record<string, unknown>): Record<string, unknown> {
+function translateObject(
+  input: Record<string, unknown>,
+  legacy: boolean,
+): Record<string, unknown> {
   const out: Record<string, unknown> = {};
 
   for (const [k, v] of Object.entries(input)) {
-    if (k === "nullable" || k === "exclusiveMinimum" || k === "exclusiveMaximum") {
+    // nullable never survives into the OBI in any version: translated into
+    // the type union when true (below), meaningless when false.
+    if (k === "nullable" || (legacy && (k === "exclusiveMinimum" || k === "exclusiveMaximum"))) {
       continue;
     }
     if (SCHEMA_BEARING_MAP_KEYS.has(k)) {
-      out[k] = translateSchemaMap(v);
+      out[k] = translateSchemaMap(v, legacy);
     } else if (SCHEMA_BEARING_ARRAY_KEYS.has(k)) {
-      out[k] = translateSchemaArray(v);
+      out[k] = translateSchemaArray(v, legacy);
     } else if (SCHEMA_BEARING_SINGLE_KEYS.has(k)) {
-      out[k] = translateNode(v);
+      out[k] = translateNode(v, legacy);
     } else {
       out[k] = v;
     }
@@ -106,37 +128,39 @@ function translateObject(input: Record<string, unknown>): Record<string, unknown
     }
   }
 
-  if (input.exclusiveMinimum === true) {
-    if (typeof input.minimum === "number") {
-      out.exclusiveMinimum = input.minimum;
-      delete out.minimum;
+  if (legacy) {
+    if (input.exclusiveMinimum === true) {
+      if (typeof input.minimum === "number") {
+        out.exclusiveMinimum = input.minimum;
+        delete out.minimum;
+      }
+    } else if (typeof input.exclusiveMinimum === "number") {
+      out.exclusiveMinimum = input.exclusiveMinimum;
     }
-  } else if (typeof input.exclusiveMinimum === "number") {
-    out.exclusiveMinimum = input.exclusiveMinimum;
-  }
 
-  if (input.exclusiveMaximum === true) {
-    if (typeof input.maximum === "number") {
-      out.exclusiveMaximum = input.maximum;
-      delete out.maximum;
+    if (input.exclusiveMaximum === true) {
+      if (typeof input.maximum === "number") {
+        out.exclusiveMaximum = input.maximum;
+        delete out.maximum;
+      }
+    } else if (typeof input.exclusiveMaximum === "number") {
+      out.exclusiveMaximum = input.exclusiveMaximum;
     }
-  } else if (typeof input.exclusiveMaximum === "number") {
-    out.exclusiveMaximum = input.exclusiveMaximum;
   }
 
   return out;
 }
 
-function translateSchemaMap(value: unknown): unknown {
+function translateSchemaMap(value: unknown, legacy: boolean): unknown {
   if (!value || typeof value !== "object" || Array.isArray(value)) return value;
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-    out[k] = translateNode(v);
+    out[k] = translateNode(v, legacy);
   }
   return out;
 }
 
-function translateSchemaArray(value: unknown): unknown {
+function translateSchemaArray(value: unknown, legacy: boolean): unknown {
   if (!Array.isArray(value)) return value;
-  return value.map(translateNode);
+  return value.map(item => translateNode(item, legacy));
 }

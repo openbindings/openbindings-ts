@@ -314,8 +314,10 @@ describe("convertToInterface — OpenAPI 3.0 dialect translation", () => {
     const output = iface.operations["x"]?.output as Record<string, unknown>;
     const props = output.properties as Record<string, Record<string, unknown>>;
     expect(props["next"]).toEqual({ type: ["string", "null"], format: "uri" });
-    // The inert nullable: true survives untouched in 3.1 — we don't second-guess.
-    expect(props["legacy"]).toEqual({ type: "string", nullable: true });
+    // A stray 3.0 nullable under a 3.1 header is salvaged, not preserved:
+    // the wild ships it constantly (DRF pagination via drf-spectacular) and
+    // preserved verbatim it silently rejects the declared nulls.
+    expect(props["legacy"]).toEqual({ type: ["string", "null"] });
   });
 
   it("translates boolean exclusiveMinimum to numeric form", async () => {
