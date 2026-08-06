@@ -108,6 +108,6 @@ describe("per-operation tolerant coverage synthesis", () => {
     expect(Object.keys(result.interface.operations)).toEqual([]);
     const targets = result.coverage.entries.filter((e) => e.scope === "target");
     expect(targets).toHaveLength(1);
-    expect(targets[0].status).toBe("excluded");
+    expect(targets[0]!.status).toBe("excluded");
   });
 });
