@@ -1,0 +1,17 @@
+name: Project integration
+
+on:
+  push:
+    branches:
+      - experiment/obi-first
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  cohort:
+    uses: openbindings/project/.github/workflows/integration.yml@main
+    with:
+      source_repository: ${{ github.repository }}
+      source_sha: ${{ github.sha }}
