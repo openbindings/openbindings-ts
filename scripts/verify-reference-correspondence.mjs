@@ -3,8 +3,9 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const goRoot = resolve(root, "../openbindings-go");
-const matrix = JSON.parse(await readFile(resolve(root, "../spec/conformance/reference-sdk-correspondence.json"), "utf8"));
+const goRoot = process.env.OB_GO_ROOT ?? resolve(root, "../openbindings-go");
+const specCorpus = process.env.OB_SPEC_CORPUS ?? resolve(root, "../spec/conformance");
+const matrix = JSON.parse(await readFile(resolve(specCorpus, "reference-sdk-correspondence.json"), "utf8"));
 if (matrix.format !== "openbindings.reference-sdk-correspondence@1") throw new Error("unsupported correspondence matrix format");
 
 const expected = new Map([
