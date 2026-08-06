@@ -13,12 +13,12 @@ jobs:
       # The conformance corpora are normative and live in the sibling spec and
       # interfaces repos; without these checkouts the corpus gates skip
       # silently. Interfaces was never checked out here, so the selection and
-      # comparison corpora ran in no CI at all. Unpinned default branch is
-      # deliberate: this SDK's main tracks the spec working draft, so
-      # main<->main is the correct pairing and drift should stay loud.
+      # comparison corpora ran in no CI at all. This pre-release integration
+      # branch tracks the matching non-default spec working branch.
       - uses: actions/checkout@v7
         with:
           repository: openbindings/spec
+          ref: chore/icon-refresh
           path: spec
       - uses: actions/checkout@v7
         with:
