@@ -181,18 +181,14 @@ export async function runBinding(
     }
   }
 
-  // ----- Input flows through the handle, not the args. An operation with
-  // no parameters and no request body takes no input. -----
+  // ----- Input flows through the handle, not the args. Whether this
+  // interaction carries an input value is decided by the ARTIFACT and by what
+  // the caller writes — never by the presence of the operation's `input`
+  // member. Core §6.2: schema absence "means the document makes no portable
+  // claim at that boundary", not that the interaction carries zero values. A
+  // caller with nothing to say says it by closing. -----
   let inputMap: Record<string, unknown>;
-  if (args.binding !== undefined && args.inputSchema === undefined) {
-    // Operation-layer no-input convention (checked BEFORE the
-    // source-derived detection below): the call came through the operation
-    // layer for an operation that declares no input. Callers of no-input
-    // operations never write nor close, so reading would park forever.
-    // Dispatch with empty input even when the OpenAPI doc declares params.
-    void inv.closeInput();
-    inputMap = {};
-  } else if (params.length === 0 && op.requestBody == null) {
+  if (params.length === 0 && op.requestBody == null) {
     // No-input operation: close input on entry so the caller never has to,
     // and dispatch immediately.
     void inv.closeInput();

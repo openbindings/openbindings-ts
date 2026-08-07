@@ -401,10 +401,12 @@ describe("invokeBinding — request construction", () => {
     expect(requests).toHaveLength(0);
   });
 
-  it("dispatches immediately with empty input under the operation-layer no-input convention", async () => {
-    // binding present + inputSchema absent: the operation declares NO input,
-    // so the caller never writes nor closes — even though the OpenAPI doc
-    // declares a required requestBody for this path.
+  it("refuses a bare close when the artifact declares a required body the OBI never expressed", async () => {
+    // The loud half of bare-close adjudication (C2). `inputSchema` is absent,
+    // so the document makes no claim at this boundary (core §6.2) — but the
+    // OpenAPI artifact declares a REQUIRED requestBody, and §9.1's
+    // required-declaration rule refuses an invocation supplying no input value
+    // before dispatch. Absence of a contract is not permission to POST `{}`.
     const { fetch, requests } = mockFetch(() => jsonResponse({ id: "u1" }, 201));
     const call = new OpenAPIInvoker().invokeBinding({
       source: SOURCE,
@@ -413,10 +415,9 @@ describe("invokeBinding — request construction", () => {
       fetch,
     });
 
-    await expect(single(call.outputs)).resolves.toEqual({ id: "u1" });
-    await expect(call.closed).resolves.toBeUndefined();
-    expect(requests).toHaveLength(1);
-    expect(JSON.parse(requests[0]?.body as string)).toEqual({});
+    await call.close();
+    await expect(call.closed).rejects.toMatchObject({ code: ERR_MISSING_INPUT });
+    expect(requests).toHaveLength(0);
   });
 });
 
@@ -1652,5 +1653,52 @@ describe("prepareBinding", () => {
       ref: REF_DATA,
     });
     expect(details).toMatchObject({ target: "https://api.example.com" });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Conformance loop rev C1 — gap G-1
+// ---------------------------------------------------------------------------
+
+describe("G-1: absent `input` is not a no-input signal", () => {
+  // The executable form of core §5.1, and it FAILS today by design.
+  //
+  // The core states that an absent `input` means no portable contract is
+  // specified for that boundary — explicitly NOT that the interaction carries
+  // zero values, because interaction shape is binding-specification-defined.
+  // An author who omits `input` because the contract is unknown makes no
+  // cardinality claim at all.
+  //
+  // Both reference implementations read schema absence as a no-input signal
+  // (invoke.ts's operation-layer convention, mirroring Go's invoke.go:148).
+  // The consequence is this test: an operation whose artifact REQUIRES a
+  // request body, driven through the binding with no declared input schema,
+  // has its input side closed before the caller can write — so the value is
+  // discarded and the service receives an empty body.
+  //
+  // The correct signal comes from the ARTIFACT (requestBody.required), which
+  // is where the spec says interaction shape lives.
+  it("delivers the caller's value when the artifact requires a body", async () => {
+    const { fetch, requests } = mockFetch(() => jsonResponse({ created: true }, 201));
+    const call = new OpenAPIInvoker().invokeBinding({
+      source: SOURCE,
+      ref: REF_CREATE_USER,
+      fetch,
+      binding: { operation: "createUser", source: "api", ref: REF_CREATE_USER },
+      // inputSchema omitted — the document makes no claim at this boundary.
+    });
+
+    await call.write({ name: "gadget" });
+    await call.close();
+    await single(call.outputs).catch(() => undefined);
+
+    const sent = requests[0]?.body;
+    expect(
+      typeof sent === "string" ? sent : "",
+      "G-1: absent `input` was read as a no-input cardinality signal. Core §5.1 " +
+        "says absence means no CONTRACT is specified, not that the interaction " +
+        "carries zero values. Interaction shape must come from the artifact " +
+        "(here: requestBody.required), never from the document's schema slot.",
+    ).toContain("gadget");
   });
 });
