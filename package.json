@@ -8,7 +8,7 @@
     "pack:verify": "node scripts/verify-packed-packages.mjs",
     "release:verify": "node scripts/verify-release-tag.mjs",
     "test:release": "node --test scripts/verify-release-tag.test.mjs",
-    "test": "vitest run",
+    "test": "vitest run && node scripts/verify-verbal-identity.mjs",
     "conformance": "pnpm --filter @openbindings/sdk conformance",
     "correspondence": "node scripts/verify-reference-correspondence.mjs",
     "lint": "pnpm -r --filter './packages/*' run lint && eslint . --ignore-pattern 'packages/**'"
