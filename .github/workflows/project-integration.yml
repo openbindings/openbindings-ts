@@ -3,7 +3,7 @@ name: Project integration
 on:
   push:
     branches:
-      - experiment/obi-first
+      - release/0.2
   workflow_dispatch:
 
 permissions:
