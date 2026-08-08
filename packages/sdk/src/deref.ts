@@ -26,21 +26,37 @@ export interface DereferenceOptions {
 
 /** Resolve a JSON Pointer (RFC 6901) against a root object. */
 function resolvePointer(root: Record<string, unknown>, pointer: string): unknown {
-  const fragment = pointer.startsWith("#/") ? pointer.slice(2) : pointer;
-  if (!fragment) return root;
+  const isFragment = pointer.startsWith("#");
+  let path = isFragment ? pointer.slice(1) : pointer;
+  if (isFragment) {
+    try {
+      // RFC 6901 §6: decode the URI fragment before evaluating its pointer.
+      path = decodeURIComponent(path);
+    } catch {
+      return undefined;
+    }
+  }
+  if (path === "") return root;
+  if (!path.startsWith("/")) return undefined;
 
-  const tokens = fragment
-    .split("/")
-    .map((t) => t.replace(/~1/g, "/").replace(/~0/g, "~"));
+  const tokens: string[] = [];
+  for (const encoded of path.slice(1).split("/")) {
+    // A literal "~" is not legal in a reference token; it must be ~0.
+    if (/~(?:[^01]|$)/.test(encoded)) return undefined;
+    tokens.push(encoded.replace(/~1/g, "/").replace(/~0/g, "~"));
+  }
 
   let current: unknown = root;
   for (const token of tokens) {
     if (current == null || typeof current !== "object") return undefined;
     if (Array.isArray(current)) {
-      const idx = parseInt(token, 10);
-      if (Number.isNaN(idx)) return undefined;
+      // RFC 6901 §4: array indexes are base-10 with no leading zeroes.
+      if (!/^(?:0|[1-9][0-9]*)$/.test(token)) return undefined;
+      const idx = Number(token);
+      if (!Number.isSafeInteger(idx) || !Object.hasOwn(current, idx)) return undefined;
       current = current[idx];
     } else {
+      if (!Object.hasOwn(current, token)) return undefined;
       current = (current as Record<string, unknown>)[token];
     }
   }
@@ -169,7 +185,14 @@ export async function dereference<T = unknown>(
         if (extraKeys.length > 0 && typeof target === "object" && target !== null) {
           const merged = { ...target } as Record<string, unknown>;
           for (const k of extraKeys) {
-            if (!(k in merged)) merged[k] = obj[k];
+            if (!Object.hasOwn(merged, k)) {
+              Object.defineProperty(merged, k, {
+                value: obj[k],
+                enumerable: true,
+                configurable: true,
+                writable: true,
+              });
+            }
           }
           return walkAsync(merged, resolvedBase);
         }
