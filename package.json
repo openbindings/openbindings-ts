@@ -6,6 +6,8 @@
     "browser:imports": "node scripts/verify-browser-imports.mjs",
     "browser:worker": "node scripts/verify-worker-build.mjs",
     "pack:verify": "node scripts/verify-packed-packages.mjs",
+    "release:verify": "node scripts/verify-release-tag.mjs",
+    "test:release": "node --test scripts/verify-release-tag.test.mjs",
     "test": "vitest run",
     "conformance": "pnpm --filter @openbindings/sdk conformance",
     "correspondence": "node scripts/verify-reference-correspondence.mjs",

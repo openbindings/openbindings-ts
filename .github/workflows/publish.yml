@@ -19,6 +19,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
       # Same corpus checkouts as ci.yml: the publish gate runs the full test
       # suite in corpus-required mode — nothing unverified ships.
       - uses: actions/checkout@v7
@@ -37,6 +39,11 @@ jobs:
           cache: pnpm
           registry-url: https://registry.npmjs.org
       - run: pnpm install --frozen-lockfile
+      - name: Verify annotated tag and package versions
+        run: |
+          test "$(git cat-file -t "${{ github.ref_name }}")" = tag
+          pnpm release:verify -- --tag "${{ github.ref_name }}"
+      - run: pnpm test:release
       - run: pnpm run build
       - run: pnpm run lint
       - run: pnpm test
@@ -45,6 +52,7 @@ jobs:
           OB_INTERFACES_CORPUS: ${{ github.workspace }}/interfaces/conformance
           OB_CORPUS_REQUIRED: "1"
       - run: pnpm conformance -- --corpus=spec/conformance
+      - run: pnpm pack:verify
       # --no-git-checks: the tag checkout is a detached HEAD, which pnpm
       # publish otherwise refuses. Each package's prepack rebuilds its dist.
       - run: pnpm -r publish --access public --provenance --no-git-checks

@@ -42,6 +42,7 @@ jobs:
           OB_SPEC_CORPUS: ${{ github.workspace }}/spec/conformance
           OB_GO_ROOT: ${{ github.workspace }}/openbindings-go
       - run: pnpm run lint
+      - run: pnpm test:release
       # Absolute: `pnpm -r` runs each package from its own directory, so a
       # relative corpus path would resolve to nothing and silently skip the
       # corpus-backed suites instead of running them. OB_CORPUS_REQUIRED flips
