@@ -3,7 +3,7 @@
   "packageManager": "pnpm@10.15.0",
   "scripts": {
     "build": "pnpm -r build",
-    "test": "vitest run",
+    "test": "vitest run && node scripts/verify-verbal-identity.mjs",
     "lint": "pnpm -r --filter './packages/*' exec tsc --noEmit"
   },
   "devDependencies": {
