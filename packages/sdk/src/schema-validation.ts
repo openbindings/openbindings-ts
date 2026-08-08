@@ -291,7 +291,44 @@ function schemaHasExternalRef(value: unknown): boolean {
  *   resolvable within the document — an absolute `$ref` matching an
  *   embedded schema's `$id` resolves locally (§10).
  */
+/**
+ * Compiled-schema cache, keyed on the identity of the schema and its defs.
+ *
+ * Compilation meta-validates, checks static resolvability, and builds a
+ * validator over the whole reachable schema graph. Invokers compile once per
+ * invocation, so for a document with a large schema graph every call — and
+ * every advisory preflight — paid that cost again for an identical input.
+ * Same immutability assumption as `buildSchemaDefs`.
+ */
+const NO_DEFS: Record<string, unknown> = {};
+const compiledSchemaCache = new WeakMap<
+  object,
+  WeakMap<object, CompiledSchema>
+>();
+
 export function compileExampleSchema(
+  schema: unknown,
+  defs: Record<string, unknown> | undefined,
+): CompiledSchema {
+  const cacheable = typeof schema === "object" && schema !== null;
+  const defsKey = defs ?? NO_DEFS;
+  if (cacheable) {
+    const hit = compiledSchemaCache.get(schema)?.get(defsKey);
+    if (hit) return hit;
+  }
+  const compiled = compileExampleSchemaUncached(schema, defs);
+  if (cacheable) {
+    let byDefs = compiledSchemaCache.get(schema);
+    if (!byDefs) {
+      byDefs = new WeakMap();
+      compiledSchemaCache.set(schema, byDefs);
+    }
+    byDefs.set(defsKey, compiled);
+  }
+  return compiled;
+}
+
+function compileExampleSchemaUncached(
   schema: unknown,
   defs: Record<string, unknown> | undefined,
 ): CompiledSchema {
@@ -575,10 +612,24 @@ export function safeValidate(
  * Builds the document's `schemas` map ready to be embedded under
  * `$defs`, with internal `#/schemas/` refs rewritten to `#/$defs/`.
  */
+/**
+ * Memoised per `schemas` object. Building the defs deep-clones and rewrites
+ * every document schema, and an invoker rebuilds it on every invocation — for
+ * a document whose schemas are large that dominated the cost of making a call.
+ *
+ * Keyed on object identity, so this is only sound while documents are treated
+ * as values. Every SDK path that changes a document produces a new object;
+ * mutating a schema in place would be observed as stale here, which is the
+ * same assumption the rest of the document model already makes.
+ */
+const schemaDefsCache = new WeakMap<object, Record<string, unknown>>();
+
 export function buildSchemaDefs(
   schemas: Record<string, unknown> | undefined,
 ): Record<string, unknown> | undefined {
   if (!schemas || Object.keys(schemas).length === 0) return undefined;
+  const cached = schemaDefsCache.get(schemas);
+  if (cached) return cached;
   const out: Record<string, unknown> = {};
   for (const [name, sch] of Object.entries(schemas)) {
     const copy = structuredClone(sch);
@@ -587,6 +638,7 @@ export function buildSchemaDefs(
     }
     out[name] = copy;
   }
+  schemaDefsCache.set(schemas, out);
   return out;
 }
 
