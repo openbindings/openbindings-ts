@@ -29,6 +29,7 @@ import {
   type SourceInspector,
 } from "@openbindings/sdk";
 import { BINDING_SPEC, DEFAULT_SOURCE_NAME } from "./constants.js";
+import { graphQLFailureEvidence } from "./failure.js";
 import {
   introspect,
   invokeGraphQL,
@@ -232,16 +233,24 @@ export class GraphQLInvoker implements BindingInvoker {
     }
 
     // Queries and mutations dispatch one HTTP POST.
-    const { response, headers: responseHeaders } = await invokeGraphQL(
-      url,
-      configuration.document.source,
-      configuration.document.operationName,
-      variables,
-      headers,
-      fetchFn,
-      inv.signal,
-      maxResponseBytes,
-    );
+    let invoked: Awaited<ReturnType<typeof invokeGraphQL>>;
+    try {
+      invoked = await invokeGraphQL(
+        url,
+        configuration.document.source,
+        configuration.document.operationName,
+        variables,
+        headers,
+        fetchFn,
+        inv.signal,
+        maxResponseBytes,
+      );
+    } catch (error: unknown) {
+      const evidence = graphQLFailureEvidence(error);
+      if (evidence?.httpResponse) inv.setHeader(evidence.httpResponse.headers);
+      throw error;
+    }
+    const { response, headers: responseHeaders } = invoked;
     inv.setHeader(responseHeaders);
     await inv.emitOutput(response);
     inv.closeOutput();

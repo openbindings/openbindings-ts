@@ -60,6 +60,29 @@ try {
 }
 ```
 
+An unsuccessful HTTP response is a failure completion, not an operation
+output. `openAPIFailureEvidence(err)` recovers the native status, headers,
+final URL/status text where the Fetch runtime exposes them, exact response
+bytes, and the OpenAPI Response Object key/media that governed the response:
+
+```typescript
+import { openAPIFailureEvidence } from "@openbindings/openapi";
+
+try {
+  await call.closed;
+} catch (err) {
+  const evidence = openAPIFailureEvidence(err);
+  if (evidence) {
+    console.error(evidence.httpResponse.status, evidence.openapi.responseKey);
+    // evidence.httpResponse.body is the exact Uint8Array when captured.
+  }
+}
+```
+
+An absent `body` is distinct from an exact empty `Uint8Array`. It currently
+occurs for a non-2xx SSE response, which is classified and cancelled without
+waiting for a possibly unbounded stream to end.
+
 When an operation requires credentials the document declares but the context
 lacks, the invocation terminates with `CONTEXT_REQUIRED` before any request
 is dispatched; the error's details carry the requirement alternatives derived
@@ -102,7 +125,7 @@ result as `content`, while browsers and Workers keep the same package graph.
 4. Derives auth requirements from the operation's (or document's) `security` and challenges `CONTEXT_REQUIRED` when the context can't satisfy them — before any request is dispatched
 5. Reads the input message from the handle and routes its fields per the flattened model (OAPI-P-03) — parameters serialize per the OAS style/explode rules (OAPI-P-02); unmatched fields pass into a declared request body and refuse loudly otherwise — and selects the request media type per the specification's preference order (OAPI-P-04)
 6. Applies credentials from the context using the spec's `securitySchemes` (bearer, basic, apiKey, oauth2 with correct placement), refusing credential/parameter channel collisions pre-dispatch (OAPI-P-10)
-7. Makes the HTTP request, sets the response headers as leading metadata; the declared success media bound the interaction shape (unary, or server-streaming for a declared `text/event-stream` response, OAPI-P-06); classifies the outcome (success iff status is 2xx, OAPI-P-08; error statuses terminate the handle with `{ status, body }` details), decodes the body by the response's `Content-Type` header (strict JSON for `application/json` and `+json` suffixes, the charset-honoring text lane otherwise, OAPI-P-07), and emits the value — classification and decode both run through the consumer hooks seam, and the trailer metadata carries `x-ob-decode`/`x-ob-classify` provenance stamps
+7. Makes the HTTP request, sets the response headers as leading metadata; the declared success media bound the interaction shape (unary, or server-streaming for a declared `text/event-stream` response, OAPI-P-06); classifies the outcome (success iff status is 2xx, OAPI-P-08; error statuses preserve lossless native response evidence on the failure completion), decodes successful bodies by the response's `Content-Type` header (strict JSON for `application/json` and `+json` suffixes, the charset-honoring text lane otherwise, OAPI-P-07), and emits the value — classification and decode both run through the consumer hooks seam, and the trailer metadata carries `x-ob-decode`/`x-ob-classify` provenance stamps
 
 ### Server selection
 

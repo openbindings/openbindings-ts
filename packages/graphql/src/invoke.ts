@@ -1,4 +1,4 @@
-import type { Metadata } from "@openbindings/sdk";
+import type { Effects, Metadata } from "@openbindings/sdk";
 import {
   DEFAULT_MAX_DELIVERY_UNIT_BYTES,
   ERR_AUTH_REQUIRED,
@@ -99,16 +99,15 @@ interface GraphQLHTTPResult {
 }
 
 /**
- * Reads a Response body as text, refusing past maxBytes. Cancels the body
+ * Reads a Response body as bytes, refusing past maxBytes. Cancels the body
  * stream before bailing so the connection doesn't sit pinned on the
  * remaining bytes.
  */
-async function readResponseText(resp: Response, maxBytes: number): Promise<string> {
-  if (!resp.body) return resp.text();
+async function readResponseBytes(resp: Response, maxBytes: number): Promise<Uint8Array> {
+  if (!resp.body) return new Uint8Array(await resp.arrayBuffer());
 
   const reader = resp.body.getReader();
-  const decoder = new TextDecoder();
-  const chunks: string[] = [];
+  const chunks: Uint8Array[] = [];
   let total = 0;
 
   try {
@@ -120,14 +119,15 @@ async function readResponseText(resp: Response, maxBytes: number): Promise<strin
         await reader.cancel().catch(() => {});
         throw new Error(`response exceeds ${maxBytes} byte limit`);
       }
-      chunks.push(decoder.decode(value, { stream: true }));
+      chunks.push(value);
     }
-    chunks.push(decoder.decode());
   } finally {
     reader.releaseLock();
   }
-
-  return chunks.join("");
+  const result = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) { result.set(chunk, offset); offset += chunk.byteLength; }
+  return result;
 }
 
 /**
@@ -168,16 +168,25 @@ async function doGraphQLHTTP(
     redirect: "manual",
   });
 
-  const text = await readResponseText(resp, maxResponseBytes);
+  const responseBytes = await readResponseBytes(resp, maxResponseBytes);
+  const text = new TextDecoder().decode(responseBytes);
   const mediaType = (resp.headers.get("content-type") ?? "").split(";", 1)[0]!.trim().toLowerCase();
   if (mediaType !== "application/graphql-response+json" && mediaType !== "application/json") {
-    throw new InvocationError(ERR_RESPONSE_ERROR, `unsupported GraphQL response media type ${JSON.stringify(mediaType)}`);
+    throw graphQLHTTPFailure(
+      resp,
+      responseBytes,
+      ERR_RESPONSE_ERROR,
+      `unsupported GraphQL response media type ${JSON.stringify(mediaType)}`,
+      mediaType,
+    );
   }
   if (mediaType === "application/json" && !resp.ok) {
-    throw new InvocationError(
+    throw graphQLHTTPFailure(
+      resp,
+      responseBytes,
       httpErrorCode(resp.status),
       `HTTP ${resp.status}: ${text}`,
-      { status: resp.status, body: text },
+      mediaType,
       httpErrorEffects(resp.status),
     );
   }
@@ -185,12 +194,55 @@ async function doGraphQLHTTP(
   try {
     respBody = JSON.parse(text);
   } catch (e: unknown) {
-    throw new InvocationError(ERR_RESPONSE_ERROR, `parse GraphQL response: ${e instanceof Error ? e.message : String(e)}`);
+    throw graphQLHTTPFailure(
+      resp,
+      responseBytes,
+      ERR_RESPONSE_ERROR,
+      `parse GraphQL response: ${e instanceof Error ? e.message : String(e)}`,
+      mediaType,
+    );
   }
   if (!wellFormedGraphQLResponse(respBody)) {
-    throw new InvocationError(ERR_RESPONSE_ERROR, "response is not a well-formed GraphQL response envelope");
+    throw graphQLHTTPFailure(
+      resp,
+      responseBytes,
+      ERR_RESPONSE_ERROR,
+      "response is not a well-formed GraphQL response envelope",
+      mediaType,
+    );
   }
   return { body: respBody, headers: metadataFromHeaders(resp.headers) };
+}
+
+function graphQLHTTPFailure(
+  response: Response,
+  body: Uint8Array,
+  code: string,
+  message: string,
+  mediaType: string,
+  effects?: Effects,
+): InvocationError {
+  return new InvocationError(code, message, {
+    status: response.status,
+    body: new TextDecoder().decode(body),
+    httpResponse: {
+      status: response.status,
+      statusText: response.statusText,
+      ...(response.url ? { url: response.url } : {}),
+      headers: metadataFromHeaders(response.headers),
+      body: capturedBytes(body),
+    },
+    graphql: { mediaType },
+  }, effects);
+}
+
+function capturedBytes(bytes: Uint8Array): { base64: string; byteLength: number } {
+  let binary = "";
+  const chunkSize = 0x8000;
+  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + chunkSize));
+  }
+  return { base64: btoa(binary), byteLength: bytes.byteLength };
 }
 
 export function wellFormedGraphQLResponse(value: unknown): value is GraphQLResponse {
@@ -419,7 +471,14 @@ export async function* subscribeGraphQL(
       }
       case "error": {
         const errors = Array.isArray(msg.payload) ? (msg.payload as Array<{ message: string }>) : undefined;
-        finish({ error: new InvocationError(ERR_EXECUTION_FAILED, errors?.[0]?.message ?? String(msg.payload), { errors }) });
+        finish({ error: new InvocationError(
+          ERR_EXECUTION_FAILED,
+          errors?.[0]?.message ?? String(msg.payload),
+          {
+            ...(errors ? { errors } : {}),
+            graphqlTransportWs: { type: "error", payload: msg.payload },
+          },
+        ) });
         break;
       }
       case "complete":
@@ -436,16 +495,22 @@ export async function* subscribeGraphQL(
     });
   };
 
-  ws.onclose = () => {
+  ws.onclose = (event) => {
     // graphql-transport-ws semantics: a clean end is signalled by a
     // `complete` frame (which already finished the sequence and makes this
     // a no-op). A post-ack close without one is an abnormal termination —
     // surfacing it as clean completion would mask server crashes.
-    finish({
-      error: acked
-        ? new InvocationError(ERR_STREAM_ERROR, "WebSocket closed before subscription complete")
-        : new InvocationError(ERR_CONNECT_FAILED, "WebSocket closed during handshake"),
-    });
+    const details = {
+      graphqlTransportWs: {
+        type: "close",
+        code: event.code,
+        reason: event.reason,
+        wasClean: event.wasClean,
+      },
+    };
+    finish({ error: acked
+      ? new InvocationError(ERR_STREAM_ERROR, "WebSocket closed before subscription complete", details)
+      : new InvocationError(ERR_CONNECT_FAILED, "WebSocket closed during handshake", details) });
   };
 
   const onAbort = () => {

@@ -33,5 +33,11 @@ streaming uses Connect envelopes and an END_STREAM verdict. The protocol's
 classification is authoritative. Explicitly named leading metadata may be
 configured, but the binding invents no bearer/basic/API-key carriage.
 
+Successful message values remain outputs even when error-shaped. Non-200 and
+END_STREAM failures preserve the complete Connect error object and exact
+response or envelope bytes; `connectFailureEvidence(error)` exposes them as a
+typed API. Streaming outputs emitted before a later error remain visible, and
+END_STREAM metadata is available through the invocation trailer.
+
 The binding specification is normative; this README describes the package
 surface and declared implementation coverage.

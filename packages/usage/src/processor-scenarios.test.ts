@@ -15,6 +15,9 @@ import { UsageInvoker, type ProcessRequest } from "./index.js";
 
 const root = process.env.OB_SPEC_CORPUS ?? resolve(dirname(fileURLToPath(import.meta.url)), "../../../../spec/conformance");
 const corpus = JSON.parse(readFileSync(resolve(root, "binding-specs/processor/usage.json"), "utf8")) as ProcessorScenarioFile;
+const fidelityCorpus = JSON.parse(
+  readFileSync(resolve(root, "invocation-fidelity/usage.json"), "utf8"),
+) as ProcessorScenarioFile;
 
 describe("portable Usage processor scenarios", () => {
   for (const scenario of corpus.scenarios) {
@@ -25,7 +28,19 @@ describe("portable Usage processor scenarios", () => {
   }
 });
 
-async function runScenario(scenario: ProcessorScenario): Promise<ProcessorObservation> {
+describe("Usage invocation-fidelity scenarios", () => {
+  for (const scenario of fidelityCorpus.scenarios) {
+    it(scenario.id, async () => {
+      const observation = await runScenario(scenario, fidelityCorpus.bindingSpec);
+      expect(() => matchProcessorObservation(scenario, observation)).not.toThrow();
+    });
+  }
+});
+
+async function runScenario(
+  scenario: ProcessorScenario,
+  bindingSpec = corpus.bindingSpec,
+): Promise<ProcessorObservation> {
   let dispatch: Record<string, unknown> | undefined;
   const runtimeEncoders = isRecord(scenario.given.runtime?.encoders) ? scenario.given.runtime.encoders : {};
   const encoders: Record<string, (value: unknown) => string> = {};
@@ -44,7 +59,17 @@ async function runScenario(scenario: ProcessorScenario): Promise<ProcessorObserv
         environment: request.environment,
         ...(request.stdin !== undefined ? { stdin: request.stdin } : {}),
       };
-      return { exitCode: 0 };
+      const fixture = isRecord(scenario.given.peer?.processResult)
+        ? scenario.given.peer.processResult
+        : undefined;
+      return fixture ? {
+        exitCode: typeof fixture.exitCode === "number" ? fixture.exitCode : 0,
+        ...(typeof fixture.signal === "string" ? { signal: fixture.signal } : {}),
+        ...(typeof fixture.stdoutBase64 === "string" ? { stdout: base64ToBytes(fixture.stdoutBase64) } : {}),
+        ...(typeof fixture.stderrBase64 === "string" ? { stderr: base64ToBytes(fixture.stderrBase64) } : {}),
+        ...(fixture.stdoutTruncated === true ? { stdoutTruncated: true } : {}),
+        ...(fixture.stderrTruncated === true ? { stderrTruncated: true } : {}),
+      } : { exitCode: 0 };
     },
     authorizeExecAddress: () => false,
   });
@@ -56,7 +81,7 @@ async function runScenario(scenario: ProcessorScenario): Promise<ProcessorObserv
 
   const call = invoker.invokeBinding({
     source: {
-      bindingSpec: corpus.bindingSpec,
+      bindingSpec,
       ...(typeof scenario.given.source.location === "string" ? { location: scenario.given.source.location } : {}),
       ...(Object.prototype.hasOwnProperty.call(scenario.given.source, "content") ? { content: scenario.given.source.content } : {}),
     },
@@ -80,7 +105,18 @@ async function runScenario(scenario: ProcessorScenario): Promise<ProcessorObserv
     auxiliaryProcesses: [],
     ...(dispatch ? { dispatch } : {}),
   };
+  data.trailer = call.trailer();
   if (!terminal) return { disposition: "complete", phase: "completion", data };
+  if (scenario.id.startsWith("USAGE-FI-")) {
+    data.error = {
+      code: terminal.code,
+      message: terminal.message,
+      category: terminal.category,
+      ...(terminal.effects !== undefined ? { effects: terminal.effects } : {}),
+      ...(terminal.details !== undefined ? { details: terminal.details } : {}),
+    };
+    return { disposition: "error", phase: "completion", data };
+  }
   return {
     disposition: terminal.code === CONTEXT_REQUIRED ? "context-required" : "refusal",
     phase: terminal.code === ERR_SOURCE_LOAD_FAILED
@@ -90,6 +126,11 @@ async function runScenario(scenario: ProcessorScenario): Promise<ProcessorObserv
         : "pre-dispatch",
     data,
   };
+}
+
+function base64ToBytes(value: string): Uint8Array<ArrayBuffer> {
+  const binary = atob(value);
+  return Uint8Array.from(binary, (character) => character.charCodeAt(0));
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

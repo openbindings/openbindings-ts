@@ -4,6 +4,8 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { parse, type Document, type Node as KDLNode } from "@bgotink/kdl";
+export { usageFailureEvidence } from "./failure.js";
+export type { UsageFailureEvidence, UsageProcessBytes } from "./failure.js";
 import {
   InvocationError,
   InvocationImpl,
@@ -17,7 +19,9 @@ import {
   contextEnvironment,
   contextRequiredError,
   ERR_INVALID_REF,
+  ERR_EXECUTION_FAILED,
   ERR_RUNTIME,
+  ERR_RESPONSE_ERROR,
   ERR_SOURCE_CONFIG_ERROR,
   ERR_SOURCE_LOAD_FAILED,
   ERR_VALIDATION_FAILED,
@@ -51,6 +55,10 @@ export interface ProcessResult {
   stdout?: string | Uint8Array;
   stderr?: string | Uint8Array;
   exitCode: number;
+  /** Native signal name when the process terminated by signal. */
+  signal?: string;
+  stdoutTruncated?: boolean;
+  stderrTruncated?: boolean;
 }
 
 export type ProcessExecutor = (request: ProcessRequest) => Promise<ProcessResult>;
@@ -221,7 +229,11 @@ export class UsageInvoker implements BindingInvoker {
       return;
     }
     if (!(classifier ? classifier(result) : result.exitCode === 0)) {
-      invocation.fireError(new InvocationError(ERR_RUNTIME, diagnostic(result.stderr) || `process exited ${result.exitCode}`, { exitCode: result.exitCode }));
+      invocation.fireError(new InvocationError(
+        ERR_EXECUTION_FAILED,
+        diagnostic(result.stderr) || (result.signal ? `process terminated by ${result.signal}` : `process exited ${result.exitCode}`),
+        usageProcessDetails(result),
+      ));
       return;
     }
     let output: unknown;
@@ -231,9 +243,14 @@ export class UsageInvoker implements BindingInvoker {
       if (typeof cfg["decode"] === "string" && !decoder) throw new Error(`unknown decode configuration ${JSON.stringify(cfg["decode"])}`);
       output = decoder ? decoder(bytes) : stripTrailingLineEndings(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
     } catch (error: unknown) {
-      invocation.fireError(new InvocationError(ERR_RUNTIME, `process output decode failed: ${message(error)}`));
+      invocation.fireError(new InvocationError(
+        ERR_RESPONSE_ERROR,
+        `process output decode failed: ${message(error)}`,
+        usageProcessDetails(result),
+      ));
       return;
     }
+    invocation.setTrailer(usageProcessTrailer(result));
     await invocation.emitOutput(output);
     invocation.closeOutput();
   }
@@ -1145,13 +1162,54 @@ async function executeProcess(request: ProcessRequest): Promise<ProcessResult> {
     child.stdout.on("data", (chunk: Buffer) => { stdout.push(chunk); });
     child.stderr.on("data", (chunk: Buffer) => { stderr.push(chunk); });
     child.on("error", reject);
-    child.on("close", (code) => resolve({
+    child.on("close", (code, signal) => resolve({
       stdout: Buffer.concat(stdout),
       stderr: Buffer.concat(stderr),
       exitCode: code ?? -1,
+      ...(signal ? { signal } : {}),
     }));
     child.stdin.end(request.stdin);
   });
+}
+
+function usageProcessDetails(result: ProcessResult): Record<string, unknown> {
+  return {
+    exitCode: result.exitCode,
+    usage: { process: {
+      exitCode: result.exitCode,
+      ...(result.signal ? { signal: result.signal } : {}),
+      stdout: capturedProcessBytes(result.stdout, result.stdoutTruncated),
+      stderr: capturedProcessBytes(result.stderr, result.stderrTruncated),
+    } },
+  };
+}
+
+function usageProcessTrailer(result: ProcessResult): Record<string, string[]> {
+  const stderr = capturedProcessBytes(result.stderr, result.stderrTruncated);
+  return {
+    "x-exit-code": [String(result.exitCode)],
+    ...(result.signal ? { "x-signal": [result.signal] } : {}),
+    "x-stderr-base64": [stderr.base64],
+    "x-stderr-byte-length": [String(stderr.byteLength)],
+    ...(stderr.truncated ? { "x-stderr-truncated": ["true"] } : {}),
+  };
+}
+
+function capturedProcessBytes(
+  value: string | Uint8Array | undefined,
+  truncated = false,
+): { base64: string; byteLength: number; truncated?: true } {
+  const bytes = outputBytes(value);
+  let binary = "";
+  const chunkSize = 0x8000;
+  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + chunkSize));
+  }
+  return {
+    base64: btoa(binary),
+    byteLength: bytes.byteLength,
+    ...(truncated ? { truncated: true } : {}),
+  };
 }
 
 async function firstInput(iterable: AsyncIterable<unknown>): Promise<unknown | undefined> {

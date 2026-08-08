@@ -14,6 +14,9 @@ import { MCPInvoker } from "./index.js";
 
 const root = process.env.OB_SPEC_CORPUS ?? resolve(dirname(fileURLToPath(import.meta.url)), "../../../../spec/conformance");
 const corpus = JSON.parse(readFileSync(resolve(root, "binding-specs/processor/mcp.json"), "utf8")) as ProcessorScenarioFile;
+const fidelityCorpus = JSON.parse(
+  readFileSync(resolve(root, "invocation-fidelity/mcp.json"), "utf8"),
+) as ProcessorScenarioFile;
 
 describe("portable MCP processor scenarios", () => {
   for (const scenario of corpus.scenarios) {
@@ -24,7 +27,19 @@ describe("portable MCP processor scenarios", () => {
   }
 });
 
-async function runScenario(scenario: ProcessorScenario): Promise<ProcessorObservation> {
+describe("MCP invocation-fidelity scenarios", () => {
+  for (const scenario of fidelityCorpus.scenarios) {
+    it(scenario.id, async () => {
+      const observation = await runScenario(scenario, fidelityCorpus.bindingSpec);
+      expect(() => matchProcessorObservation(scenario, observation)).not.toThrow();
+    });
+  }
+});
+
+async function runScenario(
+  scenario: ProcessorScenario,
+  bindingSpec = corpus.bindingSpec,
+): Promise<ProcessorObservation> {
   const wire = new ScenarioServer(scenario);
   const context: Record<string, unknown> = {};
   if (scenario.given.configuration) context.configuration = scenario.given.configuration;
@@ -35,7 +50,7 @@ async function runScenario(scenario: ProcessorScenario): Promise<ProcessorObserv
   }
   const invocation = new MCPInvoker().invokeBinding({
     source: {
-      bindingSpec: corpus.bindingSpec,
+      bindingSpec,
       location: String(scenario.given.source.location ?? ""),
       ...(Object.hasOwn(scenario.given.source, "content") ? { content: scenario.given.source.content } : {}),
     },
@@ -61,8 +76,29 @@ async function runScenario(scenario: ProcessorScenario): Promise<ProcessorObserv
   else if (Object.keys(wire.listingRequests).length > 0) data.listingRequests = wire.listingRequests;
   if (wire.dispatch) data.dispatch = wire.dispatch;
   if (wire.redirectDispatch) data.redirectDispatch = wire.redirectDispatch;
+  data.trailer = invocation.trailer();
   if (!terminal) return { disposition: "complete", phase: "completion", data };
+  data.error = {
+    code: terminal.code,
+    message: terminal.message,
+    category: terminal.category,
+    ...(terminal.effects !== undefined ? { effects: terminal.effects } : {}),
+    ...(terminal.details !== undefined ? { details: terminal.details } : {}),
+  };
   if (terminal.code === CONTEXT_REQUIRED) return { disposition: "context-required", phase: "pre-dispatch", data };
+  if (scenario.id.startsWith("MCP-FI-")) {
+    const details = isRecord(terminal.details) ? terminal.details : {};
+    const mcp = isRecord(details.mcp) ? details.mcp : {};
+    return {
+      disposition: "error",
+      phase: Object.hasOwn(mcp, "result")
+        ? "completion"
+        : Object.hasOwn(details, "httpResponse") || Object.hasOwn(mcp, "jsonrpcError")
+          ? "response"
+          : "completion",
+      data,
+    };
+  }
   const phase: ProcessorObservation["phase"] = scenario.id === "MCP-PS-01"
     ? "load"
     : ["MCP-PS-08", "MCP-PS-12"].includes(scenario.id)
@@ -124,6 +160,14 @@ class ScenarioServer {
       return new Response(null, { status: 303, headers });
     }
     if (request.method === "tools/call") {
+      if (typeof peer.httpStatus === "number") {
+        const headers = new Headers(isRecord(peer.headers) ? toStringRecord(peer.headers) : {});
+        const body = typeof peer.bodyBase64 === "string" ? base64ToBytes(peer.bodyBase64) : null;
+        return new Response(body, { status: peer.httpStatus, headers });
+      }
+      if (isRecord(peer.jsonrpcError)) {
+        return rpcError(request.id, peer.jsonrpcError);
+      }
       const result = peer.toolResult ?? { content: [] };
       const progress = Array.isArray(peer.progress) ? peer.progress : [];
       const late = Array.isArray(peer.lateProgress) ? peer.lateProgress : [];
@@ -162,6 +206,12 @@ function rpc(id: string | number | undefined, result: unknown): Response {
     headers: { "content-type": "application/json" },
   });
 }
+function rpcError(id: string | number | undefined, error: Record<string, unknown>): Response {
+  return new Response(JSON.stringify({ jsonrpc: "2.0", id, error }), {
+    status: 200,
+    headers: { "content-type": "application/json" },
+  });
+}
 function sse(messages: unknown[]): Response {
   return new Response(messages.map((message) => `data: ${JSON.stringify(message)}\n\n`).join(""), {
     status: 200,
@@ -170,6 +220,10 @@ function sse(messages: unknown[]): Response {
 }
 function toStringRecord(value: Record<string, unknown>): Record<string, string> {
   return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, String(item)]));
+}
+function base64ToBytes(value: string): Uint8Array<ArrayBuffer> {
+  const binary = atob(value);
+  return Uint8Array.from(binary, (character) => character.charCodeAt(0));
 }
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);

@@ -1,5 +1,11 @@
 import * as grpc from "@grpc/grpc-js";
 import * as protobuf from "protobufjs";
+
+export {
+  grpcFailureEvidence,
+  type GrpcFailureEvidence,
+  type GrpcStatusDetailEvidence,
+} from "./failure.js";
 import descriptor from "protobufjs/ext/descriptor/index.js";
 import apiJSON from "protobufjs/google/protobuf/api.json" with { type: "json" };
 import descriptorJSON from "protobufjs/google/protobuf/descriptor.json" with { type: "json" };
@@ -16,14 +22,20 @@ import {
   contextConfiguration,
   contextHeaders,
   contextRequiredError,
+  ERR_AUTH_REQUIRED,
+  ERR_CANCELLED,
   ERR_CONNECT_FAILED,
+  ERR_EXECUTION_FAILED,
   ERR_INVALID_REF,
+  ERR_PERMISSION_DENIED,
   ERR_PROTOCOL,
   ERR_REF_NOT_FOUND,
   ERR_RUNTIME,
   ERR_SOURCE_CONFIG_ERROR,
   ERR_SOURCE_LOAD_FAILED,
   ERR_STREAM_ERROR,
+  ERR_TIMEOUT,
+  ERR_UNAVAILABLE,
   ERR_VALIDATION_FAILED,
   type BindingInvocationArgs,
   type BindingInvoker,
@@ -143,8 +155,12 @@ export class GrpcInvoker implements BindingInvoker {
         target, service, method: methodName, content: args.source.content, transport, metadata, signal: invocation.signal,
       });
     } catch (error: unknown) {
-      const code = message(error).includes("not found") ? ERR_REF_NOT_FOUND : ERR_SOURCE_LOAD_FAILED;
-      invocation.fireError(new InvocationError(code, message(error)));
+      if (grpcCode(error) !== undefined) {
+        invocation.fireError(grpcInvocationError(error, ERR_SOURCE_LOAD_FAILED));
+      } else {
+        const code = message(error).includes("not found") ? ERR_REF_NOT_FOUND : ERR_SOURCE_LOAD_FAILED;
+        invocation.fireError(new InvocationError(code, message(error)));
+      }
       return;
     }
 
@@ -201,7 +217,7 @@ export class GrpcInvoker implements BindingInvoker {
     const sender = send().catch((error: unknown) => {
       if (!invocation.signal.aborted) invocation.fireError(error instanceof InvocationError
         ? error
-        : new InvocationError(ERR_STREAM_ERROR, message(error)));
+        : grpcInvocationError(error, ERR_STREAM_ERROR));
       call.cancel();
     });
     const header = call.header.then((value) => invocation.setHeader(value)).catch(() => {});
@@ -218,7 +234,9 @@ export class GrpcInvoker implements BindingInvoker {
     } catch (error: unknown) {
       await sender;
       await call.done.catch(() => {});
-      if (!invocation.signal.aborted) invocation.fireError(new InvocationError(ERR_STREAM_ERROR, message(error), grpcDetails(error)));
+      const trailer = await call.trailer.catch(() => ({}));
+      invocation.setTrailer(trailer);
+      if (!invocation.signal.aborted) invocation.fireError(grpcInvocationError(error, ERR_STREAM_ERROR));
     }
   }
 }
@@ -700,7 +718,11 @@ class NodeGrpcCall implements GrpcCall {
     call.on("status", (status) => {
       this.#trailerDeferred.resolve(fromGrpcMetadata(status.metadata));
       if (status.code === grpc.status.OK) this.#doneDeferred.resolve();
-      else this.#fail(Object.assign(new Error(status.details), { code: status.code }));
+      else this.#fail(Object.assign(new Error(status.details), {
+        code: status.code,
+        grpcMessage: status.details,
+        metadata: status.metadata,
+      }));
     });
   }
 
@@ -717,7 +739,11 @@ function identityDeserialize(value: Buffer): Buffer { return value; }
 
 function fromGrpcMetadata(metadata: grpc.Metadata): Metadata {
   const out: Metadata = {};
-  for (const [name, values] of Object.entries(metadata.getMap())) out[name] = [String(values)];
+  for (const name of Object.keys(metadata.getMap())) {
+    out[name] = metadata.get(name).map((value) => Buffer.isBuffer(value)
+      ? value.toString("base64")
+      : String(value));
+  }
   return out;
 }
 
@@ -752,9 +778,100 @@ async function firstInput(iterable: AsyncIterable<unknown>): Promise<unknown | u
   return undefined;
 }
 
+function grpcInvocationError(error: unknown, fallbackCode: string): InvocationError {
+  const nativeCode = grpcCode(error);
+  if (nativeCode === undefined) return new InvocationError(fallbackCode, message(error));
+  let code = ERR_EXECUTION_FAILED;
+  let effects: "none" | undefined;
+  switch (nativeCode) {
+    case grpc.status.UNAUTHENTICATED:
+      code = ERR_AUTH_REQUIRED;
+      break;
+    case grpc.status.PERMISSION_DENIED:
+      code = ERR_PERMISSION_DENIED;
+      break;
+    case grpc.status.UNAVAILABLE:
+    case grpc.status.RESOURCE_EXHAUSTED:
+      code = ERR_UNAVAILABLE;
+      effects = "none";
+      break;
+    case grpc.status.DEADLINE_EXCEEDED:
+      code = ERR_TIMEOUT;
+      break;
+    case grpc.status.CANCELLED:
+      code = ERR_CANCELLED;
+      break;
+  }
+  return new InvocationError(code, message(error), grpcDetails(error), effects);
+}
+
 function grpcDetails(error: unknown): Record<string, unknown> | undefined {
-  const code = isRecord(error) ? error.code : undefined;
-  return typeof code === "number" ? { grpcCode: code } : undefined;
+  const nativeCode = grpcCode(error);
+  if (nativeCode === undefined) return undefined;
+  const item = isRecord(error) ? error : {};
+  const nativeMessage = typeof item.grpcMessage === "string"
+    ? item.grpcMessage
+    : typeof item.details === "string"
+      ? item.details
+      : message(error);
+  const status: Record<string, unknown> = { code: nativeCode, message: nativeMessage };
+
+  const supplied = Array.isArray(item.grpcStatusDetails) ? item.grpcStatusDetails : undefined;
+  if (supplied) {
+    status.details = supplied;
+  } else {
+    const metadata = item.metadata instanceof grpc.Metadata ? item.metadata : undefined;
+    const binaries = metadata?.get("grpc-status-details-bin") ?? [];
+    for (const value of binaries) {
+      const bytes = Buffer.isBuffer(value) ? value : Buffer.from(value);
+      status.statusDetailsBinBase64 = bytes.toString("base64");
+      const decoded = decodeRichStatus(bytes);
+      if (decoded?.details.length) status.details = decoded.details;
+      if (decoded && decoded.message !== "") status.message = decoded.message;
+      break;
+    }
+  }
+  return { grpcCode: nativeCode, grpcStatus: status };
+}
+
+function decodeRichStatus(bytes: Uint8Array): {
+  code: number;
+  message: string;
+  details: Array<{ typeUrl: string; valueBase64: string }>;
+} | null {
+  try {
+    const reader = protobuf.Reader.create(bytes);
+    const result = { code: 0, message: "", details: [] as Array<{ typeUrl: string; valueBase64: string }> };
+    while (reader.pos < reader.len) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1:
+          result.code = reader.int32();
+          break;
+        case 2:
+          result.message = reader.string();
+          break;
+        case 3: {
+          const end = reader.uint32() + reader.pos;
+          let typeUrl = "";
+          let value: Uint8Array<ArrayBufferLike> = new Uint8Array();
+          while (reader.pos < end) {
+            const anyTag = reader.uint32();
+            if ((anyTag >>> 3) === 1) typeUrl = reader.string();
+            else if ((anyTag >>> 3) === 2) value = reader.bytes();
+            else reader.skipType(anyTag & 7);
+          }
+          result.details.push({ typeUrl, valueBase64: Buffer.from(value).toString("base64") });
+          break;
+        }
+        default:
+          reader.skipType(tag & 7);
+      }
+    }
+    return result;
+  } catch {
+    return null;
+  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

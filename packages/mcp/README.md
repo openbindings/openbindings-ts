@@ -149,7 +149,7 @@ Default **off**: no `progressToken` rides `tools/call` and the output stream is 
 6. Emits the result and closes the output side; when progress was solicited, correlated `notifications/progress` events emit as outputs ahead of the result
 7. Closes the client in a `finally` block
 
-The entity call's HTTP response headers surface as the invocation's leading metadata (`header`). Errors map to terminal invocation errors: JSON-RPC errors → `ERR_EXECUTION_FAILED` with the `{code, data}` in details, HTTP 401/403 → `ERR_AUTH_REQUIRED`/`ERR_PERMISSION_DENIED`, connection failures → `ERR_CONNECT_FAILED`. MCP servers declare no security schemes, so the binding raises no upfront `CONTEXT_REQUIRED` challenge — credential resolution happens above the binding (see the `OperationInvoker`'s `contextResolver`).
+The entity call's HTTP response headers surface as the invocation's leading metadata (`header`). Errors map to terminal invocation errors while retaining native evidence: complete `isError` results, JSON-RPC `code`/`message`/`data`, and exact Streamable HTTP response status, headers, and bytes. `mcpFailureEvidence` validates and extracts those lanes. MCP servers declare no generic credential carriers, so an `apiKey` or `basic` value raises `CONTEXT_REQUIRED` instead of being assigned an invented Authorization scheme.
 
 ### Response size (named exclusion)
 
@@ -157,13 +157,12 @@ The SDK-wide delivery-unit bound (`BindingInvocationArgs.maxDeliveryUnitBytes`, 
 
 ### Credential application
 
-MCP has no native security scheme declarations (MCP-P-07). Headers are passed to the underlying HTTP transport via `RequestInit.headers`, derived from the binding context in this fallback order:
+MCP has no native security scheme declarations (MCP-P-07). Credentials are passed only where MCP defines or the caller explicitly names an HTTP carrier:
 
 1. **`bearerToken`** → `Authorization: Bearer <token>`
-2. **`apiKey`** → `Authorization: ApiKey <token>`
-3. **`basic.username` + `basic.password`** → `Authorization: Basic <base64>`
+2. **`headers` and `cookies`** → their explicitly named HTTP fields
 
-Context's `headers` field merges on top, and `cookies` join as a sorted `Cookie:` header.
+Generic `apiKey` and `basic` values produce `CONTEXT_REQUIRED`; no destination or scheme is invented. Cookies join as a sorted `Cookie:` header.
 
 ### Interface synthesis
 

@@ -116,19 +116,75 @@ function typeName(v: unknown): string {
  * the initialize handshake, ERR_SOURCE_LOAD_FAILED during live listing,
  * ERR_EXECUTION_FAILED during dispatch).
  */
-function mapError(e: unknown, signal: AbortSignal, fallback: string): InvocationError {
+function mapError(
+  e: unknown,
+  signal: AbortSignal,
+  fallback: string,
+): InvocationError {
   if (e instanceof InvocationError) return e;
   if (signal.aborted) {
     return new InvocationError(ERR_CANCELLED, "invocation cancelled");
   }
   const msg = e instanceof Error ? e.message : String(e);
   if (e instanceof McpError) {
-    return new InvocationError(ERR_EXECUTION_FAILED, msg, { code: e.code, data: e.data });
+    const prefix = `MCP error ${e.code}: `;
+    const nativeMessage = msg.startsWith(prefix) ? msg.slice(prefix.length) : msg;
+    return new InvocationError(ERR_EXECUTION_FAILED, msg, {
+      code: e.code,
+      ...(e.data !== undefined ? { data: e.data } : {}),
+      mcp: { jsonrpcError: {
+        code: e.code,
+        message: nativeMessage,
+        ...(e.data !== undefined ? { data: e.data } : {}),
+      } },
+    });
   }
   if (e instanceof StreamableHTTPError && typeof e.code === "number" && e.code > 0) {
-    return new InvocationError(httpErrorCode(e.code), msg, { status: e.code }, httpErrorEffects(e.code));
+    return new InvocationError(httpErrorCode(e.code), msg, {
+      status: e.code,
+    }, httpErrorEffects(e.code));
   }
   return new InvocationError(fallback, msg);
+}
+
+/** Adds exact HTTP evidence when dispatch reached the Streamable HTTP lane. */
+async function mapErrorWithResponse(
+  e: unknown,
+  signal: AbortSignal,
+  fallback: string,
+  response: Response | undefined,
+): Promise<InvocationError> {
+  const mapped = mapError(e, signal, fallback);
+  if (!response) return mapped;
+  const prior = mapped.details !== null && typeof mapped.details === "object"
+    ? mapped.details as Record<string, unknown>
+    : {};
+  return new InvocationError(mapped.code, mapped.message, {
+    ...prior,
+    httpResponse: await capturedHTTPResponse(response),
+  }, mapped.effects);
+}
+
+async function capturedHTTPResponse(response: Response): Promise<Record<string, unknown>> {
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  const headers: Metadata = {};
+  response.headers.forEach((value, name) => { (headers[name] ??= []).push(value); });
+  return {
+    status: response.status,
+    statusText: response.statusText,
+    ...(response.url ? { url: response.url } : {}),
+    headers,
+    body: capturedBytes(bytes),
+  };
+}
+
+function capturedBytes(bytes: Uint8Array): { base64: string; byteLength: number } {
+  let binary = "";
+  const chunkSize = 0x8000;
+  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + chunkSize));
+  }
+  return { base64: btoa(binary), byteLength: bytes.byteLength };
 }
 
 /** Validates the transport credential placement before initialize side effects. */
@@ -344,6 +400,7 @@ export async function runMCPBinding(
   // then the entity call) so the latest capture at first-emit time is the
   // call's response.
   let responseHeaders: Metadata = {};
+  let responseCapture: Response | undefined;
   const captureFetch = async (url: string | URL, init?: RequestInit): Promise<Response> => {
     // Streamable HTTP POST and GET have different MCP meanings. Ordinary
     // user-agent redirect behavior is therefore unsafe (notably 303 POST ->
@@ -355,6 +412,7 @@ export async function runMCPBinding(
         (md[key] ??= []).push(value);
       });
       responseHeaders = md;
+      responseCapture = response.clone();
     }
     return response;
   };
@@ -372,7 +430,8 @@ export async function runMCPBinding(
   try {
     await client.connect(transport, { signal: inv.signal });
   } catch (e: unknown) {
-    inv.fireError(mapError(e, inv.signal, ERR_CONNECT_FAILED));
+    inv.setHeader(responseHeaders);
+    inv.fireError(await mapErrorWithResponse(e, inv.signal, ERR_CONNECT_FAILED, responseCapture));
     return;
   }
 
@@ -406,7 +465,8 @@ export async function runMCPBinding(
       try {
         listing = await liveListing(client, entityType, inv.signal);
       } catch (e: unknown) {
-        inv.fireError(mapError(e, inv.signal, ERR_SOURCE_LOAD_FAILED));
+        setHeaderOnce();
+        inv.fireError(await mapErrorWithResponse(e, inv.signal, ERR_SOURCE_LOAD_FAILED, responseCapture));
         return;
       }
       kind = resolveRef(listing, entityType, name); // throws ERR_REF_NOT_FOUND
@@ -448,7 +508,8 @@ export async function runMCPBinding(
         break;
     }
   } catch (e: unknown) {
-    inv.fireError(mapError(e, inv.signal, ERR_EXECUTION_FAILED));
+    setHeaderOnce();
+    inv.fireError(await mapErrorWithResponse(e, inv.signal, ERR_EXECUTION_FAILED, responseCapture));
   } finally {
     try { await client.close(); } catch { /* ignore close errors */ }
   }
@@ -750,7 +811,7 @@ async function emitToolResult(
     throw new InvocationError(
       ERR_EXECUTION_FAILED,
       msg || `MCP tool ${JSON.stringify(toolName)} reported an error`,
-      { mcpResult: result },
+      { mcpResult: result, mcp: { result } },
     );
   }
 

@@ -14,6 +14,7 @@ import { ConnectInvoker, envelope } from "./index.js";
 
 const root = process.env.OB_SPEC_CORPUS ?? resolve(dirname(fileURLToPath(import.meta.url)), "../../../../spec/conformance");
 const corpus = JSON.parse(readFileSync(resolve(root, "binding-specs/processor/connect.json"), "utf8")) as ProcessorScenarioFile;
+const fidelityCorpus = JSON.parse(readFileSync(resolve(root, "invocation-fidelity/connect.json"), "utf8")) as ProcessorScenarioFile;
 
 describe("portable Connect processor scenarios", () => {
   for (const scenario of corpus.scenarios) {
@@ -24,7 +25,16 @@ describe("portable Connect processor scenarios", () => {
   }
 });
 
-async function runScenario(scenario: ProcessorScenario): Promise<ProcessorObservation> {
+describe("Connect invocation-fidelity scenarios", () => {
+  for (const scenario of fidelityCorpus.scenarios) {
+    it(scenario.id, async () => {
+      const observation = await runScenario(scenario, fidelityCorpus.bindingSpec);
+      expect(() => matchProcessorObservation(scenario, observation)).not.toThrow();
+    });
+  }
+});
+
+async function runScenario(scenario: ProcessorScenario, bindingSpec = corpus.bindingSpec): Promise<ProcessorObservation> {
   const dispatches: Array<Record<string, unknown>> = [];
   const peer = scenario.given.peer ?? {};
   let peerEndStreamCount = 0;
@@ -56,11 +66,16 @@ async function runScenario(scenario: ProcessorScenario): Promise<ProcessorObserv
         } else if (isRecord(item) && Object.hasOwn(item, "endStream")) {
           peerEndStreamCount++;
           frames.push(envelope(0x02, encodeJSON(item.endStream)));
+        } else if (isRecord(item) && typeof item.endStreamBase64 === "string") {
+          peerEndStreamCount++;
+          frames.push(envelope(0x02, base64ToBytes(item.endStreamBase64)));
         }
       }
       return new Response(concatBytes(...frames) as BodyInit, { status, headers: responseHeaders });
     }
-    const body = peer.body === "" ? "" : JSON.stringify(peer.body ?? {});
+    const body = typeof peer.bodyBase64 === "string"
+      ? base64ToBytes(peer.bodyBase64)
+      : peer.body === "" ? "" : JSON.stringify(peer.body ?? {});
     return new Response(body, { status, headers: responseHeaders });
   };
 
@@ -73,7 +88,7 @@ async function runScenario(scenario: ProcessorScenario): Promise<ProcessorObserv
   const fullDuplex = !Array.isArray(available) || available.includes("2");
   const invocation = new ConnectInvoker({ fullDuplex }).invokeBinding({
     source: {
-      bindingSpec: corpus.bindingSpec,
+      bindingSpec,
       ...(typeof scenario.given.source.location === "string" ? { location: scenario.given.source.location } : {}),
       ...(Object.hasOwn(scenario.given.source, "content") ? { content: scenario.given.source.content } : {}),
     },
@@ -106,11 +121,20 @@ async function runScenario(scenario: ProcessorScenario): Promise<ProcessorObserv
     dispatches,
     peer: { endStreamCount: peerEndStreamCount },
   };
+  data.trailer = invocation.trailer();
   if (dispatches[0]) data.dispatch = dispatches[0];
   if (!terminal) return { disposition: "complete", phase: "completion", data };
+  data.error = {
+    code: terminal.code,
+    message: terminal.message,
+    category: terminal.category,
+    ...(terminal.effects !== undefined ? { effects: terminal.effects } : {}),
+    ...(terminal.details !== undefined ? { details: terminal.details } : {}),
+  };
   if (terminal.code === CONTEXT_REQUIRED) return { disposition: "context-required", phase: "pre-dispatch", data };
   if (dispatches.length === 0) return { disposition: "refusal", phase: "pre-dispatch", data };
-  const responsePhase = ["CONN-PS-02", "CONN-PS-09", "CONN-PS-13", "CONN-PS-15"].includes(scenario.id);
+  const responsePhase = ["CONN-PS-02", "CONN-PS-09", "CONN-PS-13", "CONN-PS-15"].includes(scenario.id)
+    || isRecord(terminal.details) && Object.hasOwn(terminal.details, "httpResponse");
   return { disposition: "error", phase: responsePhase ? "response" : "completion", data };
 }
 
@@ -139,6 +163,10 @@ function decodeRequestEnvelopes(bytes: Uint8Array): unknown[] {
 }
 
 function encodeJSON(value: unknown): Uint8Array { return new TextEncoder().encode(JSON.stringify(value)); }
+function base64ToBytes(value: string): Uint8Array<ArrayBuffer> {
+  const binary = atob(value);
+  return Uint8Array.from(binary, (character) => character.charCodeAt(0));
+}
 function concatBytes(...parts: Uint8Array[]): Uint8Array {
   const result = new Uint8Array(parts.reduce((total, part) => total + part.length, 0));
   let offset = 0;

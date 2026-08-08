@@ -48,6 +48,8 @@ const BEARER_DETAILS: ContextRequiredDetails = {
 
 interface MockOpts {
   bindingSpec?: string;
+  /** ping returns one binding-native failure completion. */
+  nativeFailure?: boolean;
   /** getUser challenges CONTEXT_REQUIRED when context lacks bearerToken (after reading its input). */
   requireBearer?: boolean;
   /** getUser challenges unconditionally, even with context (tests the retry cap). */
@@ -112,6 +114,22 @@ class MockBindingInvoker implements BindingInvoker {
         // No-input: close input immediately so the caller never has to.
         void h.closeInput();
         h.setHeader({ "x-mock": ["ping"] });
+        if (this.opts.nativeFailure) {
+          h.fireError(
+            new InvocationError(
+              "ERR_TIMEOUT",
+              "HTTP 504 Gateway Timeout",
+              {
+                status: 504,
+                httpResponse: {
+                  body: { base64: "Z2F0ZXdheSB0aW1lb3V0", byteLength: 15 },
+                },
+              },
+              "possible",
+            ),
+          );
+          return;
+        }
         await h.emitOutput({ ok: true });
         h.setTrailer({ "x-mock-trailer": ["done"] });
         h.closeOutput();
@@ -855,6 +873,22 @@ describe("CONTEXT_REQUIRED", () => {
 // ---------------------------------------------------------------------------
 
 describe("metadata pass-through", () => {
+  it("relays binding-native failure classification and details unchanged", async () => {
+    const op = makeInvoker(new MockBindingInvoker({ nativeFailure: true }));
+    const call = op.invoke(testInterface(), operationSignature("ping"));
+    await expect(call.closed).rejects.toMatchObject({
+      code: "ERR_TIMEOUT",
+      category: "transient",
+      effects: "possible",
+      details: {
+        status: 504,
+        httpResponse: {
+          body: { base64: "Z2F0ZXdheSB0aW1lb3V0", byteLength: 15 },
+        },
+      },
+    });
+  });
+
   it("forwards binding header and trailer to the caller handle", async () => {
     const op = makeInvoker();
     const call = op.invoke(testInterface(), operationSignature("ping"));

@@ -18,6 +18,9 @@ const root = process.env.OB_SPEC_CORPUS
 const corpus = JSON.parse(
   readFileSync(resolve(root, "binding-specs/processor/graphql.json"), "utf8"),
 ) as ProcessorScenarioFile;
+const fidelityCorpus = JSON.parse(
+  readFileSync(resolve(root, "invocation-fidelity/graphql.json"), "utf8"),
+) as ProcessorScenarioFile;
 
 describe("portable GraphQL processor scenarios", () => {
   for (const scenario of corpus.scenarios) {
@@ -28,7 +31,16 @@ describe("portable GraphQL processor scenarios", () => {
   }
 });
 
-async function runScenario(scenario: ProcessorScenario): Promise<ProcessorObservation> {
+describe("GraphQL invocation-fidelity scenarios", () => {
+  for (const scenario of fidelityCorpus.scenarios) {
+    it(scenario.id, async () => {
+      const observation = await runScenario(scenario, fidelityCorpus.bindingSpec);
+      expect(() => matchProcessorObservation(scenario, observation)).not.toThrow();
+    });
+  }
+});
+
+async function runScenario(scenario: ProcessorScenario, bindingSpec = corpus.bindingSpec): Promise<ProcessorObservation> {
   const peer = scenario.given.peer ?? {};
   const introspectionRequests: unknown[] = [];
   let dispatch: Record<string, unknown> | undefined;
@@ -40,7 +52,13 @@ async function runScenario(scenario: ProcessorScenario): Promise<ProcessorObserv
     dispatch = { target: String(input), method: init?.method ?? "GET", headers, body };
     const responseHeaders = new Headers();
     if (typeof peer.contentType === "string") responseHeaders.set("content-type", peer.contentType);
-    return new Response(JSON.stringify(peer.body ?? {}), {
+    if (isRecord(peer.headers)) {
+      for (const [name, value] of Object.entries(peer.headers)) responseHeaders.set(name, String(value));
+    }
+    const responseBody = typeof peer.bodyBase64 === "string"
+      ? base64ToBytes(peer.bodyBase64)
+      : JSON.stringify(peer.body ?? {});
+    return new Response(responseBody, {
       status: typeof peer.status === "number" ? peer.status : 200,
       headers: responseHeaders,
     });
@@ -61,7 +79,7 @@ async function runScenario(scenario: ProcessorScenario): Promise<ProcessorObserv
   }
   const invocation = invoker.invokeBinding({
     source: {
-      bindingSpec: corpus.bindingSpec,
+      bindingSpec,
       ...(typeof scenario.given.source.location === "string" ? { location: scenario.given.source.location } : {}),
       ...(Object.hasOwn(scenario.given.source, "content") ? { content: scenario.given.source.content } : {}),
     },
@@ -103,14 +121,24 @@ async function runScenario(scenario: ProcessorScenario): Promise<ProcessorObserv
     };
   }
   const data: Record<string, unknown> = { outputs, introspectionRequests };
+  data.trailer = invocation.trailer();
   if (dispatch) data.dispatch = dispatch;
   if (terminal?.code === CONTEXT_REQUIRED) data.context = terminal.details;
   if (!terminal) return { disposition: "complete", phase: "completion", data };
+  data.error = {
+    code: terminal.code,
+    message: terminal.message,
+    category: terminal.category,
+    ...(terminal.effects !== undefined ? { effects: terminal.effects } : {}),
+    ...(terminal.details !== undefined ? { details: terminal.details } : {}),
+  };
   if (terminal.code === CONTEXT_REQUIRED) return { disposition: "context-required", phase: "pre-dispatch", data };
   if (!dispatch) return { disposition: "refusal", phase: "pre-dispatch", data };
   return {
     disposition: "error",
-    phase: scenario.id === "GQL-PS-07" ? "response" : "completion",
+    phase: scenario.id === "GQL-PS-07" || isRecord(terminal.details) && Object.hasOwn(terminal.details, "httpResponse")
+      ? "response"
+      : "completion",
     data,
   };
 }
@@ -140,4 +168,13 @@ class ScenarioWebSocket {
   close(): void { this.readyState = 3; }
   open(): void { this.readyState = WebSocket.OPEN; this.onopen?.(); }
   message(value: unknown): void { this.onmessage?.({ data: JSON.stringify(value) }); }
+}
+
+function base64ToBytes(value: string): Uint8Array<ArrayBuffer> {
+  const binary = atob(value);
+  return Uint8Array.from(binary, (character) => character.charCodeAt(0));
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
 }

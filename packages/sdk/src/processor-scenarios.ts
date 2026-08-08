@@ -6,7 +6,9 @@
  */
 
 export interface ProcessorScenarioFile {
-  format: "openbindings.binding-spec-processor-scenarios@1";
+  format:
+    | "openbindings.binding-spec-processor-scenarios@1"
+    | "openbindings.invocation-fidelity-scenarios@1";
   bindingSpec: string;
   family: string;
   description: string;

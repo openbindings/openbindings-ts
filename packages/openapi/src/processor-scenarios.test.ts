@@ -7,17 +7,22 @@ import {
   ERR_INVALID_REF,
   ERR_REF_NOT_FOUND,
   ERR_SOURCE_LOAD_FAILED,
+  OperationInvoker,
   matchProcessorObservation,
+  operationSignature,
   type InvocationError,
   type ProcessorObservation,
   type ProcessorScenario,
   type ProcessorScenarioFile,
 } from "@openbindings/sdk";
-import { OpenAPIInvoker } from "./invoker.js";
+import { OpenAPIInvoker, OpenAPISynthesizer } from "./invoker.js";
 
 const corpusRoot = process.env.OB_SPEC_CORPUS ?? resolve(dirname(fileURLToPath(import.meta.url)), "../../../../spec/conformance");
 const corpus = JSON.parse(
   readFileSync(resolve(corpusRoot, "binding-specs/processor/openapi.json"), "utf8"),
+) as ProcessorScenarioFile;
+const fidelityCorpus = JSON.parse(
+  readFileSync(resolve(corpusRoot, "invocation-fidelity/openapi.json"), "utf8"),
 ) as ProcessorScenarioFile;
 
 describe("portable OpenAPI processor scenarios", () => {
@@ -29,7 +34,19 @@ describe("portable OpenAPI processor scenarios", () => {
   }
 });
 
-async function runScenario(scenario: ProcessorScenario): Promise<ProcessorObservation> {
+describe("OpenAPI invocation-fidelity scenarios", () => {
+  for (const scenario of fidelityCorpus.scenarios) {
+    it(scenario.id, async () => {
+      const observation = await runScenario(scenario, fidelityCorpus);
+      expect(() => matchProcessorObservation(scenario, observation)).not.toThrow();
+    });
+  }
+});
+
+async function runScenario(
+  scenario: ProcessorScenario,
+  scenarioFile: ProcessorScenarioFile = corpus,
+): Promise<ProcessorObservation> {
   const dispatches: Array<Record<string, unknown>> = [];
   const peer = scenario.given.peer ?? {};
   const fetchMock: typeof fetch = async (input, init) => {
@@ -44,7 +61,11 @@ async function runScenario(scenario: ProcessorScenario): Promise<ProcessorObserv
     dispatches.push(dispatch);
 
     const status = typeof peer.status === "number" ? peer.status : 599;
-    const rawBody = typeof peer.body === "string" ? peer.body : "";
+    const rawBody = typeof peer.bodyBase64 === "string"
+      ? base64ToBytes(peer.bodyBase64)
+      : typeof peer.body === "string"
+        ? peer.body
+        : "";
     const responseBody = rawBody === "" && (status === 204 || status === 205 || status === 304)
       ? null
       : rawBody;
@@ -61,16 +82,24 @@ async function runScenario(scenario: ProcessorScenario): Promise<ProcessorObserv
 
   const source = scenario.given.source;
   const binding = scenario.given.binding;
-  const call = new OpenAPIInvoker().invokeBinding({
-    source: {
-      bindingSpec: corpus.bindingSpec,
+  const invocationSource = {
+      bindingSpec: scenarioFile.bindingSpec,
       ...(typeof source.location === "string" ? { location: source.location } : {}),
       ...(Object.prototype.hasOwnProperty.call(source, "content") ? { content: source.content } : {}),
-    },
-    ref: typeof binding.ref === "string" ? binding.ref : "",
-    context,
-    fetch: fetchMock,
-  });
+  };
+  const joined = scenarioFile.format === "openbindings.invocation-fidelity-scenarios@1";
+  const call = joined
+    ? new OperationInvoker([new OpenAPIInvoker()], { fetch: fetchMock }).invoke(
+      await new OpenAPISynthesizer().synthesizeInterface({ sources: [invocationSource] }),
+      operationSignature(fidelityOperationId(source.content)),
+      { context },
+    )
+    : new OpenAPIInvoker().invokeBinding({
+      source: invocationSource,
+      ref: typeof binding.ref === "string" ? binding.ref : "",
+      context,
+      fetch: fetchMock,
+    });
 
   if (scenario.given.invocation.inputPresent === true) {
     await call.write(scenario.given.invocation.input).catch(() => {});
@@ -86,7 +115,7 @@ async function runScenario(scenario: ProcessorScenario): Promise<ProcessorObserv
     terminal = error as InvocationError;
   }
 
-  const data: Record<string, unknown> = { outputs };
+  const data: Record<string, unknown> = { outputs, ...(joined ? { joinedSynthesis: true } : {}) };
   if (dispatches.length > 0) {
     data.dispatch = dispatches[0];
     data.dispatches = dispatches;
@@ -105,8 +134,32 @@ async function runScenario(scenario: ProcessorScenario): Promise<ProcessorObserv
   return {
     disposition,
     phase: errorPhase(terminal, dispatches.length > 0),
-    data,
+    data: {
+      ...data,
+      error: {
+        code: terminal.code,
+        message: terminal.message,
+        category: terminal.category,
+        ...(terminal.effects !== undefined ? { effects: terminal.effects } : {}),
+        ...(terminal.details !== undefined ? { details: terminal.details } : {}),
+      },
+    },
   };
+}
+
+function fidelityOperationId(content: unknown): string {
+  const document = content as { paths?: Record<string, Record<string, { operationId?: unknown }>> };
+  for (const path of Object.values(document.paths ?? {})) {
+    for (const operation of Object.values(path)) {
+      if (typeof operation.operationId === "string") return operation.operationId;
+    }
+  }
+  throw new Error("fidelity artifact omits operationId");
+}
+
+function base64ToBytes(value: string): Uint8Array<ArrayBuffer> {
+  const binary = atob(value);
+  return Uint8Array.from(binary, (char) => char.charCodeAt(0));
 }
 
 async function observedBody(

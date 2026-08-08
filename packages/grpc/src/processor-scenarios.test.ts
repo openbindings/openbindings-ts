@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import {
   CONTEXT_REQUIRED,
   ERR_SOURCE_LOAD_FAILED,
+  ERR_VALIDATION_FAILED,
   matchProcessorObservation,
   type InvocationError,
   type Metadata,
@@ -22,6 +23,7 @@ import {
 
 const root = process.env.OB_SPEC_CORPUS ?? resolve(dirname(fileURLToPath(import.meta.url)), "../../../../spec/conformance");
 const corpus = JSON.parse(readFileSync(resolve(root, "binding-specs/processor/grpc.json"), "utf8")) as ProcessorScenarioFile;
+const fidelityCorpus = JSON.parse(readFileSync(resolve(root, "invocation-fidelity/grpc.json"), "utf8")) as ProcessorScenarioFile;
 
 describe("portable gRPC processor scenarios", () => {
   for (const scenario of corpus.scenarios) {
@@ -32,7 +34,16 @@ describe("portable gRPC processor scenarios", () => {
   }
 });
 
-async function runScenario(scenario: ProcessorScenario): Promise<ProcessorObservation> {
+describe("gRPC invocation-fidelity scenarios", () => {
+  for (const scenario of fidelityCorpus.scenarios) {
+    it(scenario.id, async () => {
+      const observation = await runScenario(scenario, fidelityCorpus.bindingSpec);
+      expect(() => matchProcessorObservation(scenario, observation)).not.toThrow();
+    });
+  }
+});
+
+async function runScenario(scenario: ProcessorScenario, bindingSpec = corpus.bindingSpec): Promise<ProcessorObservation> {
   const reflectionRequests: string[] = [];
   let dispatch: Record<string, unknown> | undefined;
   let callRef: FakeCall | undefined;
@@ -58,7 +69,7 @@ async function runScenario(scenario: ProcessorScenario): Promise<ProcessorObserv
 
   const call = new GrpcInvoker({ runtime }).invokeBinding({
     source: {
-      bindingSpec: corpus.bindingSpec,
+      bindingSpec,
       ...(typeof scenario.given.source.location === "string" ? { location: scenario.given.source.location } : {}),
       ...(Object.prototype.hasOwnProperty.call(scenario.given.source, "content") ? { content: scenario.given.source.content } : {}),
     },
@@ -105,14 +116,22 @@ async function runScenario(scenario: ProcessorScenario): Promise<ProcessorObserv
     reflectionRequests,
     ...(dispatch ? { dispatch } : {}),
   };
+  data.trailer = call.trailer();
   if (inputOpenAtFirstOutput !== undefined) data.trace = { outputs: [{ inputOpen: inputOpenAtFirstOutput }] };
   if (!terminal) return { disposition: "complete", phase: "completion", data };
+  data.error = {
+    code: terminal.code,
+    message: terminal.message,
+    category: terminal.category,
+    ...(terminal.effects !== undefined ? { effects: terminal.effects } : {}),
+    ...(terminal.details !== undefined ? { details: terminal.details } : {}),
+  };
   const disposition = terminal.code === CONTEXT_REQUIRED
     ? "context-required"
     : dispatch ? "error" : scenario.id === "GRPC-PS-01" ? "error" : "refusal";
   const phase: ProcessorObservation["phase"] = scenario.id === "GRPC-PS-01"
     ? "resolution"
-    : scenario.id === "GRPC-PS-10"
+    : terminal.code === ERR_VALIDATION_FAILED && dispatch
       ? "dispatch"
       : dispatch
         ? "completion"
@@ -167,7 +186,15 @@ class FakeCall implements GrpcCall {
     if (Array.isArray(this.#peer.responseMessages)) for (const response of this.#peer.responseMessages) this.#queue.push(encode(response));
     const status = this.#peer.finalStatus ?? "OK";
     if (status === "OK") { this.#queue.close(); this.#done.resolve(); }
-    else { const error = new Error(`gRPC ${String(status)}`); this.#queue.fail(error); this.#done.reject(error); }
+    else {
+      const error = Object.assign(new Error(String(this.#peer.statusMessage ?? `gRPC ${String(status)}`)), {
+        code: grpcStatusCode(String(status)),
+        grpcMessage: String(this.#peer.statusMessage ?? `gRPC ${String(status)}`),
+        ...(Array.isArray(this.#peer.statusDetails) ? { grpcStatusDetails: this.#peer.statusDetails } : {}),
+      });
+      this.#queue.fail(error);
+      this.#done.reject(error);
+    }
   }
   cancel(): void {
     this.#dispatch.cancelled = true;
@@ -204,6 +231,31 @@ function testDeferred<T>(): { promise: Promise<T>; resolve(value?: T): void; rej
 function encode(value: unknown): Uint8Array { return new TextEncoder().encode(JSON.stringify(value)); }
 function toMetadata(value: unknown): Metadata {
   if (!isRecord(value)) return {};
-  return Object.fromEntries(Object.entries(value).map(([name, item]) => [name, [String(item)]]));
+  return Object.fromEntries(Object.entries(value).map(([name, item]) => [
+    name,
+    Array.isArray(item) ? item.map(String) : [String(item)],
+  ]));
+}
+function grpcStatusCode(name: string): number {
+  const codes: Record<string, number> = {
+    OK: 0,
+    CANCELLED: 1,
+    UNKNOWN: 2,
+    INVALID_ARGUMENT: 3,
+    DEADLINE_EXCEEDED: 4,
+    NOT_FOUND: 5,
+    ALREADY_EXISTS: 6,
+    PERMISSION_DENIED: 7,
+    RESOURCE_EXHAUSTED: 8,
+    FAILED_PRECONDITION: 9,
+    ABORTED: 10,
+    OUT_OF_RANGE: 11,
+    UNIMPLEMENTED: 12,
+    INTERNAL: 13,
+    UNAVAILABLE: 14,
+    DATA_LOSS: 15,
+    UNAUTHENTICATED: 16,
+  };
+  return codes[name] ?? 2;
 }
 function isRecord(value: unknown): value is Record<string, unknown> { return value !== null && typeof value === "object" && !Array.isArray(value); }

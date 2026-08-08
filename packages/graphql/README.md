@@ -80,6 +80,12 @@ Each output is the complete GraphQL response envelope, including `data`,
 `outputTransform` such as `data.viewer` when an operation intentionally
 exposes only the selected field.
 
+Legacy `application/json` non-2xx responses and `graphql-transport-ws`
+protocol errors are failure completions. `graphQLFailureEvidence(error)`
+recovers their exact HTTP bytes and headers or complete WebSocket error/close
+evidence. Earlier subscription outputs remain visible after a later failure;
+local SDK and document-validation errors carry no invented native evidence.
+
 ## Runtime configuration
 
 The TypeScript implementation carries the specification's interpretation

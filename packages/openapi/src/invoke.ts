@@ -379,7 +379,14 @@ export async function runBinding(
         new InvocationError(
           httpErrorCode(resp.status),
           `HTTP ${resp.status} ${resp.statusText}`,
-          { status: resp.status },
+          openAPIFailureDetails(
+            resp,
+            null,
+            "",
+            invocationMeta,
+            responseDeclaration,
+            contentType,
+          ),
           httpErrorEffects(resp.status),
         ),
       );
@@ -454,15 +461,22 @@ export async function runBinding(
   }
   if (!ok) {
     // The format's NATIVE failure: hooks change the verdict, never the
-    // error vocabulary. The raw body rides details for callers.
+    // error vocabulary. It is not an operation output, but the complete
+    // native response and the OpenAPI declaration match remain available on
+    // the failure completion. The legacy status/body members remain for
+    // callers that already consume them.
     inv.fireError(
       new InvocationError(
         httpErrorCode(resp.status),
         `HTTP ${resp.status} ${resp.statusText}`,
-        {
-          status: resp.status,
-          ...(lossyText.length > 0 ? { body: lossyText } : {}),
-        },
+        openAPIFailureDetails(
+          resp,
+          bodyBytes,
+          lossyText,
+          invocationMeta,
+          responseDeclaration,
+          contentType,
+        ),
         httpErrorEffects(resp.status),
       ),
     );
@@ -740,6 +754,65 @@ function responseMetadata(resp: Response): Metadata {
     }
   });
   return md;
+}
+
+/**
+ * Builds the binding-native evidence carried by an unsuccessful OpenAPI HTTP
+ * exchange. `httpResponse.body.base64` is the fidelity record: it preserves
+ * arbitrary bytes through both in-process use and JSON invoker frames. The
+ * older top-level `status`/`body` members remain a convenience text view.
+ */
+function openAPIFailureDetails(
+  resp: Response,
+  bodyBytes: Uint8Array | null,
+  textView: string,
+  metadata: Metadata,
+  declaration: ReturnType<typeof governingResponse>,
+  contentType: string | null,
+): Record<string, unknown> {
+  const httpResponse: Record<string, unknown> = {
+    status: resp.status,
+    headers: Object.fromEntries(
+      Object.entries(metadata).map(([name, values]) => [name.toLowerCase(), [...values]]),
+    ),
+  };
+  if (bodyBytes !== null) {
+    httpResponse.body = {
+      base64: bytesToBase64(bodyBytes),
+      byteLength: bodyBytes.byteLength,
+    };
+  }
+  if (resp.statusText !== "") httpResponse.statusText = resp.statusText;
+  if (resp.url !== "") httpResponse.url = resp.url;
+
+  const artifact: Record<string, unknown> = { declared: declaration !== null };
+  if (declaration) {
+    artifact.responseKey = declaration.key;
+    try {
+      const governingMedia = governingResponseMedia(declaration.response, contentType);
+      if (governingMedia) artifact.governingMedia = governingMedia;
+    } catch {
+      // The mismatch is already preserved by the actual headers and matched
+      // Response Object key. Failure evidence must not replace the native
+      // status with a new decode/protocol failure.
+    }
+  }
+
+  return {
+    status: resp.status,
+    ...(textView.length > 0 ? { body: textView } : {}),
+    httpResponse,
+    openapi: artifact,
+  };
+}
+
+function bytesToBase64(bytes: Uint8Array): string {
+  let binary = "";
+  const chunkSize = 0x8000;
+  for (let offset = 0; offset < bytes.byteLength; offset += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + chunkSize));
+  }
+  return btoa(binary);
 }
 
 // ---------------------------------------------------------------------------

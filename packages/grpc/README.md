@@ -41,5 +41,13 @@ The binding invents no authentication convention. Supply explicitly named
 gRPC metadata. Generic credentials without a named carriage raise
 `CONTEXT_REQUIRED` before reflection or method dispatch.
 
+Response messages remain outputs even when their fields look error-shaped. A
+non-OK final gRPC status terminates the invocation without retracting earlier
+messages. Its numeric code, message, and rich `google.protobuf.Any` detail
+payloads are preserved in the terminal error and exposed by
+`grpcFailureEvidence(error)`; local SDK and ProtoJSON validation failures do
+not invent gRPC evidence. Leading and trailing metadata retain all values in
+order, with binary `-bin` values represented as base64 strings.
+
 The binding specification is normative; this README describes the package
 surface and declared implementation coverage.

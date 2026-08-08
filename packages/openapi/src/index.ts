@@ -1,4 +1,10 @@
 export { OpenAPIInvoker, OpenAPISynthesizer } from "./invoker.js";
+export { openAPIFailureEvidence } from "./failure.js";
+export type {
+  OpenAPIFailureEvidence,
+  OpenAPIHTTPResponseEvidence,
+  OpenAPIFailureDeclaration,
+} from "./failure.js";
 export { BINDING_SPEC, DEFAULT_SOURCE_NAME } from "./constants.js";
 export type {
   OpenAPIDocument,

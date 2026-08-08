@@ -4,6 +4,12 @@ import apiJSON from "protobufjs/google/protobuf/api.json" with { type: "json" };
 import descriptorJSON from "protobufjs/google/protobuf/descriptor.json" with { type: "json" };
 import sourceContextJSON from "protobufjs/google/protobuf/source_context.json" with { type: "json" };
 import typeJSON from "protobufjs/google/protobuf/type.json" with { type: "json" };
+export {
+  connectFailureEvidence,
+  type ConnectFailureEvidence,
+  type ConnectHTTPFailureEvidence,
+  type ConnectEndStreamFailureEvidence,
+} from "./failure.js";
 import { fromProtoJSON, toProtoJSON } from "./protojson.js";
 import { assertBoundMethodRange } from "./schema-range.js";
 import {
@@ -16,14 +22,22 @@ import {
   contextHeaders,
   contextRequiredError,
   ERR_CONNECT_FAILED,
+  ERR_AUTH_REQUIRED,
+  ERR_CANCELLED,
+  ERR_EXECUTION_FAILED,
   ERR_INVALID_REF,
+  ERR_PERMISSION_DENIED,
   ERR_PROTOCOL,
   ERR_REF_NOT_FOUND,
   ERR_RUNTIME,
   ERR_SOURCE_CONFIG_ERROR,
   ERR_SOURCE_LOAD_FAILED,
   ERR_STREAM_ERROR,
+  ERR_TIMEOUT,
+  ERR_UNAVAILABLE,
   ERR_VALIDATION_FAILED,
+  httpErrorCode,
+  httpErrorEffects,
   type BindingInvocationArgs,
   type BindingInvoker,
   type BindingSpecInfo,
@@ -139,9 +153,9 @@ export class ConnectInvoker implements BindingInvoker {
         : concatBytes(envelope(0, encodeJSON(json)), envelope(0x02, encodeJSON({})));
       const response = await dispatch(fetchImpl, url, headers, body, invocation.signal);
       if (!response) return;
-      invocation.setHeader(responseMetadata(response));
+      setResponseMetadata(response, invocation, plan.kind === "unary");
       if (response.status !== 200) {
-        invocation.fireError(new InvocationError(ERR_RUNTIME, `Connect HTTP ${response.status}`, { status: response.status }));
+        invocation.fireError(await connectHTTPError(response));
         return;
       }
       if (plan.kind === "unary") await handleUnaryResponse(response, plan, invocation);
@@ -170,6 +184,11 @@ export class ConnectInvoker implements BindingInvoker {
     const response = await responsePromise;
     if (!response) return;
     invocation.setHeader(responseMetadata(response));
+    if (response.status !== 200) {
+      invocation.fireError(await connectHTTPError(response));
+      await sender.catch(() => {});
+      return;
+    }
     try {
       await handleStreamingResponse(response, plan, invocation);
       await sender;
@@ -361,8 +380,29 @@ async function handleStreamingResponse(
     if ((frame.flags & 0x02) !== 0) {
       if (sawEnd) throw new InvocationError(ERR_PROTOCOL, "Connect stream carries more than one END_STREAM envelope");
       sawEnd = true;
-      const end = JSON.parse(new TextDecoder().decode(frame.payload)) as Record<string, unknown>;
-      if (isRecord(end.error)) throw new InvocationError(ERR_STREAM_ERROR, String(end.error.message ?? "Connect stream error"), end.error);
+      let end: Record<string, unknown>;
+      try {
+        const parsed = JSON.parse(new TextDecoder().decode(frame.payload));
+        if (!isRecord(parsed)) throw new Error("payload is not an object");
+        end = parsed;
+      } catch (error: unknown) {
+        throw new InvocationError(ERR_PROTOCOL, `Connect END_STREAM payload is invalid: ${message(error)}`, {
+          connect: { endStream: { payload: capturedBytes(frame.payload) } },
+        });
+      }
+      const trailer = connectEndStreamMetadata(end.metadata);
+      if (Object.keys(trailer).length > 0) invocation.setTrailer(trailer);
+      if (isRecord(end.error)) {
+        const nativeCode = typeof end.error.code === "string" ? end.error.code : "";
+        throw new InvocationError(
+          connectErrorCode(nativeCode),
+          typeof end.error.message === "string" && end.error.message !== ""
+            ? end.error.message
+            : nativeCode || "Connect stream error",
+          { connect: { endStream: { error: end.error, payload: capturedBytes(frame.payload) } } },
+          connectErrorEffects(nativeCode),
+        );
+      }
       continue;
     }
     if (sawEnd) throw new InvocationError(ERR_PROTOCOL, "Connect data follows END_STREAM");
@@ -419,6 +459,97 @@ function responseMetadata(response: Response): Metadata {
   const output: Metadata = {};
   response.headers.forEach((value, name) => { output[name] = [value]; });
   return output;
+}
+
+function setResponseMetadata(
+  response: Response,
+  invocation: InvocationImpl<unknown, unknown>,
+  unary: boolean,
+): void {
+  if (!unary) {
+    invocation.setHeader(responseMetadata(response));
+    return;
+  }
+  const header: Metadata = {};
+  const trailer: Metadata = {};
+  response.headers.forEach((value, name) => {
+    if (name.startsWith("trailer-") && name.length > "trailer-".length) {
+      trailer[name.slice("trailer-".length)] = [value];
+    } else {
+      header[name] = [value];
+    }
+  });
+  invocation.setHeader(header);
+  if (Object.keys(trailer).length > 0) invocation.setTrailer(trailer);
+}
+
+async function connectHTTPError(response: Response): Promise<InvocationError> {
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  let native: Record<string, unknown> | undefined;
+  try {
+    const parsed = JSON.parse(new TextDecoder().decode(bytes));
+    if (isRecord(parsed)) native = parsed;
+  } catch {
+    // Proxy and middleware failures need not carry a Connect JSON error.
+  }
+  const nativeCode = typeof native?.code === "string" ? native.code : "";
+  const code = nativeCode ? connectErrorCode(nativeCode) : httpErrorCode(response.status);
+  const effects = nativeCode ? connectErrorEffects(nativeCode) : httpErrorEffects(response.status);
+  const headers = responseMetadata(response);
+  const details: Record<string, unknown> = {
+    status: response.status,
+    body: new TextDecoder().decode(bytes),
+    httpResponse: {
+      status: response.status,
+      statusText: response.statusText,
+      ...(response.url ? { url: response.url } : {}),
+      headers,
+      body: capturedBytes(bytes),
+    },
+    ...(native ? { connect: { error: native } } : {}),
+  };
+  const nativeMessage = typeof native?.message === "string" && native.message !== ""
+    ? native.message
+    : `Connect HTTP ${response.status}${response.statusText ? ` ${response.statusText}` : ""}`;
+  return new InvocationError(code, nativeMessage, details, effects);
+}
+
+function connectErrorCode(code: string): string {
+  switch (code) {
+    case "unauthenticated": return ERR_AUTH_REQUIRED;
+    case "permission_denied": return ERR_PERMISSION_DENIED;
+    case "unavailable":
+    case "resource_exhausted": return ERR_UNAVAILABLE;
+    case "deadline_exceeded": return ERR_TIMEOUT;
+    case "canceled": return ERR_CANCELLED;
+    default: return ERR_EXECUTION_FAILED;
+  }
+}
+
+function connectErrorEffects(code: string): "none" | undefined {
+  return code === "unavailable" || code === "resource_exhausted" ? "none" : undefined;
+}
+
+function connectEndStreamMetadata(value: unknown): Metadata {
+  if (value === undefined) return {};
+  if (!isRecord(value)) throw new InvocationError(ERR_PROTOCOL, "Connect END_STREAM metadata is not an object");
+  const metadata: Metadata = {};
+  for (const [name, raw] of Object.entries(value)) {
+    if (!Array.isArray(raw) || !raw.every((item) => typeof item === "string")) {
+      throw new InvocationError(ERR_PROTOCOL, `Connect END_STREAM metadata field ${JSON.stringify(name)} is not a string array`);
+    }
+    metadata[name] = [...raw];
+  }
+  return metadata;
+}
+
+function capturedBytes(bytes: Uint8Array): { base64: string; byteLength: number } {
+  let binary = "";
+  const chunkSize = 0x8000;
+  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + chunkSize));
+  }
+  return { base64: btoa(binary), byteLength: bytes.byteLength };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> { return value !== null && typeof value === "object" && !Array.isArray(value); }

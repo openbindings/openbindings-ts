@@ -28,6 +28,12 @@ token encoding. Named `encode`, `route`, `decode`, `classify`, and `target`
 configuration points fill only choices the artifact leaves open. Generic
 credentials never ride argv and have no invented environment mapping.
 
+A rejected exit, signal termination, or post-process decode failure is
+terminal rather than an operation output. Its `usage.process` evidence retains
+exit/signal identity, exact stdout/stderr bytes, and truncation markers;
+`usageFailureEvidence` validates and extracts it. Successful stderr remains
+metadata through the Base64 `x-stderr-base64` trailer lane.
+
 Includes, mounts, configuration-file discovery, and external argument parse
 commands are refused in revision 1. The binding specification is normative;
 this README describes the package surface and declared coverage.
