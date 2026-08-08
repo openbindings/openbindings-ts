@@ -127,17 +127,18 @@ function hookTerminal(tier: string, nativeCode: string, err: unknown): Invocatio
   if (err instanceof InvocationError) {
     // Deliberate passthrough: the hook chose its own code. Stamp tier
     // provenance without clobbering an explicit decidedBy.
-    const d = err.details;
+    const d = err.diagnostics;
     if (d && typeof d === "object" && !Array.isArray(d)) {
       const m = d as Record<string, unknown>;
       if (!("decidedBy" in m)) m.decidedBy = tier;
       return err;
     }
-    return new InvocationError(err.code, err.message, { decidedBy: tier });
+    return new InvocationError(err.code, err.message, err.details, { decidedBy: tier });
   }
   return new InvocationError(
     nativeCode,
     `${tier}: ${err instanceof Error ? err.message : String(err)}`,
+    undefined,
     { decidedBy: tier },
   );
 }

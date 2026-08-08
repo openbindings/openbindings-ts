@@ -6,7 +6,7 @@ import {
   ERR_SOURCE_CONFIG_ERROR,
   type Invocation,
 } from "@openbindings/sdk";
-import { BINDING_SPEC } from "./constants.js";
+import { BINDING_SPEC, LEGACY_BINDING_SPEC } from "./constants.js";
 import { GraphQLInvoker, GraphQLSynthesizer } from "./invoker.js";
 import type { GraphQLWebSocketInit } from "./configuration.js";
 
@@ -50,7 +50,7 @@ const schema = {
   ],
 };
 const source = {
-  bindingSpec: BINDING_SPEC,
+  bindingSpec: LEGACY_BINDING_SPEC,
   location: endpoint,
   content: { data: { __schema: schema } },
 };
@@ -109,7 +109,7 @@ describe("GraphQLInvoker HTTP", () => {
       operationName: "Viewer",
       variables: { id: "u-1", unused: 7, _query: "ordinary variable" },
     });
-    await expect(invocation.header).resolves.toMatchObject({ "x-request-id": ["req-1"] });
+    await expect(invocation.diagnostics.leading).resolves.toMatchObject({ "x-request-id": ["req-1"] });
   });
 
   it("omits variables when caller input is absent", async () => {

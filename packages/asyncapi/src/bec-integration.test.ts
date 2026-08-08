@@ -47,7 +47,8 @@ function makeAsyncAPISpec(port: number) {
         bindings: { http: { method: "POST" } },
         security: [{ $ref: "#/components/securitySchemes/bearer" }],
       },
-      // No declared security: the server's 401 surfaces as ERR_AUTH_REQUIRED.
+      // No declared security: the server's 401 is an unsuccessful execution;
+      // the native status remains diagnostic rather than becoming a portable code.
       sendOpenMessage: {
         action: "receive" as const,
         channel: { $ref: "#/channels/messages" },
@@ -206,19 +207,21 @@ describe("AsyncAPI binding invoker (real HTTP)", () => {
     expect(out).toEqual({ echo: { text: "hello" } });
     await call.closed;
 
-    const header = await call.header;
+    const header = await call.diagnostics.leading;
     expect(header["content-type"]).toEqual(["application/json"]);
   });
 
-  it("maps a server 401 to ERR_AUTH_REQUIRED with status and body details", async () => {
+  it("keeps a server 401 structural while retaining status and body diagnostically", async () => {
     const invoker = new AsyncAPIInvoker();
     const call = invoker.invokeBinding({ source: source(), ref: "#/operations/sendOpenMessage" });
 
     await call.write({ text: "hi" });
-    // Details carry the RAW capture (diagnostics, never a decoded value).
+    // Diagnostics carry the raw capture (never an ordinary error detail or
+    // decoded operation value).
     await expect(call.closed).rejects.toMatchObject({
-      code: "ERR_AUTH_REQUIRED",
-      details: { status: 401, body: JSON.stringify({ error: "unauthorized" }) },
+      code: "ERR_EXECUTION_FAILED",
+      details: undefined,
+      diagnostics: { status: 401, body: JSON.stringify({ error: "unauthorized" }) },
     });
   });
 

@@ -59,6 +59,16 @@ for await (const event of call.outputs) {
 - **Binding `ref`**: a REQUIRED JSON Pointer fragment addressing the graph definition within the source document (`"#/graphs/summarizeOrder"`, or `"#"` for a document whose root is a graph). Bare graph keys are rejected.
 - **Source document**: any JSON document; the conventional shape is a top-level `graphs` map. Each graph declares its own `openbindings.operation-graph` version, refused per OG-T-02 when unsupported.
 
+## Synthesis boundary
+
+This package intentionally provides a binding invoker, not an interface
+synthesizer. A graph composes operations named by its containing OBI and does
+not redeclare those operations' application input/output contracts. A graph
+artifact by itself therefore cannot determine a useful standalone OBI without
+inventing schemas or copying contracts from a separate interface. Author the
+composed operation and its graph binding in an OBI; use synthesis on the
+underlying brownfield sources that actually declare their application values.
+
 ## Source shape
 
 ```json

@@ -26,31 +26,29 @@ import {
   ERR_TIMEOUT,
 } from "./errcodes.js";
 import type { InvocationErrorCode } from "./errcodes.js";
-import { type Category, type Effects, categoryForCode, defaultEffectsForCode } from "./classification.js";
 
 /**
  * The structured error type for all terminal invocation failures. A class
  * (not a plain shape) so it carries a stack trace and supports `instanceof`.
  *
- * Every error carries a {@link category} — the normative classification axis
- * consumers branch on — derived from `code` through the single canonical map in
- * classification.ts, so the constructor is the one place classification is
- * attached (mirrors the Go SDK, which stamps it at FireError / on the wire).
- * Where retry is in question it also carries {@link effects}; an emission site
- * may pass it explicitly, otherwise the transport-code default applies. An
- * absent `effects` is treated as `"possible"` by consumers.
+ * The terminal error frame is the portable unsuccessful-completion signal.
+ * `details` carries portable data defined by an interface-owned code
+ * (currently CONTEXT_REQUIRED and validation failures), or an opaque JSON
+ * failure value identified as application-authored by the governing binding
+ * rules. `diagnostics` is an optional expert escape hatch for selected-binding
+ * or implementation evidence; ordinary operation behavior must not depend on
+ * it.
  */
 export class InvocationError extends Error {
   readonly code: InvocationErrorCode | (string & {});
-  readonly category: Category;
-  readonly effects?: Effects;
   readonly details?: unknown;
+  readonly diagnostics?: unknown;
 
   constructor(
     code: InvocationErrorCode | (string & {}),
     message: string,
     details?: unknown,
-    effects?: Effects,
+    diagnostics?: unknown,
   ) {
     // A CONTEXT_REQUIRED challenge is actionable only through its details; an
     // error string that hides the target and the requirement families strands
@@ -64,10 +62,8 @@ export class InvocationError extends Error {
     super(rendered);
     this.name = "InvocationError";
     this.code = code;
-    this.category = categoryForCode(code);
-    const eff = effects ?? defaultEffectsForCode(code);
-    if (eff !== undefined) this.effects = eff;
     if (details !== undefined) this.details = details;
+    if (diagnostics !== undefined) this.diagnostics = diagnostics;
   }
 }
 
@@ -88,11 +84,9 @@ function isTimeoutReason(reason: unknown): boolean {
 
 /**
  * Map an abort into its terminal error, mirroring the Go SDK's `ctx.Err()`
- * branch. A deadline (`AbortSignal.timeout()`) is a TIMEOUT — transient /
- * effects: possible, because a deadline can fire after outputs have flowed, so
- * the honest retry-safety answer is "may have executed". Any other abort (a
- * caller-initiated `cancel()`) is `ERR_CANCELLED`. The InvocationError
- * constructor stamps category and effects from the code.
+ * branch. A deadline (`AbortSignal.timeout()`) is distinct from a
+ * caller-initiated `cancel()`. Neither code implies cross-protocol retry
+ * policy.
  */
 function abortToTerminal(reason: unknown): InvocationError {
   return isTimeoutReason(reason)
@@ -101,10 +95,18 @@ function abortToTerminal(reason: unknown): InvocationError {
 }
 
 /**
- * Multi-valued leading/trailing metadata (gRPC metadata, HTTP
- * headers/trailers). Empty for formats that carry none.
+ * Multi-valued binding-native metadata. It is exposed only through the
+ * explicitly named diagnostic view and is never part of an operation value.
  */
 export type Metadata = Record<string, string[]>;
+
+/** Optional expert evidence for one in-process invocation. */
+export interface InvocationDiagnostics {
+  /** Binding-native leading metadata, if the selected binding has any. */
+  readonly leading: Promise<Metadata>;
+  /** Binding-native trailing metadata after termination. */
+  trailing(): Metadata;
+}
 
 // ---------------------------------------------------------------------------
 // Context negotiation shapes (the openbindings.binding-invoker interface)
@@ -333,18 +335,10 @@ export interface Invocation<I = unknown, O = unknown> {
   readonly inputClosed: Promise<void>;
 
   /**
-   * Leading metadata (HTTP response headers / gRPC leading metadata).
-   * Resolves when the binding sets it, or with the first output / terminal,
-   * whichever is first. Empty for formats that carry none.
+   * Explicit expert escape hatch for binding-native evidence. Correct
+   * ordinary operation behavior MUST NOT depend on this view.
    */
-  readonly header: Promise<Metadata>;
-
-  /**
-   * Trailing metadata (gRPC trailers / HTTP trailers). Valid only after the
-   * invocation has terminated (`outputs` exhausted or `closed` settled);
-   * throws if read before then.
-   */
-  trailer(): Metadata;
+  readonly diagnostics: InvocationDiagnostics;
 }
 
 // ---------------------------------------------------------------------------
@@ -488,6 +482,13 @@ export class InvocationImpl<I = unknown, O = unknown>
 {
   readonly closed: Promise<void>;
   readonly header: Promise<Metadata>;
+
+  get diagnostics(): InvocationDiagnostics {
+    return {
+      leading: this.header,
+      trailing: () => this.trailer(),
+    };
+  }
   readonly inputClosed: Promise<void>;
 
   private readonly controller = new AbortController();

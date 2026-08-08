@@ -1,15 +1,12 @@
-import type { Effects, Metadata } from "@openbindings/sdk";
+import type { Metadata } from "@openbindings/sdk";
 import {
   DEFAULT_MAX_DELIVERY_UNIT_BYTES,
-  ERR_AUTH_REQUIRED,
   ERR_CONNECT_FAILED,
   ERR_EXECUTION_FAILED,
-  ERR_PERMISSION_DENIED,
   ERR_RESPONSE_ERROR,
   ERR_STREAM_ERROR,
   InvocationError,
   httpErrorCode,
-  httpErrorEffects,
 } from "@openbindings/sdk";
 import type { Field, IntrospectionSchema } from "./introspection.js";
 import { rootTypeName, INTROSPECTION_QUERY } from "./introspection.js";
@@ -19,7 +16,7 @@ import type { DocumentConfiguration, GraphQLWebSocketFactory } from "./configura
 // Ref parsing
 // ---------------------------------------------------------------------------
 
-/** Parse an exact openbindings.graphql@1 ref. */
+/** Parse a ref form shared by the supported GraphQL revisions. */
 export function parseRef(ref: string): { rootType: string; fieldName: string } {
   const idx = ref.indexOf("/");
   if (idx < 0 || idx === 0 || idx === ref.length - 1 || ref.indexOf("/", idx + 1) >= 0) {
@@ -96,6 +93,7 @@ function metadataFromHeaders(h: Headers): Metadata {
 interface GraphQLHTTPResult {
   body: GraphQLResponse;
   headers: Metadata;
+  mediaType: string;
 }
 
 /**
@@ -185,9 +183,8 @@ async function doGraphQLHTTP(
       resp,
       responseBytes,
       httpErrorCode(resp.status),
-      `HTTP ${resp.status}: ${text}`,
+      "Invocation completed unsuccessfully",
       mediaType,
-      httpErrorEffects(resp.status),
     );
   }
   let respBody: unknown;
@@ -211,7 +208,7 @@ async function doGraphQLHTTP(
       mediaType,
     );
   }
-  return { body: respBody, headers: metadataFromHeaders(resp.headers) };
+  return { body: respBody, headers: metadataFromHeaders(resp.headers), mediaType };
 }
 
 function graphQLHTTPFailure(
@@ -220,9 +217,8 @@ function graphQLHTTPFailure(
   code: string,
   message: string,
   mediaType: string,
-  effects?: Effects,
 ): InvocationError {
-  return new InvocationError(code, message, {
+  return new InvocationError(code, message, undefined, {
     status: response.status,
     body: new TextDecoder().decode(body),
     httpResponse: {
@@ -233,7 +229,7 @@ function graphQLHTTPFailure(
       body: capturedBytes(body),
     },
     graphql: { mediaType },
-  }, effects);
+  });
 }
 
 function capturedBytes(bytes: Uint8Array): { base64: string; byteLength: number } {
@@ -277,6 +273,7 @@ export function wellFormedGraphQLResponse(value: unknown): value is GraphQLRespo
 export interface GraphQLInvokeResult {
   response: GraphQLResponse;
   headers: Metadata;
+  mediaType: string;
 }
 
 /**
@@ -300,12 +297,7 @@ export async function invokeGraphQL(
     if (e instanceof InvocationError) throw e;
     throw new InvocationError(ERR_RESPONSE_ERROR, e instanceof Error ? e.message : String(e));
   }
-  return { response: res.body, headers: res.headers };
-}
-
-/** Check if an error is an HTTP auth failure (401/403). */
-export function isAuthError(e: unknown): boolean {
-  return e instanceof InvocationError && (e.code === ERR_AUTH_REQUIRED || e.code === ERR_PERMISSION_DENIED);
+  return { response: res.body, headers: res.headers, mediaType: res.mediaType };
 }
 
 /**
@@ -474,6 +466,7 @@ export async function* subscribeGraphQL(
         finish({ error: new InvocationError(
           ERR_EXECUTION_FAILED,
           errors?.[0]?.message ?? String(msg.payload),
+          undefined,
           {
             ...(errors ? { errors } : {}),
             graphqlTransportWs: { type: "error", payload: msg.payload },
@@ -509,8 +502,8 @@ export async function* subscribeGraphQL(
       },
     };
     finish({ error: acked
-      ? new InvocationError(ERR_STREAM_ERROR, "WebSocket closed before subscription complete", details)
-      : new InvocationError(ERR_CONNECT_FAILED, "WebSocket closed during handshake", details) });
+      ? new InvocationError(ERR_STREAM_ERROR, "WebSocket closed before subscription complete", undefined, details)
+      : new InvocationError(ERR_CONNECT_FAILED, "WebSocket closed during handshake", undefined, details) });
   };
 
   const onAbort = () => {

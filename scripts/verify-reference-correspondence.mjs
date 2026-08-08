@@ -11,11 +11,11 @@ if (matrix.format !== "openbindings.reference-sdk-correspondence@1") throw new E
 const expected = new Map([
   ["openbindings.openapi@1", ["openapi", "OpenAPIInvoker", "OpenAPISynthesizer"]],
   ["openbindings.asyncapi@1", ["asyncapi", "AsyncAPIInvoker", "AsyncAPISynthesizer"]],
-  ["openbindings.mcp@1", ["mcp", "MCPInvoker", "MCPSynthesizer"]],
+  ["openbindings.mcp@2", ["mcp", "MCPInvoker", "MCPSynthesizer"]],
   ["openbindings.grpc@1", ["grpc", "GrpcInvoker", "GrpcSynthesizer"]],
   ["openbindings.connect@1", ["connect", "ConnectInvoker", "ConnectSynthesizer"]],
   ["openbindings.usage@1", ["usage", "UsageInvoker", "UsageSynthesizer"]],
-  ["openbindings.graphql@1", ["graphql", "GraphQLInvoker", "GraphQLSynthesizer"]],
+  ["openbindings.graphql@2", ["graphql", "GraphQLInvoker", "GraphQLSynthesizer"]],
 ]);
 
 for (const family of matrix.families) {

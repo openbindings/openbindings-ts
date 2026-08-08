@@ -22,22 +22,17 @@ import {
   contextHeaders,
   contextRequiredError,
   ERR_CONNECT_FAILED,
-  ERR_AUTH_REQUIRED,
   ERR_CANCELLED,
   ERR_EXECUTION_FAILED,
   ERR_INVALID_REF,
-  ERR_PERMISSION_DENIED,
   ERR_PROTOCOL,
   ERR_REF_NOT_FOUND,
   ERR_RUNTIME,
   ERR_SOURCE_CONFIG_ERROR,
   ERR_SOURCE_LOAD_FAILED,
   ERR_STREAM_ERROR,
-  ERR_TIMEOUT,
-  ERR_UNAVAILABLE,
   ERR_VALIDATION_FAILED,
   httpErrorCode,
-  httpErrorEffects,
   type BindingInvocationArgs,
   type BindingInvoker,
   type BindingSpecInfo,
@@ -386,7 +381,7 @@ async function handleStreamingResponse(
         if (!isRecord(parsed)) throw new Error("payload is not an object");
         end = parsed;
       } catch (error: unknown) {
-        throw new InvocationError(ERR_PROTOCOL, `Connect END_STREAM payload is invalid: ${message(error)}`, {
+        throw new InvocationError(ERR_PROTOCOL, `Connect END_STREAM payload is invalid: ${message(error)}`, undefined, {
           connect: { endStream: { payload: capturedBytes(frame.payload) } },
         });
       }
@@ -395,12 +390,12 @@ async function handleStreamingResponse(
       if (isRecord(end.error)) {
         const nativeCode = typeof end.error.code === "string" ? end.error.code : "";
         throw new InvocationError(
-          connectErrorCode(nativeCode),
+          ERR_EXECUTION_FAILED,
           typeof end.error.message === "string" && end.error.message !== ""
             ? end.error.message
             : nativeCode || "Connect stream error",
+          undefined,
           { connect: { endStream: { error: end.error, payload: capturedBytes(frame.payload) } } },
-          connectErrorEffects(nativeCode),
         );
       }
       continue;
@@ -493,8 +488,7 @@ async function connectHTTPError(response: Response): Promise<InvocationError> {
     // Proxy and middleware failures need not carry a Connect JSON error.
   }
   const nativeCode = typeof native?.code === "string" ? native.code : "";
-  const code = nativeCode ? connectErrorCode(nativeCode) : httpErrorCode(response.status);
-  const effects = nativeCode ? connectErrorEffects(nativeCode) : httpErrorEffects(response.status);
+  const code = httpErrorCode(response.status);
   const headers = responseMetadata(response);
   const details: Record<string, unknown> = {
     status: response.status,
@@ -510,24 +504,8 @@ async function connectHTTPError(response: Response): Promise<InvocationError> {
   };
   const nativeMessage = typeof native?.message === "string" && native.message !== ""
     ? native.message
-    : `Connect HTTP ${response.status}${response.statusText ? ` ${response.statusText}` : ""}`;
-  return new InvocationError(code, nativeMessage, details, effects);
-}
-
-function connectErrorCode(code: string): string {
-  switch (code) {
-    case "unauthenticated": return ERR_AUTH_REQUIRED;
-    case "permission_denied": return ERR_PERMISSION_DENIED;
-    case "unavailable":
-    case "resource_exhausted": return ERR_UNAVAILABLE;
-    case "deadline_exceeded": return ERR_TIMEOUT;
-    case "canceled": return ERR_CANCELLED;
-    default: return ERR_EXECUTION_FAILED;
-  }
-}
-
-function connectErrorEffects(code: string): "none" | undefined {
-  return code === "unavailable" || code === "resource_exhausted" ? "none" : undefined;
+    : "Invocation completed unsuccessfully";
+  return new InvocationError(code, nativeMessage, undefined, details);
 }
 
 function connectEndStreamMetadata(value: unknown): Metadata {

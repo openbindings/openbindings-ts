@@ -24,7 +24,7 @@ export interface ConnectEndStreamFailureEvidence {
 /** Extracts and validates Connect-native HTTP or END_STREAM failure evidence. */
 export function connectFailureEvidence(error: unknown): ConnectFailureEvidence | null {
   if (!(error instanceof InvocationError)) return null;
-  const details = record(error.details);
+  const details = record(error.diagnostics);
   const native = record(details?.connect);
   const response = record(details?.httpResponse);
   const result: ConnectFailureEvidence = {};

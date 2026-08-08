@@ -8,7 +8,7 @@ import {
   operationSignature,
   storeContextResolver,
   CONTEXT_REQUIRED,
-  ERR_AUTH_REQUIRED,
+  ERR_EXECUTION_FAILED,
   type ContextStore,
   type ContextRequiredDetails,
   type OBInterface,
@@ -247,7 +247,7 @@ describe("BEC Integration (real HTTP)", () => {
     expect(resolves).toBe(0);
   });
 
-  it("surfaces ERR_AUTH_REQUIRED when the service rejects resolved credentials", async () => {
+  it("keeps credential rejection structural while retaining HTTP evidence diagnostically", async () => {
     const store = new MemoryStore();
     await store.set(contextKey(), { bearerToken: "wrong-token" });
 
@@ -258,8 +258,9 @@ describe("BEC Integration (real HTTP)", () => {
 
     const call = opInvoker.invoke(iface, operationSignature("listItems"));
     await expect(call.closed).rejects.toMatchObject({
-      code: ERR_AUTH_REQUIRED,
-      details: { status: 401 },
+      code: ERR_EXECUTION_FAILED,
+      details: undefined,
+      diagnostics: { httpResponse: { status: 401 } },
     });
   });
 

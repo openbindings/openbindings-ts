@@ -4,7 +4,7 @@ import { grpcFailureEvidence } from "./failure.js";
 
 describe("grpcFailureEvidence", () => {
   it("extracts exact native status and Any payload bytes", () => {
-    const error = new InvocationError(ERR_EXECUTION_FAILED, "rpc failed", {
+    const error = new InvocationError(ERR_EXECUTION_FAILED, "rpc failed", undefined, {
       grpcStatus: {
         code: 13,
         message: "ledger corrupt",
@@ -27,7 +27,7 @@ describe("grpcFailureEvidence", () => {
 
   it("does not invent evidence for local errors and rejects malformed bytes", () => {
     expect(grpcFailureEvidence(new Error("local"))).toBeNull();
-    expect(grpcFailureEvidence(new InvocationError(ERR_EXECUTION_FAILED, "bad", {
+    expect(grpcFailureEvidence(new InvocationError(ERR_EXECUTION_FAILED, "bad", undefined, {
       grpcStatus: {
         code: 13,
         message: "bad detail",

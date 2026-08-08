@@ -2,13 +2,11 @@ import { describe, it, expect, vi } from "vitest";
 import {
   single,
   CONTEXT_REQUIRED,
-  ERR_AUTH_REQUIRED,
   ERR_CANCELLED,
   ERR_CONNECT_FAILED,
   ERR_EXECUTION_FAILED,
   ERR_INVALID_REF,
   ERR_MISSING_INPUT,
-  ERR_PERMISSION_DENIED,
   ERR_PROTOCOL,
   ERR_REF_NOT_FOUND,
   ERR_RESPONSE_ERROR,
@@ -484,30 +482,31 @@ describe("invokeBinding — pre-dispatch failures", () => {
 });
 
 describe("invokeBinding — responses", () => {
-  it("maps HTTP error statuses to terminal errors carrying status and body", async () => {
+  it("reports unsuccessful HTTP completion and retains native status and body only as diagnostics", async () => {
     const { fetch } = mockFetch(() => jsonResponse({ error: "not found" }, 404));
     const call = new OpenAPIInvoker().invokeBinding({ source: SOURCE, ref: REF_PING, fetch });
 
-    // Details carry the RAW capture (diagnostics, never a decoded value —
+    // Diagnostics carry the RAW capture (never a decoded operation value —
     // the content-independence de-sniff removed failure-path parsing too).
     await expect(call.closed).rejects.toMatchObject({
       code: ERR_EXECUTION_FAILED,
-      details: { status: 404, body: JSON.stringify({ error: "not found" }) },
+      details: undefined,
+      diagnostics: { status: 404, body: JSON.stringify({ error: "not found" }) },
     });
   });
 
-  it("maps 401 to ERR_AUTH_REQUIRED and 403 to ERR_PERMISSION_DENIED", async () => {
+  it("does not compile HTTP 401 and 403 into portable failure codes", async () => {
     const inv = new OpenAPIInvoker();
 
     const { fetch: f401 } = mockFetch(() => jsonResponse({}, 401));
     await expect(
       inv.invokeBinding({ source: SOURCE, ref: REF_PING, fetch: f401 }).closed,
-    ).rejects.toMatchObject({ code: ERR_AUTH_REQUIRED, details: { status: 401 } });
+    ).rejects.toMatchObject({ code: ERR_EXECUTION_FAILED, details: undefined, diagnostics: { status: 401 } });
 
     const { fetch: f403 } = mockFetch(() => jsonResponse({}, 403));
     await expect(
       inv.invokeBinding({ source: SOURCE, ref: REF_PING, fetch: f403 }).closed,
-    ).rejects.toMatchObject({ code: ERR_PERMISSION_DENIED, details: { status: 403 } });
+    ).rejects.toMatchObject({ code: ERR_EXECUTION_FAILED, details: undefined, diagnostics: { status: 403 } });
   });
 
   it("consults consumer hooks through the seam (decode + classify)", async () => {
@@ -532,7 +531,7 @@ describe("invokeBinding — responses", () => {
     await call.closed;
 
     // the conventions record success stamps name what decided each axis.
-    expect(call.trailer()).toMatchObject({ "x-ob-decode": ["hook"], "x-ob-classify": ["hook"] });
+    expect(call.diagnostics.trailing()).toMatchObject({ "x-ob-decode": ["hook"], "x-ob-classify": ["hook"] });
   });
 
   it("a declared-JSON body that fails to parse is loud, never a silent string", async () => {
@@ -553,14 +552,14 @@ describe("invokeBinding — responses", () => {
     const out = await single(call.outputs);
     expect(out).toBe(JSON.stringify({ ok: true }));
     await call.closed;
-    expect(call.trailer()).toMatchObject({ "x-ob-decode": ["header/content-type"], "x-ob-classify": ["assumption/2xx"] });
+    expect(call.diagnostics.trailing()).toMatchObject({ "x-ob-decode": ["header/content-type"], "x-ob-classify": ["assumption/2xx"] });
   });
 
   it("exposes response headers as leading metadata", async () => {
     const { fetch } = mockFetch(() => jsonResponse({ ok: true }, 200, { "X-Request-Id": "r1" }));
     const call = new OpenAPIInvoker().invokeBinding({ source: SOURCE, ref: REF_PING, fetch });
 
-    const md = await call.header;
+    const md = await call.diagnostics.leading;
     expect(md["x-request-id"]).toEqual(["r1"]);
     expect(md["content-type"]).toEqual(["application/json"]);
     await expect(single(call.outputs)).resolves.toEqual({ ok: true });
@@ -766,7 +765,8 @@ describe("invokeBinding — SSE responses", () => {
 
     await expect(call.closed).rejects.toMatchObject({
       code: ERR_EXECUTION_FAILED,
-      details: { status: 500 },
+      details: undefined,
+      diagnostics: { status: 500 },
     });
   });
 

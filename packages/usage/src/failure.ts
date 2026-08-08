@@ -15,7 +15,7 @@ export interface UsageProcessBytes {
 /** Extracts and validates completed Usage process evidence. */
 export function usageFailureEvidence(error: unknown): UsageFailureEvidence | null {
   if (!(error instanceof InvocationError)) return null;
-  const details = record(error.details);
+  const details = record(error.diagnostics);
   const usage = record(details?.usage);
   const process = record(usage?.process);
   if (!process || !Number.isInteger(process.exitCode)) return null;

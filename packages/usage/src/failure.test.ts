@@ -4,7 +4,7 @@ import { usageFailureEvidence } from "./failure.js";
 
 describe("usageFailureEvidence", () => {
   it("extracts process status, signal, bytes, and truncation", () => {
-    const error = new InvocationError("ERR_EXECUTION_FAILED", "failed", {
+    const error = new InvocationError("ERR_EXECUTION_FAILED", "failed", undefined, {
       usage: { process: {
         exitCode: -1,
         signal: "SIGTERM",

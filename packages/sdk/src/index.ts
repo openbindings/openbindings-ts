@@ -132,7 +132,7 @@ export type { ValidateOptions } from "./validate.js";
 export { parseDocument, validateDocument, formatValidationErrors } from "./parse.js";
 
 export type { ValidationFailure } from "./schema-validation.js";
-export { compileEmbeddedSchema, type CompiledSchema } from "./schema-validation.js";
+export { compileEmbeddedSchema, compileExampleSchema, type CompiledSchema } from "./schema-validation.js";
 
 export {
   NoInvokerError,
@@ -246,14 +246,6 @@ export {
   httpErrorCode,
 } from "./errcodes.js";
 export type { InvocationErrorCode } from "./errcodes.js";
-
-export {
-  CODE_CATEGORY,
-  categoryForCode,
-  defaultEffectsForCode,
-  httpErrorEffects,
-} from "./classification.js";
-export type { Category, Effects } from "./classification.js";
 
 export { dereference } from "./deref.js";
 

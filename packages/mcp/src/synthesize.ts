@@ -3,7 +3,7 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 import { UriTemplate } from "@modelcontextprotocol/sdk/shared/uriTemplate.js";
 import type { OBInterface, Operation, BindingEntry, JSONSchema } from "@openbindings/sdk";
 import { MAX_TESTED_VERSION } from "@openbindings/sdk";
-import { CLIENT_NAME, CLIENT_VERSION, BINDING_SPEC, DEFAULT_SOURCE_NAME } from "./constants.js";
+import { CLIENT_NAME, CLIENT_VERSION, BINDING_SPEC, LEGACY_BINDING_SPEC, DEFAULT_SOURCE_NAME } from "./constants.js";
 import { exhaustPages, parsePinnedListing } from "./listing.js";
 
 export interface MCPDiscovery {
@@ -47,7 +47,7 @@ export async function discover(url: string, options?: DiscoverOptions): Promise<
   try {
     if (transport.protocolVersion !== "2025-11-25") {
       throw new Error(
-        `negotiated MCP protocol revision ${JSON.stringify(transport.protocolVersion)} is outside openbindings.mcp@1's accepted envelope (2025-11-25)`,
+        `negotiated MCP protocol revision ${JSON.stringify(transport.protocolVersion)} is outside this implementation's accepted envelope (2025-11-25)`,
       );
     }
 
@@ -66,7 +66,7 @@ export async function discover(url: string, options?: DiscoverOptions): Promise<
 
     // Each list request follows nextCursor to pagination exhaustion
     // (MCP-P-02): the artifact is always the pagination-exhausted
-    // aggregate (openbindings.mcp@1 §3) — a first-page-only discovery
+    // aggregate (openbindings.mcp §3) — a first-page-only discovery
     // would synthesize a truncated interface.
     if (caps?.tools) {
       await exhaustPages(
@@ -407,15 +407,19 @@ export function resolveKey(key: string, entityType: string, used: Map<string, st
 }
 
 /** Convert an MCP discovery result to an OBInterface. */
-export function convertToInterface(disc: MCPDiscovery, location?: string): OBInterface {
+export function convertToInterface(
+  disc: MCPDiscovery,
+  location?: string,
+  bindingSpec = LEGACY_BINDING_SPEC,
+): OBInterface {
   const operations: Record<string, Operation> = {};
   const bindings: Record<string, BindingEntry> = {};
   const usedKeys = new Map<string, string>();
 
-  const source: { bindingSpec: string; location?: string } = { bindingSpec: BINDING_SPEC };
+  const source: { bindingSpec: string; location?: string } = { bindingSpec };
   if (location) source.location = location;
 
-  disc = bindableDiscovery(disc);
+  disc = bindableDiscovery(disc, bindingSpec);
 
   // Sort all bindable entities by name, code point order, for deterministic output.
   const tools = [...disc.tools].sort((a, b) => codePointCompare(a.name, b.name));
@@ -432,9 +436,9 @@ export function convertToInterface(disc: MCPDiscovery, location?: string): OBInt
     const op: Operation = {};
     if (tool.description) op.description = tool.description;
     if (tool.inputSchema) op.input = tool.inputSchema;
-    // The binding emits the complete successful CallToolResult. MCP's
-    // outputSchema constrains only its structuredContent member.
-    op.output = toolResultOutputSchema(tool.outputSchema);
+    op.output = bindingSpec === BINDING_SPEC
+      ? tool.outputSchema
+      : toolResultOutputSchema(tool.outputSchema);
 
     operations[opKey] = op;
     bindings[`${opKey}.${DEFAULT_SOURCE_NAME}`] = { operation: opKey, source: DEFAULT_SOURCE_NAME, ref };
@@ -523,7 +527,10 @@ export function convertToInterface(disc: MCPDiscovery, location?: string): OBInt
  * binding targets in revision 1. Synthesis and inspection share this helper
  * so neither can advertise a ref invocation is statically bound to refuse.
  */
-export function bindableDiscovery(disc: MCPDiscovery): MCPDiscovery {
+export function bindableDiscovery(
+  disc: MCPDiscovery,
+  bindingSpec = LEGACY_BINDING_SPEC,
+): MCPDiscovery {
   const counts = <T>(items: T[], identity: (item: T) => string): Map<string, number> => {
     const result = new Map<string, number>();
     for (const item of items) {
@@ -547,9 +554,9 @@ export function bindableDiscovery(disc: MCPDiscovery): MCPDiscovery {
   return {
     serverName: disc.serverName,
     serverVersion: disc.serverVersion,
-    tools: disc.tools.filter((v) => v.name !== "" && toolCounts.get(v.name) === 1 && v.taskSupport !== "required"),
-    resources: disc.resources.filter((v) => v.uri !== "" && resourceCounts.get(v.uri) === 1),
-    resourceTemplates: disc.resourceTemplates.filter((v) => v.uriTemplate !== "" && templateCounts.get(v.uriTemplate) === 1 && validTemplate(v.uriTemplate)),
-    prompts: disc.prompts.filter((v) => v.name !== "" && promptCounts.get(v.name) === 1),
+    tools: disc.tools.filter((v) => v.name !== "" && toolCounts.get(v.name) === 1 && v.taskSupport !== "required" && (bindingSpec !== BINDING_SPEC || v.outputSchema !== undefined)),
+    resources: bindingSpec === BINDING_SPEC ? [] : disc.resources.filter((v) => v.uri !== "" && resourceCounts.get(v.uri) === 1),
+    resourceTemplates: bindingSpec === BINDING_SPEC ? [] : disc.resourceTemplates.filter((v) => v.uriTemplate !== "" && templateCounts.get(v.uriTemplate) === 1 && validTemplate(v.uriTemplate)),
+    prompts: bindingSpec === BINDING_SPEC ? [] : disc.prompts.filter((v) => v.name !== "" && promptCounts.get(v.name) === 1),
   };
 }

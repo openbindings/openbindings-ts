@@ -120,7 +120,7 @@ the runnable
 Outputs stream as bare values; a terminal failure rejects the output iteration (and `call.closed`) with an `InvocationError`:
 
 ```typescript
-import { InvocationError, ERR_AUTH_REQUIRED, isContextRequired } from "@openbindings/sdk";
+import { InvocationError, isContextRequired } from "@openbindings/sdk";
 
 try {
   const call = invoker.invoke(iface, operationSignature("listItems"));
@@ -132,8 +132,11 @@ try {
     // which context fields satisfy it, and err.message already carries that
     // summary. Resolve context and retry.
     console.error(err.message);
-  } else if (err instanceof InvocationError && err.code === ERR_AUTH_REQUIRED) {
-    // The service rejected the credentials — refresh and retry.
+  } else if (err instanceof InvocationError) {
+    // Unsuccessful completion. Do not infer retry or protocol meaning from
+    // an open implementation code; selected-binding evidence, when enabled,
+    // is available only at err.diagnostics.
+    throw err;
   } else {
     throw err;
   }

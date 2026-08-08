@@ -7,14 +7,19 @@ import {
   ERR_SOURCE_LOAD_FAILED,
   ERR_VALIDATION_FAILED,
   matchProcessorObservation,
+  OperationInvoker,
+  operationSignature,
+  type Invocation,
   type InvocationError,
   type Metadata,
+  type OBInterface,
   type ProcessorObservation,
   type ProcessorScenario,
   type ProcessorScenarioFile,
 } from "@openbindings/sdk";
 import {
   GrpcInvoker,
+  GrpcSynthesizer,
   type GrpcCall,
   type GrpcInteractionKind,
   type GrpcRuntime,
@@ -37,13 +42,13 @@ describe("portable gRPC processor scenarios", () => {
 describe("gRPC invocation-fidelity scenarios", () => {
   for (const scenario of fidelityCorpus.scenarios) {
     it(scenario.id, async () => {
-      const observation = await runScenario(scenario, fidelityCorpus.bindingSpec);
+      const observation = await runScenario(scenario, true);
       expect(() => matchProcessorObservation(scenario, observation)).not.toThrow();
     });
   }
 });
 
-async function runScenario(scenario: ProcessorScenario, bindingSpec = corpus.bindingSpec): Promise<ProcessorObservation> {
+async function runScenario(scenario: ProcessorScenario, joined = false): Promise<ProcessorObservation> {
   const reflectionRequests: string[] = [];
   let dispatch: Record<string, unknown> | undefined;
   let callRef: FakeCall | undefined;
@@ -67,15 +72,24 @@ async function runScenario(scenario: ProcessorScenario, bindingSpec = corpus.bin
   if (isRecord(credentials) && typeof credentials.generic === "string") context.apiKey = credentials.generic;
   if (isRecord(scenario.given.runtime?.outgoingMetadata)) context.headers = scenario.given.runtime.outgoingMetadata;
 
-  const call = new GrpcInvoker({ runtime }).invokeBinding({
-    source: {
-      bindingSpec,
-      ...(typeof scenario.given.source.location === "string" ? { location: scenario.given.source.location } : {}),
-      ...(Object.prototype.hasOwnProperty.call(scenario.given.source, "content") ? { content: scenario.given.source.content } : {}),
-    },
-    ref: typeof scenario.given.binding.ref === "string" ? scenario.given.binding.ref : "",
-    context,
-  });
+  const source = {
+    bindingSpec: joined ? fidelityCorpus.bindingSpec : corpus.bindingSpec,
+    ...(typeof scenario.given.source.location === "string" ? { location: scenario.given.source.location } : {}),
+    ...(Object.prototype.hasOwnProperty.call(scenario.given.source, "content") ? { content: scenario.given.source.content } : {}),
+  };
+  const ref = typeof scenario.given.binding.ref === "string" ? scenario.given.binding.ref : "";
+  const bindingInvoker = new GrpcInvoker({ runtime });
+  let call: Invocation<unknown, unknown>;
+  if (joined) {
+    const iface = await new GrpcSynthesizer().synthesizeInterface({ sources: [source] });
+    call = new OperationInvoker([bindingInvoker]).invoke(
+      iface,
+      operationSignature(operationForRef(iface, ref)),
+      { context },
+    );
+  } else {
+    call = bindingInvoker.invokeBinding({ source, ref, context });
+  }
 
   const outputs: unknown[] = [];
   let inputOpenAtFirstOutput: boolean | undefined;
@@ -84,7 +98,7 @@ async function runScenario(scenario: ProcessorScenario, bindingSpec = corpus.bin
   if (writes && writes.length > 0) {
     iterator = call.outputs[Symbol.asyncIterator]();
     await call.write(writes[0]);
-    if (scenario.id === "GRPC-PS-04" || scenario.id === "GRPC-PS-10") {
+    if (scenario.id === "GRPC-PS-04" || scenario.id === "GRPC-PS-10" || scenario.id === "GRPC-FI-03") {
       const first = await iterator.next();
       if (!first.done) outputs.push(first.value);
       inputOpenAtFirstOutput = true;
@@ -115,16 +129,16 @@ async function runScenario(scenario: ProcessorScenario, bindingSpec = corpus.bin
     outputs,
     reflectionRequests,
     ...(dispatch ? { dispatch } : {}),
+    ...(joined ? { joinedSynthesis: true } : {}),
   };
-  data.trailer = call.trailer();
+  data.trailer = call.diagnostics.trailing();
   if (inputOpenAtFirstOutput !== undefined) data.trace = { outputs: [{ inputOpen: inputOpenAtFirstOutput }] };
   if (!terminal) return { disposition: "complete", phase: "completion", data };
   data.error = {
     code: terminal.code,
     message: terminal.message,
-    category: terminal.category,
-    ...(terminal.effects !== undefined ? { effects: terminal.effects } : {}),
     ...(terminal.details !== undefined ? { details: terminal.details } : {}),
+    ...(terminal.diagnostics !== undefined ? { diagnostics: terminal.diagnostics } : {}),
   };
   const disposition = terminal.code === CONTEXT_REQUIRED
     ? "context-required"
@@ -137,6 +151,12 @@ async function runScenario(scenario: ProcessorScenario, bindingSpec = corpus.bin
         ? "completion"
         : terminal.code === ERR_SOURCE_LOAD_FAILED ? "resolution" : "pre-dispatch";
   return { disposition, phase, data };
+}
+
+function operationForRef(iface: OBInterface, ref: string): string {
+  const match = Object.values(iface.bindings ?? {}).find((binding) => binding.ref === ref);
+  if (!match) throw new Error(`synthesized gRPC interface has no binding for ${JSON.stringify(ref)}`);
+  return match.operation;
 }
 
 function fakeMethod(content: string, service: string, methodName: string): ResolvedGrpcMethod {

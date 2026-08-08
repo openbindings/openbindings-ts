@@ -3,6 +3,7 @@ import { InvocationError } from "@openbindings/sdk";
 export interface GraphQLFailureEvidence {
   httpResponse?: GraphQLHTTPFailureEvidence;
   mediaType?: string;
+  response?: Record<string, unknown>;
   transportWs?: GraphQLTransportWSEvidence;
 }
 
@@ -26,7 +27,7 @@ export interface GraphQLTransportWSEvidence {
 /** Extracts GraphQL-over-HTTP or graphql-transport-ws native failure evidence. */
 export function graphQLFailureEvidence(error: unknown): GraphQLFailureEvidence | null {
   if (!(error instanceof InvocationError)) return null;
-  const details = record(error.details);
+  const details = record(error.diagnostics);
   const result: GraphQLFailureEvidence = {};
 
   const response = record(details?.httpResponse);
@@ -46,6 +47,13 @@ export function graphQLFailureEvidence(error: unknown): GraphQLFailureEvidence |
     if (typeof graphql?.mediaType === "string") result.mediaType = graphql.mediaType;
   }
 
+  const graphql = record(details?.graphql);
+  const graphqlResponse = record(graphql?.response);
+  if (graphqlResponse) {
+    result.response = graphqlResponse;
+    if (typeof graphql?.mediaType === "string") result.mediaType = graphql.mediaType;
+  }
+
   const ws = record(details?.graphqlTransportWs);
   if (ws) {
     if (ws.type !== "error" && ws.type !== "close") return null;
@@ -57,7 +65,7 @@ export function graphQLFailureEvidence(error: unknown): GraphQLFailureEvidence |
       ...(typeof ws.wasClean === "boolean" ? { wasClean: ws.wasClean } : {}),
     };
   }
-  return result.httpResponse || result.transportWs ? result : null;
+  return result.httpResponse || result.transportWs || result.response ? result : null;
 }
 
 function capturedBytes(value: unknown): { bytes: Uint8Array<ArrayBuffer>; truncated: boolean } | null {

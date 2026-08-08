@@ -781,28 +781,7 @@ async function firstInput(iterable: AsyncIterable<unknown>): Promise<unknown | u
 function grpcInvocationError(error: unknown, fallbackCode: string): InvocationError {
   const nativeCode = grpcCode(error);
   if (nativeCode === undefined) return new InvocationError(fallbackCode, message(error));
-  let code = ERR_EXECUTION_FAILED;
-  let effects: "none" | undefined;
-  switch (nativeCode) {
-    case grpc.status.UNAUTHENTICATED:
-      code = ERR_AUTH_REQUIRED;
-      break;
-    case grpc.status.PERMISSION_DENIED:
-      code = ERR_PERMISSION_DENIED;
-      break;
-    case grpc.status.UNAVAILABLE:
-    case grpc.status.RESOURCE_EXHAUSTED:
-      code = ERR_UNAVAILABLE;
-      effects = "none";
-      break;
-    case grpc.status.DEADLINE_EXCEEDED:
-      code = ERR_TIMEOUT;
-      break;
-    case grpc.status.CANCELLED:
-      code = ERR_CANCELLED;
-      break;
-  }
-  return new InvocationError(code, message(error), grpcDetails(error), effects);
+  return new InvocationError(ERR_EXECUTION_FAILED, message(error), undefined, grpcDetails(error));
 }
 
 function grpcDetails(error: unknown): Record<string, unknown> | undefined {

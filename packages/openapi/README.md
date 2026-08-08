@@ -56,7 +56,7 @@ immediately — don't `write`. Error outcomes terminate the handle:
 try {
   await call.closed;
 } catch (err) {
-  console.error(err.code, err.message); // e.g. "ERR_AUTH_REQUIRED", "HTTP 401 Unauthorized"
+  console.error(err.code, err.message); // e.g. "ERR_EXECUTION_FAILED", "HTTP 401 Unauthorized"
 }
 ```
 
@@ -79,9 +79,8 @@ try {
 }
 ```
 
-An absent `body` is distinct from an exact empty `Uint8Array`. It currently
-occurs for a non-2xx SSE response, which is classified and cancelled without
-waiting for a possibly unbounded stream to end.
+An absent `body` is distinct from an exact empty `Uint8Array`. Non-2xx SSE
+responses use the same bounded exact-byte capture as unary failures.
 
 When an operation requires credentials the document declares but the context
 lacks, the invocation terminates with `CONTEXT_REQUIRED` before any request
@@ -125,7 +124,7 @@ result as `content`, while browsers and Workers keep the same package graph.
 4. Derives auth requirements from the operation's (or document's) `security` and challenges `CONTEXT_REQUIRED` when the context can't satisfy them — before any request is dispatched
 5. Reads the input message from the handle and routes its fields per the flattened model (OAPI-P-03) — parameters serialize per the OAS style/explode rules (OAPI-P-02); unmatched fields pass into a declared request body and refuse loudly otherwise — and selects the request media type per the specification's preference order (OAPI-P-04)
 6. Applies credentials from the context using the spec's `securitySchemes` (bearer, basic, apiKey, oauth2 with correct placement), refusing credential/parameter channel collisions pre-dispatch (OAPI-P-10)
-7. Makes the HTTP request, sets the response headers as leading metadata; the declared success media bound the interaction shape (unary, or server-streaming for a declared `text/event-stream` response, OAPI-P-06); classifies the outcome (success iff status is 2xx, OAPI-P-08; error statuses preserve lossless native response evidence on the failure completion), decodes successful bodies by the response's `Content-Type` header (strict JSON for `application/json` and `+json` suffixes, the charset-honoring text lane otherwise, OAPI-P-07), and emits the value — classification and decode both run through the consumer hooks seam, and the trailer metadata carries `x-ob-decode`/`x-ob-classify` provenance stamps
+7. Makes the HTTP request; the declared success media bound the interaction shape (unary, or server-streaming for a declared `text/event-stream` response, OAPI-P-06); classifies the outcome (success iff status is 2xx, OAPI-P-08), decodes successful bodies by the response's `Content-Type` header, and emits the application value. Native headers/status/body evidence and hook provenance are available only through explicit diagnostics and never become operation values.
 
 ### Server selection
 
@@ -149,7 +148,7 @@ HTTP leaves wire questions the OpenAPI document does not settle: which bytes-to-
 - **Decode** — the builtin rule is chosen from the response `Content-Type` header; an `outputDecoder` hook may override it.
 - **Classify** — the builtin verdict is HTTP status (2xx success; declared `responses` refine failure details, never classification); a `resultClassifier` hook may reclassify (a 200 envelope carrying an application error, say).
 
-Hooks are configured per invocation (`InvokeOptions`) or invoker-level (`OperationInvokerOptions`); a hook declines to the next tier by returning `USE_DEFAULT`. Each invocation records how each axis was decided in its trailer metadata (`x-ob-decode`: `header/content-type` or `hook`; `x-ob-classify`: `assumption/2xx` or `hook`), so a caller can see whether their hook fired.
+Hooks are configured per invocation (`InvokeOptions`) or invoker-level (`OperationInvokerOptions`); a hook declines to the next tier by returning `USE_DEFAULT`. Each invocation records how each axis was decided in its explicit diagnostic trailing metadata (`x-ob-decode`: `header/content-type` or `hook`; `x-ob-classify`: `assumption/2xx` or `hook`).
 
 ### Credential application
 

@@ -216,36 +216,11 @@ export type InvocationErrorCode =
   | typeof ERR_UNSUPPORTED_FORMAT_VERSION;
 
 /**
- * Maps an HTTP status code to a standard error code, per the binding-invoker
- * interface's "Transport status mapping" table (the pinned mapping every
- * conforming invoker agrees on). Shared utility for format invokers that handle
- * HTTP responses.
- *
- * - `401` → {@link ERR_AUTH_REQUIRED} (auth)
- * - `403` → {@link ERR_PERMISSION_DENIED} (auth)
- * - `408`, `504` → {@link ERR_TIMEOUT} (transient)
- * - `429`, `502`, `503` → {@link ERR_UNAVAILABLE} (transient, retry with backoff)
- * - every other `4xx`/`5xx` → {@link ERR_EXECUTION_FAILED} (service — reached
- *   the server and refused on its merits, so do not blind-retry)
- *
- * The numeric status rides in the error's `details` so callers can still branch
- * on 404, 422, and the like. The `effects` marker is set separately by
- * {@link httpErrorEffects} from how far the exchange got.
+ * Returns the SDK's open code for concrete HTTP unsuccessful completion. The
+ * binding-invoker interface deliberately does not project status numbers into
+ * a closed cross-protocol failure or retry taxonomy. The status may be retained
+ * separately on an explicit diagnostic surface.
  */
-export function httpErrorCode(status: number): string {
-  switch (status) {
-    case 401:
-      return ERR_AUTH_REQUIRED;
-    case 403:
-      return ERR_PERMISSION_DENIED;
-    case 408:
-    case 504:
-      return ERR_TIMEOUT;
-    case 429:
-    case 502:
-    case 503:
-      return ERR_UNAVAILABLE;
-    default:
-      return ERR_EXECUTION_FAILED;
-  }
+export function httpErrorCode(_status: number): string {
+  return ERR_EXECUTION_FAILED;
 }

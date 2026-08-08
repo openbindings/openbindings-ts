@@ -4,7 +4,7 @@ import { mcpFailureEvidence } from "./failure.js";
 
 describe("mcpFailureEvidence", () => {
   it("extracts all native evidence lanes", () => {
-    const error = new InvocationError("ERR_EXECUTION_FAILED", "failed", {
+    const error = new InvocationError("ERR_EXECUTION_FAILED", "failed", undefined, {
       mcp: {
         result: { isError: true, structuredContent: { reason: "policy" } },
         jsonrpcError: { code: -32042, message: "quota", data: { limit: 10 } },

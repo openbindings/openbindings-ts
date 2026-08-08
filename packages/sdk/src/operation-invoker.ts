@@ -25,7 +25,6 @@ import {
   BindingSelectionRequiredError,
   EmptyTransformExpressionError,
   MissingInterfaceError,
-  NoTransformEvaluatorError,
   OperationNotFoundError,
   TransformRefNotFoundError,
   UnknownSourceError,
@@ -60,6 +59,18 @@ import {
  * looping.
  */
 const MAX_CONTEXT_ROUNDS = 3;
+
+function operationInvokerDiagnostics(
+  bindingKey: string,
+  extra: Record<string, unknown> = {},
+): Record<string, unknown> {
+  return {
+    operationInvoker: {
+      bindingKey,
+      ...Object.fromEntries(Object.entries(extra).filter(([, value]) => value !== undefined && value !== "")),
+    },
+  };
+}
 
 export interface OperationInvokerOptions {
   bindingSelector?: BindingSelector;
@@ -427,7 +438,12 @@ export class OperationInvoker {
     const evaluator = this.transformEvaluator;
     if ((binding.inputTransform || binding.outputTransform) && !evaluator) {
       callerInv.fireError(
-        new InvocationError(ERR_TRANSFORM_ERROR, new NoTransformEvaluatorError(bindingKey).message),
+        new InvocationError(
+          ERR_TRANSFORM_ERROR,
+          "openbindings: no transform evaluator is configured",
+          undefined,
+          operationInvokerDiagnostics(bindingKey),
+        ),
       );
       return;
     }
@@ -445,7 +461,9 @@ export class OperationInvoker {
         callerInv.fireError(
           new InvocationError(
             ERR_SCHEMA_UNRESOLVED,
-            `openbindings: output schema graph for "${bindingKey}" could not be established: ${(err as Error).message}`,
+            `openbindings: output schema graph for operation ${JSON.stringify(binding.operation)} could not be established: ${(err as Error).message}`,
+            undefined,
+            operationInvokerDiagnostics(bindingKey),
           ),
         );
         return;
@@ -583,7 +601,9 @@ export class OperationInvoker {
               callerInv.fireError(
                 new InvocationError(
                   ERR_TRANSFORM_ERROR,
-                  `openbindings: input transform failed for "${bindingKey}": ${e instanceof Error ? e.message : String(e)}`,
+                  `openbindings: input transform failed: ${e instanceof Error ? e.message : String(e)}`,
+                  undefined,
+                  operationInvokerDiagnostics(bindingKey),
                 ),
               );
               return;
@@ -616,7 +636,7 @@ export class OperationInvoker {
     const forwardHeader = async (inner: Invocation<unknown, unknown>): Promise<void> => {
       if (headerForwarded) return;
       headerForwarded = true;
-      callerInv.setHeader(await inner.header);
+      callerInv.setHeader(await inner.diagnostics.leading);
     };
 
     let rounds = 0;
@@ -648,7 +668,9 @@ export class OperationInvoker {
               await inner.cancel();
               surface = new InvocationError(
                 ERR_TRANSFORM_ERROR,
-                `openbindings: output transform failed for "${bindingKey}": ${e instanceof Error ? e.message : String(e)}`,
+                `openbindings: output transform failed: ${e instanceof Error ? e.message : String(e)}`,
+                undefined,
+                operationInvokerDiagnostics(bindingKey),
               );
               break;
             }
@@ -659,21 +681,21 @@ export class OperationInvoker {
             const r = safeValidate(outputValidator, data);
             if (!r.valid) {
               await inner.cancel();
-              let msg = `openbindings: output validation failed for "${bindingKey}": ${r.errors.join("; ")}`;
-              // Contract-decided teaching + decode-lane provenance in the
-              // MESSAGE, not only the x-ob-decode trailer stamp (mirrors
-              // the Go SDK): a hook-decoded value failing a floor-stamped
-              // schema means the CONTRACT still declares the floor; any
-              // other mismatch may be a wrong decode lane, and the
-              // first-touch reader needs the pointer where they look.
+              let msg = `openbindings: output validation failed for operation ${JSON.stringify(binding.operation)}: ${r.errors.join("; ")}`;
+              // Contract-decided teaching remains application-schema advice.
+              // Decode provenance is binding/implementation evidence and
+              // therefore rides only the explicit diagnostics lane.
               const tier = hooks?.decodeDecidedBy() ?? "";
               if (floorStamped(op.output) && tier === "hook") {
                 msg +=
                   " — the synthesized schema still declares the floor's string; elect the real output schema (a stored output-schema election on the operation)";
-              } else if (tier !== "") {
-                msg += ` (the response was decoded as ${describeDecodeTier(tier)}; if the service actually returned a different shape — say JSON without a Content-Type header — this mismatch is the symptom, and the fix is the response's declared type or a custom OutputDecoder)`;
               }
-              surface = new InvocationError(ERR_VALIDATION_FAILED, msg, { failures: r.failures });
+              surface = new InvocationError(
+                ERR_VALIDATION_FAILED,
+                msg,
+                { failures: r.failures },
+                operationInvokerDiagnostics(bindingKey, { decodeDecidedBy: tier }),
+              );
               break;
             }
           }
@@ -810,7 +832,7 @@ function makeInputValidator(
 /** Reads the inner invocation's trailer, tolerating a non-terminal handle. */
 function terminalTrailer(inner: Invocation<unknown, unknown>): Record<string, string[]> | null {
   try {
-    const t = inner.trailer();
+    const t = inner.diagnostics.trailing();
     return Object.keys(t).length > 0 ? t : null;
   } catch {
     return null;
@@ -823,22 +845,6 @@ function asInvocationError(err: unknown): InvocationError {
     ERR_RUNTIME,
     err instanceof Error ? err.message : String(err),
   );
-}
-
-/**
- * Renders a decode tier for a first-touch error message: the seam's internal
- * names ("builtin", "hook") become plain descriptions. Mirrors the Go SDK's
- * describeDecodeTier.
- */
-function describeDecodeTier(tier: string): string {
-  switch (tier) {
-    case "builtin":
-      return "the format's default rule";
-    case "hook":
-      return "your custom OutputDecoder";
-    default:
-      return tier;
-  }
 }
 
 /** Converts wiring errors (no invoker for format) raised mid-run into terminal invocation errors. */

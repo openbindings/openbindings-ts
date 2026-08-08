@@ -4,7 +4,7 @@ import { connectFailureEvidence } from "./failure.js";
 
 describe("connectFailureEvidence", () => {
   it("extracts exact HTTP failure bytes and the native error", () => {
-    const error = new InvocationError(ERR_AUTH_REQUIRED, "expired", {
+    const error = new InvocationError(ERR_AUTH_REQUIRED, "expired", undefined, {
       httpResponse: {
         status: 401,
         headers: { "x-request-id": ["req-1"] },
@@ -19,7 +19,7 @@ describe("connectFailureEvidence", () => {
   });
 
   it("extracts END_STREAM evidence without inventing it for local errors", () => {
-    const error = new InvocationError(ERR_UNAVAILABLE, "quota", {
+    const error = new InvocationError(ERR_UNAVAILABLE, "quota", undefined, {
       connect: { endStream: {
         error: { code: "resource_exhausted", message: "quota" },
         payload: { base64: "AP+AQQ==", byteLength: 4 },

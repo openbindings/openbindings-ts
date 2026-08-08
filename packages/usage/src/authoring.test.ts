@@ -251,7 +251,9 @@ flag "--environment" { arg "<environment>" { choices "dev" env="DEPLOY_ENVS" } }
       executor: async () => ({ exitCode: 0, stdout: new Uint8Array([0xff]) }),
     }).invokeBinding({ source: { bindingSpec: BINDING_SPEC, content: "bin \"tool\"" }, ref: "" });
     await invalid.close();
-    await expect(single(invalid.outputs)).rejects.toThrow(/decode failed/);
+    await expect(single(invalid.outputs)).rejects.toThrow(
+      /Invocation result could not be decoded/,
+    );
 
     let dispatched: ProcessRequest | undefined;
     const binary = new UsageInvoker({

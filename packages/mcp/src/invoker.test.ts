@@ -1,10 +1,8 @@
 import { describe, it, expect } from "vitest";
 import {
-  ERR_AUTH_REQUIRED,
   ERR_CANCELLED,
   ERR_EXECUTION_FAILED,
   ERR_INVALID_REF,
-  ERR_PERMISSION_DENIED,
   ERR_SOURCE_CONFIG_ERROR,
   ERR_VALIDATION_FAILED,
   single,
@@ -140,25 +138,27 @@ describe("MCPInvoker tools", () => {
     });
   });
 
-  it("maps a JSON-RPC error to ERR_EXECUTION_FAILED with the MCP code in details", async () => {
+  it("maps a JSON-RPC error to ERR_EXECUTION_FAILED with the MCP code in diagnostics", async () => {
     const server = mcpServer(() => ({ error: { code: -32602, message: "unknown tool" } }), { tools: ["nope"] });
     const call = new MCPInvoker().invokeBinding({ source, ref: "tools/nope", fetch: server.fn });
 
     await call.write({});
     await expect(call.closed).rejects.toMatchObject({
       code: ERR_EXECUTION_FAILED,
-      details: { code: -32602 },
+      details: undefined,
+      diagnostics: { code: -32602 },
     });
   });
 
-  it("maps a dispatch-time HTTP 500 to ERR_EXECUTION_FAILED with status details", async () => {
+  it("maps a dispatch-time HTTP 500 to ERR_EXECUTION_FAILED with status diagnostics", async () => {
     const server = mcpServer(() => ({ http: new Response("boom", { status: 500 }) }), { tools: ["flaky"] });
     const call = new MCPInvoker().invokeBinding({ source, ref: "tools/flaky", fetch: server.fn });
 
     await call.write({});
     await expect(call.closed).rejects.toMatchObject({
       code: ERR_EXECUTION_FAILED,
-      details: { status: 500 },
+      details: undefined,
+      diagnostics: { status: 500 },
     });
   });
 
@@ -171,7 +171,7 @@ describe("MCPInvoker tools", () => {
 
     await call.write({});
     await expect(single(call.outputs)).resolves.toEqual({ content: [{ type: "text", text: "ok" }] });
-    await expect(call.header).resolves.toMatchObject({ "x-request-id": ["r1"] });
+    await expect(call.diagnostics.leading).resolves.toMatchObject({ "x-request-id": ["r1"] });
   });
 
   it("carries bearerToken as Authorization: Bearer per MCP-P-07", async () => {
@@ -418,7 +418,7 @@ describe("MCPInvoker failures", () => {
     expect(server.fetches()).toBe(0);
   });
 
-  it("maps a connect-time HTTP 401 to ERR_AUTH_REQUIRED", async () => {
+  it("does not compile a connect-time HTTP 401 into a portable failure code", async () => {
     const server = mcpServer(() => textResult("ok"), {
       tools: ["ping"],
       initResponse: new Response("denied", { status: 401 }),
@@ -427,12 +427,13 @@ describe("MCPInvoker failures", () => {
 
     await call.write({});
     await expect(call.closed).rejects.toMatchObject({
-      code: ERR_AUTH_REQUIRED,
-      details: { status: 401 },
+      code: ERR_EXECUTION_FAILED,
+      details: undefined,
+      diagnostics: { status: 401 },
     });
   });
 
-  it("maps a connect-time HTTP 403 to ERR_PERMISSION_DENIED", async () => {
+  it("does not compile a connect-time HTTP 403 into a portable failure code", async () => {
     const server = mcpServer(() => textResult("ok"), {
       tools: ["ping"],
       initResponse: new Response("forbidden", { status: 403 }),
@@ -441,8 +442,9 @@ describe("MCPInvoker failures", () => {
 
     await call.write({});
     await expect(call.closed).rejects.toMatchObject({
-      code: ERR_PERMISSION_DENIED,
-      details: { status: 403 },
+      code: ERR_EXECUTION_FAILED,
+      details: undefined,
+      diagnostics: { status: 403 },
     });
   });
 });

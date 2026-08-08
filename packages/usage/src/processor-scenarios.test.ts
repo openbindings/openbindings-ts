@@ -6,12 +6,16 @@ import {
   CONTEXT_REQUIRED,
   ERR_SOURCE_LOAD_FAILED,
   matchProcessorObservation,
+  OperationInvoker,
+  operationSignature,
+  type Invocation,
   type InvocationError,
+  type OBInterface,
   type ProcessorObservation,
   type ProcessorScenario,
   type ProcessorScenarioFile,
 } from "@openbindings/sdk";
-import { UsageInvoker, type ProcessRequest } from "./index.js";
+import { UsageInvoker, UsageSynthesizer, type ProcessRequest } from "./index.js";
 
 const root = process.env.OB_SPEC_CORPUS ?? resolve(dirname(fileURLToPath(import.meta.url)), "../../../../spec/conformance");
 const corpus = JSON.parse(readFileSync(resolve(root, "binding-specs/processor/usage.json"), "utf8")) as ProcessorScenarioFile;
@@ -31,7 +35,7 @@ describe("portable Usage processor scenarios", () => {
 describe("Usage invocation-fidelity scenarios", () => {
   for (const scenario of fidelityCorpus.scenarios) {
     it(scenario.id, async () => {
-      const observation = await runScenario(scenario, fidelityCorpus.bindingSpec);
+      const observation = await runScenario(scenario, true);
       expect(() => matchProcessorObservation(scenario, observation)).not.toThrow();
     });
   }
@@ -39,7 +43,7 @@ describe("Usage invocation-fidelity scenarios", () => {
 
 async function runScenario(
   scenario: ProcessorScenario,
-  bindingSpec = corpus.bindingSpec,
+  joined = false,
 ): Promise<ProcessorObservation> {
   let dispatch: Record<string, unknown> | undefined;
   const runtimeEncoders = isRecord(scenario.given.runtime?.encoders) ? scenario.given.runtime.encoders : {};
@@ -79,15 +83,23 @@ async function runScenario(
   const credentials = scenario.given.runtime?.credentials;
   if (isRecord(credentials) && typeof credentials.generic === "string") context.apiKey = credentials.generic;
 
-  const call = invoker.invokeBinding({
-    source: {
-      bindingSpec,
-      ...(typeof scenario.given.source.location === "string" ? { location: scenario.given.source.location } : {}),
-      ...(Object.prototype.hasOwnProperty.call(scenario.given.source, "content") ? { content: scenario.given.source.content } : {}),
-    },
-    ref: typeof scenario.given.binding.ref === "string" ? scenario.given.binding.ref : "",
-    context,
-  });
+  const source = {
+    bindingSpec: joined ? fidelityCorpus.bindingSpec : corpus.bindingSpec,
+    ...(typeof scenario.given.source.location === "string" ? { location: scenario.given.source.location } : {}),
+    ...(Object.prototype.hasOwnProperty.call(scenario.given.source, "content") ? { content: scenario.given.source.content } : {}),
+  };
+  const ref = typeof scenario.given.binding.ref === "string" ? scenario.given.binding.ref : "";
+  let call: Invocation<unknown, unknown>;
+  if (joined) {
+    const iface = await new UsageSynthesizer().synthesizeInterface({ sources: [source] });
+    call = new OperationInvoker([invoker]).invoke(
+      iface,
+      operationSignature(operationForRef(iface, ref)),
+      { context },
+    );
+  } else {
+    call = invoker.invokeBinding({ source, ref, context });
+  }
   if (scenario.given.invocation.inputPresent) await call.write(scenario.given.invocation.input).catch(() => {});
   else await call.close();
 
@@ -103,17 +115,17 @@ async function runScenario(
     includeReads: [],
     configFileReads: [],
     auxiliaryProcesses: [],
+    ...(joined ? { joinedSynthesis: true } : {}),
     ...(dispatch ? { dispatch } : {}),
   };
-  data.trailer = call.trailer();
+  data.trailer = call.diagnostics.trailing();
   if (!terminal) return { disposition: "complete", phase: "completion", data };
   if (scenario.id.startsWith("USAGE-FI-")) {
     data.error = {
       code: terminal.code,
       message: terminal.message,
-      category: terminal.category,
-      ...(terminal.effects !== undefined ? { effects: terminal.effects } : {}),
       ...(terminal.details !== undefined ? { details: terminal.details } : {}),
+      ...(terminal.diagnostics !== undefined ? { diagnostics: terminal.diagnostics } : {}),
     };
     return { disposition: "error", phase: "completion", data };
   }
@@ -126,6 +138,12 @@ async function runScenario(
         : "pre-dispatch",
     data,
   };
+}
+
+function operationForRef(iface: OBInterface, ref: string): string {
+  const match = Object.values(iface.bindings ?? {}).find((binding) => (binding.ref ?? "") === ref);
+  if (!match) throw new Error(`synthesized Usage interface has no binding for ${JSON.stringify(ref)}`);
+  return match.operation;
 }
 
 function base64ToBytes(value: string): Uint8Array<ArrayBuffer> {

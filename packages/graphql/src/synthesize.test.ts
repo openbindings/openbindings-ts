@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { IntrospectionSchema } from "./introspection.js";
 import { convertToInterface } from "./synthesize.js";
-import { BINDING_SPEC } from "./constants.js";
+import { BINDING_SPEC, LEGACY_BINDING_SPEC } from "./constants.js";
 
 const schema: IntrospectionSchema = {
   queryType: { kind: "OBJECT", name: "ReadRoot", ofType: null },
@@ -52,7 +52,7 @@ describe("convertToInterface", () => {
       "subscription/status",
     ]);
     expect(iface.sources?.graphql).toEqual({
-      bindingSpec: BINDING_SPEC,
+      bindingSpec: LEGACY_BINDING_SPEC,
       location: "https://api.example.test/graphql",
     });
   });
@@ -78,5 +78,13 @@ describe("convertToInterface", () => {
     const operation = convertToInterface(changed).operations.viewer!;
     expect(operation.description).toBe("Current viewer");
     expect(operation.deprecated).toBe(true);
+  });
+
+  it("projects root-field schemas and excludes subscriptions in revision 2", () => {
+    const iface = convertToInterface(schema, undefined, BINDING_SPEC);
+    expect(iface.operations).not.toHaveProperty("subscription_status");
+    expect(iface.operations.status?.output).toEqual({
+      anyOf: [{ type: "string" }, { type: "null" }],
+    });
   });
 });

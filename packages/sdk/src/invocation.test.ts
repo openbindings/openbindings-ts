@@ -378,13 +378,9 @@ describe("cancellation & close", () => {
     expect(getEventListeners(shared.signal, "abort").length).toBe(0);
   });
 
-  // --- Deadline vs. cancel classification (parity with Go invocation_test.go) ---
-  // A lifetime DEADLINE (AbortSignal.timeout) is a TIMEOUT — transient /
-  // effects: possible, because a deadline can fire after outputs have flowed,
-  // so retry-safety is "may have executed". An explicit cancel() stays
-  // ERR_CANCELLED (cancelled). Same code/category/effects as the Go SDK.
+  // --- Deadline vs. cancel terminal codes (parity with Go invocation_test.go) ---
 
-  it("a mid-stream lifetime DEADLINE is ERR_TIMEOUT (transient/possible); emitted outputs stand [SS]", async () => {
+  it("a mid-stream lifetime deadline is ERR_TIMEOUT; emitted outputs stand [SS]", async () => {
     const inv = new InvocationImpl<never, number>({ signal: AbortSignal.timeout(15) });
     await inv.emitOutput(1);
     await inv.emitOutput(2);
@@ -400,8 +396,6 @@ describe("cancellation & close", () => {
     const ie = caught as InvocationError;
     expect(ie).toBeInstanceOf(InvocationError);
     expect(ie.code).toBe(ERR_TIMEOUT);
-    expect(ie.category).toBe("transient");
-    expect(ie.effects).toBe("possible");
   });
 
   it("a pre-fired timeout signal yields an immediately-terminal ERR_TIMEOUT handle", async () => {
@@ -411,12 +405,10 @@ describe("cancellation & close", () => {
     const inv = new InvocationImpl<never, never>({ signal });
     await expect(inv.closed).rejects.toMatchObject({
       code: ERR_TIMEOUT,
-      category: "transient",
-      effects: "possible",
     });
   });
 
-  it("an explicit cancel() mid-stream stays ERR_CANCELLED (cancelled); emitted output stands [SS]", async () => {
+  it("an explicit cancel() mid-stream stays ERR_CANCELLED; emitted output stands [SS]", async () => {
     const inv = new InvocationImpl<never, number>();
     await inv.emitOutput(1);
     void inv.cancel();
@@ -431,7 +423,6 @@ describe("cancellation & close", () => {
     expect(seen).toEqual([1]);
     const ie = caught as InvocationError;
     expect(ie.code).toBe(ERR_CANCELLED);
-    expect(ie.category).toBe("cancelled");
   });
 
   it("breaking out of `for await` cancels the invocation (return() wiring)", async () => {
@@ -452,27 +443,27 @@ describe("metadata", () => {
     const inv = new InvocationImpl<never, string>();
     inv.setHeader({ "content-type": ["application/json"] });
     await inv.emitOutput("x");
-    await expect(inv.header).resolves.toEqual({ "content-type": ["application/json"] });
+    await expect(inv.diagnostics.leading).resolves.toEqual({ "content-type": ["application/json"] });
   });
 
   it("header resolves empty with the first output when the binding sets none", async () => {
     const inv = new InvocationImpl<never, string>();
     await inv.emitOutput("x");
-    await expect(inv.header).resolves.toEqual({});
+    await expect(inv.diagnostics.leading).resolves.toEqual({});
   });
 
   it("header resolves (empty) on terminal with no outputs", async () => {
     const inv = new InvocationImpl<never, never>();
     inv.fireError(new InvocationError("ERR_RUNTIME", "early death"));
-    await expect(inv.header).resolves.toEqual({});
+    await expect(inv.diagnostics.leading).resolves.toEqual({});
   });
 
   it("trailer is valid only after termination", async () => {
     const inv = new InvocationImpl<never, string>();
     inv.setTrailer({ "grpc-status": ["0"] });
-    expect(() => inv.trailer()).toThrow(/after the invocation has terminated/);
+    expect(() => inv.diagnostics.trailing()).toThrow(/after the invocation has terminated/);
     inv.closeOutput();
-    expect(inv.trailer()).toEqual({ "grpc-status": ["0"] });
+    expect(inv.diagnostics.trailing()).toEqual({ "grpc-status": ["0"] });
   });
 
   it("setHeader after the first output is a loud binding bug", async () => {
@@ -488,7 +479,7 @@ describe("metadata", () => {
     const inv = new InvocationImpl<never, never>();
     inv.closeOutput();
     expect(() => inv.setTrailer({ late: ["true"] })).not.toThrow();
-    expect(inv.trailer()).toEqual({}); // the late set did not land
+    expect(inv.diagnostics.trailing()).toEqual({}); // the late set did not land
   });
 
   it("after a single short-circuit, header (if set) is valid and trailer reflects the cancelled call", async () => {
@@ -497,8 +488,8 @@ describe("metadata", () => {
     await inv.emitOutput(1);
     await inv.emitOutput(2);
     await expect(single(inv.outputs)).rejects.toMatchObject({ code: ERR_EXPECTED_SINGLE });
-    await expect(inv.header).resolves.toEqual({ "x-stream": ["yes"] });
-    expect(inv.trailer()).toEqual({}); // binding never terminated normally
+    await expect(inv.diagnostics.leading).resolves.toEqual({ "x-stream": ["yes"] });
+    expect(inv.diagnostics.trailing()).toEqual({}); // binding never terminated normally
   });
 });
 

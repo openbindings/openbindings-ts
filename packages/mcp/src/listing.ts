@@ -1,5 +1,6 @@
 import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InvocationError, ERR_REF_NOT_FOUND, ERR_PROTOCOL } from "@openbindings/sdk";
+import { BINDING_SPEC, LEGACY_BINDING_SPEC } from "./constants.js";
 
 /**
  * A listing is this family's artifact (openbindings.mcp@1 §3): the aggregate
@@ -13,6 +14,8 @@ export interface Listing {
   tools: string[]; // Tool.name
   /** Tool names whose 2025-11-25 declaration requires task augmentation. */
   requiredTaskTools?: string[];
+  /** Application output schemas keyed by tool name when declared. */
+  toolOutputSchemas?: Record<string, unknown>;
   resources: string[]; // Resource.uri
   templates: string[]; // ResourceTemplate.uriTemplate
   prompts: string[]; // Prompt.name
@@ -69,11 +72,25 @@ export function parsePinnedListing(content: unknown): Listing {
   return {
     tools,
     requiredTaskTools: requiredTaskToolNames(members["tools"]),
+    toolOutputSchemas: toolOutputSchemas(members["tools"]),
     resources: pinEntityIdentities(members["resources"], "resources", "uri"),
     templates: pinEntityIdentities(members["resourceTemplates"], "resourceTemplates", "uriTemplate"),
     prompts: pinEntityIdentities(members["prompts"], "prompts", "name"),
     pinned: true,
   };
+}
+
+function toolOutputSchemas(raw: unknown): Record<string, unknown> {
+  if (!Array.isArray(raw)) return {};
+  const schemas: Record<string, unknown> = {};
+  for (const entry of raw) {
+    if (entry === null || typeof entry !== "object" || Array.isArray(entry)) continue;
+    const record = entry as Record<string, unknown>;
+    if (typeof record["name"] === "string" && record["outputSchema"] !== undefined) {
+      schemas[record["name"]] = record["outputSchema"];
+    }
+  }
+  return schemas;
 }
 
 function requiredTaskToolNames(raw: unknown): string[] {
@@ -150,13 +167,13 @@ export async function exhaustPages<P extends { nextCursor?: string }>(
     if (next !== undefined && next === cursor) {
       throw new InvocationError(
         ERR_PROTOCOL,
-        `MCP server did not terminate pagination: nextCursor repeated (${next}) (openbindings.mcp@1 MCP-P-02)`,
+        `MCP server did not terminate pagination: nextCursor repeated (${next}) (MCP-P-02)`,
       );
     }
     if (++pages > MAX_LIST_PAGES) {
       throw new InvocationError(
         ERR_PROTOCOL,
-        `MCP server did not terminate pagination: exceeded ${MAX_LIST_PAGES} pages (openbindings.mcp@1 MCP-P-02)`,
+        `MCP server did not terminate pagination: exceeded ${MAX_LIST_PAGES} pages (MCP-P-02)`,
       );
     }
     cursor = next;
@@ -171,7 +188,7 @@ export async function exhaustPages<P extends { nextCursor?: string }>(
  * gates both resource lists.
  */
 export async function liveListing(client: Client, entityType: string, signal: AbortSignal): Promise<Listing> {
-  const l: Listing = { tools: [], requiredTaskTools: [], resources: [], templates: [], prompts: [], pinned: false };
+  const l: Listing = { tools: [], requiredTaskTools: [], toolOutputSchemas: {}, resources: [], templates: [], prompts: [], pinned: false };
   const caps = client.getServerCapabilities();
   if (!caps) return l;
 
@@ -184,6 +201,7 @@ export async function liveListing(client: Client, entityType: string, signal: Ab
           for (const t of page.tools ?? []) {
             l.tools.push(t.name);
             if (t.execution?.taskSupport === "required") l.requiredTaskTools!.push(t.name);
+            if (t.outputSchema !== undefined) l.toolOutputSchemas![t.name] = t.outputSchema;
           }
         },
       );
@@ -231,7 +249,12 @@ export async function liveListing(client: Client, entityType: string, signal: Ab
  * string never collide — each is reached by its own entity token. Throws
  * InvocationError(ERR_REF_NOT_FOUND) on refusal.
  */
-export function resolveRef(l: Listing, entityType: string, remainder: string): TargetKind {
+export function resolveRef(
+  l: Listing,
+  entityType: string,
+  remainder: string,
+  bindingSpec = LEGACY_BINDING_SPEC,
+): TargetKind {
   const where = l.pinned ? "pinned listing" : "server listing";
   const ref = `${entityType}/${remainder}`;
   const count = (ids: string[]): number => ids.filter((id) => id === remainder).length;
@@ -250,7 +273,13 @@ export function resolveRef(l: Listing, entityType: string, remainder: string): T
         if ((l.requiredTaskTools ?? []).includes(remainder)) {
           throw new InvocationError(
             ERR_REF_NOT_FOUND,
-            `MCP ref ${JSON.stringify(ref)} names a tool that requires task augmentation, which openbindings.mcp@1 excludes`,
+            `MCP ref ${JSON.stringify(ref)} names a tool that requires task augmentation, which ${bindingSpec} excludes`,
+          );
+        }
+        if (bindingSpec === BINDING_SPEC && l.toolOutputSchemas?.[remainder] === undefined) {
+          throw new InvocationError(
+            ERR_REF_NOT_FOUND,
+            `MCP tool ${JSON.stringify(remainder)} has no outputSchema application contract and is not bindable through ${BINDING_SPEC} (MCP-P-04)`,
           );
         }
         return "tool";
@@ -259,18 +288,21 @@ export function resolveRef(l: Listing, entityType: string, remainder: string): T
       throw notFound("tool");
     }
     case "prompts": {
+      if (bindingSpec === BINDING_SPEC) throw new InvocationError(ERR_REF_NOT_FOUND, "MCP prompts have no application output schema and are excluded by openbindings.mcp@2 (MCP-P-04)");
       const n = count(l.prompts);
       if (n === 1) return "prompt";
       if (n > 1) throw ambiguous("prompt", n);
       throw notFound("prompt");
     }
     case "resources": {
+      if (bindingSpec === BINDING_SPEC) throw new InvocationError(ERR_REF_NOT_FOUND, "MCP resources have no application output schema and are excluded by openbindings.mcp@2 (MCP-P-04)");
       const n = count(l.resources);
       if (n === 1) return "staticResource";
       if (n > 1) throw ambiguous("resource", n);
       throw notFound("resource");
     }
     case "resourceTemplates": {
+      if (bindingSpec === BINDING_SPEC) throw new InvocationError(ERR_REF_NOT_FOUND, "MCP resource templates have no application output schema and are excluded by openbindings.mcp@2 (MCP-P-04)");
       const t = count(l.templates);
       if (t === 1) return "templateResource";
       if (t > 1) throw ambiguous("resource template", t);

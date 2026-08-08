@@ -1,7 +1,9 @@
 import {
   ERR_INVALID_REF,
+  ERR_EXECUTION_FAILED,
   ERR_REF_NOT_FOUND,
   ERR_RUNTIME,
+  ERR_RESPONSE_ERROR,
   ERR_SOURCE_CONFIG_ERROR,
   ERR_SOURCE_LOAD_FAILED,
   ERR_VALIDATION_FAILED,
@@ -28,12 +30,11 @@ import {
   type SourceInspection,
   type SourceInspector,
 } from "@openbindings/sdk";
-import { BINDING_SPEC, DEFAULT_SOURCE_NAME } from "./constants.js";
+import { BINDING_SPEC, DEFAULT_SOURCE_NAME, LEGACY_BINDING_SPEC } from "./constants.js";
 import { graphQLFailureEvidence } from "./failure.js";
 import {
   introspect,
   invokeGraphQL,
-  isAuthError,
   parseIntrospectionContent,
   parseRef,
   resolveField,
@@ -79,7 +80,10 @@ export class GraphQLInvoker implements BindingInvoker {
   constructor(private readonly webSocketFactory?: GraphQLWebSocketFactory) {}
 
   bindingSpecs(): BindingSpecInfo[] {
-    return [{ bindingSpec: BINDING_SPEC, description: "GraphQL APIs" }];
+    return [
+      { bindingSpec: BINDING_SPEC, description: "GraphQL query and mutation application values" },
+      { bindingSpec: LEGACY_BINDING_SPEC, description: "GraphQL response-envelope compatibility" },
+    ];
   }
 
   invokeBinding<I = unknown, O = unknown>(args: BindingInvocationArgs): Invocation<I, O> {
@@ -103,6 +107,15 @@ export class GraphQLInvoker implements BindingInvoker {
       ({ rootType, fieldName } = parseRef(args.ref));
     } catch (e: unknown) {
       throw new InvocationError(ERR_INVALID_REF, errMsg(e));
+    }
+    if (args.source.bindingSpec !== BINDING_SPEC && args.source.bindingSpec !== LEGACY_BINDING_SPEC) {
+      throw new InvocationError(
+        ERR_SOURCE_CONFIG_ERROR,
+        `GraphQL invoker supports exact binding specifications ${JSON.stringify(BINDING_SPEC)} and ${JSON.stringify(LEGACY_BINDING_SPEC)}, got ${JSON.stringify(args.source.bindingSpec)}`,
+      );
+    }
+    if (args.source.bindingSpec === BINDING_SPEC && rootType === "subscription") {
+      throw new InvocationError(ERR_INVALID_REF, `GraphQL revision 2 does not bind subscription target ${JSON.stringify(args.ref)} (GQL-P-04)`);
     }
 
     let url: string;
@@ -168,7 +181,6 @@ export class GraphQLInvoker implements BindingInvoker {
         schema = await this.cachedIntrospect(url, headers, fetchFn, inv.signal, maxResponseBytes);
       } catch (e: unknown) {
         if (inv.signal.aborted) return;
-        if (isAuthError(e)) throw e;
         throw new InvocationError(ERR_SOURCE_LOAD_FAILED, errMsg(e));
       }
     }
@@ -190,8 +202,9 @@ export class GraphQLInvoker implements BindingInvoker {
     }
     void inv.closeInput();
 
+    let responseKey: string;
     try {
-      document.verifySelection(
+      responseKey = document.responseKey(
         configuration.document.operationName,
         rootType,
         fieldName,
@@ -252,8 +265,12 @@ export class GraphQLInvoker implements BindingInvoker {
     }
     const { response, headers: responseHeaders } = invoked;
     inv.setHeader(responseHeaders);
-    await inv.emitOutput(response);
-    inv.closeOutput();
+    if (args.source.bindingSpec === LEGACY_BINDING_SPEC) {
+      await inv.emitOutput(response);
+      inv.closeOutput();
+      return;
+    }
+    await emitProjectedGraphQLResult(inv, response, responseKey, invoked.mediaType);
   }
 
   /** Side-effect-free configuration preflight. */
@@ -323,7 +340,10 @@ function introspectionCacheKey(endpoint: string, headers: Record<string, string>
 /** Synthesizes OBInterface definitions by introspecting GraphQL endpoints. */
 export class GraphQLSynthesizer implements InterfaceSynthesizer, CoverageSynthesizer, SourceInspector {
   bindingSpecs(): BindingSpecInfo[] {
-    return [{ bindingSpec: BINDING_SPEC, description: "GraphQL APIs" }];
+    return [
+      { bindingSpec: BINDING_SPEC, description: "GraphQL query and mutation application values" },
+      { bindingSpec: LEGACY_BINDING_SPEC, description: "GraphQL response-envelope compatibility" },
+    ];
   }
 
   async synthesizeInterface(
@@ -341,7 +361,7 @@ export class GraphQLSynthesizer implements InterfaceSynthesizer, CoverageSynthes
     const { iface, schema } = await this.synthesizeObserved(input, options);
     return finalizeSynthesisCoverage(
       iface,
-      schema ? graphQLSynthesisCoverage(iface) : [],
+      schema ? graphQLSynthesisCoverage(schema, iface, iface.sources?.[DEFAULT_SOURCE_NAME]?.bindingSpec ?? BINDING_SPEC) : [],
       true,
     );
   }
@@ -354,8 +374,8 @@ export class GraphQLSynthesizer implements InterfaceSynthesizer, CoverageSynthes
     const src = sources[0];
     if (src === undefined) return { iface: synthesisSkeleton(input) };
     if (sources.length > 1) throw new MultipleSourcesError();
-    if (src.bindingSpec !== BINDING_SPEC) {
-      throw new Error(`synthesizer supports exact binding specification ${JSON.stringify(BINDING_SPEC)}, got ${JSON.stringify(src.bindingSpec)}`);
+    if (src.bindingSpec !== BINDING_SPEC && src.bindingSpec !== LEGACY_BINDING_SPEC) {
+      throw new Error(`synthesizer supports exact binding specifications ${JSON.stringify(BINDING_SPEC)} and ${JSON.stringify(LEGACY_BINDING_SPEC)}, got ${JSON.stringify(src.bindingSpec)}`);
     }
     const location = validateHTTPLocation(src.location);
     if (src.outputLocation) validateHTTPLocation(src.outputLocation);
@@ -369,17 +389,17 @@ export class GraphQLSynthesizer implements InterfaceSynthesizer, CoverageSynthes
       schema = await introspect(location, {}, fetch, options?.signal);
       if (src.embed) artifactContent = { data: { __schema: schema } };
     }
-    const iface = convertToInterface(schema, location);
+    const iface = convertToInterface(schema, location, src.bindingSpec);
     if (artifactContent !== undefined) {
       iface.sources![DEFAULT_SOURCE_NAME]!.content = artifactContent;
     }
     return {
-      iface: finalizeSynthesis(iface, input, DEFAULT_SOURCE_NAME, BINDING_SPEC),
+      iface: finalizeSynthesis(iface, input, DEFAULT_SOURCE_NAME, src.bindingSpec),
       schema,
     };
   }
 
-  /** Lists all bindable query/mutation/subscription root fields. */
+  /** Lists the root fields bindable under the source's exact revision. */
   async inspectSource(
     source: Source,
     options?: { signal?: AbortSignal },
@@ -391,11 +411,13 @@ export class GraphQLSynthesizer implements InterfaceSynthesizer, CoverageSynthes
     const targets: SourceInspection["targets"] = [];
     const tm = buildTypeMap(schema);
 
-    const rootTypes: Array<{ label: string; typeName: string | null }> = [
+    let rootTypes: Array<{ label: string; typeName: string | null }> = [
       { label: "query", typeName: rootTypeName(schema, "query") },
       { label: "mutation", typeName: rootTypeName(schema, "mutation") },
       { label: "subscription", typeName: rootTypeName(schema, "subscription") },
     ];
+    const bindingSpec = source.bindingSpec || LEGACY_BINDING_SPEC;
+    if (bindingSpec === BINDING_SPEC) rootTypes = rootTypes.slice(0, 2);
 
     // Suggest the same operation key convertToInterface assigns (same
     // sanitizeKey + resolveKey collision resolution against the root type),
@@ -420,8 +442,12 @@ export class GraphQLSynthesizer implements InterfaceSynthesizer, CoverageSynthes
   }
 }
 
-function graphQLSynthesisCoverage(iface: OBInterface): SynthesisCoverageEntry[] {
-  return Object.entries(iface.bindings ?? {})
+function graphQLSynthesisCoverage(
+  schema: IntrospectionSchema,
+  iface: OBInterface,
+  bindingSpec: string,
+): SynthesisCoverageEntry[] {
+  const entries: SynthesisCoverageEntry[] = Object.entries(iface.bindings ?? {})
     .sort(([, a], [, b]) => codePointCompare(a.ref ?? "", b.ref ?? ""))
     .map(([bindingKey, binding]) => ({
       sourceIndex: 0,
@@ -435,4 +461,65 @@ function graphQLSynthesisCoverage(iface: OBInterface): SynthesisCoverageEntry[] 
         ? ["document", "subscriptionTarget"]
         : ["document"],
     }));
+  if (bindingSpec === BINDING_SPEC) {
+    const tm = buildTypeMap(schema);
+    const root = tm.get(rootTypeName(schema, "subscription") ?? "");
+    for (const field of [...(root?.fields ?? [])].sort((a, b) => codePointCompare(a.name, b.name))) {
+      if (field.name.startsWith("__")) continue;
+      entries.push({
+        sourceIndex: 0,
+        sourceRef: `subscription/${field.name}`,
+        scope: "target",
+        status: "excluded",
+        reasonCode: "graphql.subscription_lifecycle_not_representable",
+        rule: "GQL-P-04",
+        message: "subscription events may carry partial data and errors while the native stream continues; revision 2 does not approximate that lifecycle",
+        requirements: [],
+      });
+    }
+    entries.sort((a, b) => codePointCompare(a.sourceRef, b.sourceRef));
+  }
+  return entries;
+}
+
+async function emitProjectedGraphQLResult(
+  inv: InvocationImpl<unknown, unknown>,
+  response: Record<string, unknown>,
+  responseKey: string,
+  mediaType: string,
+): Promise<void> {
+  const data = response.data !== null && typeof response.data === "object" && !Array.isArray(response.data)
+    ? response.data as Record<string, unknown>
+    : undefined;
+  const present = data !== undefined && Object.hasOwn(data, responseKey);
+  if (present) await inv.emitOutput(data[responseKey]);
+  if (Object.hasOwn(response, "errors")) {
+    inv.fireError(new InvocationError(
+      ERR_EXECUTION_FAILED,
+      graphQLErrorMessage(response),
+      undefined,
+      { graphql: { response, mediaType } },
+    ));
+    return;
+  }
+  if (!present) {
+    inv.fireError(new InvocationError(
+      ERR_RESPONSE_ERROR,
+      `GraphQL response data does not contain selected response key ${JSON.stringify(responseKey)}`,
+      undefined,
+      { graphql: { response, mediaType } },
+    ));
+    return;
+  }
+  inv.closeOutput();
+}
+
+function graphQLErrorMessage(response: Record<string, unknown>): string {
+  const errors: unknown[] = Array.isArray(response.errors) ? response.errors : [];
+  const first: unknown = errors[0];
+  if (first !== null && typeof first === "object" && !Array.isArray(first)) {
+    const message = (first as Record<string, unknown>).message;
+    if (typeof message === "string" && message) return message;
+  }
+  return "GraphQL execution completed unsuccessfully";
 }

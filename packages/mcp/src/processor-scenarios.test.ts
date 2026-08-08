@@ -5,12 +5,16 @@ import { describe, expect, it } from "vitest";
 import {
   CONTEXT_REQUIRED,
   matchProcessorObservation,
+  OperationInvoker,
+  operationSignature,
+  type Invocation,
   type InvocationError,
+  type OBInterface,
   type ProcessorObservation,
   type ProcessorScenario,
   type ProcessorScenarioFile,
 } from "@openbindings/sdk";
-import { MCPInvoker } from "./index.js";
+import { MCPInvoker, MCPSynthesizer } from "./index.js";
 
 const root = process.env.OB_SPEC_CORPUS ?? resolve(dirname(fileURLToPath(import.meta.url)), "../../../../spec/conformance");
 const corpus = JSON.parse(readFileSync(resolve(root, "binding-specs/processor/mcp.json"), "utf8")) as ProcessorScenarioFile;
@@ -30,7 +34,7 @@ describe("portable MCP processor scenarios", () => {
 describe("MCP invocation-fidelity scenarios", () => {
   for (const scenario of fidelityCorpus.scenarios) {
     it(scenario.id, async () => {
-      const observation = await runScenario(scenario, fidelityCorpus.bindingSpec);
+      const observation = await runScenario(scenario, true);
       expect(() => matchProcessorObservation(scenario, observation)).not.toThrow();
     });
   }
@@ -38,7 +42,7 @@ describe("MCP invocation-fidelity scenarios", () => {
 
 async function runScenario(
   scenario: ProcessorScenario,
-  bindingSpec = corpus.bindingSpec,
+  joined = false,
 ): Promise<ProcessorObservation> {
   const wire = new ScenarioServer(scenario);
   const context: Record<string, unknown> = {};
@@ -48,16 +52,24 @@ async function runScenario(
     if (typeof credentials.generic === "string") context.apiKey = credentials.generic;
     if (isRecord(credentials.headers)) context.headers = credentials.headers;
   }
-  const invocation = new MCPInvoker().invokeBinding({
-    source: {
-      bindingSpec,
-      location: String(scenario.given.source.location ?? ""),
-      ...(Object.hasOwn(scenario.given.source, "content") ? { content: scenario.given.source.content } : {}),
-    },
-    ref: String(scenario.given.binding.ref ?? ""),
-    context,
-    fetch: wire.fetch,
-  });
+  const source = {
+    bindingSpec: joined ? fidelityCorpus.bindingSpec : corpus.bindingSpec,
+    location: String(scenario.given.source.location ?? ""),
+    ...(Object.hasOwn(scenario.given.source, "content") ? { content: scenario.given.source.content } : {}),
+  };
+  const ref = String(scenario.given.binding.ref ?? "");
+  const bindingInvoker = new MCPInvoker();
+  let invocation: Invocation<unknown, unknown>;
+  if (joined) {
+    const iface = await new MCPSynthesizer({ fetch: wire.fetch }).synthesizeInterface({ sources: [source] });
+    invocation = new OperationInvoker([bindingInvoker], { fetch: wire.fetch }).invoke(
+      iface,
+      operationSignature(operationForRef(iface, ref)),
+      { context },
+    );
+  } else {
+    invocation = bindingInvoker.invokeBinding({ source, ref, context, fetch: wire.fetch });
+  }
 
   if (scenario.given.invocation.inputPresent) {
     await invocation.write(scenario.given.invocation.input).catch(() => {});
@@ -71,29 +83,28 @@ async function runScenario(
   } catch (error: unknown) {
     terminal = error as InvocationError;
   }
-  const data: Record<string, unknown> = { outputs };
+  const data: Record<string, unknown> = { outputs, ...(joined ? { joinedSynthesis: true } : {}) };
   if (Object.hasOwn(scenario.given.source, "content")) data.listingRequests = [];
   else if (Object.keys(wire.listingRequests).length > 0) data.listingRequests = wire.listingRequests;
   if (wire.dispatch) data.dispatch = wire.dispatch;
   if (wire.redirectDispatch) data.redirectDispatch = wire.redirectDispatch;
-  data.trailer = invocation.trailer();
+  data.trailer = invocation.diagnostics.trailing();
   if (!terminal) return { disposition: "complete", phase: "completion", data };
   data.error = {
     code: terminal.code,
     message: terminal.message,
-    category: terminal.category,
-    ...(terminal.effects !== undefined ? { effects: terminal.effects } : {}),
     ...(terminal.details !== undefined ? { details: terminal.details } : {}),
+    ...(terminal.diagnostics !== undefined ? { diagnostics: terminal.diagnostics } : {}),
   };
   if (terminal.code === CONTEXT_REQUIRED) return { disposition: "context-required", phase: "pre-dispatch", data };
   if (scenario.id.startsWith("MCP-FI-")) {
-    const details = isRecord(terminal.details) ? terminal.details : {};
-    const mcp = isRecord(details.mcp) ? details.mcp : {};
+    const diagnostics = isRecord(terminal.diagnostics) ? terminal.diagnostics : {};
+    const mcp = isRecord(diagnostics.mcp) ? diagnostics.mcp : {};
     return {
       disposition: "error",
       phase: Object.hasOwn(mcp, "result")
         ? "completion"
-        : Object.hasOwn(details, "httpResponse") || Object.hasOwn(mcp, "jsonrpcError")
+        : Object.hasOwn(diagnostics, "httpResponse") || Object.hasOwn(mcp, "jsonrpcError")
           ? "response"
           : "completion",
       data,
@@ -101,12 +112,18 @@ async function runScenario(
   }
   const phase: ProcessorObservation["phase"] = scenario.id === "MCP-PS-01"
     ? "load"
-    : ["MCP-PS-08", "MCP-PS-12"].includes(scenario.id)
+    : ["MCP-PS-08", "MCP-PS-09", "MCP-PS-12", "MCP-PS-13"].includes(scenario.id)
       ? "resolution"
-      : ["MCP-PS-06", "MCP-PS-14"].includes(scenario.id)
+      : ["MCP-PS-06", "MCP-PS-10", "MCP-PS-14", "MCP-PS-16"].includes(scenario.id)
         ? "response"
         : "pre-dispatch";
-  return { disposition: wire.dispatch && ["MCP-PS-06", "MCP-PS-14"].includes(scenario.id) ? "error" : "refusal", phase, data };
+  return { disposition: wire.dispatch && ["MCP-PS-06", "MCP-PS-10", "MCP-PS-14", "MCP-PS-16"].includes(scenario.id) ? "error" : "refusal", phase, data };
+}
+
+function operationForRef(iface: OBInterface, ref: string): string {
+  const match = Object.values(iface.bindings ?? {}).find((binding) => binding.ref === ref);
+  if (!match) throw new Error(`synthesized MCP interface has no binding for ${JSON.stringify(ref)}`);
+  return match.operation;
 }
 
 class ScenarioServer {

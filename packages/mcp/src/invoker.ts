@@ -19,7 +19,7 @@ import {
   type SourceInspector,
   type SynthesizeResult,
 } from "@openbindings/sdk";
-import { BINDING_SPEC, DEFAULT_SOURCE_NAME } from "./constants.js";
+import { BINDING_SPEC, LEGACY_BINDING_SPEC, DEFAULT_SOURCE_NAME } from "./constants.js";
 import { runMCPBinding, validateEndpoint } from "./invoke.js";
 import {
   discover,
@@ -32,6 +32,13 @@ import {
   type MCPDiscovery,
 } from "./synthesize.js";
 import { mcpSynthesisCoverage } from "./coverage.js";
+
+function mcpBindingSpecs(): BindingSpecInfo[] {
+  return [
+    { bindingSpec: BINDING_SPEC, description: "MCP application-contract tools via Streamable HTTP" },
+    { bindingSpec: LEGACY_BINDING_SPEC, description: "MCP revision-1 compatibility via Streamable HTTP" },
+  ];
+}
 
 // ---------------------------------------------------------------------------
 // Invoker
@@ -62,7 +69,7 @@ export class MCPInvoker implements BindingInvoker {
   }
 
   bindingSpecs(): BindingSpecInfo[] {
-    return [{ bindingSpec: BINDING_SPEC, description: "MCP via Streamable HTTP" }];
+    return mcpBindingSpecs();
   }
 
   /**
@@ -124,7 +131,7 @@ export class MCPSynthesizer implements InterfaceSynthesizer, CoverageSynthesizer
   }
 
   bindingSpecs(): BindingSpecInfo[] {
-    return [{ bindingSpec: BINDING_SPEC, description: "MCP via Streamable HTTP" }];
+    return mcpBindingSpecs();
   }
 
   /**
@@ -166,7 +173,7 @@ export class MCPSynthesizer implements InterfaceSynthesizer, CoverageSynthesizer
     if (sources.length > 1) {
       throw new MultipleSourcesError();
     }
-    if (src.bindingSpec !== BINDING_SPEC) throw new Error(`synthesizer supports exact binding specification ${JSON.stringify(BINDING_SPEC)}, got ${JSON.stringify(src.bindingSpec)}`);
+    if (src.bindingSpec !== BINDING_SPEC && src.bindingSpec !== LEGACY_BINDING_SPEC) throw new Error(`synthesizer supports exact binding specifications ${JSON.stringify(BINDING_SPEC)} and ${JSON.stringify(LEGACY_BINDING_SPEC)}, got ${JSON.stringify(src.bindingSpec)}`);
     if (src.outputLocation) validateEndpoint(src.outputLocation);
     let disc: MCPDiscovery;
     if (src.content !== undefined) {
@@ -178,7 +185,7 @@ export class MCPSynthesizer implements InterfaceSynthesizer, CoverageSynthesizer
       }
       disc = await discover(src.location, { signal: options?.signal, fetch: this.fetchImpl });
     }
-    const iface = convertToInterface(disc, src.location);
+    const iface = convertToInterface(disc, src.location, src.bindingSpec);
     if (src.content !== undefined) {
       const emittedSource = iface.sources?.[DEFAULT_SOURCE_NAME];
       if (emittedSource) emittedSource.content = src.content;
@@ -190,7 +197,7 @@ export class MCPSynthesizer implements InterfaceSynthesizer, CoverageSynthesizer
       if (emittedSource) emittedSource.content = disc.pinnedListing;
     }
     return {
-      iface: finalizeSynthesis(iface, input, DEFAULT_SOURCE_NAME, BINDING_SPEC),
+      iface: finalizeSynthesis(iface, input, DEFAULT_SOURCE_NAME, src.bindingSpec),
       discovery: disc,
     };
   }
@@ -219,7 +226,7 @@ export class MCPSynthesizer implements InterfaceSynthesizer, CoverageSynthesizer
       if (!source.location) throw new Error("MCP source requires a location (endpoint URL)");
       disc = await discover(source.location, { signal: options?.signal, fetch: this.fetchImpl });
     }
-    disc = bindableDiscovery(disc);
+    disc = bindableDiscovery(disc, source.bindingSpec);
     const targets: SourceInspection["targets"] = [];
     const usedKeys = new Map<string, string>();
 

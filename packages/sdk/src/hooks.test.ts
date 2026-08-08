@@ -87,7 +87,7 @@ describe("failure channels", () => {
     const err = await h.decodeOutput(site, raw, null).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(InvocationError);
     expect((err as InvocationError).code).toBe(ERR_STREAM_ERROR);
-    expect((err as InvocationError).details).toMatchObject({ decidedBy: "per-invocation hook" });
+    expect((err as InvocationError).diagnostics).toMatchObject({ decidedBy: "per-invocation hook" });
   });
 
   it("a thrown plain error is a deliberate terminal with the axis's native code", async () => {

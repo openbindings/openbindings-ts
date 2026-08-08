@@ -4,15 +4,22 @@ import { dirname, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   matchProcessorObservation,
+  OperationInvoker,
+  operationSignature,
+  type Invocation,
   type InvocationError,
+  type OBInterface,
   type ProcessorObservation,
   type ProcessorScenario,
   type ProcessorScenarioFile,
 } from "@openbindings/sdk";
-import { AsyncAPIInvoker } from "./index.js";
+import { AsyncAPIInvoker, AsyncAPISynthesizer } from "./index.js";
 
 const root = process.env.OB_SPEC_CORPUS ?? resolve(dirname(fileURLToPath(import.meta.url)), "../../../../spec/conformance");
 const corpus = JSON.parse(readFileSync(resolve(root, "binding-specs/processor/asyncapi.json"), "utf8")) as ProcessorScenarioFile;
+const fidelityCorpus = JSON.parse(
+  readFileSync(resolve(root, "invocation-fidelity/asyncapi.json"), "utf8"),
+) as ProcessorScenarioFile;
 
 describe("portable AsyncAPI processor scenarios", () => {
   for (const scenario of corpus.scenarios) {
@@ -23,10 +30,19 @@ describe("portable AsyncAPI processor scenarios", () => {
   }
 });
 
-async function runScenario(scenario: ProcessorScenario): Promise<ProcessorObservation> {
+describe("AsyncAPI invocation-fidelity scenarios", () => {
+  for (const scenario of fidelityCorpus.scenarios) {
+    it(scenario.id, async () => {
+      const observation = await runScenario(scenario, true);
+      expect(() => matchProcessorObservation(scenario, observation)).not.toThrow();
+    });
+  }
+});
+
+async function runScenario(scenario: ProcessorScenario, joined = false): Promise<ProcessorObservation> {
   const dispatches: Array<Record<string, unknown>> = [];
   const previousWebSocket = globalThis.WebSocket;
-  if (scenario.id === "ASYNC-PS-10") {
+  if (Array.isArray(scenario.given.peer?.webSocketMessages)) {
     globalThis.WebSocket = scenarioWebSocket(scenario, dispatches) as unknown as typeof WebSocket;
   }
   const fetchImpl: typeof fetch = async (input, init) => {
@@ -57,16 +73,23 @@ async function runScenario(scenario: ProcessorScenario): Promise<ProcessorObserv
   }
   const invoker = new AsyncAPIInvoker();
   try {
-    const invocation = invoker.invokeBinding({
-      source: {
-        bindingSpec: corpus.bindingSpec,
-        ...(typeof scenario.given.source.location === "string" ? { location: scenario.given.source.location } : {}),
-        ...(Object.hasOwn(scenario.given.source, "content") ? { content: scenario.given.source.content } : {}),
-      },
-      ref: String(scenario.given.binding.ref ?? ""),
-      context,
-      fetch: fetchImpl,
-    });
+    const source = {
+      bindingSpec: joined ? fidelityCorpus.bindingSpec : corpus.bindingSpec,
+      ...(typeof scenario.given.source.location === "string" ? { location: scenario.given.source.location } : {}),
+      ...(Object.hasOwn(scenario.given.source, "content") ? { content: scenario.given.source.content } : {}),
+    };
+    const ref = String(scenario.given.binding.ref ?? "");
+    let invocation: Invocation<unknown, unknown>;
+    if (joined) {
+      const iface = await new AsyncAPISynthesizer().synthesizeInterface({ sources: [source] });
+      invocation = new OperationInvoker([invoker], { fetch: fetchImpl }).invoke(
+        iface,
+        operationSignature(operationForRef(iface, ref)),
+        { context },
+      );
+    } else {
+      invocation = invoker.invokeBinding({ source, ref, context, fetch: fetchImpl });
+    }
     if (scenario.given.invocation.inputPresent) {
       await invocation.write(scenario.given.invocation.input).catch(() => {});
       await invocation.close();
@@ -80,21 +103,36 @@ async function runScenario(scenario: ProcessorScenario): Promise<ProcessorObserv
     } catch (error: unknown) {
       terminal = error as InvocationError;
     }
-    const data: Record<string, unknown> = { outputs, dispatches };
+    const data: Record<string, unknown> = { outputs, dispatches, ...(joined ? { joinedSynthesis: true } : {}) };
+    data.trailer = invocation.diagnostics.trailing();
     if (dispatches[0]) data.dispatch = dispatches[0];
     if (!terminal) return { disposition: "complete", phase: "completion", data };
+    data.error = {
+      code: terminal.code,
+      message: terminal.message,
+      ...(terminal.details !== undefined ? { details: terminal.details } : {}),
+      ...(terminal.diagnostics !== undefined ? { diagnostics: terminal.diagnostics } : {}),
+    };
     const phase: ProcessorObservation["phase"] = scenario.id === "ASYNC-PS-01"
       ? "load"
       : ["ASYNC-PS-02", "ASYNC-PS-03", "ASYNC-PS-12", "ASYNC-PS-13", "ASYNC-PS-15"].includes(scenario.id)
         ? "resolution"
         : ["ASYNC-PS-08", "ASYNC-PS-17", "ASYNC-PS-18"].includes(scenario.id)
           ? "response"
+          : joined && dispatches.length > 0
+            ? "response"
           : "pre-dispatch";
     return { disposition: phase === "response" ? "error" : "refusal", phase, data };
   } finally {
     invoker.close();
     globalThis.WebSocket = previousWebSocket;
   }
+}
+
+function operationForRef(iface: OBInterface, ref: string): string {
+  const match = Object.values(iface.bindings ?? {}).find((binding) => binding.ref === ref);
+  if (!match) throw new Error(`synthesized AsyncAPI interface has no binding for ${JSON.stringify(ref)}`);
+  return match.operation;
 }
 
 function scenarioWebSocket(

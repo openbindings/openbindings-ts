@@ -1,12 +1,16 @@
 import type { OBInterface, Operation } from "@openbindings/sdk";
 import { MAX_TESTED_VERSION } from "@openbindings/sdk";
-import type { IntrospectionSchema } from "./introspection.js";
+import type { FullType, IntrospectionSchema, TypeRef } from "./introspection.js";
 import { buildTypeMap, rootTypeName } from "./introspection.js";
-import { BINDING_SPEC, DEFAULT_SOURCE_NAME } from "./constants.js";
+import { BINDING_SPEC, DEFAULT_SOURCE_NAME, LEGACY_BINDING_SPEC } from "./constants.js";
 
 /** Convert a GraphQL introspection schema to an OBInterface. */
-export function convertToInterface(schema: IntrospectionSchema, location?: string): OBInterface {
-  const source: { bindingSpec: string; location?: string } = { bindingSpec: BINDING_SPEC };
+export function convertToInterface(
+  schema: IntrospectionSchema,
+  location?: string,
+  bindingSpec = LEGACY_BINDING_SPEC,
+): OBInterface {
+  const source: { bindingSpec: string; location?: string } = { bindingSpec };
   if (location) source.location = location;
 
   const operations: Record<string, Operation> = {};
@@ -14,11 +18,12 @@ export function convertToInterface(schema: IntrospectionSchema, location?: strin
   const usedKeys = new Map<string, string>();
   const tm = buildTypeMap(schema);
 
-  const rootTypes: Array<{ label: string; typeName: string | null }> = [
+  let rootTypes: Array<{ label: string; typeName: string | null }> = [
     { label: "query", typeName: rootTypeName(schema, "query") },
     { label: "mutation", typeName: rootTypeName(schema, "mutation") },
     { label: "subscription", typeName: rootTypeName(schema, "subscription") },
   ];
+  if (bindingSpec === BINDING_SPEC) rootTypes = rootTypes.slice(0, 2);
 
   for (const rt of rootTypes) {
     if (!rt.typeName) continue;
@@ -39,7 +44,9 @@ export function convertToInterface(schema: IntrospectionSchema, location?: strin
       if (f.isDeprecated) op.deprecated = true;
 
       op.input = { type: "object" };
-      op.output = graphQLResponseSchema();
+      op.output = bindingSpec === BINDING_SPEC
+        ? graphQLValueSchema(f.type, tm)
+        : graphQLResponseSchema();
 
       operations[opKey] = op;
       bindings[`${opKey}.${DEFAULT_SOURCE_NAME}`] = { operation: opKey, source: DEFAULT_SOURCE_NAME, ref };
@@ -52,6 +59,41 @@ export function convertToInterface(schema: IntrospectionSchema, location?: strin
     sources: { [DEFAULT_SOURCE_NAME]: source },
     bindings,
   };
+}
+
+function graphQLValueSchema(ref: TypeRef, tm: Map<string, FullType>): Record<string, unknown> {
+  if (ref.kind === "NON_NULL" && ref.ofType) return graphQLNonNullSchema(ref.ofType, tm);
+  const base = graphQLNonNullSchema(ref, tm);
+  if (Object.keys(base).length === 0) return base;
+  return { anyOf: [base, { type: "null" }] };
+}
+
+function graphQLNonNullSchema(ref: TypeRef, tm: Map<string, FullType>): Record<string, unknown> {
+  switch (ref.kind) {
+    case "LIST":
+      return ref.ofType
+        ? { type: "array", items: graphQLValueSchema(ref.ofType, tm) }
+        : { type: "array" };
+    case "SCALAR":
+      switch (ref.name) {
+        case "String":
+        case "ID": return { type: "string" };
+        case "Boolean": return { type: "boolean" };
+        case "Int": return { type: "integer" };
+        case "Float": return { type: "number" };
+        default: return {};
+      }
+    case "ENUM": {
+      const values = tm.get(ref.name ?? "")?.enumValues?.map((value) => value.name) ?? [];
+      return values.length > 0 ? { type: "string", enum: values } : { type: "string" };
+    }
+    case "OBJECT":
+    case "INTERFACE":
+    case "UNION":
+      return { type: "object" };
+    default:
+      return {};
+  }
 }
 
 function graphQLResponseSchema(): Record<string, unknown> {

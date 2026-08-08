@@ -21,7 +21,7 @@ export interface GrpcStatusDetailEvidence {
  */
 export function grpcFailureEvidence(error: unknown): GrpcFailureEvidence | null {
   if (!(error instanceof InvocationError)) return null;
-  const details = record(error.details);
+  const details = record(error.diagnostics);
   const status = record(details?.grpcStatus);
   if (!status || !Number.isInteger(status.code) || (status.code as number) < 0 ||
       (status.code as number) > 16 || typeof status.message !== "string") {

@@ -119,13 +119,13 @@ class MockBindingInvoker implements BindingInvoker {
             new InvocationError(
               "ERR_TIMEOUT",
               "HTTP 504 Gateway Timeout",
+              undefined,
               {
                 status: 504,
                 httpResponse: {
                   body: { base64: "Z2F0ZXdheSB0aW1lb3V0", byteLength: 15 },
                 },
               },
-              "possible",
             ),
           );
           return;
@@ -873,14 +873,12 @@ describe("CONTEXT_REQUIRED", () => {
 // ---------------------------------------------------------------------------
 
 describe("metadata pass-through", () => {
-  it("relays binding-native failure classification and details unchanged", async () => {
+  it("relays optional binding-native diagnostics without making them portable semantics", async () => {
     const op = makeInvoker(new MockBindingInvoker({ nativeFailure: true }));
     const call = op.invoke(testInterface(), operationSignature("ping"));
     await expect(call.closed).rejects.toMatchObject({
       code: "ERR_TIMEOUT",
-      category: "transient",
-      effects: "possible",
-      details: {
+      diagnostics: {
         status: 504,
         httpResponse: {
           body: { base64: "Z2F0ZXdheSB0aW1lb3V0", byteLength: 15 },
@@ -893,8 +891,8 @@ describe("metadata pass-through", () => {
     const op = makeInvoker();
     const call = op.invoke(testInterface(), operationSignature("ping"));
     expect(await collect(call.outputs)).toEqual([{ ok: true }]);
-    await expect(call.header).resolves.toEqual({ "x-mock": ["ping"] });
-    expect(call.trailer()).toEqual({ "x-mock-trailer": ["done"] });
+    await expect(call.diagnostics.leading).resolves.toEqual({ "x-mock": ["ping"] });
+    expect(call.diagnostics.trailing()).toEqual({ "x-mock-trailer": ["done"] });
   });
 });
 

@@ -4,14 +4,18 @@ import { fileURLToPath } from "node:url";
 import {
   CONTEXT_REQUIRED,
   matchProcessorObservation,
+  OperationInvoker,
+  operationSignature,
+  type Invocation,
   type InvocationError,
+  type OBInterface,
   type ProcessorObservation,
   type ProcessorScenario,
   type ProcessorScenarioFile,
 } from "@openbindings/sdk";
 import { describe, expect, it } from "vitest";
 import type { GraphQLWebSocketInit } from "./configuration.js";
-import { GraphQLInvoker } from "./invoker.js";
+import { GraphQLInvoker, GraphQLSynthesizer } from "./invoker.js";
 
 const root = process.env.OB_SPEC_CORPUS
   ?? resolve(dirname(fileURLToPath(import.meta.url)), "../../../../spec/conformance");
@@ -34,13 +38,13 @@ describe("portable GraphQL processor scenarios", () => {
 describe("GraphQL invocation-fidelity scenarios", () => {
   for (const scenario of fidelityCorpus.scenarios) {
     it(scenario.id, async () => {
-      const observation = await runScenario(scenario, fidelityCorpus.bindingSpec);
+      const observation = await runScenario(scenario, true);
       expect(() => matchProcessorObservation(scenario, observation)).not.toThrow();
     });
   }
 });
 
-async function runScenario(scenario: ProcessorScenario, bindingSpec = corpus.bindingSpec): Promise<ProcessorObservation> {
+async function runScenario(scenario: ProcessorScenario, joined = false): Promise<ProcessorObservation> {
   const peer = scenario.given.peer ?? {};
   const introspectionRequests: unknown[] = [];
   let dispatch: Record<string, unknown> | undefined;
@@ -77,17 +81,29 @@ async function runScenario(scenario: ProcessorScenario, bindingSpec = corpus.bin
   if (credentials !== null && typeof credentials === "object" && !Array.isArray(credentials)) {
     Object.assign(context, credentials);
   }
-  const invocation = invoker.invokeBinding({
-    source: {
-      bindingSpec,
-      ...(typeof scenario.given.source.location === "string" ? { location: scenario.given.source.location } : {}),
-      ...(Object.hasOwn(scenario.given.source, "content") ? { content: scenario.given.source.content } : {}),
-    },
-    ref: typeof scenario.given.binding.ref === "string" ? scenario.given.binding.ref : "",
-    context,
-    ...(scenario.given.invocation.inputPresent ? { inputSchema: { type: "object" } } : {}),
-    fetch: fetchImpl,
-  });
+  const source = {
+    bindingSpec: joined ? fidelityCorpus.bindingSpec : corpus.bindingSpec,
+    ...(typeof scenario.given.source.location === "string" ? { location: scenario.given.source.location } : {}),
+    ...(Object.hasOwn(scenario.given.source, "content") ? { content: scenario.given.source.content } : {}),
+  };
+  const ref = typeof scenario.given.binding.ref === "string" ? scenario.given.binding.ref : "";
+  let invocation: Invocation<unknown, unknown>;
+  if (joined) {
+    const iface = await new GraphQLSynthesizer().synthesizeInterface({ sources: [source] });
+    invocation = new OperationInvoker([invoker], { fetch: fetchImpl }).invoke(
+      iface,
+      operationSignature(operationForRef(iface, ref)),
+      { context },
+    );
+  } else {
+    invocation = invoker.invokeBinding({
+      source,
+      ref,
+      context,
+      ...(scenario.given.invocation.inputPresent ? { inputSchema: { type: "object" } } : {}),
+      fetch: fetchImpl,
+    });
+  }
   if (scenario.given.invocation.inputPresent) {
     await invocation.write(scenario.given.invocation.input).catch(() => {});
   } else {
@@ -120,30 +136,41 @@ async function runScenario(scenario: ProcessorScenario, bindingSpec = corpus.bin
       body: subscribe?.payload,
     };
   }
-  const data: Record<string, unknown> = { outputs, introspectionRequests };
-  data.trailer = invocation.trailer();
+  const data: Record<string, unknown> = { outputs, introspectionRequests, ...(joined ? { joinedSynthesis: true } : {}) };
+  data.trailer = invocation.diagnostics.trailing();
   if (dispatch) data.dispatch = dispatch;
   if (terminal?.code === CONTEXT_REQUIRED) data.context = terminal.details;
   if (!terminal) return { disposition: "complete", phase: "completion", data };
   data.error = {
     code: terminal.code,
     message: terminal.message,
-    category: terminal.category,
-    ...(terminal.effects !== undefined ? { effects: terminal.effects } : {}),
     ...(terminal.details !== undefined ? { details: terminal.details } : {}),
+    ...(terminal.diagnostics !== undefined ? { diagnostics: terminal.diagnostics } : {}),
   };
   if (terminal.code === CONTEXT_REQUIRED) return { disposition: "context-required", phase: "pre-dispatch", data };
   if (!dispatch) return { disposition: "refusal", phase: "pre-dispatch", data };
   return {
     disposition: "error",
-    phase: scenario.id === "GQL-PS-07" || isRecord(terminal.details) && Object.hasOwn(terminal.details, "httpResponse")
+    phase: scenario.id === "GQL-PS-07" || outputs.length === 0 && hasGraphQLResponseEvidence(terminal.diagnostics)
       ? "response"
       : "completion",
     data,
   };
 }
 
-async function collectOutputs(invocation: ReturnType<GraphQLInvoker["invokeBinding"]>): Promise<{
+function operationForRef(iface: OBInterface, ref: string): string {
+  const match = Object.values(iface.bindings ?? {}).find((binding) => binding.ref === ref);
+  if (!match) throw new Error(`synthesized GraphQL interface has no binding for ${JSON.stringify(ref)}`);
+  return match.operation;
+}
+
+function hasGraphQLResponseEvidence(value: unknown): boolean {
+  if (!isRecord(value)) return false;
+  if (Object.hasOwn(value, "httpResponse")) return true;
+  return isRecord(value.graphql) && Object.hasOwn(value.graphql, "response");
+}
+
+async function collectOutputs(invocation: Invocation<unknown, unknown>): Promise<{
   outputs: unknown[];
   terminal?: InvocationError;
 }> {

@@ -67,7 +67,8 @@ describe("AsyncAPI unary-publish classification (§9.4)", () => {
     await call.write({ text: "hi" });
     await expect(call.closed).rejects.toMatchObject({
       code: "ERR_EXECUTION_FAILED",
-      details: { status: 302 },
+      details: undefined,
+      diagnostics: { status: 302 },
     });
   });
 });

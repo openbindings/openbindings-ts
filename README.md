@@ -209,8 +209,9 @@ correctness, and `close()` never rejects.
 
 Client-streaming and bidirectional callers own `close()` (and drive input and
 output from separate async contexts); lifecycle is observable via `closed`,
-leading/trailing metadata via `header`/`trailer()`, and termination via
-`cancel()`. Missing runtime context (credentials, configuration) surfaces as a
+and termination via `cancel()`. Optional binding-native evidence is available
+only through the explicitly named `diagnostics` view; correct ordinary
+operation behavior must not depend on it. Missing runtime context surfaces as a
 `CONTEXT_REQUIRED` terminal error raised before any side effect, resolved by
 the operation invoker's `contextResolver` when one is configured.
 
@@ -231,16 +232,16 @@ const invoker = new OperationInvoker([
 |---------|--------------|-------------------|
 | `@openbindings/openapi` | `openbindings.openapi@1` | yes |
 | `@openbindings/asyncapi` | `openbindings.asyncapi@1` | yes |
-| `@openbindings/mcp` | `openbindings.mcp@1` | yes |
+| `@openbindings/mcp` | `openbindings.mcp@2` (latest), `openbindings.mcp@1` (compatibility) | yes |
 | `@openbindings/grpc` | `openbindings.grpc@1` | yes |
 | `@openbindings/connect` | `openbindings.connect@1` | yes |
 | `@openbindings/usage` | `openbindings.usage@1` | yes |
-| `@openbindings/graphql` | `openbindings.graphql@1` | yes |
+| `@openbindings/graphql` | `openbindings.graphql@2` (latest), `openbindings.graphql@1` (compatibility) | yes |
 | `@openbindings/operationgraph` | `openbindings.operation-graph@1` | no (graphs are authored, then composed at invoke time) |
 
-OpenAPI, AsyncAPI, MCP, gRPC, Connect, usage, and GraphQL are published
-revision-1 artifact/protocol binding specifications and participate in the
-0.2 cross-SDK coverage guarantee.
+OpenAPI, AsyncAPI, gRPC, Connect, usage, and Operation Graph retain their
+published revision-1 identifiers; MCP and GraphQL advertise protocol-blind
+revision-2 contracts alongside explicit revision-1 compatibility.
 
 Invokers implement `BindingInvoker`. Interface synthesizers implement
 `InterfaceSynthesizer`; synthesizers that can return durable, explicitly

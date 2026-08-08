@@ -40,7 +40,6 @@ import {
   contextCookies,
   contextConfiguration,
   httpErrorCode,
-  httpErrorEffects,
   ERR_INVALID_REF,
   ERR_PROTOCOL,
   ERR_SOURCE_CONFIG_ERROR,
@@ -846,9 +845,9 @@ async function runUnaryPublish(
     h.fireError(
       new InvocationError(
         httpErrorCode(resp.status),
-        `HTTP ${resp.status} ${resp.statusText}`,
+        "Invocation completed unsuccessfully",
+        undefined,
         { status: resp.status, body: errBody },
-        httpErrorEffects(resp.status),
       ),
     );
     return;
@@ -978,9 +977,9 @@ async function runSSESubscribe(
     h.fireError(
       new InvocationError(
         httpErrorCode(resp.status),
-        `HTTP ${resp.status} ${resp.statusText}`,
+        "Invocation completed unsuccessfully",
+        undefined,
         { status: resp.status, body },
-        httpErrorEffects(resp.status),
       ),
     );
     return;

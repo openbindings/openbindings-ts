@@ -1,6 +1,7 @@
 import { UriTemplate } from "@modelcontextprotocol/sdk/shared/uriTemplate.js";
 import type { OBInterface, SynthesisCoverageEntry } from "@openbindings/sdk";
 import type { MCPDiscovery } from "./synthesize.js";
+import { BINDING_SPEC, LEGACY_BINDING_SPEC, DEFAULT_SOURCE_NAME } from "./constants.js";
 
 /** Accounts for every entity in the pagination-exhausted MCP listing. */
 export function mcpSynthesisCoverage(
@@ -8,6 +9,7 @@ export function mcpSynthesisCoverage(
   iface: OBInterface,
 ): SynthesisCoverageEntry[] {
   if (!disc) return [];
+	const bindingSpec = iface.sources?.[DEFAULT_SOURCE_NAME]?.bindingSpec ?? LEGACY_BINDING_SPEC;
   const represented = new Map<string, { operationKey: string; bindingRef: string }>();
   for (const binding of Object.values(iface.bindings ?? {})) {
     if (binding.ref) represented.set(binding.ref, { operationKey: binding.operation, bindingRef: binding.ref });
@@ -67,13 +69,15 @@ export function mcpSynthesisCoverage(
     const count = toolCounts.get(entity.name) ?? 0;
     if (!entity.name) add("tools", "", index, count, { status: "invalid", reasonCode: "mcp.invalid_entity", message: "tool name is empty" });
     else if (count > 1) add("tools", entity.name, index, count, { status: "excluded", reasonCode: "mcp.ambiguous_identity", rule: "MCP-P-02", message: "more than one listed tool has this ref identity" });
-    else if (entity.taskSupport === "required") add("tools", entity.name, index, count, { status: "excluded", reasonCode: "mcp.required_task", rule: "MCP-P-08", message: "the tool requires task augmentation, which revision 1 excludes" });
+    else if (entity.taskSupport === "required") add("tools", entity.name, index, count, { status: "excluded", reasonCode: "mcp.required_task", rule: "MCP-P-08", message: "the tool requires task augmentation, which this binding revision excludes" });
+    else if (bindingSpec === BINDING_SPEC && entity.outputSchema === undefined) add("tools", entity.name, index, count, { status: "excluded", reasonCode: "mcp.missing_application_output_schema", rule: "MCP-P-04", message: "the tool listing does not declare an application outputSchema" });
     else add("tools", entity.name, index, count);
   });
   disc.resources.forEach((entity, index) => {
     const count = resourceCounts.get(entity.uri) ?? 0;
     if (!entity.uri) add("resources", "", index, count, { status: "invalid", reasonCode: "mcp.invalid_entity", message: "resource URI is absent" });
     else if (count > 1) add("resources", entity.uri, index, count, { status: "excluded", reasonCode: "mcp.ambiguous_identity", rule: "MCP-P-02", message: "more than one listed resource has this ref identity" });
+    else if (bindingSpec === BINDING_SPEC) add("resources", entity.uri, index, count, { status: "excluded", reasonCode: "mcp.no_application_output_contract", rule: "MCP-P-04", message: "MCP resource listings do not declare an application output schema" });
     else add("resources", entity.uri, index, count);
   });
   disc.resourceTemplates.forEach((entity, index) => {
@@ -83,7 +87,8 @@ export function mcpSynthesisCoverage(
     else {
       try {
         new UriTemplate(entity.uriTemplate);
-        add("resourceTemplates", entity.uriTemplate, index, count);
+        if (bindingSpec === BINDING_SPEC) add("resourceTemplates", entity.uriTemplate, index, count, { status: "excluded", reasonCode: "mcp.no_application_output_contract", rule: "MCP-P-04", message: "MCP resource-template listings do not declare an application output schema" });
+        else add("resourceTemplates", entity.uriTemplate, index, count);
       } catch (error: unknown) {
         add("resourceTemplates", entity.uriTemplate, index, count, {
           status: "invalid",
@@ -97,6 +102,7 @@ export function mcpSynthesisCoverage(
     const count = promptCounts.get(entity.name) ?? 0;
     if (!entity.name) add("prompts", "", index, count, { status: "invalid", reasonCode: "mcp.invalid_entity", message: "prompt name is empty" });
     else if (count > 1) add("prompts", entity.name, index, count, { status: "excluded", reasonCode: "mcp.ambiguous_identity", rule: "MCP-P-02", message: "more than one listed prompt has this ref identity" });
+    else if (bindingSpec === BINDING_SPEC) add("prompts", entity.name, index, count, { status: "excluded", reasonCode: "mcp.no_application_output_contract", rule: "MCP-P-04", message: "MCP prompt listings do not declare an application output schema" });
     else add("prompts", entity.name, index, count);
   });
   return entries;

@@ -27,7 +27,7 @@ export interface OpenAPIFailureDeclaration {
  */
 export function openAPIFailureEvidence(error: unknown): OpenAPIFailureEvidence | null {
   if (!(error instanceof InvocationError)) return null;
-  const details = record(error.details);
+  const details = record(error.diagnostics);
   const response = record(details?.httpResponse);
   const declaration = record(details?.openapi);
   if (!response || !declaration || !Number.isInteger(response.status) ||

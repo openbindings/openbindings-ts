@@ -23,7 +23,7 @@ export interface MCPHTTPFailureEvidence {
 /** Extracts and validates MCP-native result, JSON-RPC, and HTTP evidence. */
 export function mcpFailureEvidence(error: unknown): MCPFailureEvidence | null {
   if (!(error instanceof InvocationError)) return null;
-  const details = record(error.details);
+  const details = record(error.diagnostics);
   const mcp = record(details?.mcp);
   const result: MCPFailureEvidence = {};
 

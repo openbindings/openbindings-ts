@@ -35,6 +35,7 @@ function judge(document: CorpusDocument): string | undefined {
       for (const binding of Object.values(document.bindings ?? {})) {
         if (binding.source !== sourceName) continue;
         const { rootType, fieldName } = parseRef(binding.ref ?? "");
+        if (rootType === "subscription") throw new Error(`subscription refs are outside ${BINDING_SPEC}`);
         if (schema) resolveField(schema, rootType, fieldName);
       }
     }

@@ -28,6 +28,16 @@ export class ExecutableDocument {
     variables: Record<string, unknown> | undefined,
     schema: IntrospectionSchema,
   ): void {
+	this.responseKey(operationName, wantKind, wantField, variables, schema);
+  }
+
+  responseKey(
+    operationName: string | undefined,
+    wantKind: string,
+    wantField: string,
+    variables: Record<string, unknown> | undefined,
+    schema: IntrospectionSchema,
+  ): string {
     let operation: Operation;
     if (operationName) {
       const matches = this.operations.filter((item) => item.name === operationName);
@@ -54,6 +64,7 @@ export class ExecutableDocument {
         }
       }
     }
+	return groups.keys().next().value as string;
   }
 
   private collect(

@@ -14,7 +14,6 @@ import {
   contextCookies,
   contextConfiguration,
   httpErrorCode,
-  httpErrorEffects,
   ERR_INVALID_REF,
   ERR_SOURCE_CONFIG_ERROR,
   ERR_REF_NOT_FOUND,
@@ -374,20 +373,33 @@ export async function runBinding(
       return;
     }
     if (!ok) {
-      await resp.body?.cancel().catch(() => {});
+      // A non-2xx event-stream response is one unsuccessful HTTP exchange,
+      // not a stream of successful operation values. Preserve its exact
+      // response bytes under the same consumer-owned delivery-unit bound as
+      // the unary failure lane. Detecting SSE framing must never discard
+      // native evidence.
+      let failureBody: Uint8Array;
+      try {
+        failureBody = await readResponseBytes(resp, resolveDeliveryUnitLimit(args));
+      } catch (e: unknown) {
+        if (inv.signal.aborted) return;
+        inv.fireError(new InvocationError(ERR_RESPONSE_ERROR, errorMessage(e)));
+        return;
+      }
+      if (inv.signal.aborted) return;
       inv.fireError(
         new InvocationError(
           httpErrorCode(resp.status),
-          `HTTP ${resp.status} ${resp.statusText}`,
+          "Invocation completed unsuccessfully",
+          undefined,
           openAPIFailureDetails(
             resp,
-            null,
-            "",
+            failureBody,
+            failureBody.length > 0 ? new TextDecoder().decode(failureBody) : "",
             invocationMeta,
             responseDeclaration,
             contentType,
           ),
-          httpErrorEffects(resp.status),
         ),
       );
       return;
@@ -468,7 +480,8 @@ export async function runBinding(
     inv.fireError(
       new InvocationError(
         httpErrorCode(resp.status),
-        `HTTP ${resp.status} ${resp.statusText}`,
+        "Invocation completed unsuccessfully",
+        undefined,
         openAPIFailureDetails(
           resp,
           bodyBytes,
@@ -477,7 +490,6 @@ export async function runBinding(
           responseDeclaration,
           contentType,
         ),
-        httpErrorEffects(resp.status),
       ),
     );
     return;

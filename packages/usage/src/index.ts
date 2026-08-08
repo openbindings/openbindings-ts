@@ -231,7 +231,8 @@ export class UsageInvoker implements BindingInvoker {
     if (!(classifier ? classifier(result) : result.exitCode === 0)) {
       invocation.fireError(new InvocationError(
         ERR_EXECUTION_FAILED,
-        diagnostic(result.stderr) || (result.signal ? `process terminated by ${result.signal}` : `process exited ${result.exitCode}`),
+        "Invocation completed unsuccessfully",
+        undefined,
         usageProcessDetails(result),
       ));
       return;
@@ -242,10 +243,11 @@ export class UsageInvoker implements BindingInvoker {
       const decoder = typeof cfg["decode"] === "string" ? this.#decoders[cfg["decode"]] : undefined;
       if (typeof cfg["decode"] === "string" && !decoder) throw new Error(`unknown decode configuration ${JSON.stringify(cfg["decode"])}`);
       output = decoder ? decoder(bytes) : stripTrailingLineEndings(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
-    } catch (error: unknown) {
+    } catch {
       invocation.fireError(new InvocationError(
         ERR_RESPONSE_ERROR,
-        `process output decode failed: ${message(error)}`,
+        "Invocation result could not be decoded",
+        undefined,
         usageProcessDetails(result),
       ));
       return;

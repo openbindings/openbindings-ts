@@ -14,13 +14,14 @@ import {
   contextCookies,
   contextRequiredError,
   contextConfiguration,
+  compileExampleSchema,
   httpErrorCode,
-  httpErrorEffects,
   ERR_CANCELLED,
   ERR_CONNECT_FAILED,
   ERR_EXECUTION_FAILED,
   ERR_INVALID_REF,
   ERR_REF_NOT_FOUND,
+  ERR_RESPONSE_ERROR,
   ERR_SOURCE_CONFIG_ERROR,
   ERR_SOURCE_LOAD_FAILED,
   ERR_VALIDATION_FAILED,
@@ -28,7 +29,7 @@ import {
   type BindingInvocationArgs,
   type Metadata,
 } from "@openbindings/sdk";
-import { CLIENT_NAME, CLIENT_VERSION } from "./constants.js";
+import { BINDING_SPEC, CLIENT_NAME, CLIENT_VERSION } from "./constants.js";
 import { liveListing, parsePinnedListing, resolveRef, type Listing, type TargetKind } from "./listing.js";
 
 /** Consumer-level knobs the invoker threads into each run (openbindings.mcp@1 §9.3). */
@@ -129,7 +130,11 @@ function mapError(
   if (e instanceof McpError) {
     const prefix = `MCP error ${e.code}: `;
     const nativeMessage = msg.startsWith(prefix) ? msg.slice(prefix.length) : msg;
-    return new InvocationError(ERR_EXECUTION_FAILED, msg, {
+    return new InvocationError(
+      ERR_EXECUTION_FAILED,
+      nativeMessage || "Invocation completed unsuccessfully",
+      undefined,
+      {
       code: e.code,
       ...(e.data !== undefined ? { data: e.data } : {}),
       mcp: { jsonrpcError: {
@@ -137,12 +142,13 @@ function mapError(
         message: nativeMessage,
         ...(e.data !== undefined ? { data: e.data } : {}),
       } },
-    });
+      },
+    );
   }
   if (e instanceof StreamableHTTPError && typeof e.code === "number" && e.code > 0) {
-    return new InvocationError(httpErrorCode(e.code), msg, {
+    return new InvocationError(httpErrorCode(e.code), "Invocation completed unsuccessfully", undefined, {
       status: e.code,
-    }, httpErrorEffects(e.code));
+    });
   }
   return new InvocationError(fallback, msg);
 }
@@ -156,13 +162,13 @@ async function mapErrorWithResponse(
 ): Promise<InvocationError> {
   const mapped = mapError(e, signal, fallback);
   if (!response) return mapped;
-  const prior = mapped.details !== null && typeof mapped.details === "object"
-    ? mapped.details as Record<string, unknown>
+  const prior = mapped.diagnostics !== null && typeof mapped.diagnostics === "object"
+    ? mapped.diagnostics as Record<string, unknown>
     : {};
-  return new InvocationError(mapped.code, mapped.message, {
+  return new InvocationError(mapped.code, mapped.message, mapped.details, {
     ...prior,
     httpResponse: await capturedHTTPResponse(response),
-  }, mapped.effects);
+  });
 }
 
 async function capturedHTTPResponse(response: Response): Promise<Record<string, unknown>> {
@@ -320,9 +326,11 @@ export async function runMCPBinding(
   // exhausted listing and happens right after the handshake — still before
   // dispatch.
   let kind: TargetKind | undefined;
+  let applicationOutputSchema: unknown;
   if (pin) {
     try {
-      kind = resolveRef(pin, entityType, name);
+      kind = resolveRef(pin, entityType, name, args.source.bindingSpec);
+      if (args.source.bindingSpec === BINDING_SPEC) applicationOutputSchema = pin.toolOutputSchemas?.[name];
     } catch (e: unknown) {
       inv.fireError(mapError(e, inv.signal, ERR_REF_NOT_FOUND));
       return;
@@ -441,7 +449,7 @@ export async function runMCPBinding(
   if (transport.protocolVersion !== "2025-11-25") {
     inv.fireError(new InvocationError(
       ERR_SOURCE_LOAD_FAILED,
-      `negotiated MCP protocol revision ${JSON.stringify(transport.protocolVersion)} is outside openbindings.mcp@1's accepted envelope (2025-11-25)`,
+      `negotiated MCP protocol revision ${JSON.stringify(transport.protocolVersion)} is outside ${args.source.bindingSpec}'s accepted envelope (2025-11-25)`,
     ));
     try { await client.close(); } catch { /* ignore close errors */ }
     return;
@@ -469,7 +477,8 @@ export async function runMCPBinding(
         inv.fireError(await mapErrorWithResponse(e, inv.signal, ERR_SOURCE_LOAD_FAILED, responseCapture));
         return;
       }
-      kind = resolveRef(listing, entityType, name); // throws ERR_REF_NOT_FOUND
+      kind = resolveRef(listing, entityType, name, args.source.bindingSpec); // throws ERR_REF_NOT_FOUND
+      if (args.source.bindingSpec === BINDING_SPEC) applicationOutputSchema = listing.toolOutputSchemas?.[name];
     }
 
     // --- Resource input (post-resolution: static vs template decides the
@@ -496,8 +505,10 @@ export async function runMCPBinding(
     // --- Dispatch. ---
     switch (kind) {
       case "tool": {
-        const solicit = resolveSolicit(args.context, opts?.solicitProgress);
-        await runTool(client, name, toolArgs, solicit, inv, setHeaderOnce);
+        const solicit = args.source.bindingSpec === BINDING_SPEC
+          ? false
+          : resolveSolicit(args.context, opts?.solicitProgress);
+        await runTool(client, name, toolArgs, solicit, args.source.bindingSpec, applicationOutputSchema, inv, setHeaderOnce);
         break;
       }
       case "prompt":
@@ -727,6 +738,8 @@ async function runTool(
   toolName: string,
   toolArgs: Record<string, unknown> | undefined,
   solicit: boolean,
+  bindingSpec: string,
+  applicationOutputSchema: unknown,
   inv: BindingHandle<unknown, unknown>,
   setHeaderOnce: () => void,
 ): Promise<void> {
@@ -744,7 +757,7 @@ async function runTool(
     // attaches _meta.progressToken only when an onprogress handler is
     // registered, so not registering one IS the wire-level off switch.
     const result = await client.callTool(params, undefined, { signal: inv.signal });
-    await emitToolResult(result, toolName, inv, setHeaderOnce);
+    await emitToolResult(result, toolName, bindingSpec, applicationOutputSchema, inv, setHeaderOnce);
     return;
   }
 
@@ -790,7 +803,7 @@ async function runTool(
   resultArrived = true;
   await progressChain;
 
-  await emitToolResult(result, toolName, inv, setHeaderOnce);
+  await emitToolResult(result, toolName, bindingSpec, applicationOutputSchema, inv, setHeaderOnce);
 }
 
 /**
@@ -801,6 +814,8 @@ async function runTool(
 async function emitToolResult(
   result: Awaited<ReturnType<Client["callTool"]>>,
   toolName: string,
+  bindingSpec: string,
+  applicationOutputSchema: unknown,
   inv: BindingHandle<unknown, unknown>,
   setHeaderOnce: () => void,
 ): Promise<void> {
@@ -811,13 +826,33 @@ async function emitToolResult(
     throw new InvocationError(
       ERR_EXECUTION_FAILED,
       msg || `MCP tool ${JSON.stringify(toolName)} reported an error`,
+      undefined,
       { mcpResult: result, mcp: { result } },
     );
   }
 
-  // MCP already defines the result representation. Preserve it whole;
-  // projection belongs in an OBI outputTransform, not in this binding.
-  const output: unknown = result;
+  let output: unknown = result;
+  if (bindingSpec === BINDING_SPEC) {
+    if (result.structuredContent === undefined) {
+      throw new InvocationError(
+        ERR_RESPONSE_ERROR,
+        `MCP tool ${JSON.stringify(toolName)} declared outputSchema but returned no structuredContent application value`,
+        undefined,
+        { mcp: { result } },
+      );
+    }
+    const validation = compileExampleSchema(applicationOutputSchema, undefined).validate(result.structuredContent);
+    if (!validation.valid) {
+      const first = validation.failures[0];
+      throw new InvocationError(
+        ERR_RESPONSE_ERROR,
+        `MCP tool ${JSON.stringify(toolName)} returned structuredContent that does not satisfy its outputSchema${first ? `: ${first.path ? `${first.path}: ` : ""}${first.message}` : ""}`,
+        undefined,
+        { mcp: { result } },
+      );
+    }
+    output = result.structuredContent;
+  }
   setHeaderOnce();
   inv.setTrailer({ "x-ob-decode": ["protocol/result"], "x-ob-classify": ["protocol/isError"] });
   await inv.emitOutput(output);

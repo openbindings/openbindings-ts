@@ -121,7 +121,7 @@ async function runScenario(
     data.dispatches = dispatches;
   }
   if (!terminal) {
-    const trailer = call.trailer();
+    const trailer = call.diagnostics.trailing();
     const governing = trailer["x-ob-governing-media"];
     if (governing?.length === 1) data.response = { governingMedia: governing[0] };
     return { disposition: "complete", phase: "completion", data };
@@ -139,9 +139,8 @@ async function runScenario(
       error: {
         code: terminal.code,
         message: terminal.message,
-        category: terminal.category,
-        ...(terminal.effects !== undefined ? { effects: terminal.effects } : {}),
         ...(terminal.details !== undefined ? { details: terminal.details } : {}),
+        ...(terminal.diagnostics !== undefined ? { diagnostics: terminal.diagnostics } : {}),
       },
     },
   };
