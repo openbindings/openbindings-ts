@@ -22,6 +22,13 @@ export interface DereferenceOptions {
    * external refs are parsed as JSON only.
    */
   parse?: (text: string) => unknown;
+  /**
+   * Preserve a `$ref` object when its fragment does not resolve instead of
+   * rejecting the complete document. Strict rejection remains the default.
+   * This is intended for processors that inventory and exclude invalid
+   * targets individually after dereferencing the rest of the artifact.
+   */
+  allowUnresolved?: boolean;
 }
 
 /** Resolve a JSON Pointer (RFC 6901) against a root object. */
@@ -137,6 +144,7 @@ export async function dereference<T = unknown>(
   const parse = options?.parse ?? defaultParse;
   const baseUrl = options?.baseUrl;
   const signal = options?.signal;
+  const allowUnresolved = options?.allowUnresolved ?? false;
 
   // The single working tree. Internal refs resolve against THIS clone, never
   // the caller's `doc`: resolving against the original both mutates the
@@ -321,6 +329,7 @@ export async function dereference<T = unknown>(
         resolvedNodes.set(obj, resolved);
         return resolved;
       }
+      if (allowUnresolved) return obj;
       throw new Error(`unresolvable $ref ${JSON.stringify(ref)}`);
     }
 

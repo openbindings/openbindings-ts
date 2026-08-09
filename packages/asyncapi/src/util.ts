@@ -216,6 +216,10 @@ export async function parseAsyncAPIDocument(
       fetch: fetchFn ?? fetch,
       parse: (text) => yaml.load(text),
       signal: options?.signal,
+      // AsyncAPI synthesis accounts for invalid operations individually.
+      // Preserve a dangling target here so the eligibility/coverage layer can
+      // exclude that operation without rejecting unrelated valid operations.
+      allowUnresolved: true,
     },
   );
 

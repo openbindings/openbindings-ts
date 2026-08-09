@@ -279,4 +279,13 @@ describe("dereference — multi-document resource scope", () => {
       dereference({ use: { $ref: "#/missing" } }),
     ).rejects.toThrow("unresolvable $ref");
   });
+
+  it("can retain a dangling pointer for a processor that adjudicates targets individually", async () => {
+    const result = await dereference<{ use: { $ref: string } }>(
+      { use: { $ref: "#/missing" } },
+      { allowUnresolved: true },
+    );
+
+    expect(result.use).toEqual({ $ref: "#/missing" });
+  });
 });
