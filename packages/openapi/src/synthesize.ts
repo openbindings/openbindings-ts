@@ -7,7 +7,7 @@ import type {
   OpenAPIParameter,
   OpenAPIPathItem,
 } from "./types.js";
-import { BINDING_SPEC, DEFAULT_SOURCE_NAME } from "./constants.js";
+import { BINDING_SPEC, BINDING_SPEC_V2, DEFAULT_SOURCE_NAME } from "./constants.js";
 import {
   DegenerateMediaError,
   FAMILY_JSON,
@@ -18,6 +18,7 @@ import {
   type BodyPlan,
 } from "./media.js";
 import { effectiveParameters, unflattenableParam } from "./params.js";
+import { planAbstractInputRoutes, type AbstractInputRoutes } from "./input-routes-v2.js";
 import { translateSchemaDialect } from "./translate.js";
 import {
   bodySchemaFlattens,
@@ -71,6 +72,7 @@ export async function convertToInterface(
   onWarning?: (warning: SynthesizerWarning) => void,
   onDocument?: (document: OpenAPIDocument) => void,
   onUnrealizable?: (target: UnrealizableTarget) => void,
+  bindingSpec: string = BINDING_SPEC,
 ): Promise<OBInterface> {
   // loadOpenAPIDocument fully dereferences (every $ref, internal and
   // external, matching Go's kin-openapi loader), so extracted schemas are
@@ -82,7 +84,7 @@ export async function convertToInterface(
   const formatVersion = majorMinor(doc.openapi ?? "3.0");
 
   const sourceEntry: Source = {
-    bindingSpec: BINDING_SPEC,
+    bindingSpec,
   };
   if (location) sourceEntry.location = location;
   if (content !== undefined) sourceEntry.content = content;
@@ -122,7 +124,7 @@ export async function convertToInterface(
       const ref = buildJsonPointerRef(pathStr, method);
 
       const params = effectiveParameters(pathItem, opObj);
-      const unflattenable = unflattenableParam(params);
+      const unflattenable = unflattenableParam(params, bindingSpec);
       if (unflattenable) {
         const reason = `parameter ${JSON.stringify(unflattenable)} has no unique revision-1 flattened identity`;
         if (onUnrealizable) {
@@ -145,7 +147,7 @@ export async function convertToInterface(
         try {
           const plans = planRequestBodies(opObj);
           plannedCount = plans.length;
-          requestPlans = plans.filter((plan) => !candidateCollides(params, plan));
+          requestPlans = plans.filter((plan) => bindingSpec === BINDING_SPEC_V2 || !candidateCollides(params, plan));
         } catch (error: unknown) {
           planError = error;
         }
@@ -200,7 +202,8 @@ export async function convertToInterface(
       // schema root, referenced by same-document pointers from the OBI root
       // (OBI-D-16); translation then runs on an acyclic tree.
       const opPointer = `#/operations/${escapePointerSegment(opKey)}`;
-      const inputSchema = buildInputSchemaForPlans(opObj, params, requestPlans);
+      const routes = planAbstractInputRoutes(params, requestPlans);
+      const inputSchema = buildInputSchemaForPlans(opObj, params, requestPlans, routes);
       if (inputSchema) {
         const acyclicInput = decycleSchema(inputSchema, schemaNames, `${opPointer}/input`);
         obiOp.input = translateSchemaDialect(acyclicInput, formatVersion) as JSONSchema;
@@ -215,11 +218,15 @@ export async function convertToInterface(
       iface.operations[opKey] = obiOp;
 
       const bindingKey = `${opKey}.${DEFAULT_SOURCE_NAME}`;
-      (iface.bindings as Record<string, BindingEntry>)[bindingKey] = {
+      const binding: BindingEntry = {
         operation: opKey,
         source: DEFAULT_SOURCE_NAME,
         ref,
       };
+      if (bindingSpec === BINDING_SPEC_V2 && routes.needsTransform) {
+        binding.inputTransform = routes.transformExpression();
+      }
+      (iface.bindings as Record<string, BindingEntry>)[bindingKey] = binding;
     }
   }
 
@@ -281,13 +288,14 @@ function buildInputSchemaForPlans(
   op: OpenAPIOperation,
   allParams: OpenAPIParameter[],
   requestPlans: BodyPlan[],
+  routes: AbstractInputRoutes,
 ): JSONSchema | undefined {
-  if (!op.requestBody) return buildInputSchema(op, allParams);
+  if (!op.requestBody) return buildInputSchema(op, allParams, undefined, routes);
   const variants = requestPlans
-    .map((plan) => buildInputSchema(op, allParams, plan))
+    .map((plan) => buildInputSchema(op, allParams, plan, routes))
     .filter((schema): schema is JSONSchema => schema !== undefined);
   if (!op.requestBody.required) {
-    const parameterOnly = buildInputSchema(op, allParams);
+    const parameterOnly = buildInputSchema(op, allParams, undefined, routes);
     if (parameterOnly) variants.unshift(parameterOnly);
   }
   // cycleSafeKey: the variants may carry object cycles from recursive
@@ -305,6 +313,7 @@ function buildInputSchema(
   op: OpenAPIOperation,
   allParams: OpenAPIParameter[],
   requestPlan?: BodyPlan,
+  routes: AbstractInputRoutes = planAbstractInputRoutes(allParams, requestPlan ? [requestPlan] : []),
 ): JSONSchema | undefined {
   const properties: Record<string, unknown> = {};
   const required: string[] = [];
@@ -315,8 +324,9 @@ function buildInputSchema(
   for (const param of allParams) {
     if (!param?.name) continue;
     const prop = paramToSchema(param);
-    if (prop) properties[param.name] = prop;
-    if (param.required) required.push(param.name);
+    const field = routes.parameterField(param.in ?? "", param.name);
+    if (prop) properties[field] = prop;
+    if (param.required) required.push(field);
   }
 
   if (op.requestBody && requestPlan) {
@@ -330,18 +340,19 @@ function buildInputSchema(
         // determination is declaration-only): the flattened contract
         // carries it under the synthetic `body` property, unwrapped at
         // the wire.
-        properties["body"] = bodySchema;
-        if (rb.required) required.push("body");
+        const field = routes.wholeBodyField || "body";
+        properties[field] = bodySchema;
+        if (rb.required) required.push(field);
       } else if (bodyProps && typeof bodyProps === "object") {
         for (const [k, v] of Object.entries(bodyProps)) {
           // Colliding candidates were removed before this plan was chosen.
-          properties[k] = v;
+          properties[routes.bodyField(k)] = v;
         }
         if (Array.isArray(bodySchema.required)) {
           // OAS contract: `required` members are strings. A malformed member
           // passes through unchanged (same as before typing) and surfaces in
           // downstream OBI validation rather than being silently dropped.
-          required.push(...(bodySchema.required as string[]));
+          required.push(...(bodySchema.required as string[]).map((name) => routes.bodyField(name)));
         }
       } else {
         // A free-form object body (type object, no named properties): the

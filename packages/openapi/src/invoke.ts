@@ -51,6 +51,15 @@ import {
   routeInput,
   unflattenableParam,
 } from "./params.js";
+import { BINDING_SPEC_V2 } from "./constants.js";
+import {
+  envelopeWillEmitBody,
+  flatInputHasAmbiguousParameter,
+  parseRoutedEnvelope,
+  routeEnvelope,
+  validateEnvelopeRoutes,
+  type RoutedEnvelope,
+} from "./input-routes-v2.js";
 import {
   acceptHeader,
   buildRequestBody,
@@ -135,15 +144,17 @@ export async function runBinding(
     return;
   }
 
-  // The flattened model's structural refusals (§9.1) are declaration-only:
-  // they precede input consumption.
+  const revision2 = args.source.bindingSpec === BINDING_SPEC_V2;
+  // Revision 2 lifts cross-location name collisions through its routed
+  // source value. Case-distinct declarations that HTTP itself treats as one
+  // header name remain unresolvable in both revisions.
   const params = effectiveParameters(pathItem, op);
-  const unflattenable = unflattenableParam(params);
+  const unflattenable = unflattenableParam(params, args.source.bindingSpec);
   if (unflattenable !== "") {
     inv.fireError(
       new InvocationError(
         ERR_SOURCE_CONFIG_ERROR,
-        `operation declares parameter "${unflattenable}" in two different locations: it cannot be represented by the flattened model (OAPI-P-03, unflattenable)`,
+        `operation declares parameter "${unflattenable}" without a distinct wire identity under ${args.source.bindingSpec} (OAPI-P-03, unflattenable/unresolvable)`,
       ),
     );
     return;
@@ -187,6 +198,8 @@ export async function runBinding(
   // claim at that boundary", not that the interaction carries zero values. A
   // caller with nothing to say says it by closing. -----
   let inputMap: Record<string, unknown>;
+  let envelope: RoutedEnvelope | null = null;
+  let inputSupplied = false;
   if (params.length === 0 && op.requestBody == null) {
     // No-input operation: close input on entry so the caller never has to,
     // and dispatch immediately.
@@ -207,14 +220,42 @@ export async function runBinding(
       }
       inputMap = {};
     } else {
-      inputMap = asInputRecord(first);
+      inputSupplied = true;
+      if (revision2) {
+        try {
+          envelope = parseRoutedEnvelope(first);
+        } catch (e: unknown) {
+          inv.fireError(new InvocationError(ERR_VALIDATION_FAILED, errorMessage(e)));
+          return;
+        }
+      }
+      if (envelope === null) {
+        if (first === null || typeof first !== "object" || Array.isArray(first)) {
+          inv.fireError(new InvocationError(ERR_VALIDATION_FAILED, "OpenAPI input value must be a JSON object"));
+          return;
+        }
+        inputMap = first as Record<string, unknown>;
+      } else {
+        inputMap = {};
+      }
     }
   }
 
   // ----- Routing (§9.1) and body construction (§9.2): still pre-dispatch. -----
 
+  if (revision2 && inputSupplied && envelope === null && flatInputHasAmbiguousParameter(params, inputMap)) {
+    inv.fireError(new InvocationError(
+      ERR_VALIDATION_FAILED,
+      "this revision-2 input supplies one flat field for independently declared same-named parameters and requires a routed source input (normally produced by the binding's inputTransform)",
+    ));
+    return;
+  }
+
   let plans: BodyPlan[] = [];
-  if (requestWillEmitBody(params, inputMap, op)) {
+  const willEmitBody = envelope
+    ? envelopeWillEmitBody(envelope, op)
+    : requestWillEmitBody(params, inputMap, op);
+  if (willEmitBody || envelope) {
     try {
       plans = requiredBodyPlans ?? planRequestBodies(op);
     } catch (e: unknown) {
@@ -222,6 +263,15 @@ export async function runBinding(
       return;
     }
   }
+  if (envelope) {
+    try {
+      validateEnvelopeRoutes(params, plans, envelope);
+    } catch (e: unknown) {
+      inv.fireError(new InvocationError(ERR_VALIDATION_FAILED, errorMessage(e)));
+      return;
+    }
+  }
+  if (!willEmitBody) plans = [];
 
   let routed: ReturnType<typeof routeInput> | undefined;
   let wire: ReturnType<typeof buildRequestBody> | undefined;
@@ -231,14 +281,16 @@ export async function runBinding(
     ? [null]
     : configuredRequestPlans(plans, args.context);
   for (const candidate of candidates) {
-    if (candidate && candidateCollides(params, candidate)) {
+    if (envelope === null && candidate && candidateCollides(params, candidate)) {
       reasons.push(
         `request media candidate ${candidate.mediaType} collides with an independently declared parameter`,
       );
       continue;
     }
     try {
-      const candidateRouted = routeInput(params, inputMap, path, candidate);
+      const candidateRouted = envelope
+        ? routeEnvelope(params, envelope, path, candidate)
+        : routeInput(params, inputMap, path, candidate);
       const candidateWire = buildRequestBody(doc, candidate, candidateRouted);
       routed = candidateRouted;
       wire = candidateWire;
@@ -1209,13 +1261,6 @@ export function credentialCollision(
 // ---------------------------------------------------------------------------
 // Response reading
 // ---------------------------------------------------------------------------
-
-function asInputRecord(input: unknown): Record<string, unknown> {
-  if (input == null) return {};
-  if (Array.isArray(input)) return {};
-  if (typeof input === "object") return input as Record<string, unknown>;
-  return {};
-}
 
 async function readResponseBytes(resp: Response, maxBytes: number): Promise<Uint8Array> {
   if (!resp.body) {

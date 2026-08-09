@@ -200,6 +200,9 @@ importers:
       '@types/node':
         specifier: ^22.0.0
         version: 22.19.17
+      jsonata:
+        specifier: 2.1.1
+        version: 2.1.1
 
   packages/operationgraph:
     devDependencies:

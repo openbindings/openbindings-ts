@@ -1,8 +1,9 @@
-import { createServer, type Server } from "node:http";
+import { createServer, type IncomingMessage, type Server } from "node:http";
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import jsonata from "jsonata";
 import {
   OperationInvoker,
   operationSignature,
@@ -86,7 +87,116 @@ describe("OpenAPI native-client differential", () => {
       }
     });
   }
+
+  it("preserves independent same-named path, query, and body values through revision 2", async () => {
+    interface Observation {
+      method: string;
+      pathId: string;
+      queryId: string;
+      body: unknown;
+    }
+    const observations: Observation[] = [];
+    const server = createServer(async (request, response) => {
+      const body = await requestJSON(request);
+      const url = new URL(request.url ?? "/", "http://openbindings.test");
+      observations.push({
+        method: request.method ?? "",
+        pathId: url.pathname.replace("/items/", ""),
+        queryId: url.searchParams.get("id") ?? "",
+        body,
+      });
+      response.setHeader("content-type", "application/json");
+      response.end('{"ok":true}');
+    });
+    const baseURL = await listen(server);
+
+    try {
+      const nativeResponse = await fetch(`${baseURL}/items/path-value?id=query-value`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ id: "body-value", name: "widget" }),
+      });
+      await nativeResponse.arrayBuffer();
+      const want = observations[0];
+
+      const content = {
+        openapi: "3.1.0",
+        info: { title: "collision", version: "1" },
+        servers: [{ url: baseURL }],
+        paths: {
+          "/items/{id}": {
+            post: {
+              operationId: "createItem",
+              parameters: [
+                { name: "id", in: "path", required: true, description: "resource identifier", schema: { type: "string" } },
+                { name: "id", in: "query", description: "request correlation identifier", schema: { type: "string" } },
+              ],
+              requestBody: {
+                required: true,
+                content: {
+                  "application/json": {
+                    schema: {
+                      type: "object",
+                      properties: {
+                        id: { type: "string", description: "body identifier" },
+                        name: { type: "string" },
+                      },
+                      required: ["id", "name"],
+                    },
+                  },
+                },
+              },
+              responses: {
+                "200": {
+                  description: "ok",
+                  content: {
+                    "application/json": {
+                      schema: { type: "object", properties: { ok: { type: "boolean" } } },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      };
+      const iface = await new OpenAPISynthesizer().synthesizeInterface({
+        sources: [{ bindingSpec: "openbindings.openapi@2", content }],
+      });
+      expect(iface.bindings?.["createItem.openapi"]?.inputTransform).toBeTypeOf("string");
+      expect(Object.keys(
+        (iface.operations.createItem?.input as { properties: Record<string, unknown> }).properties,
+      ).sort()).toEqual(["id", "id_2", "id_3", "name"]);
+
+      const invoker = new OperationInvoker([new OpenAPIInvoker()], {
+        transformEvaluator: {
+          evaluate: (expression, data) => jsonata(expression).evaluate(data),
+        },
+      });
+      const call = invoker.invoke(iface, operationSignature("createItem"));
+      await call.write({
+        id: "path-value",
+        id_2: "query-value",
+        id_3: "body-value",
+        name: "widget",
+      });
+      await call.close();
+      const outputs: unknown[] = [];
+      for await (const output of call.outputs) outputs.push(output);
+      expect(outputs).toEqual([{ ok: true }]);
+      expect(observations[1]).toEqual(want);
+    } finally {
+      await close(server);
+    }
+  });
 });
+
+async function requestJSON(request: IncomingMessage): Promise<unknown> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of request) chunks.push(Buffer.from(chunk));
+  if (chunks.length === 0) return undefined;
+  return JSON.parse(Buffer.concat(chunks).toString("utf8")) as unknown;
+}
 
 function artifactForServer(scenario: ProcessorScenario, baseURL: string): Record<string, unknown> {
   const content = structuredClone(scenario.given.source.content) as Record<string, unknown>;

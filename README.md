@@ -221,16 +221,25 @@ The SDK routes operations to binding invokers by exact, opaque `bindingSpec`
 identifier. Invokers declare the identifiers they implement, and the SDK uses
 exact equality—never semver range matching:
 
+`BindingInvoker` is the intended adapter boundary. General OBI processing and
+the protocol-independent invocation surface remain in the SDK; a binding
+package adds only the translation and behavior owned by its binding
+specification. Beneath that boundary, implementations should use separately
+testable, ordinary domain-native machinery where an independent source domain
+exists. Binding-defined domains such as Operation Graph may instead depend
+directly on OpenBindings concepts. See the binding-specification guide's
+[implementation-layering doctrine](https://github.com/openbindings/spec/blob/main/binding-specs/README.md#implementation-layering).
+
 ```typescript
 const invoker = new OperationInvoker([
-  new OpenAPIInvoker(),    // openbindings.openapi@1
+  new OpenAPIInvoker(),    // openbindings.openapi@2 (plus @1 compatibility)
   new AsyncAPIInvoker(),   // openbindings.asyncapi@1
 ]);
 ```
 
 | Package | Binding specification | Synthesizes OBIs? |
 |---------|--------------|-------------------|
-| `@openbindings/openapi` | `openbindings.openapi@1` | yes |
+| `@openbindings/openapi` | `openbindings.openapi@2` (`@1` compatibility) | yes |
 | `@openbindings/asyncapi` | `openbindings.asyncapi@1` | yes |
 | `@openbindings/mcp` | `openbindings.mcp@2` (latest), `openbindings.mcp@1` (compatibility) | yes |
 | `@openbindings/grpc` | `openbindings.grpc@1` | yes |

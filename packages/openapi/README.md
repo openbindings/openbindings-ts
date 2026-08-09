@@ -25,7 +25,7 @@ import { OpenAPIInvoker } from "@openbindings/openapi";
 const invoker = new OperationInvoker([new OpenAPIInvoker()]);
 ```
 
-The invoker declares the binding specification `openbindings.openapi@1` — it handles exactly OpenAPI 3.0.0–3.0.4 and 3.1.0–3.1.2 documents, discriminated by the artifact's own `openapi` field. This package implements the published [`openbindings.openapi@1`](https://github.com/openbindings/spec/blob/main/binding-specs/openapi/openbindings.openapi.md) binding specification; that document is normative for input mapping (the flattened model, OAS style/explode serialization), request media selection, server resolution, interaction shape, and channel assembly.
+The invoker declares current `openbindings.openapi@2` and immutable `openbindings.openapi@1` compatibility. Both handle exactly OpenAPI 3.0.0–3.0.4 and 3.1.0–3.1.2 documents, discriminated by the artifact's own `openapi` field. The current [`openbindings.openapi@2`](https://github.com/openbindings/spec/blob/main/binding-specs/openapi/openbindings.openapi.md) document is normative for routed input mapping, OAS serialization, request media selection, server resolution, interaction shape, and channel assembly.
 
 ### Invoke a binding
 
@@ -38,7 +38,7 @@ const invoker = new OpenAPIInvoker();
 
 const call = invoker.invokeBinding({
   source: {
-    bindingSpec: "openbindings.openapi@1",
+    bindingSpec: "openbindings.openapi@2",
     location: "https://api.example.com/openapi.json",
   },
   ref: "#/paths/~1users~1{id}/get",
@@ -99,7 +99,7 @@ const synth = new OpenAPISynthesizer();
 const iface = await synth.synthesizeInterface({
   sources: [
     {
-      bindingSpec: "openbindings.openapi@1",
+      bindingSpec: "openbindings.openapi@2",
       location: "https://api.example.com/openapi.json",
     },
   ],
@@ -177,14 +177,14 @@ A scheme outside this table is **surfaced, never dropped**: it emits a requireme
 
 ### Interface synthesis
 
-Deterministic generation of OBI documents is a synthesis concern outside the binding specification (`openbindings.openapi@1` §10); these are this package's conventions, chosen so both reference SDKs emit an identical OBI for the same artifact:
+Deterministic generation of OBI documents is a synthesis concern outside the binding specification (`openbindings.openapi@2` §10); these are this package's conventions, chosen so both reference SDKs emit an identical OBI for the same artifact:
 
 - **Operation keys** come from `operationId` when present, sanitized to the OBI key grammar (non-key characters become `_`, leading/trailing `_` trimmed, a leading non-letter gets an `_` prefix). An `operationId` whose sanitized key is already taken falls through to path+method derivation: template segments (`{id}`) dropped, remaining segments joined with `.`, the lowercased method appended (`/users/{id}` + `GET` → `users.get`), then deduplicated deterministically with `_2`, `_3`, … suffixes.
 - **Iteration order is fixed**: paths alphabetically, methods in the order get, put, post, delete, options, head, patch, trace.
-- **Input schemas** merge effective path-level and operation-level parameters from every supported location (path, query, header, cookie) with each realizable request-media candidate's own body surface. Distinct candidate surfaces are preserved with `anyOf`; parameter-only and non-JSON surfaces are closed against fields the invoker would refuse, while JSON object candidates remain open for the binding's declared passthrough rule.
+- **Input schemas** merge effective path-level and operation-level parameters from every supported location (path, query, header, cookie) with each realizable request-media candidate's own body surface. Distinct declarations keep their application names when unique; collisions receive deterministic neutral suffixes and a binding-private `inputTransform` carries the exact protocol route. Distinct candidate surfaces are preserved with `anyOf`; parameter-only and non-JSON surfaces are closed against fields the invoker would refuse, while JSON object candidates remain open for the binding's declared passthrough rule.
 - **Output schemas** conservatively union every value-bearing success lane that can govern a 2xx response: exact 2xx entries, `2XX`, and an unshadowed `default`. JSON declarations contribute their schemas, non-JSON/SSE declarations contribute strings, and a schema-less JSON lane leaves output unspecified rather than inventing a shape.
 - **Schema translation** targets JSON Schema 2020-12 (spec OBI-D-06), keyed on the artifact's declared `openapi` version: 3.0.x schemas are normalized out of the Draft-4 subset dialect; 3.1.x schemas pass through unchanged.
-- **Unrealizable targets fail synthesis**: cross-location parameter collisions and required bodies with no non-colliding, supported media candidate make the whole synthesis call fail. An optional body may be omitted with a warning only when the remaining no-body operation is still faithfully invocable.
+- **Unrealizable targets fail synthesis**: conditional/combinatorial body shapes without one declaration-defined route, case-colliding HTTP header declarations, and required bodies with no supported media candidate make the whole strict synthesis call fail. An optional body may be omitted with a warning only when the remaining no-body operation is still faithfully invocable.
 - **No security metadata is written to the OBI**; `securitySchemes` are honored at invocation time via context negotiation (`CONTEXT_REQUIRED` challenges and the `prepareBinding` preflight).
 
 ## License

@@ -21,6 +21,7 @@ import {
   codePointCompare,
 } from "./util.js";
 import { resolveServer } from "./servers.js";
+import { BINDING_SPEC, BINDING_SPEC_V2, LEGACY_BINDING_SPEC } from "./constants.js";
 
 /**
  * Inventories path operations, request-media alternatives, callbacks, and
@@ -39,8 +40,10 @@ export function openAPISynthesisCoverage(
   for (const binding of Object.values(iface.bindings ?? {})) {
     if (binding.ref) byRef.set(binding.ref, { operationKey: binding.operation, ref: binding.ref });
   }
-  const sourceLocation = Object.values(iface.sources ?? {})
-    .find((source) => source.bindingSpec === "openbindings.openapi@1")?.location ?? "";
+  const source = Object.values(iface.sources ?? {})
+    .find((candidate) => candidate.bindingSpec === BINDING_SPEC || candidate.bindingSpec === LEGACY_BINDING_SPEC);
+  const sourceLocation = source?.location ?? "";
+  const bindingSpec = source?.bindingSpec ?? BINDING_SPEC;
 
   const entries: SynthesisCoverageEntry[] = [];
   for (const [path, rawPathItem] of sortedEntries(doc.paths)) {
@@ -87,7 +90,7 @@ export function openAPISynthesisCoverage(
         bindingRef: identity.ref,
         requirements: serverRequirements(doc, pathItem, operation, sourceLocation),
       });
-      entries.push(...requestMediaCoverage(operation, pathItem, identity));
+      entries.push(...requestMediaCoverage(operation, pathItem, identity, bindingSpec));
       entries.push(...callbackCoverage(operation, ref));
     }
   }
@@ -113,6 +116,7 @@ function requestMediaCoverage(
   operation: OpenAPIOperation,
   pathItem: OpenAPIPathItem,
   identity: { operationKey: string; ref: string },
+  bindingSpec: string,
 ): SynthesisCoverageEntry[] {
   const content = operation.requestBody?.content;
   if (!content || Object.keys(content).length === 0) return [];
@@ -126,7 +130,9 @@ function requestMediaCoverage(
   }
   const planned = new Set(plans.map((plan) => plan.mediaKey));
   const represented = new Set(
-    plans.filter((plan) => !candidateCollides(params, plan)).map((plan) => plan.mediaKey),
+    plans
+      .filter((plan) => bindingSpec === BINDING_SPEC_V2 || !candidateCollides(params, plan))
+      .map((plan) => plan.mediaKey),
   );
   return Object.keys(content).sort(codePointCompare).map((mediaType): SynthesisCoverageEntry => {
     const sourceRef = `${identity.ref}/requestBody/content/${escapeJSONPointerToken(mediaType)}`;

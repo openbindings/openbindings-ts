@@ -137,9 +137,10 @@ function authSource(spec: Record<string, unknown>) {
 // ---------------------------------------------------------------------------
 
 describe("OpenAPIInvoker.bindingSpecs", () => {
-  it("advertises the exact binding-specification identifier", () => {
+  it("advertises both immutable binding-specification revisions", () => {
     expect(new OpenAPIInvoker().bindingSpecs()).toEqual([
-      { bindingSpec: "openbindings.openapi@1", description: "OpenAPI 3.x HTTP APIs" },
+      { bindingSpec: "openbindings.openapi@2", description: "OpenAPI 3.x HTTP APIs (collision-preserving revision)" },
+      { bindingSpec: "openbindings.openapi@1", description: "OpenAPI 3.x HTTP APIs (revision-1 compatibility)" },
     ]);
   });
 });
@@ -185,6 +186,53 @@ describe("invokeBinding — request construction", () => {
       name: "Ada",
       email: "ada@example.com",
     });
+  });
+
+  it("keeps an envelope-shaped object as application data when the artifact has no collision", async () => {
+    const spec = {
+      openapi: "3.1.0",
+      info: { title: "t", version: "1" },
+      servers: [{ url: "https://api.example.com" }],
+      paths: {
+        "/objects": {
+          post: {
+            requestBody: {
+              required: true,
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    properties: {
+                      $openbindings: { type: "string" },
+                      value: { type: "object" },
+                      parameters: { type: "array" },
+                      body: { type: "object" },
+                    },
+                  },
+                },
+              },
+            },
+            responses: { "200": { description: "ok", content: { "application/json": {} } } },
+          },
+        },
+      },
+    };
+    const input = {
+      $openbindings: "openbindings.openapi@2",
+      value: { application: true },
+      parameters: [],
+      body: { application: true },
+    };
+    const { fetch, requests } = mockFetch(() => jsonResponse({ ok: true }));
+    const call = new OpenAPIInvoker().invokeBinding({
+      source: { bindingSpec: "openbindings.openapi@2", content: spec },
+      ref: "#/paths/~1objects/post",
+      fetch,
+    });
+
+    await call.write(input);
+    await expect(single(call.outputs)).resolves.toEqual({ ok: true });
+    expect(JSON.parse(requests[0]?.body as string)).toEqual(input);
   });
 
   it("refuses a request-media candidate whose body property collides with a parameter", async () => {

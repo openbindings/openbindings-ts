@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { OpenAPISynthesizer } from "./invoker.js";
-import { BINDING_SPEC } from "./constants.js";
+import { LEGACY_BINDING_SPEC } from "./constants.js";
 
 // A document with one clean operation and two operations that are
 // unrepresentable under revision 1's flattened boundary: a required
@@ -46,7 +46,7 @@ const MIXED_DOC = {
 };
 
 function input() {
-  return { sources: [{ bindingSpec: BINDING_SPEC, content: MIXED_DOC }] };
+  return { sources: [{ bindingSpec: LEGACY_BINDING_SPEC, content: MIXED_DOC }] };
 }
 
 describe("per-operation tolerant coverage synthesis", () => {
@@ -90,7 +90,7 @@ describe("per-operation tolerant coverage synthesis", () => {
 
   it("source inspection filters unrepresentable targets instead of refusing the document", async () => {
     const synth = new OpenAPISynthesizer();
-    const inspection = await synth.inspectSource({ bindingSpec: BINDING_SPEC, content: MIXED_DOC });
+    const inspection = await synth.inspectSource({ bindingSpec: LEGACY_BINDING_SPEC, content: MIXED_DOC });
     expect(inspection.targets.map((t) => t.ref)).toEqual(["#/paths/~1good/get"]);
     expect(inspection.exhaustive).toBe(true);
   });
@@ -103,7 +103,7 @@ describe("per-operation tolerant coverage synthesis", () => {
       paths: { "/conditional": MIXED_DOC.paths["/conditional"] },
     };
     const result = await synth.synthesizeInterfaceWithCoverage({
-      sources: [{ bindingSpec: BINDING_SPEC, content: doc }],
+      sources: [{ bindingSpec: LEGACY_BINDING_SPEC, content: doc }],
     });
     expect(Object.keys(result.interface.operations)).toEqual([]);
     const targets = result.coverage.entries.filter((e) => e.scope === "target");

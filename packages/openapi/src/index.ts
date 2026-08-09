@@ -5,7 +5,7 @@ export type {
   OpenAPIHTTPResponseEvidence,
   OpenAPIFailureDeclaration,
 } from "./failure.js";
-export { BINDING_SPEC, DEFAULT_SOURCE_NAME } from "./constants.js";
+export { BINDING_SPEC, BINDING_SPEC_V2, LEGACY_BINDING_SPEC, DEFAULT_SOURCE_NAME } from "./constants.js";
 export type {
   OpenAPIDocument,
   OpenAPIPathItem,

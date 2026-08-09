@@ -1,6 +1,7 @@
 import type { OpenAPIParameter, OpenAPIPathItem, OpenAPIOperation } from "./types.js";
 import { mergeParameters } from "./util.js";
 import { isJSONMediaType, normalizeMediaType, type BodyPlan } from "./media.js";
+import { BINDING_SPEC_V2 } from "./constants.js";
 
 // This file implements the flattened input model of openbindings.openapi@1
 // §9.1 (OAPI-P-02, OAPI-P-03): the caller-facing input value is one JSON
@@ -39,13 +40,16 @@ export function effectiveParameters(
  * the flattened model): such an operation is refused loudly at binding
  * resolution (OAPI-P-03). Empty string means flattenable.
  */
-export function unflattenableParam(params: OpenAPIParameter[]): string {
+export function unflattenableParam(
+  params: OpenAPIParameter[],
+  bindingSpec: string = "openbindings.openapi@1",
+): string {
   const locs = new Map<string, string>();
   const headerSpellings = new Map<string, string>();
   for (const p of params) {
     if (!p?.name || !p?.in) continue;
     const prev = locs.get(p.name);
-    if (prev !== undefined && prev !== p.in) return p.name;
+    if (bindingSpec !== BINDING_SPEC_V2 && prev !== undefined && prev !== p.in) return p.name;
     locs.set(p.name, p.in);
     if (p.in === "header") {
       const folded = p.name.toLowerCase();

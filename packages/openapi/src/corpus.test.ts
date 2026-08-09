@@ -2,7 +2,7 @@
 // repository's binding-specs/openapi fixtures (OAPI-D-01..03) through this
 // package's own offline lanes — content load, location grammar, and ref
 // grammar/resolution — under the subcorpus README's verdict semantics:
-// valid:false means a conformant openbindings.openapi@1 processor refuses
+// valid:false means a conformant openbindings.openapi@2 processor refuses
 // the document's family-scoped material at or before bind time, decidable
 // offline with no network and no live source. Positive location-only
 // fixtures are judged by grammar alone (never dereferenced), so the run
@@ -18,7 +18,7 @@ import { existsSync, readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { BINDING_SPEC } from "./constants.js";
+import { BINDING_SPEC, LEGACY_BINDING_SPEC } from "./constants.js";
 import { loadOpenAPIDocument, parseRef, validateDocumentAddress, errorMessage } from "./util.js";
 
 const FAMILY = "openapi";
@@ -66,7 +66,7 @@ interface CorpusBinding {
  */
 async function judgeDocument(doc: CorpusDocument): Promise<string | undefined> {
   for (const [name, src] of Object.entries(doc.sources ?? {})) {
-    if (src.bindingSpec !== BINDING_SPEC) continue;
+    if (src.bindingSpec !== BINDING_SPEC && src.bindingSpec !== LEGACY_BINDING_SPEC) continue;
 
     // Content lane (OAPI-D-01): a present member — null included — must be
     // the parsed document object or its source text. External refs are

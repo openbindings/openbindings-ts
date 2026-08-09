@@ -22,7 +22,7 @@ import {
   type SourceInspector,
 } from "@openbindings/sdk";
 import type { OpenAPIDocument } from "./types.js";
-import { DEFAULT_SOURCE_NAME, BINDING_SPEC } from "./constants.js";
+import { DEFAULT_SOURCE_NAME, BINDING_SPEC, LEGACY_BINDING_SPEC } from "./constants.js";
 import { preflightTarget, requiredContext, runBinding } from "./invoke.js";
 import { convertToInterface, type UnrealizableTarget } from "./synthesize.js";
 import { openAPISynthesisCoverage } from "./coverage.js";
@@ -74,7 +74,10 @@ export class OpenAPIInvoker implements BindingInvoker {
 
   /** Returns the binding specifications this invoker supports, by exact identifier. */
   bindingSpecs(): BindingSpecInfo[] {
-    return [{ bindingSpec: BINDING_SPEC, description: "OpenAPI 3.x HTTP APIs" }];
+    return [
+      { bindingSpec: BINDING_SPEC, description: "OpenAPI 3.x HTTP APIs (collision-preserving revision)" },
+      { bindingSpec: LEGACY_BINDING_SPEC, description: "OpenAPI 3.x HTTP APIs (revision-1 compatibility)" },
+    ];
   }
 
   /**
@@ -165,7 +168,10 @@ export class OpenAPIInvoker implements BindingInvoker {
 export class OpenAPISynthesizer implements InterfaceSynthesizer, CoverageSynthesizer, SourceInspector {
   /** Returns the binding specifications this synthesizer supports, by exact identifier. */
   bindingSpecs(): BindingSpecInfo[] {
-    return [{ bindingSpec: BINDING_SPEC, description: "OpenAPI 3.x HTTP APIs" }];
+    return [
+      { bindingSpec: BINDING_SPEC, description: "OpenAPI 3.x HTTP APIs (collision-preserving revision)" },
+      { bindingSpec: LEGACY_BINDING_SPEC, description: "OpenAPI 3.x HTTP APIs (revision-1 compatibility)" },
+    ];
   }
 
   /** Converts an OpenAPI source into an OBInterface, applying optional name/version/description overrides. */
@@ -220,7 +226,9 @@ export class OpenAPISynthesizer implements InterfaceSynthesizer, CoverageSynthes
     if (sources.length > 1) {
       throw new MultipleSourcesError();
     }
-    if (src.bindingSpec !== BINDING_SPEC) throw new Error(`synthesizer supports exact binding specification ${JSON.stringify(BINDING_SPEC)}, got ${JSON.stringify(src.bindingSpec)}`);
+    if (src.bindingSpec !== BINDING_SPEC && src.bindingSpec !== LEGACY_BINDING_SPEC) {
+      throw new Error(`synthesizer supports exact binding specifications ${JSON.stringify(BINDING_SPEC)} and ${JSON.stringify(LEGACY_BINDING_SPEC)}, got ${JSON.stringify(src.bindingSpec)}`);
+    }
     if (src.outputLocation) validateDocumentAddress(src.outputLocation);
     const location = normalizeAuthoringLocation(src.location);
     const artifactContent = src.content === undefined && src.embed && location
@@ -236,6 +244,7 @@ export class OpenAPISynthesizer implements InterfaceSynthesizer, CoverageSynthes
         document = observed;
       },
       onUnrealizable,
+      src.bindingSpec,
     );
     // Content is authoritative and remains verbatim in the synthesized
     // source. A co-present location is its base/provenance, not permission
@@ -245,7 +254,7 @@ export class OpenAPISynthesizer implements InterfaceSynthesizer, CoverageSynthes
       if (entry) entry.content = artifactContent;
     }
     return {
-      iface: finalizeSynthesis(iface, input, DEFAULT_SOURCE_NAME, BINDING_SPEC),
+      iface: finalizeSynthesis(iface, input, DEFAULT_SOURCE_NAME, src.bindingSpec),
       document,
     };
   }
@@ -261,7 +270,15 @@ export class OpenAPISynthesizer implements InterfaceSynthesizer, CoverageSynthes
     // it is filtered per operation (tolerant mode), never a reason to refuse
     // inspecting the rest of the document.
     const location = normalizeAuthoringLocation(source.location);
-    const iface = await convertToInterface(location, source.content, options, undefined, undefined, () => {});
+    const iface = await convertToInterface(
+      location,
+      source.content,
+      options,
+      undefined,
+      undefined,
+      () => {},
+      source.bindingSpec || BINDING_SPEC,
+    );
     const targets: SourceInspection["targets"] = [];
     for (const binding of Object.values(iface.bindings ?? {})) {
       targets.push({

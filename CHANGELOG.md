@@ -4,6 +4,13 @@
 
 ### Changed
 
+- **`@openbindings/openapi` now defaults to `openbindings.openapi@2` and
+  preserves same-named application inputs.** Synthesis retains unique author
+  names, assigns deterministic neutral suffixes only for collisions, and uses
+  a binding-private core `inputTransform` for the exact OpenAPI route. The
+  operation schema remains protocol-blind. Immutable revision 1 remains
+  available as `LEGACY_BINDING_SPEC`.
+
 - **Per-operation dependencies compose compatibility, invocability, and
   caller policy without introducing a registry.** The core SDK now exposes
   `OperationRequirement`, `checkOperationCompatibility`,
