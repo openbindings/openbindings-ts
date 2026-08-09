@@ -79,6 +79,24 @@ describe("dereference — no caller-input mutation", () => {
     expect(result.a).toBe(result.b);
     expect(result.a).not.toBe((doc as { defs: { shared: unknown } }).defs.shared);
   });
+
+  it("memoizes the resolved value of ref aliases reached before their declaration", async () => {
+    const doc = {
+      useBeforeComponents: { $ref: "#/components/alias" },
+      useAgain: { $ref: "#/components/alias" },
+      components: {
+        alias: { $ref: "#/components/concrete" },
+        concrete: { type: "string", enum: ["a", "b"] },
+      },
+    };
+
+    const result = await dereference<Record<string, any>>(doc);
+
+    expect(result.useBeforeComponents).toEqual({ type: "string", enum: ["a", "b"] });
+    expect(result.useAgain).toBe(result.useBeforeComponents);
+    expect(result.components.alias).toBe(result.useBeforeComponents);
+    expect(JSON.stringify(result)).not.toContain("$ref");
+  });
 });
 
 describe("dereference — document-root ref", () => {

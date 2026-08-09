@@ -147,14 +147,19 @@ export async function dereference<T = unknown>(
     return resolved;
   }
 
-  const seen = new Set<unknown>();
+  // A node may be reached through several refs, including through an alias
+  // component whose own value is another ref. Remember the RESOLVED result,
+  // not merely that traversal started: a global seen-set can strand the
+  // original alias object as `{$ref: ...}` when its first traversal result
+  // was returned to a different parent.
+  const resolvedNodes = new Map<object, unknown>();
 
   async function walkAsync(node: unknown, currentBase?: string): Promise<unknown> {
     if (node == null || typeof node !== "object") return node;
-    if (seen.has(node)) return node;
-    seen.add(node);
+    if (resolvedNodes.has(node)) return resolvedNodes.get(node);
 
     if (Array.isArray(node)) {
+      resolvedNodes.set(node, node);
       for (let i = 0; i < node.length; i++) {
         node[i] = await walkAsync(node[i], currentBase);
       }
@@ -163,6 +168,10 @@ export async function dereference<T = unknown>(
 
     const obj = node as Record<string, unknown>;
     if (typeof obj.$ref === "string") {
+      // Reserve before following the edge so document-root and recursive
+      // refs terminate. The reservation is replaced with the actual result
+      // once the target (and any siblings) has resolved.
+      resolvedNodes.set(obj, obj);
       const [externalUrl, fragment] = splitRef(obj.$ref);
 
       let targetDoc: Record<string, unknown>;
@@ -194,12 +203,17 @@ export async function dereference<T = unknown>(
               });
             }
           }
-          return walkAsync(merged, resolvedBase);
+          const resolved = await walkAsync(merged, resolvedBase);
+          resolvedNodes.set(obj, resolved);
+          return resolved;
         }
-        return walkAsync(target, resolvedBase);
+        const resolved = await walkAsync(target, resolvedBase);
+        resolvedNodes.set(obj, resolved);
+        return resolved;
       }
     }
 
+    resolvedNodes.set(obj, obj);
     for (const key of Object.keys(obj)) {
       obj[key] = await walkAsync(obj[key], currentBase);
     }
