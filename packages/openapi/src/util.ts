@@ -294,16 +294,10 @@ function parseJSONOrYAML(text: string): unknown {
 }
 
 /**
- * THE §9.1 flatten-vs-synthetic determination, in one place for the two
- * sites that must never disagree: buildInputSchema (synthesize.ts), which
- * publishes the flattened contract, and planRequestBody (media.ts), which
- * routes the wire. A declared request-body schema participates in the
- * flattened model by property name iff it declares `properties` or an
- * explicit object type; ANY other schema — array, scalar, binary, and the
- * TYPELESS schema that declares neither — rides the synthetic `body`
- * property, unwrapped at the wire. The determination is declaration-only:
- * what the schema might admit at runtime never participates. Mirrors the
- * Go SDK's bodySchemaFlattens (formats/openapi/synthesize.go).
+ * The direct-node half of §9.1's declaration-only object determination.
+ * Callers recursively union `allOf` members around this predicate; a schema
+ * declaring neither properties nor object type is typeless/non-object at
+ * this node.
  */
 export function bodySchemaFlattens(schema: Record<string, unknown>): boolean {
   const props = schema["properties"];

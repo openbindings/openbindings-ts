@@ -189,6 +189,79 @@ describe("OpenAPI native-client differential", () => {
       await close(server);
     }
   });
+
+  it("projects allOf multipart properties without inventing a body part", async () => {
+    const content = {
+      openapi: "3.0.3",
+      info: { title: "multipart allOf", version: "1" },
+      servers: [{ url: "https://upload.example.test" }],
+      paths: {
+        "/upload": {
+          post: {
+            operationId: "uploadAllOf",
+            requestBody: {
+              required: true,
+              content: {
+                "multipart/form-data": {
+                  schema: {
+                    allOf: [
+                      {
+                        type: "object",
+                        properties: {
+                          transaction: { type: "string" },
+                          fileName: { type: "string" },
+                        },
+                        required: ["transaction", "fileName"],
+                      },
+                      {
+                        type: "object",
+                        properties: { file: { type: "string", format: "binary" } },
+                        required: ["file"],
+                      },
+                    ],
+                  },
+                },
+              },
+            },
+            responses: { "204": { description: "done" } },
+          },
+        },
+      },
+    };
+    const iface = await new OpenAPISynthesizer().synthesizeInterface({
+      sources: [{ bindingSpec: "openbindings.openapi@2", content }],
+    });
+    const input = iface.operations.uploadAllOf?.input as {
+      properties?: Record<string, unknown>;
+      required?: string[];
+    };
+    expect(Object.keys(input.properties ?? {}).sort()).toEqual(["file", "fileName", "transaction"]);
+    expect(input.properties).not.toHaveProperty("body");
+    expect(input.required?.sort()).toEqual(["file", "fileName", "transaction"]);
+
+    const observed: Record<string, FormDataEntryValue> = {};
+    const fetch = async (requestInput: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+      const request = new Request(requestInput, init);
+      expect(request.headers.get("content-type")).toMatch(/^multipart\/form-data; boundary=/);
+      const form = await request.formData();
+      form.forEach((value, name) => { observed[name] = value; });
+      return new Response(null, { status: 204 });
+    };
+    const call = new OperationInvoker([new OpenAPIInvoker()], { fetch }).invoke(
+      iface,
+      operationSignature("uploadAllOf"),
+    );
+    await call.write({ transaction: "tx-1", fileName: "a.bin", file: "AQID" });
+    await call.close();
+    const outputs: unknown[] = [];
+    for await (const output of call.outputs) outputs.push(output);
+    expect(outputs).toEqual([]);
+    expect(observed.transaction).toBe("tx-1");
+    expect(observed.fileName).toBe("a.bin");
+    expect(observed).not.toHaveProperty("body");
+    expect(observed.file).toBeInstanceOf(File);
+    expect(Array.from(new Uint8Array(await (observed.file as File).arrayBuffer()))).toEqual([1, 2, 3]);
+  });
 });
 
 async function requestJSON(request: IncomingMessage): Promise<unknown> {

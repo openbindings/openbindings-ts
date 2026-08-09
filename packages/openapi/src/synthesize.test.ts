@@ -457,8 +457,8 @@ describe("synthesis coverage", () => {
 // `body` property (openbindings.openapi@1 §9.1): the synthetic wrap is
 // reserved for NON-object body schemas, and wrapping would describe a field
 // the conformant invoker refuses as unmatched — breaking the
-// synthesize→invoke round trip. Mirrors the Go SDK's hasOpenBody /
-// isObjectTypedSchema (formats/openapi/synthesize.go).
+// synthesize→invoke round trip. Mirrors the Go SDK's resolved synthesis body
+// shape (formats/openapi/synthesize.go).
 describe("free-form object bodies", () => {
   function specWithBody(bodySchema: Record<string, unknown>) {
     return {
@@ -485,6 +485,12 @@ describe("free-form object bodies", () => {
     // No parameters and no named properties: the flattened surface is the
     // open object itself — never a synthetic `body` wrap, never absent.
     expect(iface.operations["makeThing"]?.input).toEqual({ type: "object" });
+
+    const declaredByEmptyProperties = await convertToInterface(
+      undefined,
+      specWithBody({ properties: {} }),
+    );
+    expect(declaredByEmptyProperties.operations["makeThing"]?.input).toEqual({ type: "object" });
   });
 
   it("still wraps a NON-object body schema under the synthetic body property", async () => {

@@ -21,7 +21,6 @@ import { effectiveParameters, unflattenableParam } from "./params.js";
 import { planAbstractInputRoutes, type AbstractInputRoutes } from "./input-routes-v2.js";
 import { translateSchemaDialect } from "./translate.js";
 import {
-  bodySchemaFlattens,
   buildJsonPointerRef,
   codePointCompare,
   componentSchemaNames,
@@ -333,8 +332,9 @@ function buildInputSchema(
     const rb = op.requestBody;
     const bodySchema = requestPlan.media?.schema ? { ...requestPlan.media.schema } : undefined;
     if (bodySchema) {
-      const bodyProps = bodySchema.properties as Record<string, unknown> | undefined;
-      if (!bodySchemaFlattens(bodySchema)) {
+      const bodyShape = resolvedSynthesisBodyShape(bodySchema, new Set());
+      const bodyProps = bodyShape.properties;
+      if (!bodyShape.object) {
         // A non-object body schema — array, scalar, binary, or TYPELESS
         // (neither `properties` nor an explicit object type; §9.1's
         // determination is declaration-only): the flattened contract
@@ -343,17 +343,12 @@ function buildInputSchema(
         const field = routes.wholeBodyField || "body";
         properties[field] = bodySchema;
         if (rb.required) required.push(field);
-      } else if (bodyProps && typeof bodyProps === "object") {
+      } else if (Object.keys(bodyProps).length > 0) {
         for (const [k, v] of Object.entries(bodyProps)) {
           // Colliding candidates were removed before this plan was chosen.
           properties[routes.bodyField(k)] = v;
         }
-        if (Array.isArray(bodySchema.required)) {
-          // OAS contract: `required` members are strings. A malformed member
-          // passes through unchanged (same as before typing) and surfaces in
-          // downstream OBI validation rather than being silently dropped.
-          required.push(...(bodySchema.required as string[]).map((name) => routes.bodyField(name)));
-        }
+        required.push(...[...bodyShape.required].map((name) => routes.bodyField(name)));
       } else {
         // A free-form object body (type object, no named properties): the
         // flattened model passes unmatched input fields through into the
@@ -381,6 +376,59 @@ function buildInputSchema(
     schema.required = [...required].sort(codePointCompare);
   }
   return schema;
+}
+
+interface SynthesisBodyShape {
+  object: boolean;
+  properties: Record<string, unknown>;
+  required: Set<string>;
+}
+
+/**
+ * Resolves the declaration-only object surface used by OAPI-P-03 synthesis.
+ * `allOf` contributes its recursive property and required-name union; wrapping
+ * the `allOf` node as a synthetic whole body would publish a contract that the
+ * invoker (correctly) routes as object properties.
+ */
+function resolvedSynthesisBodyShape(
+  schema: Record<string, unknown>,
+  seen: Set<Record<string, unknown>>,
+): SynthesisBodyShape {
+  if (seen.has(schema)) return { object: false, properties: {}, required: new Set() };
+  seen.add(schema);
+  try {
+    const properties: Record<string, unknown> = {};
+    const ownProperties = schema.properties;
+    const declaresProperties = ownProperties !== undefined && ownProperties !== null &&
+      typeof ownProperties === "object" && !Array.isArray(ownProperties);
+    if (declaresProperties) {
+      Object.assign(properties, ownProperties as Record<string, unknown>);
+    }
+    const required = new Set(
+      Array.isArray(schema.required)
+        ? schema.required.filter((name): name is string => typeof name === "string")
+        : [],
+    );
+    const type = schema.type;
+    let object = declaresProperties || type === "object" ||
+      (Array.isArray(type) && type.length === 1 && type[0] === "object");
+    if (Array.isArray(schema.allOf)) {
+      for (const member of schema.allOf) {
+        if (!member || typeof member !== "object" || Array.isArray(member)) continue;
+        const nested = resolvedSynthesisBodyShape(member as Record<string, unknown>, seen);
+        object ||= nested.object;
+        for (const [name, property] of Object.entries(nested.properties)) {
+          properties[name] = properties[name] === undefined
+            ? property
+            : { allOf: [properties[name], property] };
+        }
+        for (const name of nested.required) required.add(name);
+      }
+    }
+    return { object, properties, required };
+  } finally {
+    seen.delete(schema);
+  }
 }
 
 function paramToSchema(param: OpenAPIParameter): Record<string, unknown> | undefined {

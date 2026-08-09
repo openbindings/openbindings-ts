@@ -404,7 +404,7 @@ export function buildMultipartBody(
   const fd = new FormData();
   const is30 = isOpenAPI30(doc);
   const schema = mediaSchema(media);
-  const properties = (schema?.properties ?? {}) as Record<string, Record<string, unknown>>;
+  const properties = resolvedMultipartProperties(schema, new Set());
   const encoding = (media?.encoding ?? {}) as Record<string, Record<string, unknown>>;
 
   for (const name of Object.keys(fields).sort()) {
@@ -418,7 +418,7 @@ export function buildMultipartBody(
     if (propSchema && schemaTypeIs(propSchema, "array")) {
       const arr = asArray(value);
       if (arr) {
-        const items = asObject(propSchema.items);
+        const items = resolvedMultipartItems(propSchema);
         for (const elem of arr) {
           writeMultipartPart(fd, name, elem, items, enc, is30);
         }
@@ -434,7 +434,40 @@ function schemaTypeIs(schema: Record<string, unknown>, want: string): boolean {
   const ty = schema.type;
   if (typeof ty === "string") return ty === want;
   if (Array.isArray(ty)) return ty.includes(want);
-  return false;
+  return Array.isArray(schema.allOf) && schema.allOf.some(member => {
+    const nested = asObject(member);
+    return nested !== null && schemaTypeIs(nested, want);
+  });
+}
+
+function resolvedMultipartProperties(
+  schema: Record<string, unknown> | null,
+  seen: Set<Record<string, unknown>>,
+): Record<string, Record<string, unknown>> {
+  if (schema === null || seen.has(schema)) return {};
+  seen.add(schema);
+  try {
+    const result: Record<string, Record<string, unknown>> = {};
+    const own = asObject(schema.properties);
+    for (const [name, property] of Object.entries(own ?? {})) {
+      const value = asObject(property);
+      if (value !== null) result[name] = value;
+    }
+    if (Array.isArray(schema.allOf)) {
+      for (const member of schema.allOf) {
+        const nested = asObject(member);
+        if (nested === null) continue;
+        for (const [name, property] of Object.entries(resolvedMultipartProperties(nested, seen))) {
+          result[name] = result[name] === undefined
+            ? property
+            : { allOf: [result[name], property] };
+        }
+      }
+    }
+    return result;
+  } finally {
+    seen.delete(schema);
+  }
 }
 
 function writeMultipartPart(
@@ -452,7 +485,7 @@ function writeMultipartPart(
     // JSON) — the convenience counterpart of Go's []byte passthrough.
     const ct =
       encContentType ||
-      (typeof schema?.contentMediaType === "string" ? schema.contentMediaType : "") ||
+      declaredContentMediaType(schema) ||
       "application/octet-stream";
     if (value instanceof Blob) {
       fd.append(name, value.type ? value : new Blob([value], { type: ct }), name);
@@ -515,12 +548,29 @@ function isComplexPartValue(value: unknown, schema: Record<string, unknown> | nu
  */
 export function binarySignaled(schema: Record<string, unknown> | null, is30: boolean): boolean {
   if (!schema) return false;
-  if (is30) return schema.format === "binary";
-  if (!schemaTypeIs(schema, "string")) return false;
-  return (
-    (typeof schema.contentMediaType === "string" && schema.contentMediaType !== "") ||
-    (typeof schema.contentEncoding === "string" && schema.contentEncoding !== "")
+  const direct = is30
+    ? schema.format === "binary"
+    : schemaTypeIs(schema, "string") && (
+    declaredContentMediaType(schema) !== "" || declaredContentEncoding(schema, false) !== ""
   );
+  if (direct) return true;
+  return Array.isArray(schema.allOf) && schema.allOf.some(member => binarySignaled(asObject(member), is30));
+}
+
+function resolvedMultipartItems(schema: Record<string, unknown>): Record<string, unknown> | null {
+  const candidates: Record<string, unknown>[] = [];
+  const direct = asObject(schema.items);
+  if (direct !== null) candidates.push(direct);
+  if (Array.isArray(schema.allOf)) {
+    for (const member of schema.allOf) {
+      const nested = asObject(member);
+      if (nested === null) continue;
+      const items = resolvedMultipartItems(nested);
+      if (items !== null) candidates.push(items);
+    }
+  }
+  if (candidates.length === 0) return null;
+  return candidates.length === 1 ? candidates[0]! : { allOf: candidates };
 }
 
 /**
@@ -529,7 +579,25 @@ export function binarySignaled(schema: Record<string, unknown> | null, is30: boo
  */
 function declaredContentEncoding(schema: Record<string, unknown> | null, is30: boolean): string {
   if (is30) return "";
-  return typeof schema?.contentEncoding === "string" ? schema.contentEncoding : "";
+  if (typeof schema?.contentEncoding === "string") return schema.contentEncoding;
+  if (Array.isArray(schema?.allOf)) {
+    for (const member of schema.allOf) {
+      const encoding = declaredContentEncoding(asObject(member), false);
+      if (encoding) return encoding;
+    }
+  }
+  return "";
+}
+
+function declaredContentMediaType(schema: Record<string, unknown> | null): string {
+  if (typeof schema?.contentMediaType === "string") return schema.contentMediaType;
+  if (Array.isArray(schema?.allOf)) {
+    for (const member of schema.allOf) {
+      const mediaType = declaredContentMediaType(asObject(member));
+      if (mediaType) return mediaType;
+    }
+  }
+  return "";
 }
 
 /**
