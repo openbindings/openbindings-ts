@@ -35,11 +35,12 @@
   descriptions through an injectable artifact resolver.** External Path Item,
   parameter, request-body, response, security, and schema references retain
   their own document scope; JSON Schema `$id` resources and anchors are
-  indexed before traversal; redirects contribute their final retrieval URI;
-  retrieval is cached and abortable; and dangling references fail loudly
-  instead of producing a partially dereferenced contract. Resolver
-  configuration remains binding-private and does not alter the protocol-blind
-  OBI document model.
+  indexed before traversal; targets discovered after a shared external
+  resource was cached are prepared and reindexed in that resource's own scope;
+  redirects contribute their final retrieval URI; retrieval is cached and
+  abortable; and dangling references fail loudly instead of producing a
+  partially dereferenced contract. Resolver configuration remains
+  binding-private and does not alter the protocol-blind OBI document model.
 
 - **`@openbindings/openapi` now defaults to `openbindings.openapi@2` and
   preserves same-named application inputs.** Synthesis retains unique author

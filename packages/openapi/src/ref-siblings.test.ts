@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { validateInterface } from "@openbindings/sdk";
 import { convertToInterface } from "./synthesize.js";
 import { loadOpenAPIDocument } from "./util.js";
 
@@ -209,6 +210,50 @@ describe("OpenAPI edition-specific Schema Object $ref siblings", () => {
     });
   });
 
+  it("resolves a named anchor in an external schema resource without a root $schema", async () => {
+    const root = {
+      openapi: "3.1.2",
+      info: { title: "external anchor", version: "1" },
+      paths: {
+        "/value": {
+          get: {
+            operationId: "externalAnchor",
+            responses: {
+              "200": {
+                description: "ok",
+                content: {
+                  "application/json": {
+                    schema: { $ref: "./bundle.json#foo" },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    };
+    const bundle = {
+      $defs: {
+        Foo: { $anchor: "foo", type: "string", minLength: 1 },
+      },
+    };
+    const fetch: typeof globalThis.fetch = async input => String(input) === "https://description.example/bundle.json"
+      ? new Response(JSON.stringify(bundle), { status: 200 })
+      : new Response("missing", { status: 404 });
+
+    const iface = await convertToInterface(
+      "https://description.example/openapi.json",
+      root,
+      { fetch },
+    );
+    expect(iface.operations.externalAnchor?.output).toEqual({
+      $anchor: "foo",
+      type: "string",
+      minLength: 1,
+    });
+    expect(() => validateInterface(iface)).not.toThrow();
+  });
+
   it("normalizes external Parameter, RequestBody, and redirected Response targets by position", async () => {
     const root = {
       openapi: "3.1.2",
@@ -388,6 +433,189 @@ describe("OpenAPI edition-specific Schema Object $ref siblings", () => {
     });
     expect(requested).toContain("https://description.example/nested/base.json");
     expect(requested).not.toContain("https://description.example/base.json");
+  });
+
+  it("internalizes nested relative schema references from external OpenAPI 3.0 resources", async () => {
+    const root = {
+      openapi: "3.0.3",
+      info: { title: "nested external schemas", version: "1" },
+      paths: {
+        "/prime": { $ref: "./paths/prime.yaml#/paths/~1prime" },
+        "/value": { $ref: "./paths/value.yaml#/paths/~1value" },
+      },
+    };
+    const resources: Record<string, unknown> = {
+      "https://description.example/paths/prime.yaml": {
+        paths: {
+          "/prime": {
+            get: {
+              operationId: "primeExternal",
+              responses: {
+                "200": {
+                  description: "ok",
+                  content: {
+                    "application/json": {
+                      schema: { $ref: "../schemas/envelope.yaml#/Prime" },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      "https://description.example/paths/value.yaml": {
+        paths: {
+          "/value": {
+            get: {
+              operationId: "nestedExternal",
+              responses: {
+                "200": {
+                  description: "ok",
+                  content: {
+                    "application/json": {
+                      schema: { $ref: "../schemas/envelope.yaml#/Envelope" },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      "https://description.example/schemas/envelope.yaml": {
+        Prime: { type: "boolean" },
+        Envelope: {
+          type: "object",
+          properties: {
+            value: { $ref: "./value.yaml#/Value" },
+          },
+        },
+      },
+      "https://description.example/schemas/value.yaml": {
+        Value: { type: "string", minLength: 1 },
+      },
+    };
+    const fetch: typeof globalThis.fetch = async input => {
+      const resource = resources[String(input)];
+      return resource === undefined
+        ? new Response("missing", { status: 404 })
+        : new Response(JSON.stringify(resource), { status: 200 });
+    };
+
+    const iface = await convertToInterface(
+      "https://description.example/openapi.yaml",
+      root,
+      { fetch },
+    );
+    expect(iface.operations.primeExternal?.output).toEqual({ type: "boolean" });
+    expect(iface.operations.nestedExternal?.output).toEqual({
+      type: "object",
+      properties: {
+        value: { type: "string", minLength: 1 },
+      },
+    });
+    expect(() => validateInterface(iface)).not.toThrow();
+  });
+
+  it("resolves same-fragment schema references within an external OpenAPI resource", async () => {
+    const root = {
+      openapi: "3.0.3",
+      info: { title: "external path resource", version: "1" },
+      paths: {
+        "/prime": { $ref: "./paths/prime.yaml#/paths/~1prime" },
+        "/events": { $ref: "./paths/events.yaml#/paths/~1events" },
+      },
+    };
+    const prime = {
+      paths: {
+        "/prime": {
+          get: {
+            operationId: "primeComponents",
+            responses: {
+              "200": {
+                description: "ok",
+                content: {
+                  "application/json": {
+                    schema: { $ref: "../schemas/common.yaml#/components/schemas/Prime" },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    };
+    const events = {
+      paths: {
+        "/events": {
+          get: {
+            operationId: "externalEvents",
+            responses: {
+              "200": {
+                description: "ok",
+                content: {
+                  "application/json": {
+                    schema: { $ref: "../schemas/common.yaml#/components/schemas/EventList" },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    };
+    const common = {
+      components: {
+        schemas: {
+          Prime: { type: "boolean" },
+          EventList: {
+            type: "array",
+            items: { $ref: "#/components/schemas/Event" },
+          },
+          Event: {
+            $id: "https://schemas.example/Event",
+            type: "object",
+            $defs: {
+              EventID: { $anchor: "eventID", type: "string", minLength: 1 },
+            },
+            properties: { id: { $ref: "#eventID" } },
+          },
+        },
+      },
+    };
+    const resources: Record<string, unknown> = {
+      "https://description.example/paths/prime.yaml": prime,
+      "https://description.example/paths/events.yaml": events,
+      "https://description.example/schemas/common.yaml": common,
+    };
+    const fetch: typeof globalThis.fetch = async input => {
+      const resource = resources[String(input)];
+      return resource === undefined
+        ? new Response("missing", { status: 404 })
+        : new Response(JSON.stringify(resource), { status: 200 });
+    };
+
+    const iface = await convertToInterface(
+      "https://description.example/openapi.yaml",
+      root,
+      { fetch },
+    );
+    expect(iface.operations.primeComponents?.output).toEqual({ type: "boolean" });
+    expect(iface.operations.externalEvents?.output).toEqual({
+      type: "array",
+      items: {
+        $id: "https://schemas.example/Event",
+        type: "object",
+        $defs: {
+          EventID: { $anchor: "eventID", type: "string", minLength: 1 },
+        },
+        properties: {
+          id: { $anchor: "eventID", type: "string", minLength: 1 },
+        },
+      },
+    });
+    expect(() => validateInterface(iface)).not.toThrow();
   });
 
   it("does not dereference data-shaped $ref or schema keys in examples and extensions", async () => {

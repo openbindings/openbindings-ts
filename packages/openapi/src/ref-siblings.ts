@@ -56,6 +56,13 @@ interface RefTarget {
   kind: ReferencedKind;
 }
 
+interface NormalizationState {
+  semantics: RefSemantics | null;
+  protectedRefKey: string;
+  referenceMarkerKey: string;
+  referenceMarkerToken: string;
+}
+
 let protectedRefSequence = 0;
 
 /**
@@ -79,6 +86,12 @@ export class OpenAPIRefSiblingNormalizer {
   private readonly targets = new Map<string, Map<string, RefTarget>>();
   private readonly protectedRefs = new Map<string, Set<string>>();
   private readonly referenceMarkers = new Map<string, Set<string>>();
+  private readonly statesByProtectedToken = new Map<string, NormalizationState>();
+  private readonly statesByResourceRoot = new WeakMap<object, ReadonlySet<NormalizationState>>();
+  private readonly preparedTargetsByResourceRoot = new WeakMap<
+    object,
+    Map<NormalizationState, Set<string>>
+  >();
 
   constructor(
     private readonly fallbackOpenAPIVersion: string,
@@ -160,37 +173,58 @@ export class OpenAPIRefSiblingNormalizer {
       targetSemantics = this.unsupportedDialectSemantics(document.$schema);
     }
 
-    // A target can reveal another same-resource target. Iterate to closure so
-    // a fetched Parameter -> local Schema -> nested Schema ref chain receives
-    // the same position-aware treatment as a complete OpenAPI document.
-    const processed = new Set<string>();
-    for (;;) {
-      let progress = false;
-      for (const target of this.targetsFor([resourceUrl, ...aliases])) {
-        const id = `${target.kind}\0${target.fragment}`;
-        if (processed.has(id)) continue;
-        processed.add(id);
-        progress = true;
-        const node = target.kind === "schema"
-          ? schemaNormalizationRoot(document, target.fragment)
-          : fragmentTarget(document, target.fragment);
-        if (node !== undefined) {
-          normalizeTarget(
-            node,
-            target.kind,
-            targetSemantics,
-            protectedRefKey,
-            referenceMarkerKey,
-            referenceMarkerToken,
-            this,
-            resourceUrl,
-          );
-        }
-      }
-      if (!progress) break;
-    }
+    const state: NormalizationState = {
+      semantics: targetSemantics,
+      protectedRefKey,
+      referenceMarkerKey,
+      referenceMarkerToken,
+    };
+    this.statesByProtectedToken.set(protectedRefToken, state);
+    this.normalizeTargets(document, [resourceUrl, ...aliases], resourceUrl, state);
 
     return document;
+  }
+
+  /**
+   * Applies target hints discovered after a resource was first fetched.
+   *
+   * External resources are cached by the generic dereferencer, while their
+   * OpenAPI position can be learned incrementally through other external
+   * documents. The protected token embedded by {@link normalize} identifies
+   * this resource's position-aware normalization state even after the fetch
+   * response has been serialized and parsed by the transport-neutral loader.
+   */
+  prepareTarget(value: Record<string, unknown>, resourceUrl?: string): boolean {
+    let states = this.statesByResourceRoot.get(value);
+    if (!states) {
+      states = normalizationStates(
+        value,
+        this.statesByProtectedToken,
+        new WeakSet(),
+      );
+      this.statesByResourceRoot.set(value, states);
+    }
+    let preparedByState = this.preparedTargetsByResourceRoot.get(value);
+    if (!preparedByState) {
+      preparedByState = new Map();
+      this.preparedTargetsByResourceRoot.set(value, preparedByState);
+    }
+    let prepared = false;
+    for (const state of states) {
+      let processed = preparedByState.get(state);
+      if (!processed) {
+        processed = new Set();
+        preparedByState.set(state, processed);
+      }
+      prepared = this.normalizeTargets(
+        value,
+        [resourceUrl],
+        resourceUrl,
+        state,
+        processed,
+      ) || prepared;
+    }
+    return prepared;
   }
 
   mergeReferenceObject(
@@ -262,6 +296,101 @@ export class OpenAPIRefSiblingNormalizer {
     }
     return [...targets.values()];
   }
+
+  private normalizeTargets(
+    document: Record<string, unknown>,
+    resourceUrls: readonly (string | undefined)[],
+    baseUrl: string | undefined,
+    state: NormalizationState,
+    processed: Set<string> = new Set(),
+  ): boolean {
+    // A target can reveal another same-resource target. Iterate to closure so
+    // a fetched Parameter -> local Schema -> nested Schema ref chain receives
+    // the same position-aware treatment as a complete OpenAPI document.
+    let prepared = false;
+    for (;;) {
+      let progress = false;
+      for (const target of this.targetsFor(resourceUrls)) {
+        const id = `${target.kind}\0${target.fragment}`;
+        if (processed.has(id)) continue;
+        let node = target.kind === "schema"
+          ? schemaNormalizationRoot(document, target.fragment)
+          : fragmentTarget(document, target.fragment);
+
+        // A plain-name schema fragment identifies an anchor in a schema
+        // resource. A standalone external schema is allowed to omit a root
+        // `$schema`; in that case its anchors are still protected when the
+        // first target lookup runs. The schema-kind edge supplies the missing
+        // resource identity, so expose only the root schema vocabulary walk
+        // (data-valued keywords remain protected), then retry the anchor.
+        if (node === undefined && target.kind === "schema"
+          && state.semantics === "compose" && isPlainNameFragment(target.fragment)) {
+          normalizeSchema(
+            document,
+            state.semantics,
+            state.protectedRefKey,
+            new WeakSet(),
+            this,
+            baseUrl,
+          );
+          node = schemaNormalizationRoot(document, target.fragment);
+        }
+        // Do not consume an undiscoverable target. Another external edge can
+        // reveal the resource identity needed to locate it on a later pass.
+        if (node === undefined) continue;
+
+        processed.add(id);
+        prepared = true;
+        progress = true;
+        normalizeTarget(
+          node,
+          target.kind,
+          state.semantics,
+          state.protectedRefKey,
+          state.referenceMarkerKey,
+          state.referenceMarkerToken,
+          this,
+          baseUrl,
+        );
+      }
+      if (!progress) break;
+    }
+    return prepared;
+  }
+}
+
+function isPlainNameFragment(encodedFragment: string): boolean {
+  try {
+    const fragment = decodeURIComponent(encodedFragment);
+    return fragment !== "" && !fragment.startsWith("/");
+  } catch {
+    return false;
+  }
+}
+
+function normalizationStates(
+  node: unknown,
+  statesByToken: ReadonlyMap<string, NormalizationState>,
+  seen: WeakSet<object>,
+): Set<NormalizationState> {
+  const states = new Set<NormalizationState>();
+  const walk = (value: unknown): void => {
+    if (!value || typeof value !== "object" || seen.has(value)) return;
+    seen.add(value);
+    if (Array.isArray(value)) {
+      for (const item of value) walk(item);
+      return;
+    }
+    for (const child of Object.values(value as Record<string, unknown>)) {
+      if (isProtectedSchemaFields(child)) {
+        const state = statesByToken.get(child.token);
+        if (state) states.add(state);
+      }
+      walk(child);
+    }
+  };
+  walk(node);
+  return states;
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {

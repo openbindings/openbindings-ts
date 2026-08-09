@@ -32,6 +32,17 @@ export interface DereferenceOptions {
     reference: Record<string, unknown>,
   ) => Record<string, unknown> | undefined;
   /**
+   * Optional format-adapter hook invoked immediately before a reference
+   * fragment is resolved against a resource. It may expose reference
+   * semantics at a target whose format-defined position was discovered only
+   * after that external resource had already been fetched and cached.
+   * Generic dereferencing remains unchanged when omitted.
+   */
+  prepareRefTarget?: (
+    root: Record<string, unknown>,
+    target: { resourceURI?: string; fragment: string },
+  ) => boolean | void;
+  /**
    * Preserve a `$ref` object when its fragment does not resolve instead of
    * rejecting the complete document. Strict rejection remains the default.
    * This is intended for processors that inventory and exclude invalid
@@ -155,6 +166,7 @@ export async function dereference<T = unknown>(
   const signal = options?.signal;
   const allowUnresolved = options?.allowUnresolved ?? false;
   const mergeRefSiblings = options?.mergeRefSiblings;
+  const prepareRefTarget = options?.prepareRefTarget;
 
   // The single working tree. Internal refs resolve against THIS clone, never
   // the caller's `doc`: resolving against the original both mutates the
@@ -167,36 +179,28 @@ export async function dereference<T = unknown>(
   // an earlier reference denotes. The maps also keep fragment-only references
   // inside an external document scoped to THAT document, not the entrypoint.
   const scopeByNode = new WeakMap<object, ResourceScope>();
+  const parentScopeByNode = new WeakMap<object, ResourceScope>();
+  const aliasesByDocumentRoot = new WeakMap<object, readonly string[]>();
   const resourcesByURI = new Map<string, ResourceScope>();
 
-  function registerDocument(
-    root: Record<string, unknown>,
-    retrievalURI?: string,
-    requestedURI?: string,
-  ): DocumentContext {
-    const rootScope: ResourceScope = {
-      root,
-      baseURI: retrievalURI ? withoutFragment(retrievalURI) : undefined,
-      anchors: new Map(),
-    };
-    if (rootScope.baseURI) resourcesByURI.set(rootScope.baseURI, rootScope);
-    if (requestedURI) resourcesByURI.set(withoutFragment(requestedURI), rootScope);
-
+  function indexResourceSubtree(node: unknown, inherited: ResourceScope): void {
     const seen = new WeakSet<object>();
-    const index = (node: unknown, inherited: ResourceScope): void => {
-      if (node === null || typeof node !== "object" || seen.has(node)) return;
-      seen.add(node);
+    const index = (value: unknown, parent: ResourceScope): void => {
+      if (value === null || typeof value !== "object" || seen.has(value)) return;
+      seen.add(value);
 
-      if (Array.isArray(node)) {
-        scopeByNode.set(node, inherited);
-        for (const value of node) index(value, inherited);
+      if (Array.isArray(value)) {
+        parentScopeByNode.set(value, parent);
+        scopeByNode.set(value, parent);
+        for (const child of value) index(child, parent);
         return;
       }
 
-      const object = node as Record<string, unknown>;
-      let scope = inherited;
+      const object = value as Record<string, unknown>;
+      parentScopeByNode.set(object, parent);
+      let scope = parent;
       if (typeof object.$id === "string") {
-        const resolvedID = resolveURI(inherited.baseURI, object.$id);
+        const resolvedID = resolveURI(parent.baseURI, object.$id);
         scope = {
           root: object,
           baseURI: resolvedID ? withoutFragment(resolvedID) : undefined,
@@ -211,10 +215,30 @@ export async function dereference<T = unknown>(
       if (typeof object.$dynamicAnchor === "string") {
         scope.anchors.set(object.$dynamicAnchor, object);
       }
-      for (const value of Object.values(object)) index(value, scope);
+      for (const child of Object.values(object)) index(child, scope);
     };
-    index(root, rootScope);
-    return { root, rootScope: scopeByNode.get(root) ?? rootScope };
+    index(node, inherited);
+  }
+
+  function registerDocument(
+    root: Record<string, unknown>,
+    retrievalURI?: string,
+    requestedURI?: string,
+  ): DocumentContext {
+    const rootScope: ResourceScope = {
+      root,
+      baseURI: retrievalURI ? withoutFragment(retrievalURI) : undefined,
+      anchors: new Map(),
+    };
+    const aliases = [...new Set([
+      retrievalURI && withoutFragment(retrievalURI),
+      requestedURI && withoutFragment(requestedURI),
+    ].filter((uri): uri is string => typeof uri === "string"))];
+    aliasesByDocumentRoot.set(root, aliases);
+    indexResourceSubtree(root, rootScope);
+    const effectiveRootScope = scopeByNode.get(root) ?? rootScope;
+    for (const alias of aliases) resourcesByURI.set(alias, effectiveRootScope);
+    return { root, rootScope: effectiveRootScope };
   }
 
   const entryContext = registerDocument(cloned, baseUrl);
@@ -253,6 +277,40 @@ export async function dereference<T = unknown>(
   // was returned to a different parent.
   const resolvedNodes = new Map<object, unknown>();
 
+  function invalidateResolvedSubtree(node: unknown, preserve: object): void {
+    const seen = new WeakSet<object>();
+    const walk = (value: unknown): void => {
+      if (value === null || typeof value !== "object" || value === preserve || seen.has(value)) {
+        return;
+      }
+      seen.add(value);
+      resolvedNodes.delete(value);
+      for (const child of Object.values(value)) walk(child);
+    };
+    walk(node);
+  }
+
+  function reindexPreparedResource(
+    root: Record<string, unknown>,
+    inherited: ResourceScope,
+    owner: object,
+  ): ResourceScope {
+    // Target preparation can expose `$id`, `$anchor`, or `$dynamicAnchor`
+    // fields that were deliberately hidden during the resource's initial
+    // format-neutral index. Re-index before traversal so nested refs inherit
+    // their newly visible resource base and anchor table.
+    indexResourceSubtree(root, parentScopeByNode.get(root) ?? inherited);
+    const effectiveRootScope = scopeByNode.get(root) ?? inherited;
+    for (const alias of aliasesByDocumentRoot.get(root) ?? []) {
+      resourcesByURI.set(alias, effectiveRootScope);
+    }
+    // A single preparation pass can expose a closure of same-resource
+    // targets, not only the fragment currently being resolved. Invalidate
+    // the complete resource so each newly exposed edge is revisited.
+    invalidateResolvedSubtree(root, owner);
+    return effectiveRootScope;
+  }
+
   function resolveFragment(scope: ResourceScope, fragment: string): unknown {
     if (fragment === "" || fragment === "#") return scope.root;
     let decoded: string;
@@ -270,8 +328,16 @@ export async function dereference<T = unknown>(
     owner: Record<string, unknown>,
     document: DocumentContext,
   ): Promise<unknown> {
-    const scope = scopeByNode.get(owner) ?? document.rootScope;
-    if (ref.startsWith("#")) return resolveFragment(scope, ref);
+    let scope = scopeByNode.get(owner) ?? document.rootScope;
+    if (ref.startsWith("#")) {
+      const prepared = prepareRefTarget?.(scope.root, {
+        resourceURI: scope.baseURI,
+        fragment: ref,
+      });
+      if (prepared) scope = reindexPreparedResource(scope.root, scope, owner);
+      const target = resolveFragment(scope, ref);
+      return target;
+    }
 
     const absolute = resolveURI(scope.baseURI, ref);
     if (!absolute) {
@@ -288,7 +354,10 @@ export async function dereference<T = unknown>(
       const external = await resolveExternal(resourceURI);
       resource = resourcesByURI.get(resourceURI) ?? external.rootScope;
     }
-    return resolveFragment(resource, fragment);
+    const prepared = prepareRefTarget?.(resource.root, { resourceURI, fragment });
+    if (prepared) resource = reindexPreparedResource(resource.root, resource, owner);
+    const target = resolveFragment(resource, fragment);
+    return target;
   }
 
   async function walkAsync(node: unknown, document: DocumentContext): Promise<unknown> {

@@ -201,6 +201,7 @@ export async function loadOpenAPIDocument(
     signal: options?.signal,
     fetch: refFetch,
     mergeRefSiblings: (target, reference) => normalizer.mergeReferenceObject(target, reference),
+    prepareRefTarget: (root, target) => normalizer.prepareTarget(root, target.resourceURI),
   });
   normalizer.restore(dereferenced);
   return dereferenced;

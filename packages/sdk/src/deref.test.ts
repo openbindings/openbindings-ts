@@ -214,6 +214,141 @@ describe("dereference — RFC 6901 pointer evaluation", () => {
 });
 
 describe("dereference — multi-document resource scope", () => {
+  it("revisits a cached target subtree after a format adapter prepares late reference semantics", async () => {
+    const external = {
+      prime: { type: "boolean" },
+      late: {
+        hiddenID: "https://schemas.example/late",
+        type: "object",
+        $defs: {
+          value: { hiddenAnchor: "value", type: "string", minLength: 1 },
+        },
+        properties: {
+          value: { hiddenRef: "#value" },
+        },
+      },
+    };
+    const fetch: typeof globalThis.fetch = async input => String(input) === "https://example.test/shared.json"
+      ? new Response(JSON.stringify(external), { status: 200 })
+      : new Response("missing", { status: 404 });
+    let prepared = false;
+
+    const result = await dereference<Record<string, any>>(
+      {
+        prime: { $ref: "./shared.json#/prime" },
+        late: { $ref: "./shared.json#/late" },
+      },
+      {
+        baseUrl: "https://example.test/openapi.json",
+        fetch,
+        prepareRefTarget: (root, target) => {
+          if (target.fragment !== "#/late" || prepared) return false;
+          prepared = true;
+          const late = root.late as Record<string, any>;
+          late.$id = late.hiddenID;
+          delete late.hiddenID;
+          const definition = late.$defs.value as Record<string, unknown>;
+          definition.$anchor = definition.hiddenAnchor;
+          delete definition.hiddenAnchor;
+          const value = late.properties.value as Record<string, unknown>;
+          value.$ref = value.hiddenRef;
+          delete value.hiddenRef;
+          return true;
+        },
+      },
+    );
+
+    expect(result.prime).toEqual({ type: "boolean" });
+    expect(result.late).toEqual({
+      $id: "https://schemas.example/late",
+      type: "object",
+      $defs: {
+        value: { $anchor: "value", type: "string", minLength: 1 },
+      },
+      properties: {
+        value: { $anchor: "value", type: "string", minLength: 1 },
+      },
+    });
+  });
+
+  it("remaps requested and retrieval aliases when preparation exposes a root $id and child anchor", async () => {
+    const external = {
+      hiddenID: "https://schemas.example/effective-bundle",
+      prime: { type: "boolean" },
+      $defs: {
+        value: { hiddenAnchor: "foo", type: "string", minLength: 1 },
+      },
+    };
+    const fetch: typeof globalThis.fetch = async input => {
+      if (String(input) !== "https://example.test/bundle.json") {
+        return new Response("missing", { status: 404 });
+      }
+      const response = new Response(JSON.stringify(external), { status: 200 });
+      Object.defineProperty(response, "url", {
+        value: "https://cdn.example.test/contracts/bundle.json",
+      });
+      return response;
+    };
+    let prepared = false;
+
+    const result = await dereference<Record<string, any>>(
+      {
+        prime: { $ref: "./bundle.json#/prime" },
+        anchored: { $ref: "./bundle.json#foo" },
+      },
+      {
+        baseUrl: "https://example.test/openapi.json",
+        fetch,
+        prepareRefTarget: (root, target) => {
+          if (target.fragment !== "#/prime" || prepared) return false;
+          prepared = true;
+          root.$id = root.hiddenID;
+          delete root.hiddenID;
+          const value = (root.$defs as Record<string, any>).value as Record<string, unknown>;
+          value.$anchor = value.hiddenAnchor;
+          delete value.hiddenAnchor;
+          return true;
+        },
+      },
+    );
+
+    expect(result.prime).toEqual({ type: "boolean" });
+    expect(result.anchored).toEqual({
+      $anchor: "foo",
+      type: "string",
+      minLength: 1,
+    });
+  });
+
+  it("maps retrieval aliases to the effective root $id scope during initial indexing", async () => {
+    const external = {
+      $id: "https://schemas.example/effective-bundle",
+      $defs: {
+        value: { $anchor: "foo", type: "string" },
+      },
+    };
+    const fetch: typeof globalThis.fetch = async input => {
+      if (String(input) !== "https://example.test/bundle.json") {
+        return new Response("missing", { status: 404 });
+      }
+      const response = new Response(JSON.stringify(external), { status: 200 });
+      Object.defineProperty(response, "url", {
+        value: "https://cdn.example.test/contracts/bundle.json",
+      });
+      return response;
+    };
+
+    const result = await dereference<Record<string, any>>(
+      { anchored: { $ref: "./bundle.json#foo" } },
+      { baseUrl: "https://example.test/openapi.json", fetch },
+    );
+
+    expect(result.anchored).toEqual({
+      $anchor: "foo",
+      type: "string",
+    });
+  });
+
   it("resolves fragment-only refs inside an external document against that external document", async () => {
     const documents: Record<string, unknown> = {
       "https://example.test/parts/operation.json": {
