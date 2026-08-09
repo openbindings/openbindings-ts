@@ -6,7 +6,6 @@ import {
   classifyThroughHooks,
   decodeThroughHooks,
   contextBearerToken,
-  contextApiKey,
   contextApiKeyFor,
   contextBasicAuth,
   contextString,
@@ -41,7 +40,6 @@ import type {
   OpenAPIParameter,
   OpenAPISecurityScheme,
   OpenAPIOAuthFlow,
-  OpenAPIOAuthFlows,
 } from "./types.js";
 import { errorMessage, parseRef } from "./util.js";
 import {
@@ -149,6 +147,16 @@ export async function runBinding(
   // source value. Case-distinct declarations that HTTP itself treats as one
   // header name remain unresolvable in both revisions.
   const params = effectiveParameters(pathItem, op);
+  const ownershipConflict = parameterOwnershipConflict(params);
+  if (ownershipConflict !== "") {
+    inv.fireError(new InvocationError(ERR_SOURCE_CONFIG_ERROR, ownershipConflict));
+    return;
+  }
+  const securityConfigurationFailure = securityConfigurationError(doc, op);
+  if (securityConfigurationFailure !== "") {
+    inv.fireError(new InvocationError(ERR_SOURCE_CONFIG_ERROR, securityConfigurationFailure));
+    return;
+  }
   const unflattenable = unflattenableParam(params, args.source.bindingSpec);
   if (unflattenable !== "") {
     inv.fireError(
@@ -170,7 +178,13 @@ export async function runBinding(
   // CONTEXT_REQUIRED is raised before any input is consumed and before any
   // network I/O, so a no-input-consumed retry (after the operation layer
   // resolves context) is safe.
-  const details = requiredContext(doc, op, args.context, baseURL);
+  const securityConflict = securityAlternativesCollision(doc, op, baseURL, params);
+  if (securityConflict !== "") {
+    inv.fireError(new InvocationError(ERR_VALIDATION_FAILED, securityConflict));
+    return;
+  }
+
+  const details = requiredContext(doc, op, args.context, baseURL, params);
   if (details) {
     inv.fireError(
       contextRequiredError("OpenAPI operation requires authentication context", details),
@@ -316,10 +330,15 @@ export async function runBinding(
 
   // ----- Channel assembly (§9.6, OAPI-P-10). -----
 
-  const placements = credentialPlacements(doc, op, args.context);
+  const placements = credentialPlacements(doc, op, args.context, baseURL, params);
   const collision = credentialCollision(placements, params, routed.populated);
   if (collision !== "") {
     inv.fireError(new InvocationError(ERR_VALIDATION_FAILED, collision));
+    return;
+  }
+  const contextCollision = contextChannelCollision(args.context, params, placements);
+  if (contextCollision !== "") {
+    inv.fireError(new InvocationError(ERR_VALIDATION_FAILED, contextCollision));
     return;
   }
 
@@ -890,30 +909,81 @@ function bytesToBase64(bytes: Uint8Array): string {
  * CONTEXT_REQUIRED details when the context is insufficient, or null when
  * no auth is required or the context satisfies one alternative.
  *
- * Each OpenAPI security-requirement object (an AND of schemes) becomes one
- * alternative; the array of requirement objects is the OR.
+ * Each OpenAPI Security Requirement Object remains one authored AND-set;
+ * OAuth flow choices expand that set into equivalent runtime alternatives.
+ * The document array remains the outer OR.
  */
 export function requiredContext(
   doc: OpenAPIDocument,
   op: OpenAPIOperation,
   ctx: Record<string, unknown> | undefined,
   baseURL: string,
+  params: OpenAPIParameter[] = [],
 ): ContextRequiredDetails | null {
-  const alternatives = securityAlternatives(doc, op, baseURL);
-  if (!alternatives) return null;
+  const plans = viableSecurityPlans(doc, op, baseURL, params);
+  if (!plans) return null;
+  // An empty Security Requirement Object is an anonymous alternative. The
+  // binding-invoker context shape intentionally has no empty alternatives,
+  // so consume it here rather than emitting a malformed challenge.
+  if (plans.some((plan) => plan.context.requirements.length === 0)) return null;
   const details: ContextRequiredDetails = {
     target: baseURL,
-    alternatives,
+    alternatives: plans.map((plan) => plan.context),
   };
   if (ctx && contextSatisfies(ctx, details)) return null;
   return details;
 }
 
-function securityAlternatives(
+interface SecurityPlan {
+  context: ContextAlternative;
+  schemes: NamedSecurityScheme[];
+}
+
+/**
+ * A Security Requirement Object can only be interpreted when every named
+ * scheme resolves through components.securitySchemes. An unresolved name is
+ * invalid source configuration, never an anonymous alternative: treating it
+ * as absent would weaken the API author's security declaration.
+ */
+function securityConfigurationError(
+  doc: OpenAPIDocument,
+  op: OpenAPIOperation,
+): string {
+  const opSec = op.security as Array<Record<string, unknown>> | undefined;
+  const docSec = (doc as Record<string, unknown>)["security"] as
+    | Array<Record<string, unknown>>
+    | undefined;
+  const requirements = opSec ?? docSec;
+  if (!requirements?.length) return "";
+
+  const components = (doc as Record<string, unknown>)["components"] as
+    | Record<string, unknown>
+    | undefined;
+  const securitySchemes = components?.["securitySchemes"] as
+    | Record<string, OpenAPISecurityScheme>
+    | undefined;
+  const missing = new Set<string>();
+  for (const requirement of requirements) {
+    for (const name of Object.keys(requirement)) {
+      if (!securitySchemes?.[name]) missing.add(name);
+    }
+  }
+  if (missing.size === 0) return "";
+  return `OpenAPI security requirement references undefined security scheme${missing.size === 1 ? "" : "s"}: ${[...missing].sort().join(", ")}`;
+}
+
+/**
+ * Expands the artifact's OR-of-AND Security Requirement Objects without
+ * flattening them. An OAuth scheme can contribute more than one usable flow,
+ * so one authored AND-set expands to the Cartesian product of its schemes'
+ * context alternatives. Every expanded plan still represents exactly one
+ * complete artifact-declared Security Requirement Object.
+ */
+function securityPlans(
   doc: OpenAPIDocument,
   op: OpenAPIOperation,
   baseURL: string,
-): ContextAlternative[] | null {
+): SecurityPlan[] | null {
   const opSec = op.security as Array<Record<string, unknown>> | undefined;
   const docSec = (doc as Record<string, unknown>)["security"] as
     | Array<Record<string, unknown>>
@@ -930,40 +1000,78 @@ function securityAlternatives(
     | Record<string, OpenAPISecurityScheme>
     | undefined;
 
-  const alternatives: ContextAlternative[] = [];
+  const alternatives: SecurityPlan[] = [];
   for (const req of requirements) {
     const names = Object.keys(req);
-    // An empty security-requirement object means unauthenticated access is
-    // allowed: the OR is trivially satisfiable, so no context is required.
-    if (names.length === 0) return null;
+    if (names.length === 0) {
+      alternatives.push({ context: { requirements: [] }, schemes: [] });
+      continue;
+    }
 
-    const reqs: ContextRequirement[] = [];
+    let expanded: SecurityPlan[] = [{ context: { requirements: [] }, schemes: [] }];
     let expressible = true;
     for (const name of names.sort()) {
       const scheme = securitySchemes?.[name];
       if (!scheme) {
-        // The security requirement names a scheme that components.securitySchemes
-        // never declares: an unresolvable reference, not checkable, not
-        // enforced — never degraded into a weaker requirement. This is
-        // distinct from a resolved scheme with an unrecognized type (R2.c
-        // ruling), which schemeRequirement always surfaces below.
+        // Invocation validates this as source configuration before reaching
+        // plan construction. Retain a defensive skip for direct helper calls;
+        // it must never become a dispatch path.
         expressible = false;
         break;
       }
-      reqs.push(schemeRequirement(scheme, baseURL, name));
+      const scopes = Array.isArray(req[name])
+        ? req[name].filter((scope): scope is string => typeof scope === "string")
+        : [];
+      const options = schemeRequirements(scheme, baseURL, name, scopes);
+      expanded = expanded.flatMap((plan) =>
+        options.map((requirement) => ({
+          context: { requirements: [...plan.context.requirements, requirement] },
+          schemes: [...plan.schemes, { scheme, name }],
+        })),
+      );
     }
-    // A requirement set containing an unresolvable scheme reference cannot
-    // be expressed through context negotiation at all; skip the whole
-    // alternative (it is an AND). A scheme that resolves but maps to no
+    // The invocation path already refused an undefined scheme name as source
+    // configuration. A scheme that resolves but maps to no
     // known family is NOT skipped — schemeRequirement surfaces it as a typed
     // "auth.<T>" requirement instead (R2.c ruling), so the alternative stays
     // discoverable even though the built-in satisfaction check can never
     // select it (contextSatisfies treats an unrecognized type as
     // unsatisfiable).
-    if (!expressible || reqs.length === 0) continue;
-    alternatives.push({ requirements: reqs });
+    if (!expressible || expanded.length === 0) continue;
+    alternatives.push(...expanded);
   }
   return alternatives.length > 0 ? alternatives : null;
+}
+
+function viableSecurityPlans(
+  doc: OpenAPIDocument,
+  op: OpenAPIOperation,
+  baseURL: string,
+  params: OpenAPIParameter[],
+): SecurityPlan[] | null {
+  const plans = securityPlans(doc, op, baseURL);
+  if (!plans) return null;
+  const populated = { header: new Set<string>(), query: new Set<string>(), cookie: new Set<string>() };
+  const viable = plans.filter(
+    (plan) => credentialCollision(credentialDestinations(plan), params, populated) === "",
+  );
+  return viable.length > 0 ? viable : null;
+}
+
+/** Reports a collision only when every declared security alternative is unusable. */
+function securityAlternativesCollision(
+  doc: OpenAPIDocument,
+  op: OpenAPIOperation,
+  baseURL: string,
+  params: OpenAPIParameter[],
+): string {
+  const plans = securityPlans(doc, op, baseURL);
+  if (!plans) return "";
+  const populated = { header: new Set<string>(), query: new Set<string>(), cookie: new Set<string>() };
+  const collisions = plans.map((plan) =>
+    credentialCollision(credentialDestinations(plan), params, populated),
+  );
+  return collisions.every((collision) => collision !== "") ? collisions[0] ?? "" : "";
 }
 
 /**
@@ -979,19 +1087,28 @@ function securityAlternatives(
  * this way now produces a pre-dispatch CONTEXT_REQUIRED challenge instead of
  * dispatching unauthenticated into a blind 401.
  */
-function schemeRequirement(
+function schemeRequirements(
   scheme: OpenAPISecurityScheme,
   baseURL: string,
   name: string,
-): ContextRequirement {
-  const req = mapScheme(scheme, baseURL);
-  req.name = name;
-  if (scheme.description) req.description = scheme.description;
-  return req;
+  requiredScopes: string[],
+): ContextRequirement[] {
+  const requirements = scheme.type === "oauth2"
+    ? oauth2Requirements(scheme, baseURL, requiredScopes)
+    : [mapScheme(scheme, baseURL, requiredScopes)];
+  return requirements.map((requirement) => ({
+    ...requirement,
+    name,
+    ...(scheme.description ? { description: scheme.description } : {}),
+  }));
 }
 
-/** The type-specific mapping schemeRequirement wraps with name/description. */
-function mapScheme(scheme: OpenAPISecurityScheme, baseURL: string): ContextRequirement {
+/** The type-specific mapping `schemeRequirements` wraps with name/description. */
+function mapScheme(
+  scheme: OpenAPISecurityScheme,
+  baseURL: string,
+  requiredScopes: string[],
+): ContextRequirement {
   switch (scheme.type) {
     case "http": {
       const httpScheme = (scheme.scheme ?? "").toLowerCase();
@@ -1003,8 +1120,6 @@ function mapScheme(scheme: OpenAPISecurityScheme, baseURL: string): ContextRequi
     }
     case "apiKey":
       return { type: "auth.apiKey" };
-    case "oauth2":
-      return oauth2Requirement(scheme, baseURL);
     case "openIdConnect": {
       // OpenID Connect resolves to an OAuth2 access token. The discovery URL
       // lets a resolver fetch the authorize/token endpoints. No flows are
@@ -1013,6 +1128,7 @@ function mapScheme(scheme: OpenAPISecurityScheme, baseURL: string): ContextRequi
       if (scheme.openIdConnectUrl) {
         req.openIdConnectUrl = absolutize(scheme.openIdConnectUrl, baseURL);
       }
+      req.scopes = [...requiredScopes];
       return req;
     }
     default:
@@ -1023,52 +1139,52 @@ function mapScheme(scheme: OpenAPISecurityScheme, baseURL: string): ContextRequi
 }
 
 /**
- * Builds an `auth.oauth2` requirement carrying the flow's authorize/token URLs
- * and scopes under the role's convention field names (`authorizeUrl`,
- * `tokenUrl`, `scopes`), plus `grantType` naming the OAuth2 grant type of the
- * SELECTED flow (rule B). Prefers the authorization-code flow — the only
- * interactive, PKCE-capable flow — then implicit, then password, then
- * clientCredentials: a fixed priority (mirroring the Go SDK's
- * oauth2Requirement exactly), not object/declaration order, so the same
- * scheme resolves to the same flow regardless of how it was authored. The
- * token-only fallback keys on `tokenUrl` (not `authorizationUrl`) so
- * password and clientCredentials — which define only `tokenUrl` — are
- * selected; keying on `authorizationUrl` skipped them, yielding a bare
- * `auth.oauth2` requirement with no `tokenUrl`/`scopes`. Relative URLs are
- * resolved against the server base. No flow means no grantType: a bare
- * `auth.oauth2` requirement (e.g. an openIdConnect-derived one) never
- * fabricates a grant type it did not select.
+ * Builds one `auth.oauth2` requirement per usable declared flow. `scopes`
+ * carries the scopes required by the Security Requirement Object—not every
+ * scope the flow happens to advertise. Canonical ordering is deterministic
+ * only; it does not collapse the artifact's flow alternatives into a policy
+ * preference. A malformed/empty flow set remains discoverable as a bare
+ * OAuth requirement so an already-acquired access token can still satisfy it.
  */
-function oauth2Requirement(
+function oauth2Requirements(
   scheme: OpenAPISecurityScheme,
   baseURL: string,
-): ContextRequirement {
-  const req: ContextRequirement = { type: "auth.oauth2" };
+  requiredScopes: string[],
+): ContextRequirement[] {
   const flows = scheme.flows;
-  const tokenOnlyFlow = [flows?.password, flows?.clientCredentials].find(
-    (f): f is OpenAPIOAuthFlow => !!f && typeof f.tokenUrl === "string",
-  );
-  const flow = flows?.authorizationCode ?? flows?.implicit ?? tokenOnlyFlow;
-  if (flow?.authorizationUrl) req.authorizeUrl = absolutize(flow.authorizationUrl, baseURL);
-  if (flow?.tokenUrl) req.tokenUrl = absolutize(flow.tokenUrl, baseURL);
-  if (flow?.scopes && Object.keys(flow.scopes).length > 0) {
-    req.scopes = Object.keys(flow.scopes);
+  const candidates: Array<[string, OpenAPIOAuthFlow | undefined]> = [
+    ["authorization_code", flows?.authorizationCode],
+    ["implicit", flows?.implicit],
+    ["password", flows?.password],
+    ["client_credentials", flows?.clientCredentials],
+  ];
+  const requirements: ContextRequirement[] = [];
+  for (const [grantType, flow] of candidates) {
+    if (!flow || !oauthFlowUsable(grantType, flow, requiredScopes)) continue;
+    const req: ContextRequirement = {
+      type: "auth.oauth2",
+      scopes: [...requiredScopes],
+      grantType,
+    };
+    if (flow.authorizationUrl) req.authorizeUrl = absolutize(flow.authorizationUrl, baseURL);
+    if (flow.tokenUrl) req.tokenUrl = absolutize(flow.tokenUrl, baseURL);
+    requirements.push(req);
   }
-  if (flow) req.grantType = grantTypeFor(flows, flow);
-  return req;
+  return requirements.length > 0
+    ? requirements
+    : [{ type: "auth.oauth2", scopes: [...requiredScopes] }];
 }
 
-/**
- * Names the OAuth2 grant type for the flow `oauth2Requirement` selected, per
- * the SAME fixed priority (authorizationCode > implicit > password >
- * clientCredentials). Identity comparison against the flows object recovers
- * which flow was picked without re-deriving the priority a second time.
- */
-function grantTypeFor(flows: OpenAPIOAuthFlows | undefined, flow: OpenAPIOAuthFlow): string {
-  if (flow === flows?.authorizationCode) return "authorization_code";
-  if (flow === flows?.implicit) return "implicit";
-  if (flow === flows?.password) return "password";
-  return "client_credentials";
+function oauthFlowUsable(
+  grantType: string,
+  flow: OpenAPIOAuthFlow,
+  requiredScopes: string[],
+): boolean {
+  if (grantType === "authorization_code" && (!flow.authorizationUrl || !flow.tokenUrl)) return false;
+  if (grantType === "implicit" && !flow.authorizationUrl) return false;
+  if ((grantType === "password" || grantType === "client_credentials") && !flow.tokenUrl) return false;
+  const available = flow.scopes ?? {};
+  return requiredScopes.every((scope) => Object.hasOwn(available, scope));
 }
 
 /** Resolves a possibly-relative URL against the server base; passes absolute URLs through. */
@@ -1102,67 +1218,40 @@ interface NamedSecurityScheme {
 }
 
 /**
- * The security schemes applicable to an operation, each paired with its
- * securitySchemes key. Operation-level security overrides top-level; falls
- * back to top-level if not set. Scheme names within each requirement
- * iterate sorted so placement order is deterministic.
- */
-function resolveSecuritySchemes(
-  doc: OpenAPIDocument,
-  op: OpenAPIOperation,
-): NamedSecurityScheme[] {
-  const opSec = op.security as Array<Record<string, unknown>> | undefined;
-  const docSec = (doc as Record<string, unknown>)["security"] as Array<Record<string, unknown>> | undefined;
-  const requirements = opSec ?? docSec;
-  if (!requirements?.length) return [];
-
-  const components = (doc as Record<string, unknown>)["components"] as Record<string, unknown> | undefined;
-  const securitySchemes = components?.["securitySchemes"] as Record<string, OpenAPISecurityScheme> | undefined;
-  if (!securitySchemes) return [];
-
-  const result: NamedSecurityScheme[] = [];
-  const seen = new Set<string>();
-
-  for (const req of requirements) {
-    for (const schemeName of Object.keys(req).sort()) {
-      if (seen.has(schemeName)) continue;
-      seen.add(schemeName);
-      const scheme = securitySchemes[schemeName];
-      if (scheme) result.push({ scheme, name: schemeName });
-    }
-  }
-
-  return result;
-}
-
-/**
  * Derives the credential wire applications for an operation from the
  * artifact's security declarations (read at invocation time, never
  * extracted into the OBI) and the supplied context (OAPI-P-09): an apiKey
  * scheme's credential rides its declared in/name; http basic and bearer,
- * oauth2, and openIdConnect ride the Authorization header. When the
- * document declares no security schemes, well-known context credentials
- * fall back to the Authorization header. Placements are computed BEFORE
- * dispatch so the OAPI-P-10 collision refusal can run pre-dispatch;
- * duplicate channel+name placements collapse to the first.
+ * oauth2, and openIdConnect ride the Authorization header. Exactly one
+ * complete, satisfiable, channel-safe Security Requirement alternative is
+ * selected; credentials from separate OR alternatives are never unioned.
+ * Duplicate destinations are deliberately retained so OAPI-P-10 can refuse
+ * two ANDed schemes instead of silently deduplicating them.
  */
 export function credentialPlacements(
   doc: OpenAPIDocument,
   op: OpenAPIOperation,
   ctx: Record<string, unknown> | undefined,
+  baseURL: string,
+  params: OpenAPIParameter[],
 ): CredentialPlacement[] {
-  if (!ctx || Object.keys(ctx).length === 0) return [];
+  const plans = viableSecurityPlans(doc, op, baseURL, params);
+  if (!plans) return [];
+  const plan = plans.find((candidate) =>
+    candidate.context.requirements.length === 0
+      || (!!ctx && contextSatisfies(ctx, { target: baseURL, alternatives: [candidate.context] })),
+  );
+  if (!plan || plan.context.requirements.length === 0 || !ctx) return [];
+  return credentialValues(plan, ctx);
+}
 
+function credentialValues(plan: SecurityPlan, ctx: Record<string, unknown>): CredentialPlacement[] {
   const placements: CredentialPlacement[] = [];
-  const seen = new Set<string>();
   const add = (channel: CredentialPlacement["channel"], name: string, value: string): void => {
-    const key = channel + "\0" + (channel === "header" ? name.toLowerCase() : name);
-    if (seen.has(key)) return;
-    seen.add(key);
     placements.push({ channel, name, value });
   };
 
-  for (const { scheme, name: schemeName } of resolveSecuritySchemes(doc, op)) {
+  for (const { scheme, name: schemeName } of plan.schemes) {
     switch (scheme.type) {
       case "apiKey": {
         // The requirement's addressable name (the securitySchemes key)
@@ -1199,23 +1288,83 @@ export function credentialPlacements(
       }
     }
   }
+  return placements;
+}
 
-  if (placements.length === 0) {
-    // No scheme applied a credential (typically no securitySchemes
-    // declared): well-known context credentials fall back to the
-    // Authorization header.
-    const token = contextBearerToken(ctx);
-    const basic = contextBasicAuth(ctx);
-    const apiKey = contextApiKey(ctx);
-    if (token) {
-      add("header", "Authorization", `Bearer ${token}`);
-    } else if (basic) {
-      add("header", "Authorization", `Basic ${btoa(`${basic.username}:${basic.password}`)}`);
-    } else if (apiKey) {
-      add("header", "Authorization", `ApiKey ${apiKey}`);
+/** Wire destinations for collision analysis before credential values exist. */
+function credentialDestinations(plan: SecurityPlan): CredentialPlacement[] {
+  const placements: CredentialPlacement[] = [];
+  for (const { scheme } of plan.schemes) {
+    if (
+      scheme.type === "apiKey"
+      && scheme.name
+      && (scheme.in === "header" || scheme.in === "query" || scheme.in === "cookie")
+    ) {
+      placements.push({ channel: scheme.in, name: scheme.name, value: "" });
+      continue;
+    }
+    if (scheme.type === "oauth2" || scheme.type === "openIdConnect") {
+      placements.push({ channel: "header", name: "Authorization", value: "" });
+      continue;
+    }
+    if (
+      scheme.type === "http"
+      && ["basic", "bearer"].includes((scheme.scheme ?? "").toLowerCase())
+    ) {
+      placements.push({ channel: "header", name: "Authorization", value: "" });
     }
   }
   return placements;
+}
+
+/**
+ * Artifact-only OAPI-P-10 ownership checks that make an operation
+ * unresolvable regardless of caller input or credential selection.
+ */
+export function parameterOwnershipConflict(params: OpenAPIParameter[]): string {
+  const headers = params
+    .filter((parameter) => parameter.in === "header" && !!parameter.name)
+    .map((parameter) => parameter.name!.toLowerCase());
+  for (const name of headers) {
+    if (name === "host" || name === "content-length") {
+      return `effective header parameter "${name}" collides with a processor-owned request field (OAPI-P-10)`;
+    }
+  }
+  if (headers.includes("cookie") && params.some((parameter) => parameter.in === "cookie")) {
+    return "effective raw Cookie header parameter collides with structured cookie parameters (OAPI-P-10)";
+  }
+  return "";
+}
+
+/**
+ * Context transport hints are a separate request source. A raw Cookie hint
+ * is admissible only when no artifact or context source contributes a
+ * structured cookie and no declared raw Cookie parameter owns the header.
+ */
+function contextChannelCollision(
+  ctx: Record<string, unknown> | undefined,
+  params: OpenAPIParameter[],
+  placements: CredentialPlacement[],
+): string {
+  const rawCookieHints = Object.keys(contextHeaders(ctx)).filter(
+    (name) => name.toLowerCase() === "cookie",
+  );
+  const hasRawCookieOwner = params.some(
+    (parameter) => parameter.in === "header" && parameter.name?.toLowerCase() === "cookie",
+  ) || placements.some(
+    (placement) => placement.channel === "header" && placement.name.toLowerCase() === "cookie",
+  );
+  const hasStructuredCookie = params.some((parameter) => parameter.in === "cookie")
+    || placements.some((placement) => placement.channel === "cookie")
+    || Object.keys(contextCookies(ctx)).length > 0;
+
+  if (rawCookieHints.length > 0 && (hasRawCookieOwner || hasStructuredCookie)) {
+    return "raw Cookie context header collides with another raw or structured cookie source (OAPI-P-10: refused before dispatch, never a silent overwrite)";
+  }
+  if (hasRawCookieOwner && Object.keys(contextCookies(ctx)).length > 0) {
+    return "raw Cookie header source collides with structured context cookies (OAPI-P-10: refused before dispatch, never a silent overwrite)";
+  }
+  return "";
 }
 
 /**
@@ -1242,11 +1391,22 @@ export function credentialCollision(
     else if (parameter.in === "cookie") declared.cookie.add(parameter.name);
   }
   const processorOwned = new Set(["host", "content-length", "content-type", "accept"]);
+  const hasRawCookieOwner = declared.header.has("cookie") || placements.some(
+    (placement) => placement.channel === "header" && placement.name.toLowerCase() === "cookie",
+  );
+  const hasStructuredCookieOwner = declared.cookie.size > 0
+    || placements.some((placement) => placement.channel === "cookie");
+  if (hasRawCookieOwner && hasStructuredCookieOwner) {
+    return "raw Cookie header source collides with structured cookie assembly (OAPI-P-10)";
+  }
   const seen = new Set<string>();
   for (const pl of placements) {
     const name = pl.channel === "header" ? pl.name.toLowerCase() : pl.name;
     if (pl.channel === "header" && processorOwned.has(name)) {
       return `credential "${pl.name}" collides with processor-owned request field ${pl.name} (OAPI-P-10)`;
+    }
+    if (pl.channel === "cookie" && declared.header.has("cookie")) {
+      return `cookie credential "${pl.name}" collides with an effective raw Cookie header parameter (OAPI-P-10)`;
     }
     if (declared[pl.channel].has(name) || populated[pl.channel].has(name)) {
       return `credential "${pl.name}" collides with an effective ${pl.channel} parameter of the same name (OAPI-P-10: refused before dispatch, never a silent overwrite in either direction)`;
@@ -1312,7 +1472,7 @@ export function preflightTarget(
   ref: string,
   ctx: Record<string, unknown> | undefined,
   sourceLocation: string | undefined,
-): { op: OpenAPIOperation; baseURL: string } | null {
+): { op: OpenAPIOperation; params: OpenAPIParameter[]; baseURL: string } | null {
   let path: string, method: string;
   try {
     ({ path, method } = parseRef(ref));
@@ -1323,7 +1483,10 @@ export function preflightTarget(
   const op = pathItem?.[method] as OpenAPIOperation | undefined;
   if (!pathItem || !op) return null;
   try {
-    return { op, baseURL: resolveServer(doc, pathItem, op, ctx, sourceLocation) };
+    const params = effectiveParameters(pathItem, op);
+    if (parameterOwnershipConflict(params) !== "") return null;
+    if (securityConfigurationError(doc, op) !== "") return null;
+    return { op, params, baseURL: resolveServer(doc, pathItem, op, ctx, sourceLocation) };
   } catch {
     return null;
   }

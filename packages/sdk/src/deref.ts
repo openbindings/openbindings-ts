@@ -23,6 +23,15 @@ export interface DereferenceOptions {
    */
   parse?: (text: string) => unknown;
   /**
+   * Optionally replace the default target-wins `$ref` sibling merge for a
+   * recognized reference object. Returning `undefined` keeps the default.
+   * Format adapters use this only after position-aware classification.
+   */
+  mergeRefSiblings?: (
+    target: Record<string, unknown>,
+    reference: Record<string, unknown>,
+  ) => Record<string, unknown> | undefined;
+  /**
    * Preserve a `$ref` object when its fragment does not resolve instead of
    * rejecting the complete document. Strict rejection remains the default.
    * This is intended for processors that inventory and exclude invalid
@@ -145,6 +154,7 @@ export async function dereference<T = unknown>(
   const baseUrl = options?.baseUrl;
   const signal = options?.signal;
   const allowUnresolved = options?.allowUnresolved ?? false;
+  const mergeRefSiblings = options?.mergeRefSiblings;
 
   // The single working tree. Internal refs resolve against THIS clone, never
   // the caller's `doc`: resolving against the original both mutates the
@@ -305,14 +315,18 @@ export async function dereference<T = unknown>(
       if (target !== undefined) {
         const extraKeys = Object.keys(obj).filter((k) => k !== "$ref");
         if (extraKeys.length > 0 && typeof target === "object" && target !== null) {
-          const merged = { ...target } as Record<string, unknown>;
+          const customMerged = mergeRefSiblings?.(
+            target as Record<string, unknown>,
+            obj,
+          );
+          const merged = customMerged ?? { ...target };
           // A synthetic sibling-merge object still belongs to the target's
           // resource. Without carrying that scope, a target whose own root is
           // another relative ref would incorrectly resolve from the referring
           // document merely because the merge allocated a new object.
           scopeByNode.set(merged, scopeByNode.get(target) ?? document.rootScope);
           for (const k of extraKeys) {
-            if (!Object.hasOwn(merged, k)) {
+            if (!Object.hasOwn(merged, k) && customMerged === undefined) {
               Object.defineProperty(merged, k, {
                 value: obj[k],
                 enumerable: true,

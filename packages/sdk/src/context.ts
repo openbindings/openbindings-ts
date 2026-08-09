@@ -418,7 +418,11 @@ function requirementSatisfied(ctx: Record<string, unknown>, req: ContextRequirem
     const value = (configuration as Record<string, unknown>)[point];
     return value !== undefined && value !== null && value !== "";
   }
-  const field = REQUIREMENT_FIELDS[req.type] ?? req.type;
+  const mappedField = REQUIREMENT_FIELDS[req.type];
+  if (mappedField === undefined && req.type.startsWith("auth.")) {
+    return false;
+  }
+  const field = mappedField ?? req.type;
   const v = ctx[field];
   return v !== undefined && v !== null && v !== "";
 }

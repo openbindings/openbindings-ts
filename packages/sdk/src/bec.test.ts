@@ -341,6 +341,11 @@ describe("contextSatisfies", () => {
         details,
       ),
     ).toBe(false);
+    // The reserved auth namespace does not acquire an implicit satisfaction
+    // convention merely because consumer context contains a same-named field.
+    // A binding-specific resolver must understand the family before it can
+    // select the alternative.
+    expect(contextSatisfies({ "auth.http.digest": "present" }, details)).toBe(false);
   });
 });
 

@@ -314,10 +314,8 @@ describe("convertToInterface — OpenAPI 3.0 dialect translation", () => {
     const output = iface.operations["x"]?.output as Record<string, unknown>;
     const props = output.properties as Record<string, Record<string, unknown>>;
     expect(props["next"]).toEqual({ type: ["string", "null"], format: "uri" });
-    // A stray 3.0 nullable under a 3.1 header is salvaged, not preserved:
-    // the wild ships it constantly (DRF pagination via drf-spectacular) and
-    // preserved verbatim it silently rejects the declared nulls.
-    expect(props["legacy"]).toEqual({ type: ["string", "null"] });
+    // In 3.1 this is an unknown annotation, not the 3.0 type modifier.
+    expect(props["legacy"]).toEqual({ type: "string", nullable: true });
   });
 
   it("translates boolean exclusiveMinimum to numeric form", async () => {
@@ -927,3 +925,210 @@ describe("deterministic ordering", () => {
     expect(Object.keys(iface.operations)).toEqual(["listPets", "adoptPet"]);
   });
 });
+
+describe("directional request/response schema projection", () => {
+  for (const openapi of ["3.0.3", "3.1.0"]) {
+    it(`projects readOnly/writeOnly through nested, allOf, and recursive refs in OpenAPI ${openapi}`, async () => {
+      const spec = {
+        openapi,
+        info: { title: "Directional API", version: "1" },
+        servers: [{ url: "https://api.example.test" }],
+        components: {
+          schemas: {
+            Filter: {
+              type: "object",
+              required: ["serverGenerated", "clientProvided", "ordinary"],
+              properties: {
+                serverGenerated: { type: "string", readOnly: true },
+                clientProvided: { type: "string", writeOnly: true },
+                ordinary: { type: "string" },
+              },
+            },
+            Profile: {
+              type: "object",
+              required: ["serverNote", "clientSecret", "displayName", "nested", "neverDirectional"],
+              properties: {
+                serverNote: { type: "string", readOnly: true },
+                clientSecret: { type: "string", writeOnly: true },
+                displayName: { type: "string" },
+                neverDirectional: {
+                  type: "string",
+                  readOnly: true,
+                  writeOnly: true,
+                },
+                nested: {
+                  type: "array",
+                  items: {
+                    type: "object",
+                    required: ["createdAt", "draft", "label"],
+                    properties: {
+                      createdAt: { type: "string", readOnly: true },
+                      draft: { type: "string", writeOnly: true },
+                      label: { type: "string" },
+                    },
+                  },
+                },
+              },
+            },
+            User: {
+              type: "object",
+              // Parent-level required names deliberately target properties
+              // declared only in allOf members. Projection must repair this
+              // list as well as each member's local list.
+              required: [
+                "id",
+                "password",
+                "serverNote",
+                "clientSecret",
+                "displayName",
+                "nested",
+                "manager",
+                "neverDirectional",
+              ],
+              allOf: [
+                { $ref: "#/components/schemas/Profile" },
+                {
+                  type: "object",
+                  required: ["id", "password", "manager"],
+                  properties: {
+                    id: { type: "string", readOnly: true },
+                    password: { type: "string", writeOnly: true },
+                    manager: { $ref: "#/components/schemas/User" },
+                  },
+                },
+              ],
+            },
+          },
+        },
+        paths: {
+          "/users": {
+            post: {
+              operationId: "upsertUser",
+              parameters: [
+                {
+                  name: "filter",
+                  in: "query",
+                  required: true,
+                  schema: { $ref: "#/components/schemas/Filter" },
+                },
+              ],
+              requestBody: {
+                required: true,
+                content: {
+                  "application/json": { schema: { $ref: "#/components/schemas/User" } },
+                },
+              },
+              responses: {
+                "200": {
+                  description: "ok",
+                  content: {
+                    "application/json": { schema: { $ref: "#/components/schemas/User" } },
+                  },
+                },
+              },
+            },
+          },
+        },
+      };
+
+      const iface = await convertToInterface(undefined, spec);
+      const input = iface.operations.upsertUser?.input as Record<string, unknown>;
+      const output = iface.operations.upsertUser?.output as Record<string, unknown>;
+      const inputProps = input.properties as Record<string, Record<string, unknown>>;
+
+      expect(Object.keys(inputProps)).toEqual(expect.arrayContaining([
+        "filter", "password", "clientSecret", "displayName", "nested", "manager",
+      ]));
+      expect(inputProps).not.toHaveProperty("id");
+      expect(inputProps).not.toHaveProperty("serverNote");
+      expect(inputProps).not.toHaveProperty("neverDirectional");
+      expect(input.required).toEqual(expect.arrayContaining([
+        "filter", "password", "clientSecret", "displayName", "nested", "manager",
+      ]));
+      expect(input.required).not.toEqual(expect.arrayContaining([
+        "id", "serverNote", "neverDirectional",
+      ]));
+
+      const filterProps = inputProps.filter!.properties as Record<string, unknown>;
+      expect(filterProps).not.toHaveProperty("serverGenerated");
+      expect(filterProps).toHaveProperty("clientProvided");
+      expect(inputProps.filter!.required).toEqual(["clientProvided", "ordinary"]);
+
+      const inputNested = inputProps.nested!.items as Record<string, unknown>;
+      const inputNestedProps = inputNested.properties as Record<string, unknown>;
+      expect(inputNestedProps).not.toHaveProperty("createdAt");
+      expect(inputNestedProps).toHaveProperty("draft");
+      expect(inputNested.required).toEqual(["draft", "label"]);
+
+      const outputProfile = findSchemaWithProperty(output, "displayName");
+      const outputProfileProps = outputProfile.properties as Record<string, unknown>;
+      expect(outputProfileProps).toHaveProperty("serverNote");
+      expect(outputProfileProps).not.toHaveProperty("clientSecret");
+      expect(outputProfileProps).not.toHaveProperty("neverDirectional");
+      expect(outputProfile.required).toEqual(["serverNote", "displayName", "nested"]);
+
+      const outputIdentity = findSchemaWithProperty(output, "id");
+      const outputIdentityProps = outputIdentity.properties as Record<string, unknown>;
+      expect(outputIdentityProps).toHaveProperty("id");
+      expect(outputIdentityProps).not.toHaveProperty("password");
+      expect(outputIdentity.required).toEqual(["id", "manager"]);
+
+      const outputNested = findSchemaWithProperty(output, "label");
+      const outputNestedProps = outputNested.properties as Record<string, unknown>;
+      expect(outputNestedProps).toHaveProperty("createdAt");
+      expect(outputNestedProps).not.toHaveProperty("draft");
+      expect(outputNested.required).toEqual(["createdAt", "label"]);
+
+      const outputRoot = findSchemaWithRequired(output, "manager");
+      expect(outputRoot.required).toEqual(expect.arrayContaining([
+        "id", "serverNote", "displayName", "nested", "manager",
+      ]));
+      expect(outputRoot.required).not.toEqual(expect.arrayContaining([
+        "password", "clientSecret", "neverDirectional",
+      ]));
+
+      // The recursive component keeps its stable name after projection and
+      // decycling; directionality is applied inside the reachable definition.
+      expect(JSON.stringify(input)).toContain("#/operations/upsertUser/input/$defs/User");
+      expect(JSON.stringify(output)).toContain("#/operations/upsertUser/output/$defs/User");
+      expect(JSON.stringify(input)).not.toContain('"readOnly":true');
+      expect(JSON.stringify(output)).not.toContain('"writeOnly":true');
+    });
+  }
+});
+
+function findSchemaWithProperty(
+  root: unknown,
+  property: string,
+): Record<string, unknown> {
+  return findSchema(root, (schema) => {
+    const properties = schema.properties;
+    return !!properties && typeof properties === "object" && !Array.isArray(properties)
+      && Object.hasOwn(properties, property);
+  });
+}
+
+function findSchemaWithRequired(root: unknown, property: string): Record<string, unknown> {
+  return findSchema(
+    root,
+    (schema) => Array.isArray(schema.required) && schema.required.includes(property),
+  );
+}
+
+function findSchema(
+  root: unknown,
+  predicate: (schema: Record<string, unknown>) => boolean,
+): Record<string, unknown> {
+  const seen = new Set<object>();
+  const pending: unknown[] = [root];
+  while (pending.length > 0) {
+    const value = pending.shift();
+    if (!value || typeof value !== "object" || seen.has(value)) continue;
+    seen.add(value);
+    if (!Array.isArray(value) && predicate(value as Record<string, unknown>)) {
+      return value as Record<string, unknown>;
+    }
+    pending.push(...Object.values(value));
+  }
+  throw new Error("expected schema fragment was not found");
+}

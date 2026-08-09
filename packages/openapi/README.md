@@ -122,13 +122,20 @@ result as `content`, while browsers and Workers keep the same package graph.
 2. Parses the ref as a JSON Pointer (`#/paths/~1users/get` -> path `/users`, method `get`); the method is lowercase exactly as the artifact spells it — an uppercase method is refused, never case-folded (OAPI-D-03)
 3. Resolves the server (the OAS effective list + variables + the `server` configuration point, OAPI-P-05)
 4. Derives auth requirements from the operation's (or document's) `security` and challenges `CONTEXT_REQUIRED` when the context can't satisfy them — before any request is dispatched
-5. Reads the input message from the handle and routes its fields per the flattened model (OAPI-P-03) — parameters serialize per the OAS style/explode rules (OAPI-P-02); unmatched fields pass into a declared request body and refuse loudly otherwise — and selects the request media type per the specification's preference order (OAPI-P-04)
-6. Applies credentials from the context using the spec's `securitySchemes` (bearer, basic, apiKey, oauth2 with correct placement), refusing credential/parameter channel collisions pre-dispatch (OAPI-P-10)
+5. Reads the input message from the handle and routes its fields per the flattened model (OAPI-P-03) — parameters serialize per the OAS style/explode rules (OAPI-P-02); unmatched fields pass into a declared request body and refuse loudly otherwise — and uses the configured `requestMedia` candidate or any faithfully supported declared candidate when no preference is supplied (OAPI-P-04)
+6. Selects one complete, satisfiable Security Requirement alternative and applies only that alternative's credentials with the artifact-declared placement, refusing credential/parameter and processor-owned-channel collisions before dispatch (OAPI-P-09/P-10)
 7. Makes the HTTP request; the declared success media bound the interaction shape (unary, or server-streaming for a declared `text/event-stream` response, OAPI-P-06); classifies the outcome (success iff status is 2xx, OAPI-P-08), decodes successful bodies by the response's `Content-Type` header, and emits the application value. Native headers/status/body evidence and hook provenance are available only through explicit diagnostics and never become operation values.
 
 ### Server selection
 
-By default the request target is the OAS effective server list's first entry (operation `servers`, else the path item's, else the document's, else the implied `/`), with server-variable defaults substituted; a relative server URL resolves against the source `location`. Server resolution is the specification's named configuration point (OAPI-P-05): set `configuration.server` in the invocation context to select another declared entry (`url` or `index`), supply `variables`, or supply a complete `baseUrl` outright:
+The OAS effective server list comes from operation `servers`, else the path
+item's, else the document's, else the implied `/`. A sole entry is selected
+with server-variable defaults substituted; more than one requires the named
+`server` configuration point because the artifact declares alternatives but
+no preference. A relative server URL resolves against the source `location`.
+Set `configuration.server` in the invocation context to select a declared
+entry (`url` or `index`), supply `variables`, or supply a complete `baseUrl`
+outright (OAPI-P-05):
 
 ```typescript
 context: {
@@ -159,7 +166,11 @@ Credentials are applied based on the OpenAPI spec's security configuration:
 - **`apiKey`**: Places the `apiKey` context field in the header, query param, or cookie as the spec declares
 - **`oauth2` / `openIdConnect`**: Sets `Authorization: Bearer <token>` from the `accessToken` (or `bearerToken`) context field
 
-When no security schemes are defined, falls back to bearer -> basic -> apiKey in that order.
+Credentials are never volunteered when the effective operation declares no
+security. Security Requirement Objects are OR alternatives and the schemes
+within one object are an AND set; invocation selects exactly one complete,
+channel-safe alternative and never combines credential fragments from
+different alternatives.
 
 When declared security is unsatisfied by the context, the invoker challenges `CONTEXT_REQUIRED` before any input is read or network touched, deriving the challenge from the artifact's `securitySchemes` (the negotiation surface is the [binding-invoker interface](https://openbindings.com/interfaces/binding-invoker); the challenge's `target` is the resolved base URL):
 
@@ -168,10 +179,17 @@ When declared security is unsatisfied by the context, the invoker challenges `CO
 | `http` / `basic`  | `auth.basic`     | —                                                                        |
 | `http` / `bearer` | `auth.bearer`    | —                                                                        |
 | `apiKey`          | `auth.apiKey`    | —                                                                        |
-| `oauth2`          | `auth.oauth2`    | `grantType`, `authorizeUrl`, `tokenUrl`, `scopes` from the selected flow |
-| `openIdConnect`   | `auth.oauth2`    | `openIdConnectUrl`                                                       |
+| `oauth2`          | `auth.oauth2`    | `grantType`, `authorizeUrl`, `tokenUrl` from each usable flow; `scopes` required by the Security Requirement |
+| `openIdConnect`   | `auth.oauth2`    | `openIdConnectUrl`; `scopes` required by the Security Requirement        |
 
-An `oauth2` scheme declaring several flows selects one by fixed preference — `authorizationCode`, then `implicit`, then `password`, then `clientCredentials` — and `grantType` names the selection in its RFC 6749 spelling (`authorization_code`, `implicit`, `password`, `client_credentials`). Every requirement carries the scheme's declared name (its `securitySchemes` key), which disambiguates ANDed requirements of one type and keys the scheme-scoped credential lookup: an API-key scheme named `N` resolves `apiKeys[N]` first, falling back to the single `apiKey` convenience.
+An `oauth2` scheme declaring several usable flows surfaces each as a separate
+context alternative; it does not invent a flow preference. `grantType` names
+each flow in its RFC 6749 spelling (`authorization_code`, `implicit`,
+`password`, `client_credentials`). Every requirement carries the scheme's
+declared name (its `securitySchemes` key), which disambiguates ANDed
+requirements of one type and keys the scheme-scoped credential lookup: an
+API-key scheme named `N` resolves `apiKeys[N]` first, falling back to the
+single `apiKey` convenience.
 
 A scheme outside this table is **surfaced, never dropped**: it emits a requirement typed from the artifact's own scheme (`http`/`digest` → `auth.http.digest`; any other type `T` → `auth.<T>`, e.g. `auth.mutualTLS`) that this package cannot itself apply. The alternative stays discoverable — unselectable only for runtimes without a resolver for that family — and a document whose every alternative is unmapped produces a readable challenge instead of an unauthenticated dispatch into a blind 401.
 
@@ -183,7 +201,7 @@ Deterministic generation of OBI documents is a synthesis concern outside the bin
 - **Iteration order is fixed**: paths alphabetically, methods in the order get, put, post, delete, options, head, patch, trace.
 - **Input schemas** merge effective path-level and operation-level parameters from every supported location (path, query, header, cookie) with each realizable request-media candidate's own body surface. Distinct declarations keep their application names when unique; collisions receive deterministic neutral suffixes and a binding-private `inputTransform` carries the exact protocol route. Distinct candidate surfaces are preserved with `anyOf`; parameter-only and non-JSON surfaces are closed against fields the invoker would refuse, while JSON object candidates remain open for the binding's declared passthrough rule.
 - **Output schemas** conservatively union every value-bearing success lane that can govern a 2xx response: exact 2xx entries, `2XX`, and an unshadowed `default`. JSON declarations contribute their schemas, non-JSON/SSE declarations contribute strings, and a schema-less JSON lane leaves output unspecified rather than inventing a shape.
-- **Schema translation** targets JSON Schema 2020-12 (spec OBI-D-06), keyed on the artifact's declared `openapi` version: 3.0.x schemas are normalized out of the Draft-4 subset dialect; 3.1.x schemas pass through unchanged.
+- **Schema projection** targets JSON Schema 2020-12 (spec OBI-D-06), keyed on the artifact's declared `openapi` version and operation direction. OpenAPI 3.0.x schemas are translated from their subset dialect and ignore Reference Object siblings; 3.1.x Schema Object `$ref` siblings compose under JSON Schema semantics, while non-schema Reference Objects apply only their legal site-local `summary`/`description` overrides. Request contracts omit `readOnly` properties and response contracts omit `writeOnly` properties, with required lists repaired through nested and recursive graphs. Unknown annotations remain annotations rather than being assigned invented validation meaning. An operation whose projected contract inherits a custom 3.1 schema dialect that cannot be losslessly projected to 2020-12 is excluded by tolerant synthesis and fails strict synthesis explicitly; schema-free operations and supported per-schema overrides remain available, and the dialect does not by itself prevent artifact-native invocation.
 - **Unrealizable targets fail synthesis**: conditional/combinatorial body shapes without one declaration-defined route, case-colliding HTTP header declarations, and required bodies with no supported media candidate make the whole strict synthesis call fail. An optional body may be omitted with a warning only when the remaining no-body operation is still faithfully invocable.
 - **No security metadata is written to the OBI**; `securitySchemes` are honored at invocation time via context negotiation (`CONTEXT_REQUIRED` challenges and the `prepareBinding` preflight).
 

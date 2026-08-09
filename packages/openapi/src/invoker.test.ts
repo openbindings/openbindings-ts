@@ -10,6 +10,7 @@ import {
   ERR_PROTOCOL,
   ERR_REF_NOT_FOUND,
   ERR_RESPONSE_ERROR,
+  ERR_SOURCE_CONFIG_ERROR,
   ERR_SOURCE_LOAD_FAILED,
   ERR_VALIDATION_FAILED,
   USE_DEFAULT,
@@ -108,6 +109,7 @@ function authSpec(opts: {
   securitySchemes?: Record<string, unknown>;
   security?: Array<Record<string, unknown>>;
   opSecurity?: Array<Record<string, unknown>>;
+  parameters?: Array<Record<string, unknown>>;
 }): Record<string, unknown> {
   return {
     openapi: "3.1.0",
@@ -119,6 +121,7 @@ function authSpec(opts: {
       "/data": {
         get: {
           ...(opts.opSecurity !== undefined ? { security: opts.opSecurity } : {}),
+          ...(opts.parameters ? { parameters: opts.parameters } : {}),
           responses: { "200": { description: "OK", content: { "application/json": {} } } },
         },
       },
@@ -146,6 +149,33 @@ describe("OpenAPIInvoker.bindingSpecs", () => {
 });
 
 describe("invokeBinding — request construction", () => {
+  it("invokes a schema-free operation even when the OAS document selects a custom schema dialect", async () => {
+    const spec = {
+      openapi: "3.1.2",
+      jsonSchemaDialect: "https://schemas.example/custom-dialect",
+      info: { title: "Custom dialect API", version: "1" },
+      servers: [{ url: "https://api.example.com" }],
+      paths: {
+        "/health": {
+          get: {
+            operationId: "health",
+            responses: { "204": { description: "healthy" } },
+          },
+        },
+      },
+    };
+    const { fetch, requests } = mockFetch(() => new Response(null, { status: 204 }));
+    const call = new OpenAPIInvoker().invokeBinding({
+      source: { bindingSpec: "openbindings.openapi@2", content: spec },
+      ref: "#/paths/~1health/get",
+      fetch,
+    });
+
+    await call.closed;
+    expect(requests).toHaveLength(1);
+    expect(requests[0]?.method).toBe("GET");
+  });
+
   it("dispatches a no-input operation immediately and emits the parsed body", async () => {
     const { fetch, requests } = mockFetch(() => jsonResponse({ pong: true }));
     const call = new OpenAPIInvoker().invokeBinding({ source: SOURCE, ref: REF_PING, fetch });
@@ -1023,7 +1053,7 @@ describe("invokeBinding — context negotiation", () => {
     expect(requests[0]?.headers.get("Cookie")).toBe("sid=k1");
   });
 
-  it("challenges auth.oauth2 and applies an accessToken as a bearer", async () => {
+  it("preserves the OAuth scopes required by the Security Requirement and applies an accessToken as a bearer", async () => {
     // clientCredentials is a token-only flow: it defines tokenUrl/scopes but
     // never authorizationUrl. The flow fallback keys on tokenUrl, so the
     // challenge must carry tokenUrl (and scopes) — keying on authorizationUrl
@@ -1040,7 +1070,7 @@ describe("invokeBinding — context negotiation", () => {
           },
         },
       },
-      security: [{ oauth: [] }],
+      security: [{ oauth: ["write"] }],
     });
     const inv = new OpenAPIInvoker();
 
@@ -1056,7 +1086,7 @@ describe("invokeBinding — context negotiation", () => {
               {
                 type: "auth.oauth2",
                 tokenUrl: "https://auth.example.com/token",
-                scopes: ["read", "write"],
+                scopes: ["write"],
                 // R2.b ruling: grantType names the SELECTED flow.
                 grantType: "client_credentials",
               },
@@ -1092,7 +1122,7 @@ describe("invokeBinding — context negotiation", () => {
           },
         },
       },
-      security: [{ oauth: [] }],
+      security: [{ oauth: ["read"] }],
     });
     const { fetch, requests } = mockFetch(() => jsonResponse({}));
     await expect(
@@ -1107,7 +1137,7 @@ describe("invokeBinding — context negotiation", () => {
                 type: "auth.oauth2",
                 authorizeUrl: "https://api.example.com/oauth/authorize",
                 tokenUrl: "https://auth.example.com/oauth/token",
-                scopes: ["read", "write"],
+                scopes: ["read"],
                 grantType: "authorization_code",
               },
             ],
@@ -1203,11 +1233,7 @@ describe("invokeBinding — context negotiation", () => {
     expect(r2[0]?.headers.get("Authorization")).toBe("Bearer at_2");
   });
 
-  it("prefers the password flow over clientCredentials by fixed priority, not declaration order", async () => {
-    // Both flows are token-only (define tokenUrl but not authorizationUrl).
-    // Declared clientCredentials-first to prove the fix: object insertion
-    // order must NOT decide the winner — the fixed priority (password
-    // before clientCredentials, mirroring the Go SDK exactly) does.
+  it("preserves password and clientCredentials as separate OAuth flow alternatives", async () => {
     const spec = authSpec({
       securitySchemes: {
         oauth: {
@@ -1238,8 +1264,18 @@ describe("invokeBinding — context negotiation", () => {
               {
                 type: "auth.oauth2",
                 tokenUrl: "https://auth.example.com/password/token",
-                scopes: ["pw"],
+                scopes: [],
                 grantType: "password",
+              },
+            ],
+          },
+          {
+            requirements: [
+              {
+                type: "auth.oauth2",
+                tokenUrl: "https://auth.example.com/client-credentials/token",
+                scopes: [],
+                grantType: "client_credentials",
               },
             ],
           },
@@ -1248,7 +1284,7 @@ describe("invokeBinding — context negotiation", () => {
     });
   });
 
-  it("selects the implicit flow (and grantType) when declared alongside token-only flows, but below authorizationCode", async () => {
+  it("preserves implicit and clientCredentials as separate OAuth flow alternatives", async () => {
     const spec = authSpec({
       securitySchemes: {
         oauth: {
@@ -1274,6 +1310,17 @@ describe("invokeBinding — context negotiation", () => {
                 type: "auth.oauth2",
                 authorizeUrl: "https://auth.example.com/implicit/authorize",
                 grantType: "implicit",
+                scopes: [],
+              },
+            ],
+          },
+          {
+            requirements: [
+              {
+                type: "auth.oauth2",
+                tokenUrl: "https://auth.example.com/client-credentials/token",
+                grantType: "client_credentials",
+                scopes: [],
               },
             ],
           },
@@ -1282,7 +1329,7 @@ describe("invokeBinding — context negotiation", () => {
     });
   });
 
-  it("prefers authorizationCode over every other flow when multiple are declared", async () => {
+  it("preserves every usable OAuth flow alternative instead of inventing a preference", async () => {
     const spec = authSpec({
       securitySchemes: {
         oauth: {
@@ -1314,6 +1361,37 @@ describe("invokeBinding — context negotiation", () => {
                 authorizeUrl: "https://auth.example.com/authorize",
                 tokenUrl: "https://auth.example.com/authcode/token",
                 grantType: "authorization_code",
+                scopes: [],
+              },
+            ],
+          },
+          {
+            requirements: [
+              {
+                type: "auth.oauth2",
+                authorizeUrl: "https://auth.example.com/implicit/authorize",
+                grantType: "implicit",
+                scopes: [],
+              },
+            ],
+          },
+          {
+            requirements: [
+              {
+                type: "auth.oauth2",
+                tokenUrl: "https://auth.example.com/password/token",
+                grantType: "password",
+                scopes: [],
+              },
+            ],
+          },
+          {
+            requirements: [
+              {
+                type: "auth.oauth2",
+                tokenUrl: "https://auth.example.com/client-credentials/token",
+                grantType: "client_credentials",
+                scopes: [],
               },
             ],
           },
@@ -1357,6 +1435,27 @@ describe("invokeBinding — context negotiation", () => {
     expect(r2[0]?.headers.get("X-API-Key")).toBe("k1");
   });
 
+  it("selects exactly one complete OR alternative when context satisfies more than one", async () => {
+    const spec = authSpec({
+      securitySchemes: {
+        bearerAuth: { type: "http", scheme: "bearer" },
+        key: { type: "apiKey", name: "X-API-Key", in: "header" },
+      },
+      security: [{ bearerAuth: [] }, { key: [] }],
+    });
+    const { fetch, requests } = mockFetch(() => jsonResponse({}));
+    const call = new OpenAPIInvoker().invokeBinding({
+      source: authSource(spec),
+      ref: REF_DATA,
+      context: { bearerToken: "tok", apiKey: "k1" },
+      fetch,
+    });
+
+    await single(call.outputs);
+    expect(requests[0]?.headers.get("Authorization")).toBe("Bearer tok");
+    expect(requests[0]?.headers.get("X-API-Key")).toBeNull();
+  });
+
   it("treats schemes within one requirement object as conjunctive (AND)", async () => {
     const spec = authSpec({
       securitySchemes: {
@@ -1396,6 +1495,29 @@ describe("invokeBinding — context negotiation", () => {
     await single(call.outputs);
     expect(r2[0]?.headers.get("Authorization")).toBe("Bearer tok");
     expect(r2[0]?.headers.get("X-API-Key")).toBe("k1");
+  });
+
+  it("refuses two ANDed credentials that share Authorization without deduplicating them", async () => {
+    const spec = authSpec({
+      securitySchemes: {
+        bearerA: { type: "http", scheme: "bearer" },
+        bearerB: { type: "http", scheme: "bearer" },
+      },
+      security: [{ bearerA: [], bearerB: [] }],
+    });
+    const { fetch, requests } = mockFetch(() => jsonResponse({}));
+    const call = new OpenAPIInvoker().invokeBinding({
+      source: authSource(spec),
+      ref: REF_DATA,
+      context: { bearerToken: "tok" },
+      fetch,
+    });
+
+    await expect(call.closed).rejects.toMatchObject({
+      code: ERR_VALIDATION_FAILED,
+      message: expect.stringContaining("two credentials collide"),
+    });
+    expect(requests).toHaveLength(0);
   });
 
   it("lets operation-level security remove document-level requirements", async () => {
@@ -1447,14 +1569,20 @@ describe("invokeBinding — context negotiation", () => {
     });
     const { fetch, requests } = mockFetch(() => jsonResponse({}));
     await expect(
-      new OpenAPIInvoker().invokeBinding({ source: authSource(spec), ref: REF_DATA, fetch }).closed,
+      new OpenAPIInvoker().invokeBinding({
+        source: authSource(spec),
+        ref: REF_DATA,
+        context: { "auth.http.digest": "present" },
+        fetch,
+      }).closed,
     ).rejects.toMatchObject({
       code: CONTEXT_REQUIRED,
       details: {
         alternatives: [{ requirements: [{ type: "auth.http.digest", name: "digestAuth" }] }],
       },
     });
-    // Pre-dispatch: no request was ever made unauthenticated (the OLD
+    // Even a same-named context field cannot invent support for this reserved
+    // auth family. Pre-dispatch: no request was ever made unauthenticated (the OLD
     // behavior dropped this alternative entirely, so alternatives.length
     // was 0, requiredContext returned null, and the request WOULD have
     // dispatched here with no Authorization header at all).
@@ -1541,6 +1669,42 @@ describe("invokeBinding — context negotiation", () => {
     expect(requests).toHaveLength(0);
   });
 
+  it("fails closed when a security requirement names an undefined scheme", async () => {
+    const spec = authSpec({ security: [{ missingAuth: [] }] });
+    const { fetch, requests } = mockFetch(() => jsonResponse({}));
+    const call = new OpenAPIInvoker().invokeBinding({
+      source: authSource(spec),
+      ref: REF_DATA,
+      fetch,
+    });
+
+    await expect(call.closed).rejects.toMatchObject({
+      code: ERR_SOURCE_CONFIG_ERROR,
+      message: expect.stringContaining("missingAuth"),
+    });
+    expect(requests).toHaveLength(0);
+  });
+
+  it("does not ignore an undefined scheme merely because another OR alternative is usable", async () => {
+    const spec = authSpec({
+      securitySchemes: { bearerAuth: { type: "http", scheme: "bearer" } },
+      security: [{ bearerAuth: [] }, { missingAuth: [] }],
+    });
+    const { fetch, requests } = mockFetch(() => jsonResponse({}));
+    const call = new OpenAPIInvoker().invokeBinding({
+      source: authSource(spec),
+      ref: REF_DATA,
+      context: { bearerToken: "tok" },
+      fetch,
+    });
+
+    await expect(call.closed).rejects.toMatchObject({
+      code: ERR_SOURCE_CONFIG_ERROR,
+      message: expect.stringContaining("missingAuth"),
+    });
+    expect(requests).toHaveLength(0);
+  });
+
   it("merges context headers and cookies into the request", async () => {
     const { fetch, requests } = mockFetch(() => jsonResponse({ pong: true }));
     const call = new OpenAPIInvoker().invokeBinding({
@@ -1555,7 +1719,7 @@ describe("invokeBinding — context negotiation", () => {
     expect(requests[0]?.headers.get("Cookie")).toBe("session=s1");
   });
 
-  it("falls back to bearer placement when the document declares no schemes", async () => {
+  it("never sends fallback credentials when the operation declares no security", async () => {
     const { fetch, requests } = mockFetch(() => jsonResponse({ pong: true }));
     const call = new OpenAPIInvoker().invokeBinding({
       source: SOURCE,
@@ -1565,7 +1729,138 @@ describe("invokeBinding — context negotiation", () => {
     });
 
     await single(call.outputs);
-    expect(requests[0]?.headers.get("Authorization")).toBe("Bearer tok");
+    expect(requests[0]?.headers.get("Authorization")).toBeNull();
+  });
+
+  for (const name of ["Host", "content-Length"]) {
+    it(`refuses an effective ${name} header parameter as processor-owned`, async () => {
+      const spec = authSpec({
+        parameters: [{ name, in: "header", schema: { type: "string" } }],
+      });
+      const { fetch, requests } = mockFetch(() => jsonResponse({}));
+      const call = new OpenAPIInvoker().invokeBinding({
+        source: authSource(spec),
+        ref: REF_DATA,
+        fetch,
+      });
+
+      await expect(call.closed).rejects.toMatchObject({
+        code: ERR_SOURCE_CONFIG_ERROR,
+        message: expect.stringContaining("OAPI-P-10"),
+      });
+      expect(requests).toHaveLength(0);
+    });
+  }
+
+  it("refuses a declared raw Cookie header alongside a structured cookie parameter", async () => {
+    const spec = authSpec({
+      parameters: [
+        { name: "Cookie", in: "header", schema: { type: "string" } },
+        { name: "session", in: "cookie", schema: { type: "string" } },
+      ],
+    });
+    const { fetch, requests } = mockFetch(() => jsonResponse({}));
+    const call = new OpenAPIInvoker().invokeBinding({
+      source: authSource(spec),
+      ref: REF_DATA,
+      fetch,
+    });
+
+    await expect(call.closed).rejects.toMatchObject({
+      code: ERR_SOURCE_CONFIG_ERROR,
+      message: expect.stringContaining("OAPI-P-10"),
+    });
+    expect(requests).toHaveLength(0);
+  });
+
+  it("refuses a raw Cookie transport hint that would overwrite structured cookies", async () => {
+    const { fetch, requests } = mockFetch(() => jsonResponse({ pong: true }));
+    const call = new OpenAPIInvoker().invokeBinding({
+      source: SOURCE,
+      ref: REF_PING,
+      context: {
+        headers: { Cookie: "raw=1" },
+        cookies: { session: "structured" },
+      },
+      fetch,
+    });
+
+    await expect(call.closed).rejects.toMatchObject({
+      code: ERR_VALIDATION_FAILED,
+      message: expect.stringContaining("OAPI-P-10"),
+    });
+    expect(requests).toHaveLength(0);
+  });
+
+  it("refuses a raw Cookie transport hint that would overwrite a selected cookie credential", async () => {
+    const spec = authSpec({
+      securitySchemes: {
+        cookieKey: { type: "apiKey", name: "session", in: "cookie" },
+      },
+      security: [{ cookieKey: [] }],
+    });
+    const { fetch, requests } = mockFetch(() => jsonResponse({}));
+    const call = new OpenAPIInvoker().invokeBinding({
+      source: authSource(spec),
+      ref: REF_DATA,
+      context: {
+        apiKey: "structured-secret",
+        headers: { Cookie: "raw=1" },
+      },
+      fetch,
+    });
+
+    await expect(call.closed).rejects.toMatchObject({
+      code: ERR_VALIDATION_FAILED,
+      message: expect.stringContaining("OAPI-P-10"),
+    });
+    expect(requests).toHaveLength(0);
+  });
+
+  it("refuses a header credential named Cookie alongside structured cookie parameters", async () => {
+    const spec = authSpec({
+      securitySchemes: {
+        rawCookieKey: { type: "apiKey", name: "Cookie", in: "header" },
+      },
+      security: [{ rawCookieKey: [] }],
+      parameters: [{ name: "session", in: "cookie", schema: { type: "string" } }],
+    });
+    const { fetch, requests } = mockFetch(() => jsonResponse({}));
+    const call = new OpenAPIInvoker().invokeBinding({
+      source: authSource(spec),
+      ref: REF_DATA,
+      context: { apiKey: "raw-cookie-secret" },
+      fetch,
+    });
+
+    await expect(call.closed).rejects.toMatchObject({
+      code: ERR_VALIDATION_FAILED,
+      message: expect.stringContaining("OAPI-P-10"),
+    });
+    expect(requests).toHaveLength(0);
+  });
+
+  it("skips a cookie-colliding security alternative and selects a complete safe alternative", async () => {
+    const spec = authSpec({
+      securitySchemes: {
+        cookieKey: { type: "apiKey", name: "session", in: "cookie" },
+        bearerAuth: { type: "http", scheme: "bearer" },
+      },
+      security: [{ cookieKey: [] }, { bearerAuth: [] }],
+      parameters: [{ name: "Cookie", in: "header", schema: { type: "string" } }],
+    });
+    const { fetch, requests } = mockFetch(() => jsonResponse({}));
+    const call = new OpenAPIInvoker().invokeBinding({
+      source: authSource(spec),
+      ref: REF_DATA,
+      context: { apiKey: "cookie-secret", bearerToken: "bearer-secret" },
+      fetch,
+    });
+    await call.close();
+
+    await single(call.outputs);
+    expect(requests[0]?.headers.get("Authorization")).toBe("Bearer bearer-secret");
+    expect(requests[0]?.headers.get("Cookie")).toBeNull();
   });
 });
 

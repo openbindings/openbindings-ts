@@ -99,6 +99,22 @@ describe("translateSchemaDialect — OpenAPI 3.0 → JSON Schema 2020-12", () =>
       expect(out).toEqual({ type: "object", additionalProperties: true });
     });
 
+    it("recurses into contentSchema", () => {
+      const out = translateSchemaDialect(
+        {
+          type: "string",
+          contentMediaType: "application/json",
+          contentSchema: { type: "string", nullable: true },
+        },
+        "3.0",
+      );
+      expect(out).toEqual({
+        type: "string",
+        contentMediaType: "application/json",
+        contentSchema: { type: ["string", "null"] },
+      });
+    });
+
     it("does not recurse into example/examples/enum/default values", () => {
       const out = translateSchemaDialect(
         {
@@ -205,12 +221,8 @@ describe("translateSchemaDialect — OpenAPI 3.0 → JSON Schema 2020-12", () =>
     });
   });
 
-  describe("stray-nullable salvage (non-3.0 versions)", () => {
-    // Parity with the Go synthesizer: the wild's 3.1 documents routinely
-    // carry 3.0's removed nullable keyword (DRF pagination schemas via
-    // drf-spectacular — PokeAPI ships 132 of them), and preserved verbatim
-    // it silently rejects the very nulls the author declared.
-    it("translates a stray 3.1 nullable and drops the keyword", () => {
+  describe("nullable outside the 3.0 dialect", () => {
+    it("preserves a 3.1 nullable annotation without widening the type", () => {
       const input = {
         type: ["string", "null"],
         properties: { x: { type: "string", nullable: true, format: "uri" } },
@@ -218,18 +230,19 @@ describe("translateSchemaDialect — OpenAPI 3.0 → JSON Schema 2020-12", () =>
       const out = translateSchemaDialect(input, "3.1") as Record<string, unknown>;
       expect(out.type).toEqual(["string", "null"]);
       expect((out.properties as Record<string, unknown>).x).toEqual({
-        type: ["string", "null"],
+        type: "string",
+        nullable: true,
         format: "uri",
       });
     });
 
-    it("drops a stray nullable without a type", () => {
+    it("preserves nullable without inventing a type", () => {
       const input = {
         type: ["string", "null"],
         properties: { x: { nullable: true } },
       };
       const out = translateSchemaDialect(input, "3.1") as Record<string, unknown>;
-      expect((out.properties as Record<string, unknown>).x).toEqual({});
+      expect((out.properties as Record<string, unknown>).x).toEqual({ nullable: true });
     });
 
     it("leaves 3.1 exclusiveMinimum untouched (already numeric in 2020-12)", () => {
@@ -238,10 +251,10 @@ describe("translateSchemaDialect — OpenAPI 3.0 → JSON Schema 2020-12", () =>
       expect(out).toEqual({ type: "integer", exclusiveMinimum: 5 });
     });
 
-    it("salvages nullable under unknown versions too", () => {
+    it("preserves nullable under unknown versions too", () => {
       const input = { type: "string", nullable: true };
       const out = translateSchemaDialect(input, "4.0") as Record<string, unknown>;
-      expect(out).toEqual({ type: ["string", "null"] });
+      expect(out).toEqual({ type: "string", nullable: true });
     });
 
     it("returns non-object schemas unchanged", () => {

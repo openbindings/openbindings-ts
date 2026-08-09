@@ -114,6 +114,30 @@ describe("dereference — document-root ref", () => {
   });
 });
 
+describe("dereference — format-scoped sibling merge", () => {
+  it("keeps target-wins by default and permits an adapter-local override", async () => {
+    const document = {
+      target: { description: "target", structural: "target" },
+      use: {
+        $ref: "#/target",
+        description: "reference",
+        structural: "reference",
+        marker: true,
+      },
+    };
+
+    const ordinary = await dereference<Record<string, Record<string, unknown>>>(document);
+    expect(ordinary.use).toEqual({ description: "target", structural: "target", marker: true });
+
+    const adapted = await dereference<Record<string, Record<string, unknown>>>(document, {
+      mergeRefSiblings: (target, reference) => reference.marker === true
+        ? { ...target, description: reference.description }
+        : undefined,
+    });
+    expect(adapted.use).toEqual({ description: "reference", structural: "target" });
+  });
+});
+
 describe("dereference — RFC 6901 pointer evaluation", () => {
   it("decodes URI fragments, escaped tokens, and the empty property name", async () => {
     const doc = {

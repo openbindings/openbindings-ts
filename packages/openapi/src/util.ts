@@ -2,6 +2,7 @@ import type { OpenAPIDocument, OpenAPIParameter } from "./types.js";
 import { VALID_METHODS } from "./constants.js";
 import { dereference } from "@openbindings/sdk";
 import yaml from "js-yaml";
+import { OpenAPIRefSiblingNormalizer } from "./ref-siblings.js";
 
 // The u flag makes the class match whole code points, so an astral-plane
 // character replaces as one underscore, not one per surrogate half
@@ -121,7 +122,12 @@ export function buildJsonPointerRef(path: string, method: string): string {
 export async function loadOpenAPIDocument(
   location?: string,
   content?: unknown,
-  options?: { signal?: AbortSignal; allowExternalRefs?: boolean },
+  options?: {
+    signal?: AbortSignal;
+    allowExternalRefs?: boolean;
+    /** Refuse schemas whose dialect cannot be projected faithfully into OBI. */
+    requirePortableSchemaDialect?: boolean;
+  },
   fetchFn?: typeof globalThis.fetch,
 ): Promise<OpenAPIDocument> {
   // `location`, when present, must be an absolute URI (OAPI-D-02) —
@@ -129,6 +135,7 @@ export async function loadOpenAPIDocument(
   // A bare filesystem path is refused loudly before any fetch (the Go
   // loader's posture; the former "local tooling" lenience is gone).
   if (location) validateDocumentAddress(location);
+  let retrievalLocation = location;
 
   let raw: unknown;
   if (content !== undefined) {
@@ -146,6 +153,7 @@ export async function loadOpenAPIDocument(
         `failed to fetch ${location}: ${resp.status} ${resp.statusText}`,
       );
     }
+    retrievalLocation = resp.url || location;
 
     let text: string;
     try {
@@ -166,6 +174,16 @@ export async function loadOpenAPIDocument(
   }
 
   checkAcceptedOpenAPIVersion(raw);
+  const openapiVersion = (raw as Record<string, unknown>).openapi as string;
+  const normalizer = new OpenAPIRefSiblingNormalizer(
+    openapiVersion,
+    options?.requirePortableSchemaDialect === true,
+  );
+  const normalized = normalizer.normalize(
+    raw,
+    retrievalLocation,
+    location && location !== retrievalLocation ? [location] : [],
+  );
 
   const allowExternalRefs = options?.allowExternalRefs ?? true;
   let refFetch: typeof globalThis.fetch;
@@ -176,12 +194,47 @@ export async function loadOpenAPIDocument(
   } else {
     refFetch = fetchFn ?? fetch;
   }
-  return dereference<OpenAPIDocument>(raw as Record<string, unknown>, {
-    baseUrl: location,
+  refFetch = normalizeExternalRefFetch(refFetch, normalizer);
+  const dereferenced = await dereference<OpenAPIDocument>(normalized as Record<string, unknown>, {
+    baseUrl: retrievalLocation,
     parse: parseJSONOrYAML,
     signal: options?.signal,
     fetch: refFetch,
+    mergeRefSiblings: (target, reference) => normalizer.mergeReferenceObject(target, reference),
   });
+  normalizer.restore(dereferenced);
+  return dereferenced;
+}
+
+/**
+ * Normalizes each fetched reference resource while both its requested and
+ * final retrieval URI are available. The requested URI locates target-kind
+ * hints recorded by the referring document; the final URI is the base for
+ * nested relative references after redirects.
+ */
+function normalizeExternalRefFetch(
+  real: typeof globalThis.fetch,
+  normalizer: OpenAPIRefSiblingNormalizer,
+): typeof globalThis.fetch {
+  return async (input: RequestInfo | URL, init?: RequestInit) => {
+    const requested = input instanceof Request ? input.url : String(input);
+    const response = await real(input, init);
+    if (!response.ok) return response;
+    const retrieval = response.url || requested;
+    const parsed = parseJSONOrYAML(await response.text());
+    const normalized = normalizer.normalize(
+      parsed,
+      retrieval,
+      requested !== retrieval ? [requested] : [],
+    );
+    const wrapped = new Response(JSON.stringify(normalized), {
+      status: response.status,
+      statusText: response.statusText,
+      headers: response.headers,
+    });
+    Object.defineProperty(wrapped, "url", { value: retrieval });
+    return wrapped;
+  };
 }
 
 /**

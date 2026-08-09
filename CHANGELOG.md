@@ -4,6 +4,33 @@
 
 ### Changed
 
+- **OpenAPI security and request-channel handling now preserves complete
+  artifact alternatives.** Invocation selects one satisfiable,
+  collision-free Security Requirement Object instead of unioning OR
+  alternatives; OAuth requirements retain their authored scopes and usable
+  flow choices; undefined scheme references fail closed, unmapped reserved
+  auth families cannot be selected by same-named context fields, and ambient
+  credentials are never volunteered for an anonymous
+  operation; and processor-owned `Host`, `Content-Length`, and conflicting
+  raw/structured cookie sources refuse before dispatch. Synthesis excludes
+  parameter-content media revision 2 cannot faithfully carry. The generic
+  context helper now also enforces its existing reserved-`auth.*` rule, and
+  the generic dereferencer exposes an adapter-scoped sibling-merge hook; the
+  core OBI document model is unchanged.
+
+- **OpenAPI synthesis now projects schemas by data direction and source
+  edition.** Request contracts omit `readOnly` properties, response contracts
+  omit `writeOnly` properties, and nested, composed, and recursive required
+  sets remain coherent. OpenAPI 3.1 Schema Object `$ref` siblings compose with
+  the referenced schema, while 3.0 Reference Object siblings are ignored and
+  3.1 non-schema Reference Objects apply only their legal site-local
+  `summary`/`description` overrides; data-shaped references, IDs, and anchors
+  remain opaque. Unsupported custom schema dialects fail portable synthesis
+  honestly without globally disabling artifact-native invocation. The removed
+  3.0 `nullable` keyword widens types only in 3.0—under 3.1 it remains an inert
+  annotation instead of invented null acceptance. These are binding-local
+  projection and artifact-loader changes, not changes to the OBI model.
+
 - **OpenAPI invocation and synthesis now resolve complete multi-document
   descriptions through an injectable artifact resolver.** External Path Item,
   parameter, request-body, response, security, and schema references retain

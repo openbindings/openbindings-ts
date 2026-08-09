@@ -9,25 +9,16 @@
  *   - `{exclusiveMinimum: false}` (or with no `minimum`) → drop the keyword
  *   - same for `maximum` / `exclusiveMaximum`
  *
- * Translations performed for EVERY version:
+ * Additional translations performed for OpenAPI 3.0:
  *   - `{type: T, nullable: true}`        → `{type: [T, "null"]}`
  *   - `{type: [...], nullable: true}`    → `{type: [..., "null"]}`
  *   - `{nullable: true}` without `type`  → drop the keyword
  *   - `{nullable: false}`                → drop the keyword
  *
- * The nullable transform is deliberately NOT gated on 3.0 (parity with the
- * Go synthesizer, same rationale): OAS 3.1 removed the keyword, but the
- * median real-world 3.1 document still carries it — DRF hand-writes it into
- * pagination schemas and drf-spectacular forwards it verbatim even in 3.1
- * mode, so every DRF-backed 3.1 spec ships it (PokeAPI: 132 occurrences
- * across 54 of 100 operations). A 2020-12 validator ignores the unknown
- * keyword, leaving `type: string` to reject the very null the author
- * declared. The intent is unambiguous, and the schema-comparison profile
- * already normalizes nullable unconditionally.
- *
- * Other 3.1 keywords pass through unchanged (3.1 schemas are already
- * 2020-12); unknown versions get the nullable salvage only
- * (forward-compatible).
+ * In OpenAPI 3.1, `nullable` is not the 3.0 type modifier. It is preserved as
+ * an unknown annotation and MUST NOT invent null acceptance; authors express
+ * that with JSON Schema's `type` union. Other 3.1 keywords likewise pass
+ * through unchanged (3.1 schemas are already 2020-12).
  */
 export function translateSchemaDialect(
   schema: unknown,
@@ -64,6 +55,7 @@ const SCHEMA_BEARING_SINGLE_KEYS = new Set([
   "else",
   "propertyNames",
   "contains",
+  "contentSchema",
   "unevaluatedItems",
   "unevaluatedProperties",
 ]);
@@ -71,7 +63,7 @@ const SCHEMA_BEARING_SINGLE_KEYS = new Set([
 // The decycled schema is a DAG with shared subtrees; memoize so translation
 // preserves that sharing instead of re-expanding it combinatorially. One
 // cache per dialect mode: the same shared subtree translates differently
-// under 3.0 rules than under the version-independent nullable salvage.
+// under OpenAPI 3.0's nullable/exclusive-bound rules than under 3.1.
 const translatedLegacy = new WeakMap<object, unknown>();
 const translatedModern = new WeakMap<object, unknown>();
 
@@ -102,9 +94,11 @@ function translateObject(
   const out: Record<string, unknown> = {};
 
   for (const [k, v] of Object.entries(input)) {
-    // nullable never survives into the OBI in any version: translated into
-    // the type union when true (below), meaningless when false.
-    if (k === "nullable" || (legacy && (k === "exclusiveMinimum" || k === "exclusiveMaximum"))) {
+    // OpenAPI 3.0 nullable is translated into the type union when true
+    // (below), and dropped when false. In 3.1 it is only an unknown
+    // annotation, so the ordinary copy path preserves it without changing
+    // the accepted instance set.
+    if ((legacy && k === "nullable") || (legacy && (k === "exclusiveMinimum" || k === "exclusiveMaximum"))) {
       continue;
     }
     if (SCHEMA_BEARING_MAP_KEYS.has(k)) {
@@ -118,7 +112,7 @@ function translateObject(
     }
   }
 
-  if (input.nullable === true) {
+  if (legacy && input.nullable === true) {
     const type = input.type;
     if (typeof type === "string") {
       out.type = [type, "null"];

@@ -136,7 +136,7 @@ export class OpenAPIInvoker implements BindingInvoker {
     // pre-dispatch refusal before auth matters: no context to report.
     const target = preflightTarget(doc, args.ref, args.context, args.source.location);
     if (!target) return null;
-    return requiredContext(doc, target.op, args.context, target.baseURL);
+    return requiredContext(doc, target.op, args.context, target.baseURL, target.params);
   }
 
   private async run(

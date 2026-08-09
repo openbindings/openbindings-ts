@@ -21,6 +21,10 @@ import { effectiveParameters, unflattenableParam } from "./params.js";
 import { planAbstractInputRoutes, type AbstractInputRoutes } from "./input-routes-v2.js";
 import { translateSchemaDialect } from "./translate.js";
 import {
+  createOpenAPISchemaProjector,
+  type OpenAPISchemaProjector,
+} from "./schema-direction.js";
+import {
   buildJsonPointerRef,
   codePointCompare,
   componentSchemaNames,
@@ -31,6 +35,7 @@ import {
   sanitizeKey,
   uniqueKey,
 } from "./util.js";
+import { isSupportedOpenAPISchemaDialect } from "./ref-siblings.js";
 
 /**
  * A paths operation admitted by the artifact but unrepresentable under
@@ -76,7 +81,12 @@ export async function convertToInterface(
   // loadOpenAPIDocument fully dereferences (every $ref, internal and
   // external, matching Go's kin-openapi loader), so extracted schemas are
   // already inlined here.
-  const doc = await loadOpenAPIDocument(location, content, options, options?.fetch);
+  const doc = await loadOpenAPIDocument(
+    location,
+    content,
+    options,
+    options?.fetch,
+  );
   onDocument?.(doc);
   // The schema-dialect translation keys off the artifact's own declared
   // version (3.0 vs 3.1); the identifier stays exact and version-free.
@@ -139,6 +149,22 @@ export async function convertToInterface(
         throw unrealizableOperation(opKey, reason);
       }
 
+      const unsupportedParameter = unsupportedParameterContent(params);
+      if (unsupportedParameter) {
+        const reason = `parameter ${JSON.stringify(unsupportedParameter)} declares content with no faithful revision-2 carriage`;
+        if (onUnrealizable) {
+          onUnrealizable({
+            ref,
+            operationKey: opKey,
+            reasonCode: "openapi.parameter_content_excluded",
+            rule: "OAPI-P-02",
+            message: reason,
+          });
+          continue;
+        }
+        throw unrealizableOperation(opKey, reason);
+      }
+
       let requestPlans: BodyPlan[] = [];
       if (opObj.requestBody) {
         let planError: unknown;
@@ -188,6 +214,22 @@ export async function convertToInterface(
         }
       }
 
+      const dialectIssue = operationSchemaDialectIssue(doc, params, requestPlans, opObj);
+      if (dialectIssue) {
+        const reason = `${dialectIssue.side} schema inherits unsupported dialect ${JSON.stringify(dialectIssue.dialect)} and cannot be projected into OBI's JSON Schema 2020-12 contract`;
+        if (onUnrealizable) {
+          onUnrealizable({
+            ref,
+            operationKey: opKey,
+            reasonCode: "openapi.unsupported_schema_dialect",
+            rule: "OBI-D-06",
+            message: reason,
+          });
+          continue;
+        }
+        throw unrealizableOperation(opKey, reason);
+      }
+
       const obiOp: Operation = {
         description: opObj.description || opObj.summary || undefined,
         deprecated: opObj.deprecated || undefined,
@@ -202,15 +244,31 @@ export async function convertToInterface(
       // (OBI-D-16); translation then runs on an acyclic tree.
       const opPointer = `#/operations/${escapePointerSegment(opKey)}`;
       const routes = planAbstractInputRoutes(params, requestPlans);
-      const inputSchema = buildInputSchemaForPlans(opObj, params, requestPlans, routes);
+      const requestProjector = createOpenAPISchemaProjector("request", schemaNames);
+      const inputSchema = buildInputSchemaForPlans(
+        opObj,
+        params,
+        requestPlans,
+        routes,
+        requestProjector,
+      );
       if (inputSchema) {
-        const acyclicInput = decycleSchema(inputSchema, schemaNames, `${opPointer}/input`);
+        const acyclicInput = decycleSchema(
+          inputSchema,
+          requestProjector.componentNames,
+          `${opPointer}/input`,
+        );
         obiOp.input = translateSchemaDialect(acyclicInput, formatVersion) as JSONSchema;
       }
 
-      const outputSchema = buildOutputSchema(opObj);
+      const responseProjector = createOpenAPISchemaProjector("response", schemaNames);
+      const outputSchema = buildOutputSchema(opObj, responseProjector);
       if (outputSchema) {
-        const acyclicOutput = decycleSchema(outputSchema, schemaNames, `${opPointer}/output`);
+        const acyclicOutput = decycleSchema(
+          outputSchema,
+          responseProjector.componentNames,
+          `${opPointer}/output`,
+        );
         obiOp.output = translateSchemaDialect(acyclicOutput, formatVersion) as JSONSchema;
       }
 
@@ -246,6 +304,174 @@ function safeErrorMessage(value: unknown): string {
   } catch {
     return "unknown request-body planning error";
   }
+}
+
+interface OperationSchemaDialectIssue {
+  side: "input" | "output";
+  dialect: unknown;
+}
+
+interface SchemaDialectState {
+  portable: boolean;
+  dialect: unknown;
+}
+
+const PORTABLE_SCHEMA_MAP_KEYS = new Set([
+  "properties",
+  "patternProperties",
+  "$defs",
+  "definitions",
+  "dependentSchemas",
+]);
+
+const PORTABLE_SCHEMA_ARRAY_KEYS = new Set([
+  "oneOf",
+  "anyOf",
+  "allOf",
+  "prefixItems",
+]);
+
+const PORTABLE_SCHEMA_SINGLE_KEYS = new Set([
+  "items",
+  "additionalItems",
+  "additionalProperties",
+  "not",
+  "if",
+  "then",
+  "else",
+  "propertyNames",
+  "contains",
+  "contentSchema",
+  "unevaluatedItems",
+  "unevaluatedProperties",
+]);
+
+/**
+ * Finds the first artifact Schema Object that cannot be represented under
+ * core OBI-D-06. Dialect support is intentionally checked after loading and
+ * per operation: a custom OpenAPI document default is valid source syntax and
+ * cannot veto a schema-free operation, while a supported per-schema `$schema`
+ * override establishes a portable resource even under that custom default.
+ */
+function operationSchemaDialectIssue(
+  doc: OpenAPIDocument,
+  params: OpenAPIParameter[],
+  requestPlans: BodyPlan[],
+  op: OpenAPIOperation,
+): OperationSchemaDialectIssue | undefined {
+  if (majorMinor(doc.openapi ?? "3.0") !== "3.1") return undefined;
+
+  const documentDialect = doc.jsonSchemaDialect;
+  const inherited: SchemaDialectState = {
+    portable: documentDialect === undefined || isSupportedOpenAPISchemaDialect(documentDialect),
+    dialect: documentDialect ?? "https://spec.openapis.org/oas/3.1/dialect/base",
+  };
+
+  const inputRoots: unknown[] = [];
+  for (const param of params) {
+    if (param.schema && typeof param.schema === "object") {
+      inputRoots.push(param.schema);
+    } else if (param.content && typeof param.content === "object") {
+      for (const media of Object.values(param.content as Record<string, OpenAPIMediaType>)) {
+        if (media?.schema && typeof media.schema === "object") inputRoots.push(media.schema);
+      }
+    }
+  }
+  for (const plan of requestPlans) {
+    const schema = plan.media?.schema;
+    if (schema && typeof schema === "object") inputRoots.push(schema);
+  }
+  for (const schema of inputRoots) {
+    const dialect = firstUnsupportedSchemaDialect(schema, inherited, new WeakMap());
+    if (dialect.found) return { side: "input", dialect: dialect.value };
+  }
+
+  for (const schema of projectedSuccessSchemaRoots(op)) {
+    const dialect = firstUnsupportedSchemaDialect(schema, inherited, new WeakMap());
+    if (dialect.found) return { side: "output", dialect: dialect.value };
+  }
+  return undefined;
+}
+
+interface UnsupportedDialectResult {
+  found: boolean;
+  value?: unknown;
+}
+
+function firstUnsupportedSchemaDialect(
+  node: unknown,
+  inherited: SchemaDialectState,
+  seen: WeakMap<object, Set<boolean>>,
+): UnsupportedDialectResult {
+  if (node === null || typeof node !== "object") return { found: false };
+  let states = seen.get(node);
+  if (!states) {
+    states = new Set();
+    seen.set(node, states);
+  }
+  if (states.has(inherited.portable)) return { found: false };
+  states.add(inherited.portable);
+
+  if (Array.isArray(node)) {
+    for (const item of node) {
+      const issue = firstUnsupportedSchemaDialect(item, inherited, seen);
+      if (issue.found) return issue;
+    }
+    return { found: false };
+  }
+
+  const schema = node as Record<string, unknown>;
+  const local: SchemaDialectState = schema.$schema === undefined
+    ? inherited
+    : {
+      portable: isSupportedOpenAPISchemaDialect(schema.$schema),
+      dialect: schema.$schema,
+    };
+  if (!local.portable) return { found: true, value: local.dialect };
+
+  for (const [key, child] of Object.entries(schema)) {
+    if (PORTABLE_SCHEMA_MAP_KEYS.has(key)) {
+      if (!child || typeof child !== "object" || Array.isArray(child)) continue;
+      for (const nested of Object.values(child as Record<string, unknown>)) {
+        const issue = firstUnsupportedSchemaDialect(nested, local, seen);
+        if (issue.found) return issue;
+      }
+    } else if (PORTABLE_SCHEMA_ARRAY_KEYS.has(key)) {
+      if (!Array.isArray(child)) continue;
+      for (const nested of child) {
+        const issue = firstUnsupportedSchemaDialect(nested, local, seen);
+        if (issue.found) return issue;
+      }
+    } else if (PORTABLE_SCHEMA_SINGLE_KEYS.has(key)) {
+      const issue = firstUnsupportedSchemaDialect(child, local, seen);
+      if (issue.found) return issue;
+    }
+  }
+  return { found: false };
+}
+
+/** Returns only source schemas that buildOutputSchema can actually project. */
+function projectedSuccessSchemaRoots(op: OpenAPIOperation): unknown[] {
+  if (!op.responses) return [];
+  const keys = Object.keys(op.responses);
+  const hasRange = Object.hasOwn(op.responses, "2XX");
+  const exact = keys.filter((key) => /^2[0-9][0-9]$/.test(key));
+  const schemas: unknown[] = [];
+  for (const key of keys.sort(codePointCompare)) {
+    if (!/^2[0-9][0-9]$/.test(key) && key !== "2XX" && !(key === "default" && !hasRange && exact.length < 100)) continue;
+    const response = op.responses[key];
+    if (!response?.content) continue;
+    for (const [mediaKey, media] of Object.entries(response.content)) {
+      let parsed;
+      try { parsed = parseMediaType(mediaKey); } catch { continue; }
+      if (!isJSONMediaType(parsed.base)) continue;
+      // One unconstrained JSON lane makes the entire synthesized output
+      // unconstrained, so no response schema is projected at all.
+      if (!media.schema) return [];
+      schemas.push(media.schema);
+    }
+  }
+  return schemas;
 }
 
 /**
@@ -288,13 +514,14 @@ function buildInputSchemaForPlans(
   allParams: OpenAPIParameter[],
   requestPlans: BodyPlan[],
   routes: AbstractInputRoutes,
+  projector: OpenAPISchemaProjector,
 ): JSONSchema | undefined {
-  if (!op.requestBody) return buildInputSchema(op, allParams, undefined, routes);
+  if (!op.requestBody) return buildInputSchema(op, allParams, undefined, routes, projector);
   const variants = requestPlans
-    .map((plan) => buildInputSchema(op, allParams, plan, routes))
+    .map((plan) => buildInputSchema(op, allParams, plan, routes, projector))
     .filter((schema): schema is JSONSchema => schema !== undefined);
   if (!op.requestBody.required) {
-    const parameterOnly = buildInputSchema(op, allParams, undefined, routes);
+    const parameterOnly = buildInputSchema(op, allParams, undefined, routes, projector);
     if (parameterOnly) variants.unshift(parameterOnly);
   }
   // cycleSafeKey: the variants may carry object cycles from recursive
@@ -313,6 +540,7 @@ function buildInputSchema(
   allParams: OpenAPIParameter[],
   requestPlan?: BodyPlan,
   routes: AbstractInputRoutes = planAbstractInputRoutes(allParams, requestPlan ? [requestPlan] : []),
+  projector: OpenAPISchemaProjector = createOpenAPISchemaProjector("request"),
 ): JSONSchema | undefined {
   const properties: Record<string, unknown> = {};
   const required: string[] = [];
@@ -322,7 +550,7 @@ function buildInputSchema(
 
   for (const param of allParams) {
     if (!param?.name) continue;
-    const prop = paramToSchema(param);
+    const prop = paramToSchema(param, projector);
     const field = routes.parameterField(param.in ?? "", param.name);
     if (prop) properties[field] = prop;
     if (param.required) required.push(field);
@@ -330,7 +558,9 @@ function buildInputSchema(
 
   if (op.requestBody && requestPlan) {
     const rb = op.requestBody;
-    const bodySchema = requestPlan.media?.schema ? { ...requestPlan.media.schema } : undefined;
+    const bodySchema = requestPlan.media?.schema
+      ? projector.project(requestPlan.media.schema) as Record<string, unknown>
+      : undefined;
     if (bodySchema) {
       const bodyShape = resolvedSynthesisBodyShape(bodySchema, new Set());
       const bodyProps = bodyShape.properties;
@@ -431,13 +661,18 @@ function resolvedSynthesisBodyShape(
   }
 }
 
-function paramToSchema(param: OpenAPIParameter): Record<string, unknown> | undefined {
+function paramToSchema(
+  param: OpenAPIParameter,
+  projector: OpenAPISchemaProjector,
+): Record<string, unknown> | undefined {
   let schema: Record<string, unknown>;
   if (param.schema && typeof param.schema === "object") {
-    schema = { ...param.schema };
+    schema = { ...(projector.project(param.schema) as Record<string, unknown>) };
   } else if (param.content && typeof param.content === "object") {
     const media = Object.values(param.content as Record<string, OpenAPIMediaType>)[0];
-    schema = media?.schema && typeof media.schema === "object" ? { ...media.schema } : { type: "string" };
+    schema = media?.schema && typeof media.schema === "object"
+      ? { ...(projector.project(media.schema) as Record<string, unknown>) }
+      : { type: "string" };
   } else {
     schema = { type: "string" };
   }
@@ -445,7 +680,31 @@ function paramToSchema(param: OpenAPIParameter): Record<string, unknown> | undef
   return schema;
 }
 
-function buildOutputSchema(op: OpenAPIOperation): JSONSchema | undefined {
+/**
+ * Returns the first content-form parameter whose single media declaration
+ * cannot be serialized by revision 2. Synthesis must not publish an operation
+ * that the binding is statically guaranteed to refuse when that parameter is
+ * used; tolerant synthesis excludes the complete target with durable evidence.
+ */
+function unsupportedParameterContent(params: OpenAPIParameter[]): string | undefined {
+  for (const param of params) {
+    if (!param?.name || !param.content || typeof param.content !== "object") continue;
+    const keys = Object.keys(param.content);
+    if (keys.length !== 1) return param.name;
+    try {
+      const media = parseMediaType(keys[0]!);
+      if (!isJSONMediaType(media.base) && media.base !== "text/plain") return param.name;
+    } catch {
+      return param.name;
+    }
+  }
+  return undefined;
+}
+
+function buildOutputSchema(
+  op: OpenAPIOperation,
+  projector: OpenAPISchemaProjector,
+): JSONSchema | undefined {
   if (!op.responses) return undefined;
   const keys = Object.keys(op.responses);
   const hasRange = Object.hasOwn(op.responses, "2XX");
@@ -462,7 +721,7 @@ function buildOutputSchema(op: OpenAPIOperation): JSONSchema | undefined {
         // A JSON success declaration without a schema can emit any JSON
         // value; the synthesized OBI must not make a narrower claim.
         if (!media.schema) return undefined;
-        schemas.push({ ...media.schema });
+        schemas.push(projector.project(media.schema) as Record<string, unknown>);
       } else {
         // Revision 1's builtin non-JSON response lane is text, including
         // one string per SSE event, irrespective of an OAS schema claim.
