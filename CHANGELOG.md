@@ -4,6 +4,16 @@
 
 ### Changed
 
+- **OpenAPI invocation and synthesis now resolve complete multi-document
+  descriptions through an injectable artifact resolver.** External Path Item,
+  parameter, request-body, response, security, and schema references retain
+  their own document scope; JSON Schema `$id` resources and anchors are
+  indexed before traversal; redirects contribute their final retrieval URI;
+  retrieval is cached and abortable; and dangling references fail loudly
+  instead of producing a partially dereferenced contract. Resolver
+  configuration remains binding-private and does not alter the protocol-blind
+  OBI document model.
+
 - **`@openbindings/openapi` now defaults to `openbindings.openapi@2` and
   preserves same-named application inputs.** Synthesis retains unique author
   names, assigns deterministic neutral suffixes only for collisions, and uses

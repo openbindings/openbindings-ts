@@ -29,7 +29,14 @@ describe("portable OpenAPI processor scenarios", () => {
   for (const scenario of corpus.scenarios) {
     it(scenario.id, async () => {
       const observation = await runScenario(scenario);
-      expect(() => matchProcessorObservation(scenario, observation)).not.toThrow();
+      try {
+        matchProcessorObservation(scenario, observation);
+      } catch (error: unknown) {
+        throw new Error(
+          `${error instanceof Error ? error.message : String(error)}\nobservation: ${JSON.stringify(observation)}`,
+          { cause: error },
+        );
+      }
     });
   }
 });
@@ -50,10 +57,18 @@ async function runScenario(
   const dispatches: Array<Record<string, unknown>> = [];
   const peer = scenario.given.peer ?? {};
   const fetchMock: typeof fetch = async (input, init) => {
+    const url = input instanceof Request ? input.url : String(input);
+    const resource = scenario.given.resources?.[url];
+    if (resource !== undefined) {
+      return new Response(
+        typeof resource === "string" ? resource : JSON.stringify(resource),
+        { status: 200 },
+      );
+    }
     const headers = new Headers(init?.headers);
     const dispatch: Record<string, unknown> = {
       method: init?.method ?? "GET",
-      url: input instanceof Request ? input.url : String(input),
+      url,
       headers: normalizedHeaders(headers),
     };
     const body = await observedBody(init?.body);
@@ -90,7 +105,7 @@ async function runScenario(
   const joined = scenarioFile.format === "openbindings.invocation-fidelity-scenarios@1";
   const call = joined
     ? new OperationInvoker([new OpenAPIInvoker()], { fetch: fetchMock }).invoke(
-      await new OpenAPISynthesizer().synthesizeInterface({ sources: [invocationSource] }),
+      await new OpenAPISynthesizer({ fetch: fetchMock }).synthesizeInterface({ sources: [invocationSource] }),
       operationSignature(fidelityOperationId(source.content)),
       { context },
     )

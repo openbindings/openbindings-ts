@@ -27,6 +27,8 @@ export interface ProcessorScenario {
     invocation: Record<string, unknown> & { inputPresent: boolean };
     peer?: Record<string, unknown>;
     runtime?: Record<string, unknown>;
+    /** Closed artifact dependency set supplied to a family adapter's resolver. */
+    resources?: Record<string, unknown>;
   };
   expected: ProcessorExpected[];
 }

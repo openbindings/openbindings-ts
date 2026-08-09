@@ -63,24 +63,16 @@ function resolvePointer(root: Record<string, unknown>, pointer: string): unknown
   return current;
 }
 
-/** Split a $ref into [url, fragment]. Internal refs return ["", pointer]. */
-function splitRef(ref: string): [string, string] {
-  if (ref.startsWith("#")) return ["", ref];
-  const hashIdx = ref.indexOf("#");
-  if (hashIdx === -1) return [ref, ""];
-  return [ref.slice(0, hashIdx), ref.slice(hashIdx)];
+function withoutFragment(uri: string): string {
+  const hash = uri.indexOf("#");
+  return hash < 0 ? uri : uri.slice(0, hash);
 }
 
-/** Resolve a possibly-relative URL against a base. */
-function resolveUrl(base: string | undefined, relative: string): string {
-  if (relative.startsWith("http://") || relative.startsWith("https://")) {
-    return relative;
-  }
-  if (!base) return relative;
+function resolveURI(base: string | undefined, reference: string): string | undefined {
   try {
-    return new URL(relative, base).href;
+    return base ? new URL(reference, base).href : new URL(reference).href;
   } catch {
-    return relative;
+    return undefined;
   }
 }
 
@@ -100,13 +92,34 @@ async function fetchDocument(
   doFetch: typeof globalThis.fetch,
   parse: (text: string) => unknown,
   signal?: AbortSignal,
-): Promise<Record<string, unknown>> {
+): Promise<{ document: Record<string, unknown>; retrievalURI: string }> {
   const resp = await doFetch(url, { signal });
   if (!resp.ok) {
     throw new Error(`failed to fetch $ref ${url}: ${resp.status}`);
   }
   const text = await resp.text();
-  return parse(text) as Record<string, unknown>;
+  const parsed = parse(text);
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error(`external $ref ${url} did not return an object document`);
+  }
+  return {
+    document: parsed as Record<string, unknown>,
+    // Fetch exposes the final retrieval URI after redirects. When a test or
+    // host fetch implementation cannot provide it, the requested URI remains
+    // the only available base.
+    retrievalURI: resp.url || url,
+  };
+}
+
+interface ResourceScope {
+  root: Record<string, unknown>;
+  baseURI?: string;
+  anchors: Map<string, unknown>;
+}
+
+interface DocumentContext {
+  root: Record<string, unknown>;
+  rootScope: ResourceScope;
 }
 
 /**
@@ -131,20 +144,88 @@ export async function dereference<T = unknown>(
   // output nodes back to the input, contradicting the no-mutate contract above.
   const cloned = structuredClone(doc);
 
-  // Cache of fetched + dereferenced external documents.
-  const externalCache = new Map<string, Record<string, unknown>>();
+  // Every document is indexed before traversal. OAS 3.1 requires complete
+  // document parsing because a later $id can establish the resource/base that
+  // an earlier reference denotes. The maps also keep fragment-only references
+  // inside an external document scoped to THAT document, not the entrypoint.
+  const scopeByNode = new WeakMap<object, ResourceScope>();
+  const resourcesByURI = new Map<string, ResourceScope>();
 
-  async function resolveExternal(url: string): Promise<Record<string, unknown>> {
-    const cached = externalCache.get(url);
-    if (cached) return cached;
+  function registerDocument(
+    root: Record<string, unknown>,
+    retrievalURI?: string,
+    requestedURI?: string,
+  ): DocumentContext {
+    const rootScope: ResourceScope = {
+      root,
+      baseURI: retrievalURI ? withoutFragment(retrievalURI) : undefined,
+      anchors: new Map(),
+    };
+    if (rootScope.baseURI) resourcesByURI.set(rootScope.baseURI, rootScope);
+    if (requestedURI) resourcesByURI.set(withoutFragment(requestedURI), rootScope);
 
-    const raw = await fetchDocument(url, doFetch, parse, signal);
-    // Placeholder to break circular external refs.
-    externalCache.set(url, raw);
+    const seen = new WeakSet<object>();
+    const index = (node: unknown, inherited: ResourceScope): void => {
+      if (node === null || typeof node !== "object" || seen.has(node)) return;
+      seen.add(node);
 
-    const resolved = await walkAsync(raw, url) as Record<string, unknown>;
-    externalCache.set(url, resolved);
-    return resolved;
+      if (Array.isArray(node)) {
+        scopeByNode.set(node, inherited);
+        for (const value of node) index(value, inherited);
+        return;
+      }
+
+      const object = node as Record<string, unknown>;
+      let scope = inherited;
+      if (typeof object.$id === "string") {
+        const resolvedID = resolveURI(inherited.baseURI, object.$id);
+        scope = {
+          root: object,
+          baseURI: resolvedID ? withoutFragment(resolvedID) : undefined,
+          anchors: new Map(),
+        };
+        if (scope.baseURI) resourcesByURI.set(scope.baseURI, scope);
+      }
+      scopeByNode.set(object, scope);
+      if (typeof object.$anchor === "string") {
+        scope.anchors.set(object.$anchor, object);
+      }
+      if (typeof object.$dynamicAnchor === "string") {
+        scope.anchors.set(object.$dynamicAnchor, object);
+      }
+      for (const value of Object.values(object)) index(value, scope);
+    };
+    index(root, rootScope);
+    return { root, rootScope: scopeByNode.get(root) ?? rootScope };
+  }
+
+  const entryContext = registerDocument(cloned, baseUrl);
+
+  interface ExternalRecord {
+    context?: DocumentContext;
+    ready?: Promise<DocumentContext>;
+  }
+  const externalCache = new Map<string, ExternalRecord>();
+
+  async function resolveExternal(url: string): Promise<DocumentContext> {
+    const key = withoutFragment(url);
+    const cached = externalCache.get(key);
+    if (cached?.context) return cached.context;
+    if (cached?.ready) return cached.ready;
+
+    const record: ExternalRecord = {};
+    externalCache.set(key, record);
+    record.ready = (async () => {
+      const fetched = await fetchDocument(key, doFetch, parse, signal);
+      const context = registerDocument(fetched.document, fetched.retrievalURI, key);
+      // Publish the parsed/indexed document before walking it. A circular
+      // external edge can now resolve back to this object graph without
+      // awaiting itself; resolvedNodes below terminates the object cycle.
+      record.context = context;
+      await walkAsync(context.root, context);
+      return context;
+    })();
+    return record.ready;
   }
 
   // A node may be reached through several refs, including through an alias
@@ -154,14 +235,52 @@ export async function dereference<T = unknown>(
   // was returned to a different parent.
   const resolvedNodes = new Map<object, unknown>();
 
-  async function walkAsync(node: unknown, currentBase?: string): Promise<unknown> {
+  function resolveFragment(scope: ResourceScope, fragment: string): unknown {
+    if (fragment === "" || fragment === "#") return scope.root;
+    let decoded: string;
+    try {
+      decoded = decodeURIComponent(fragment.startsWith("#") ? fragment.slice(1) : fragment);
+    } catch {
+      return undefined;
+    }
+    if (decoded.startsWith("/")) return resolvePointer(scope.root, `#${decoded}`);
+    return scope.anchors.get(decoded);
+  }
+
+  async function resolveReference(
+    ref: string,
+    owner: Record<string, unknown>,
+    document: DocumentContext,
+  ): Promise<unknown> {
+    const scope = scopeByNode.get(owner) ?? document.rootScope;
+    if (ref.startsWith("#")) return resolveFragment(scope, ref);
+
+    const absolute = resolveURI(scope.baseURI, ref);
+    if (!absolute) {
+      throw new Error(
+        `reference ${JSON.stringify(ref)} cannot resolve without a base URI; the document must be self-contained or supplied with a base`,
+      );
+    }
+    const hash = absolute.indexOf("#");
+    const resourceURI = hash < 0 ? absolute : absolute.slice(0, hash);
+    const fragment = hash < 0 ? "" : absolute.slice(hash);
+
+    let resource = resourcesByURI.get(resourceURI);
+    if (!resource) {
+      const external = await resolveExternal(resourceURI);
+      resource = resourcesByURI.get(resourceURI) ?? external.rootScope;
+    }
+    return resolveFragment(resource, fragment);
+  }
+
+  async function walkAsync(node: unknown, document: DocumentContext): Promise<unknown> {
     if (node == null || typeof node !== "object") return node;
     if (resolvedNodes.has(node)) return resolvedNodes.get(node);
 
     if (Array.isArray(node)) {
       resolvedNodes.set(node, node);
       for (let i = 0; i < node.length; i++) {
-        node[i] = await walkAsync(node[i], currentBase);
+        node[i] = await walkAsync(node[i], document);
       }
       return node;
     }
@@ -172,27 +291,18 @@ export async function dereference<T = unknown>(
       // refs terminate. The reservation is replaced with the actual result
       // once the target (and any siblings) has resolved.
       resolvedNodes.set(obj, obj);
-      const [externalUrl, fragment] = splitRef(obj.$ref);
-
-      let targetDoc: Record<string, unknown>;
-      let resolvedBase = currentBase;
-
-      if (externalUrl) {
-        const fullUrl = resolveUrl(currentBase ?? baseUrl, externalUrl);
-        targetDoc = await resolveExternal(fullUrl);
-        resolvedBase = fullUrl;
-      } else {
-        targetDoc = cloned;
-      }
-
-      const target = fragment
-        ? resolvePointer(targetDoc, fragment)
-        : targetDoc;
+      const ref = obj.$ref;
+      const target = await resolveReference(ref, obj, document);
 
       if (target !== undefined) {
         const extraKeys = Object.keys(obj).filter((k) => k !== "$ref");
         if (extraKeys.length > 0 && typeof target === "object" && target !== null) {
           const merged = { ...target } as Record<string, unknown>;
+          // A synthetic sibling-merge object still belongs to the target's
+          // resource. Without carrying that scope, a target whose own root is
+          // another relative ref would incorrectly resolve from the referring
+          // document merely because the merge allocated a new object.
+          scopeByNode.set(merged, scopeByNode.get(target) ?? document.rootScope);
           for (const k of extraKeys) {
             if (!Object.hasOwn(merged, k)) {
               Object.defineProperty(merged, k, {
@@ -203,22 +313,23 @@ export async function dereference<T = unknown>(
               });
             }
           }
-          const resolved = await walkAsync(merged, resolvedBase);
+          const resolved = await walkAsync(merged, document);
           resolvedNodes.set(obj, resolved);
           return resolved;
         }
-        const resolved = await walkAsync(target, resolvedBase);
+        const resolved = await walkAsync(target, document);
         resolvedNodes.set(obj, resolved);
         return resolved;
       }
+      throw new Error(`unresolvable $ref ${JSON.stringify(ref)}`);
     }
 
     resolvedNodes.set(obj, obj);
     for (const key of Object.keys(obj)) {
-      obj[key] = await walkAsync(obj[key], currentBase);
+      obj[key] = await walkAsync(obj[key], document);
     }
     return obj;
   }
 
-  return await walkAsync(cloned, baseUrl) as T;
+  return await walkAsync(cloned, entryContext) as T;
 }

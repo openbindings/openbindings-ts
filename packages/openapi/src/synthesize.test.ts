@@ -378,6 +378,36 @@ describeMS("multi-source refusal", () => {
   });
 });
 
+describe("synthesizer artifact resolver", () => {
+  it("uses the injected fetch implementation for external reference closure", async () => {
+    const requests: string[] = [];
+    const fetch: typeof globalThis.fetch = async (input) => {
+      const url = String(input);
+      requests.push(url);
+      if (url !== "https://description.example/path-item.yaml") {
+        return new Response("missing", { status: 404 });
+      }
+      return new Response(`get:
+  operationId: externalGet
+  responses: {"200": {description: ok}}
+`, { status: 200 });
+    };
+    const iface = await new OpenAPISynthesizer({ fetch }).synthesizeInterface({
+      sources: [{
+        bindingSpec: "openbindings.openapi@2",
+        location: "https://description.example/openapi.yaml",
+        content: `openapi: 3.1.2
+info: {title: External, version: "1"}
+paths: {/items: {$ref: "./path-item.yaml"}}
+`,
+      }],
+    });
+
+    expect(iface.operations.externalGet).toBeDefined();
+    expect(requests).toEqual(["https://description.example/path-item.yaml"]);
+  });
+});
+
 describe("synthesis coverage", () => {
   it("accounts for request alternatives and reverse interactions", async () => {
     const result = await new OpenAPISynthesizer().synthesizeInterfaceWithCoverage({

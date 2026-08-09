@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseRef, buildJsonPointerRef, sanitizeKey, uniqueKey, mergeParameters } from "./util.js";
+import { parseRef, buildJsonPointerRef, sanitizeKey, uniqueKey, mergeParameters, loadOpenAPIDocument } from "./util.js";
 
 describe("parseRef", () => {
   it("parses a standard JSON pointer ref", () => {
@@ -141,5 +141,44 @@ describe("mergeParameters", () => {
   it("handles undefined inputs gracefully", () => {
     expect(mergeParameters(undefined, undefined)).toEqual([]);
     expect(mergeParameters(undefined, [{ name: "x", in: "query" }])).toHaveLength(1);
+  });
+});
+
+describe("loadOpenAPIDocument reference closure", () => {
+  it("keeps fragment-only references inside an external Path Item scoped to its document", async () => {
+    const root = {
+      openapi: "3.1.2",
+      info: { title: "t", version: "1" },
+      paths: { "/items": { $ref: "./path-item.json" } },
+    };
+    const external = {
+      post: {
+        parameters: [{ $ref: "#/Trace" }],
+        requestBody: { $ref: "#/Create" },
+        responses: { "200": { $ref: "#/Created" } },
+      },
+      Trace: { name: "trace", in: "query", schema: { type: "string" } },
+      Create: {
+        required: true,
+        content: { "application/json": { schema: { type: "object" } } },
+      },
+      Created: { description: "ok" },
+    };
+    const fetch: typeof globalThis.fetch = async (input) => {
+      return String(input) === "https://description.example/path-item.json"
+        ? new Response(JSON.stringify(external), { status: 200 })
+        : new Response("missing", { status: 404 });
+    };
+
+    const loaded = await loadOpenAPIDocument(
+      "https://description.example/openapi.json",
+      root,
+      undefined,
+      fetch,
+    );
+    const post = loaded.paths?.["/items"]?.post;
+    expect(post?.parameters?.[0]).toMatchObject({ name: "trace", in: "query" });
+    expect(post?.requestBody).toMatchObject({ required: true });
+    expect(post?.responses?.["200"]).toMatchObject({ description: "ok" });
   });
 });

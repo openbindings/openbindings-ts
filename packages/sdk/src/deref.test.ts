@@ -138,37 +138,34 @@ describe("dereference — RFC 6901 pointer evaluation", () => {
   });
 
   it("rejects malformed array indexes and pointer syntax", async () => {
-    const doc = {
-      items: [{ value: "first" }],
-      valid: { $ref: "#/items/0" },
-      trailingJunk: { $ref: "#/items/0junk" },
-      leadingZero: { $ref: "#/items/00" },
-      invalidEscape: { $ref: "#/items/~2" },
-      missingSlash: { $ref: "#items" },
-    };
+    const root = { items: [{ value: "first" }] };
+    const valid = await dereference<Record<string, any>>({
+      ...root,
+      use: { $ref: "#/items/0" },
+    });
+    expect(valid.use.value).toBe("first");
 
-    const result = await dereference<Record<string, any>>(doc);
-
-    expect(result.valid.value).toBe("first");
-    expect(result.trailingJunk).toEqual({ $ref: "#/items/0junk" });
-    expect(result.leadingZero).toEqual({ $ref: "#/items/00" });
-    expect(result.invalidEscape).toEqual({ $ref: "#/items/~2" });
-    expect(result.missingSlash).toEqual({ $ref: "#items" });
+    for (const ref of ["#/items/0junk", "#/items/00", "#/items/~2", "#items"]) {
+      await expect(dereference({ ...root, use: { $ref: ref } })).rejects.toThrow(
+        "unresolvable $ref",
+      );
+    }
   });
 
   it("resolves only own properties, never Object.prototype members", async () => {
     const doc = {
       constructor: { value: "own" },
       own: { $ref: "#/constructor" },
-      inherited: { $ref: "#/toString" },
-      prototype: { $ref: "#/__proto__" },
     };
 
     const result = await dereference<Record<string, any>>(doc);
 
     expect(result.own.value).toBe("own");
-    expect(result.inherited).toEqual({ $ref: "#/toString" });
-    expect(result.prototype).toEqual({ $ref: "#/__proto__" });
+    for (const ref of ["#/toString", "#/__proto__"]) {
+      await expect(dereference({ use: { $ref: ref } })).rejects.toThrow(
+        "unresolvable $ref",
+      );
+    }
   });
 
   it("merges ref siblings as JSON properties without prototype mutation", async () => {
@@ -189,5 +186,97 @@ describe("dereference — RFC 6901 pointer evaluation", () => {
     expect(result.resolved.__proto__.polluted).toBe(true);
     expect(Object.getPrototypeOf(result.resolved)).toBe(Object.prototype);
     expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+  });
+});
+
+describe("dereference — multi-document resource scope", () => {
+  it("resolves fragment-only refs inside an external document against that external document", async () => {
+    const documents: Record<string, unknown> = {
+      "https://example.test/parts/operation.json": {
+        operation: {
+          parameter: { $ref: "#/definitions/trace" },
+        },
+        definitions: {
+          trace: { name: "trace", in: "query" },
+        },
+      },
+    };
+    const fetch: typeof globalThis.fetch = async (input) => {
+      const url = String(input);
+      const value = documents[url];
+      return value === undefined
+        ? new Response("missing", { status: 404 })
+        : new Response(JSON.stringify(value), { status: 200 });
+    };
+
+    const result = await dereference<Record<string, any>>(
+      { use: { $ref: "./parts/operation.json#/operation" } },
+      { baseUrl: "https://example.test/openapi.json", fetch },
+    );
+
+    expect(result.use.parameter).toEqual({ name: "trace", in: "query" });
+  });
+
+  it("keeps a sibling-merged external alias in the target resource scope", async () => {
+    const documents: Record<string, unknown> = {
+      "https://example.test/parts/alias.json": {
+        $ref: "./value.json",
+      },
+      "https://example.test/parts/value.json": {
+        type: "string",
+      },
+    };
+    const fetch: typeof globalThis.fetch = async (input) => {
+      const value = documents[String(input)];
+      return value === undefined
+        ? new Response("missing", { status: 404 })
+        : new Response(JSON.stringify(value), { status: 200 });
+    };
+
+    const result = await dereference<Record<string, any>>(
+      { use: { $ref: "./parts/alias.json", description: "named" } },
+      { baseUrl: "https://example.test/openapi.json", fetch },
+    );
+
+    expect(result.use).toEqual({ type: "string", description: "named" });
+  });
+
+  it("indexes the complete document before resolving $id resources and anchors", async () => {
+    let fetched = false;
+    const result = await dereference<Record<string, any>>(
+      {
+        byID: { $ref: "https://schemas.example/child.json" },
+        byAnchor: { $ref: "https://schemas.example/root.json#kind" },
+        definitions: {
+          root: {
+            $id: "https://schemas.example/root.json",
+            $defs: {
+              child: {
+                $id: "child.json",
+                type: "object",
+                properties: { name: { type: "string" } },
+              },
+              kind: { $anchor: "kind", enum: ["a", "b"] },
+            },
+          },
+        },
+      },
+      {
+        fetch: async () => {
+          fetched = true;
+          return new Response("missing", { status: 404 });
+        },
+      },
+    );
+
+    expect(fetched).toBe(false);
+    expect(result.byID.properties.name.type).toBe("string");
+    expect(result.byAnchor.enum).toEqual(["a", "b"]);
+  });
+
+  it("refuses a dangling pointer instead of returning a partially dereferenced graph", async () => {
+    await expect(
+      dereference({ use: { $ref: "#/missing" } }),
+    ).rejects.toThrow("unresolvable $ref");
   });
 });

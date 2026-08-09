@@ -67,7 +67,7 @@ export interface UnrealizableTarget {
 export async function convertToInterface(
   location?: string,
   content?: unknown,
-  options?: { signal?: AbortSignal },
+  options?: { signal?: AbortSignal; fetch?: typeof globalThis.fetch },
   onWarning?: (warning: SynthesizerWarning) => void,
   onDocument?: (document: OpenAPIDocument) => void,
   onUnrealizable?: (target: UnrealizableTarget) => void,
@@ -76,7 +76,7 @@ export async function convertToInterface(
   // loadOpenAPIDocument fully dereferences (every $ref, internal and
   // external, matching Go's kin-openapi loader), so extracted schemas are
   // already inlined here.
-  const doc = await loadOpenAPIDocument(location, content, options);
+  const doc = await loadOpenAPIDocument(location, content, options, options?.fetch);
   onDocument?.(doc);
   // The schema-dialect translation keys off the artifact's own declared
   // version (3.0 vs 3.1); the identifier stays exact and version-free.

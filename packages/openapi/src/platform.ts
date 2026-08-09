@@ -25,6 +25,7 @@ export function normalizeAuthoringLocation(
 export async function readAuthoringArtifact(
   location: string,
   signal?: AbortSignal,
+  fetchFn: typeof globalThis.fetch = globalThis.fetch,
 ): Promise<string> {
   const url = new URL(location);
   if (url.protocol !== "http:" && url.protocol !== "https:") {
@@ -32,7 +33,7 @@ export async function readAuthoringArtifact(
       `cannot embed ${location}: the portable synthesizer fetches HTTP(S); read the artifact in the host runtime and pass it as content`,
     );
   }
-  const response = await fetch(url, { signal });
+  const response = await fetchFn(url, { signal });
   if (!response.ok) {
     throw new Error(
       `failed to fetch ${location}: ${response.status} ${response.statusText}`,

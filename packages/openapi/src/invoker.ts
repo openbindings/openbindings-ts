@@ -166,6 +166,17 @@ export class OpenAPIInvoker implements BindingInvoker {
 
 /** Synthesizes OBInterface definitions from OpenAPI specification documents. */
 export class OpenAPISynthesizer implements InterfaceSynthesizer, CoverageSynthesizer, SourceInspector {
+  private readonly fetchFn: typeof globalThis.fetch;
+
+  /**
+   * Creates a synthesizer whose artifact retrievals, including external
+   * references, use the supplied fetch implementation. Resolver configuration
+   * is an implementation seam only and is never represented in the OBI.
+   */
+  constructor(options?: { fetch?: typeof globalThis.fetch }) {
+    this.fetchFn = options?.fetch ?? globalThis.fetch;
+  }
+
   /** Returns the binding specifications this synthesizer supports, by exact identifier. */
   bindingSpecs(): BindingSpecInfo[] {
     return [
@@ -232,13 +243,13 @@ export class OpenAPISynthesizer implements InterfaceSynthesizer, CoverageSynthes
     if (src.outputLocation) validateDocumentAddress(src.outputLocation);
     const location = normalizeAuthoringLocation(src.location);
     const artifactContent = src.content === undefined && src.embed && location
-      ? await readAuthoringArtifact(location, options?.signal)
+      ? await readAuthoringArtifact(location, options?.signal, this.fetchFn)
       : src.content;
     let document: OpenAPIDocument | undefined;
     const iface = await convertToInterface(
       location,
       artifactContent,
-      options,
+      { ...options, fetch: this.fetchFn },
       input.onWarning,
       (observed) => {
         document = observed;
@@ -273,7 +284,7 @@ export class OpenAPISynthesizer implements InterfaceSynthesizer, CoverageSynthes
     const iface = await convertToInterface(
       location,
       source.content,
-      options,
+      { ...options, fetch: this.fetchFn },
       undefined,
       undefined,
       () => {},
