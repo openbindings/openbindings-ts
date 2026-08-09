@@ -30,7 +30,7 @@ import {
   resolveOperation,
   concludeVerification,
 } from "../src/index.js";
-import { compileExampleSchema } from "../src/schema-validation.js";
+import { compileOperationSchema } from "../src/schema-validation.js";
 import type { OBInterface } from "../src/types.js";
 import type { RuleEvidenceStatus } from "../src/verification.js";
 
@@ -233,7 +233,7 @@ function evaluateSchemaCycle(
   const schema = side === "output" ? resolved.operation.output : resolved.operation.input;
   if (schema === undefined) throw new Error(`operation ${side} side has no schema`);
   try {
-    const validator = compileExampleSchema(schema, document.schemas);
+    const validator = compileOperationSchema(document, resolved.key, side === "output" ? "output" : "input");
     return validator.validate(scenario.given.value).valid ? "valid" : "instance-mismatch";
   } catch {
     return "resolver-error";
@@ -334,7 +334,7 @@ async function runToolScenario(
       const values = scenario.given.values as unknown[];
       let actual: string[];
       try {
-        const validator = compileExampleSchema(schema, document.schemas);
+        const validator = compileOperationSchema(document, resolved.key, side === "output" ? "output" : "input");
         actual = values.map((value) =>
           validator.validate(value).valid ? "valid" : "instance-mismatch",
         );

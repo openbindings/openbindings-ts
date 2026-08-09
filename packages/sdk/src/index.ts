@@ -132,7 +132,7 @@ export type { ValidateOptions } from "./validate.js";
 export { parseDocument, validateDocument, formatValidationErrors } from "./parse.js";
 
 export type { ValidationFailure } from "./schema-validation.js";
-export { compileEmbeddedSchema, compileExampleSchema, type CompiledSchema } from "./schema-validation.js";
+export { compileEmbeddedSchema, compileExampleSchema, compileOperationSchema, type CompiledSchema } from "./schema-validation.js";
 
 export {
   NoInvokerError,

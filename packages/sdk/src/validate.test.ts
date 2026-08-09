@@ -527,6 +527,26 @@ describe("validateInterface example validation edge cases (OBI-D-11)", () => {
     };
     expect(() => validateInterface(iface)).toThrow(/OBI-D-11/);
   });
+
+  it("validates examples with refs resolved from the OBI document root", () => {
+    const iface: OBInterface = {
+      openbindings: "0.2.0",
+      operations: {
+        greet: {
+          input: {
+            type: "object",
+            properties: {
+              name: { $ref: "#/operations/greet/input/$defs/Name" },
+            },
+            required: ["name"],
+            $defs: { Name: { type: "string" } },
+          },
+          examples: { bad: { input: { name: 42 } } },
+        },
+      },
+    };
+    expect(() => validateInterface(iface)).toThrow(/OBI-D-11/);
+  });
 });
 
 // OBI-T-04's refusal runs downward too: a version below the SDK's minimum is

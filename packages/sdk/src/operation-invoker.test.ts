@@ -685,6 +685,48 @@ describe("OBI-T-08 — output validation", () => {
 // ---------------------------------------------------------------------------
 
 describe("OBI-T-16 claim semantics", () => {
+  it("resolves an input $ref from the OBI document root", async () => {
+    const iface = testInterface();
+    iface.operations["getUser"].input = {
+      type: "object",
+      properties: {
+        id: { $ref: "#/operations/getUser/input/$defs/Identifier" },
+      },
+      required: ["id"],
+      additionalProperties: false,
+      $defs: { Identifier: { type: "string" } },
+    };
+
+    const op = makeInvoker();
+    const call = op.invoke(iface, operationSignature("getUser"));
+    await call.write({ id: "u1" });
+    await expect(single(call.outputs)).resolves.toEqual({ id: "u1", name: "Ada" });
+  });
+
+  it("resolves a streaming output $ref from the OBI document root before per-item validation", async () => {
+    const iface = testInterface();
+    iface.operations["watchTyped"].output = {
+      type: "object",
+      properties: {
+        n: { $ref: "#/operations/watchTyped/output/$defs/Count" },
+      },
+      required: ["n"],
+      $defs: { Count: { type: "number" } },
+    };
+
+    const op = makeInvoker();
+    const call = op.invoke(iface, operationSignature("watchTyped"));
+    const seen: unknown[] = [];
+    let caught: unknown;
+    try {
+      for await (const v of call.outputs) seen.push(v);
+    } catch (err) {
+      caught = err;
+    }
+    expect(seen).toEqual([{ n: 1 }]);
+    expect(caught).toMatchObject({ code: ERR_VALIDATION_FAILED });
+  });
+
   it("an unresolvable output schema graph is ERR_SCHEMA_UNRESOLVED, never partial validation", async () => {
     const iface = testInterface();
     iface.operations["watchTyped"].output = { $ref: "#/schemas/DoesNotExist" };

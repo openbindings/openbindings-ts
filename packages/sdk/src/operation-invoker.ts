@@ -40,7 +40,7 @@ import {
   ERR_TRANSFORM_ERROR,
   ERR_VALIDATION_FAILED,
 } from "./errcodes.js";
-import { buildSchemaDefs, compileExampleSchema, safeValidate , type CompiledSchema } from "./schema-validation.js";
+import { compileOperationSchema, safeValidate, type CompiledSchema } from "./schema-validation.js";
 import {
   type FieldRouter,
   type InvokeHooks,
@@ -285,7 +285,7 @@ export class OperationInvoker {
 
     const callerInv = new InvocationImpl<I, O>({
       signal: opts?.signal,
-      validateInput: makeInputValidator(op, obi, sig.key),
+      validateInput: makeInputValidator(op, obi, opKey),
     });
 
     // Both hook tiers snapshot at invoke entry ("resolved once" = immunity
@@ -448,15 +448,15 @@ export class OperationInvoker {
       return;
     }
 
-    // Compile the output schema once per invocation, over the complete
-    // statically reachable schema graph (every document schema rides as
-    // $defs). A graph that cannot be established is ERR_SCHEMA_UNRESOLVED —
+    // Compile the output schema once per invocation at its canonical address
+    // inside the OBI document, preserving the complete statically reachable
+    // schema graph. A graph that cannot be established is ERR_SCHEMA_UNRESOLVED —
     // the claim could not be evaluated — never partial validation
     // (OBI-T-16).
     let outputValidator: CompiledSchema | undefined;
     if (op.output != null) {
       try {
-        outputValidator = compileExampleSchema(op.output, buildSchemaDefs(iface.schemas));
+        outputValidator = compileOperationSchema(iface, binding.operation, "output");
       } catch (err) {
         callerInv.fireError(
           new InvocationError(
@@ -808,7 +808,7 @@ function makeInputValidator(
     if (!compiled) {
       compiled = true;
       try {
-        validator = compileExampleSchema(op.input!, buildSchemaDefs(iface.schemas));
+        validator = compileOperationSchema(iface, operationName, "input");
       } catch (err) {
         compileError = new InvocationError(
           ERR_SCHEMA_UNRESOLVED,

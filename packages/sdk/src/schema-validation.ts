@@ -214,7 +214,7 @@ export function validateExamplesAgainstOpSchemas(
     let outputValidator: CompiledSchema | undefined;
     if (op.input != null && !defsExternal && !schemaHasExternalRef(op.input)) {
       try {
-        inputValidator = compileExampleSchema(op.input, defs);
+        inputValidator = compileOperationSchema(iface, opKey, "input");
       } catch (err) {
         errs.push(
           `operations["${opKey}"].input: cannot compile schema: ${(err as Error).message} (OBI-D-11)`,
@@ -223,7 +223,7 @@ export function validateExamplesAgainstOpSchemas(
     }
     if (op.output != null && !defsExternal && !schemaHasExternalRef(op.output)) {
       try {
-        outputValidator = compileExampleSchema(op.output, defs);
+        outputValidator = compileOperationSchema(iface, opKey, "output");
       } catch (err) {
         errs.push(
           `operations["${opKey}"].output: cannot compile schema: ${(err as Error).message} (OBI-D-11)`,
@@ -277,21 +277,6 @@ function schemaHasExternalRef(value: unknown): boolean {
 }
 
 /**
- * Compiles a single operation schema with the document's schemas
- * exposed under $defs (so `$ref: "#/schemas/X"` references resolve).
- * Used by validateExamplesAgainstOpSchemas (OBI-D-11) and by
- * OperationInvoker (OBI-T-16).
- *
- * Enforcement at compile time, per the spec's boundary rules:
- * - the schema must conform to JSON Schema 2020-12 (meta-validation; a
- *   draft-4-form keyword is refused, never silently misread), and
- * - the schema must be fully resolvable, judged STATICALLY over the
- *   whole governing schema (T-07/T-08): an unresolvable `$ref` anywhere
- *   throws here, before any value is validated. "External" means not
- *   resolvable within the document — an absolute `$ref` matching an
- *   embedded schema's `$id` resolves locally (§10).
- */
-/**
  * Compiled-schema cache, keyed on the identity of the schema and its defs.
  *
  * Compilation meta-validates, checks static resolvability, and builds a
@@ -306,6 +291,99 @@ const compiledSchemaCache = new WeakMap<
   WeakMap<object, CompiledSchema>
 >();
 
+type OperationSchemaPosition = "input" | "output";
+
+/**
+ * Compiled operation schemas, keyed by OBI document identity and canonical
+ * operation/member address. The document is the JSON Schema resolution root;
+ * extracting the member and compiling it alone changes the meaning of legal
+ * same-document references such as
+ * `#/operations/list/output/$defs/Item` (OBI-D-16 / OBI-T-16).
+ */
+const compiledOperationSchemaCache = new WeakMap<
+  object,
+  Map<string, CompiledSchema>
+>();
+
+/**
+ * Compiles an operation input/output schema while preserving the complete OBI
+ * document as its resolution scope. `operationName` is the canonical map key,
+ * not an alias.
+ */
+export function compileOperationSchema(
+  iface: OBInterface,
+  operationName: string,
+  position: OperationSchemaPosition,
+): CompiledSchema {
+  const operation = iface.operations?.[operationName];
+  const schema = operation?.[position];
+  if (schema == null) {
+    throw new Error(`operation ${JSON.stringify(operationName)} has no ${position} schema`);
+  }
+
+  const cacheKey = `${operationName}\u0000${position}`;
+  const cached = compiledOperationSchemaCache.get(iface)?.get(cacheKey);
+  if (cached) return cached;
+
+  const document = structuredClone(iface) as Record<string, unknown>;
+  // The OBI root is a resolution container, not itself a JSON Schema. Ignore
+  // every root field that happens to spell a JSON Schema keyword; Core says
+  // unknown OBI fields are ignored, so (for example) an unknown root `type`
+  // must not constrain an operation value merely because a generic validator
+  // recognizes it. Non-keyword extension fields remain pointer-addressable.
+  stripDocumentRootSchemaKeywords(document);
+  document.$ref = `#/operations/${escapePointerToken(operationName)}/${position}`;
+
+  const compiled = compileDocumentRootSchema(
+    document,
+    operationSchemaRoots(document),
+  );
+  let entries = compiledOperationSchemaCache.get(iface);
+  if (!entries) {
+    entries = new Map();
+    compiledOperationSchemaCache.set(iface, entries);
+  }
+  entries.set(cacheKey, compiled);
+  return compiled;
+}
+
+function stripDocumentRootSchemaKeywords(document: Record<string, unknown>): void {
+  for (const keyword of OBI_BOUNDARY_DRAFT.keywords) {
+    delete document[keyword.keyword];
+  }
+  // Dialect/resource controls are not all represented as ordinary assertion
+  // or annotation keywords by validator backends.
+  for (const keyword of ["$id", "$schema", "$anchor", "$dynamicAnchor", "$vocabulary", "$comment"]) {
+    delete document[keyword];
+  }
+}
+
+function escapePointerToken(token: string): string {
+  return token.replaceAll("~", "~0").replaceAll("/", "~1");
+}
+
+/** Returns every Core-defined schema root in a cloned OBI document. */
+function operationSchemaRoots(document: Record<string, unknown>): unknown[] {
+  const roots: unknown[] = [];
+  const schemas = document.schemas;
+  if (isObj(schemas)) roots.push(...Object.values(schemas));
+  const operations = document.operations;
+  if (isObj(operations)) {
+    for (const operation of Object.values(operations)) {
+      if (!isObj(operation)) continue;
+      if (operation.input !== undefined) roots.push(operation.input);
+      if (operation.output !== undefined) roots.push(operation.output);
+    }
+  }
+  return roots;
+}
+
+/**
+ * Compiles an isolated schema with a named schema map exposed under `$defs`.
+ * This helper cannot preserve arbitrary references into an OBI document
+ * because it does not receive that document; interface-aware callers use
+ * compileOperationSchema instead.
+ */
 export function compileExampleSchema(
   schema: unknown,
   defs: Record<string, unknown> | undefined,
@@ -347,6 +425,55 @@ function compileExampleSchemaUncached(
     assertFullyResolvable(root as Record<string, unknown>);
   }
   return wrapNode(compileSchema(root as object, { drafts: [OBI_BOUNDARY_DRAFT] }));
+}
+
+/**
+ * Compiles a schema whose root is a JSON-Schema view of an OBI document. The
+ * injected root `$ref` selects the governing operation schema while leaving
+ * all document-root JSON Pointers intact. Reachable nodes are meta-validated
+ * individually because the Core fields that contain schemas are deliberately
+ * unknown keywords to a generic JSON Schema meta-validator.
+ */
+function compileDocumentRootSchema(
+  root: Record<string, unknown>,
+  schemaRoots: unknown[],
+): CompiledSchema {
+  assertFullyResolvable(root, schemaRoots, true);
+  const remotes = embeddedIDResources(schemaRoots);
+  const options = {
+    drafts: [OBI_BOUNDARY_DRAFT],
+    formatAssertion: false as const,
+  };
+  if (remotes.length > 0) {
+    const [first, ...rest] = remotes;
+    const remote = compileSchema(first!, options);
+    for (const resource of rest) {
+      remote.addRemoteSchema(String(resource.$id), resource);
+    }
+    return wrapNode(compileSchema(root, { ...options, remote }));
+  }
+  return wrapNode(compileSchema(root, {
+    ...options,
+  }));
+}
+
+/**
+ * Finds the outermost embedded resources beneath each Core-defined schema
+ * position. Once a resource is registered, the backend discovers nested `$id`
+ * resources through ordinary JSON Schema keyword traversal.
+ */
+function embeddedIDResources(schemaRoots: unknown[]): Record<string, unknown>[] {
+  const resources: Record<string, unknown>[] = [];
+  const visit = (node: unknown): void => {
+    if (!isObj(node)) return;
+    if (typeof node.$id === "string") {
+      resources.push(node);
+      return;
+    }
+    walkSchemaChildren(node, visit);
+  };
+  for (const root of schemaRoots) visit(root);
+  return resources;
 }
 
 /**
@@ -397,23 +524,45 @@ const isObj = (v: unknown): v is Record<string, unknown> =>
  * a dangling same-document ref there is OBI-D-16's document-level
  * concern, not an invocation refusal.
  */
-function assertFullyResolvable(root: Record<string, unknown>): void {
+function assertFullyResolvable(
+  root: Record<string, unknown>,
+  additionalSchemaRoots: unknown[] = [],
+  validateReachableSchemas = false,
+): void {
   // Pass 1 (lexical): collect embedded $id resources across the whole
   // compound — identity resolution is in-document wherever the resource
   // sits (§10), even inside an entry nothing references directly.
   const idResources = new Map<string, Record<string, unknown>>();
-  (function collectIds(node: unknown): void {
+  const collectIds = (node: unknown): void => {
     if (!isObj(node)) return;
     if (typeof node.$id === "string") idResources.set(node.$id.replace(/#$/, ""), node);
     walkSchemaChildren(node, collectIds);
-  })(root);
+  };
+  collectIds(root);
+  for (const schemaRoot of additionalSchemaRoots) collectIds(schemaRoot);
 
   // Pass 2 (reachable): follow keyword subschemas and $ref targets from
   // the governing root only.
   const visited = new Set<unknown>();
   (function visit(node: unknown, scope: Record<string, unknown>, base: string): void {
-    if (!isObj(node) || visited.has(node)) return;
+    if (typeof node === "boolean") return;
+    if (!isObj(node)) {
+      if (validateReachableSchemas) {
+        throw new Error(`schema does not conform to JSON Schema 2020-12: expected an object or boolean schema`);
+      }
+      return;
+    }
+    if (visited.has(node)) return;
     visited.add(node);
+    if (validateReachableSchemas) {
+      const meta = metaValidator().validate(node);
+      if (!meta.valid) {
+        const first = meta.failures[0] ?? { path: "", message: "schema violation" };
+        throw new Error(
+          `schema does not conform to JSON Schema 2020-12: ${first.path ? first.path + ": " : ""}${first.message}`,
+        );
+      }
+    }
     let currentScope = scope;
     let currentBase = base;
     if (typeof node.$id === "string") {
@@ -609,10 +758,6 @@ export function safeValidate(
 }
 
 /**
- * Builds the document's `schemas` map ready to be embedded under
- * `$defs`, with internal `#/schemas/` refs rewritten to `#/$defs/`.
- */
-/**
  * Memoised per `schemas` object. Building the defs deep-clones and rewrites
  * every document schema, and an invoker rebuilds it on every invocation — for
  * a document whose schemas are large that dominated the cost of making a call.
@@ -624,6 +769,10 @@ export function safeValidate(
  */
 const schemaDefsCache = new WeakMap<object, Record<string, unknown>>();
 
+/**
+ * Builds the document's `schemas` map ready to be embedded under `$defs`,
+ * with internal `#/schemas/` refs rewritten to `#/$defs/`.
+ */
 export function buildSchemaDefs(
   schemas: Record<string, unknown> | undefined,
 ): Record<string, unknown> | undefined {

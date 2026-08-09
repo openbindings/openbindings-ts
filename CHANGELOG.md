@@ -372,6 +372,17 @@
 
 ### Fixed
 
+- **Operation-boundary schema validation now preserves the OBI document as
+  the same-document reference root.** Input, output, and example validation
+  compile schemas at their canonical `#/operations/...` addresses instead of
+  extracting them into a synthetic root, so operation-local recursive
+  `$defs`, cross-operation pointers, escaped operation keys, named schemas,
+  and embedded absolute `$id` resources retain their JSON Schema meaning.
+  Schema-shaped unknown fields at the OBI root remain ignored rather than
+  accidentally constraining operation values.
+  `compileOperationSchema` exposes the same interface-aware boundary to
+  applications that drive binding invokers directly.
+
 - **Every published binding family now runs its shared D-rule corpus through
   the TypeScript package's own family lanes.** Connect, gRPC, and Usage gained
   the missing adapters, GraphQL rejoined the core corpus inventory, and the

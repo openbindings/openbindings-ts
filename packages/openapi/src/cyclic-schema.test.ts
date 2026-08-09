@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync, existsSync } from "node:fs";
-import { OpenAPISynthesizer } from "./invoker.js";
+import jsonata from "jsonata";
+import { OperationInvoker, compileOperationSchema, operationSignature, single } from "@openbindings/sdk";
+import { OpenAPIInvoker, OpenAPISynthesizer } from "./invoker.js";
 import { BINDING_SPEC } from "./constants.js";
 
 // A recursive component: Tree.children -> Tree. After full dereference this
@@ -10,6 +12,7 @@ import { BINDING_SPEC } from "./constants.js";
 const RECURSIVE_DOC = {
   openapi: "3.1.0",
   info: { title: "recursive", version: "1.0.0" },
+  servers: [{ url: "https://api.example.test" }],
   paths: {
     "/trees": {
       post: {
@@ -44,7 +47,7 @@ describe("cyclic schema synthesis (rev 2a)", () => {
   it("synthesizes a recursive component as $defs/$ref, JSON-serializable", async () => {
     const synth = new OpenAPISynthesizer();
     const result = await synth.synthesizeInterfaceWithCoverage({
-      sources: [{ bindingSpec: BINDING_SPEC, content: RECURSIVE_DOC }],
+      sources: [{ bindingSpec: BINDING_SPEC, content: structuredClone(RECURSIVE_DOC) }],
     });
     const op = result.interface.operations["createTree"];
     expect(op).toBeDefined();
@@ -63,6 +66,34 @@ describe("cyclic schema synthesis (rev 2a)", () => {
     const output = op.output as Record<string, any>;
     expect(JSON.stringify(output)).toContain('"#/operations/createTree/output/$defs/Tree"');
     expect(result.coverage.fullyRepresented).toBe(true);
+  });
+
+  it("invokes a synthesized recursive operation through the Core document-root schema boundary", async () => {
+    const iface = await new OpenAPISynthesizer().synthesizeInterface({
+      sources: [{ bindingSpec: BINDING_SPEC, content: structuredClone(RECURSIVE_DOC) }],
+    });
+    const tree = {
+      label: "root",
+      children: [{ label: "leaf", children: [] }],
+    };
+    expect(() =>
+      compileOperationSchema(structuredClone(iface), "createTree", "input"),
+    ).not.toThrow();
+    const fetch: typeof globalThis.fetch = async () =>
+      new Response(JSON.stringify(tree), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    const invoker = new OperationInvoker([new OpenAPIInvoker()], {
+      fetch,
+      transformEvaluator: {
+        evaluate: (expression, data) => jsonata(expression).evaluate(data),
+      },
+    });
+    const call = invoker.invoke(iface, operationSignature("createTree"));
+    await call.write(tree);
+    await call.close();
+    await expect(single(call.outputs)).resolves.toEqual(tree);
   });
 
   it("recovers a real-world cyclic artifact (corpus regression)", { timeout: 30000 }, async () => {
