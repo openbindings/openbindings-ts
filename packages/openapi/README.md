@@ -1,8 +1,16 @@
 # @openbindings/openapi
 
-OpenAPI 3.x binding invoker and interface synthesizer for the [OpenBindings](https://openbindings.com) TypeScript SDK.
+Thin OpenBindings adapter and interface synthesizer over the standalone
+[`@openbindings/openapi-client`](https://github.com/openbindings/openapi-client)
+OpenAPI 3.x document-driven client and execution engine.
 
 This package enables OpenBindings to invoke operations against OpenAPI specs and synthesize OBI documents from them. It reads OpenAPI 3.x documents, constructs HTTP requests, applies credentials via security schemes, and delivers results through the SDK's cardinality-agnostic `Invocation` handle.
+
+Applications that need faithful OpenAPI artifact invocation without an OBI
+can use `@openbindings/openapi-client` directly. This package owns OBI source,
+binding-invoker, context/frame, coverage, and synthesis adaptation; the runtime
+owns OpenAPI loading, operation resolution, HTTP request/response behavior,
+and SSE lifecycle.
 
 See the [spec](https://github.com/openbindings/spec) and the [invocation pattern](https://openbindings.com/spec/invocation-pattern) for how binding invokers and interface synthesizers fit into the OpenBindings architecture.
 
@@ -12,7 +20,8 @@ See the [spec](https://github.com/openbindings/spec) and the [invocation pattern
 npm install @openbindings/openapi
 ```
 
-Requires [@openbindings/sdk](https://www.npmjs.com/package/@openbindings/sdk) (the core SDK).
+Requires [@openbindings/sdk](https://www.npmjs.com/package/@openbindings/sdk)
+(the Core SDK) and uses `@openbindings/openapi-client` as its artifact engine.
 
 ## Usage
 

@@ -14,7 +14,7 @@ import {
 } from "./params.js";
 import type { BodyPlan } from "./media.js";
 import { FAMILY_JSON } from "./media.js";
-import { BINDING_SPEC_V3 } from "./constants.js";
+import { BINDING_SPEC_V3, profileForBindingSpec } from "./constants.js";
 
 // The OAS style-examples table (OAPI-P-02: serialization incorporated
 // wholesale), exercised cell by cell with the OAS's own example values:
@@ -214,7 +214,7 @@ describe("routeParameter — content-form parameters", () => {
       name: "note",
       in: "query",
       content: { "text/plain; charset=iso-8859-1; profile=demo": {} },
-    }, "café", BINDING_SPEC_V3);
+    }, "café", profileForBindingSpec(BINDING_SPEC_V3));
     expect(r.queryUnits).toEqual(["note=caf%E9"]);
   });
 
@@ -224,7 +224,7 @@ describe("routeParameter — content-form parameters", () => {
       name: "note",
       in: "query",
       content: { "text/plain; charset=utf-16": {} },
-    }, "hello", BINDING_SPEC_V3)).toThrow(/unsupported charset/);
+    }, "hello", profileForBindingSpec(BINDING_SPEC_V3))).toThrow(/unsupported charset/);
   });
 });
 

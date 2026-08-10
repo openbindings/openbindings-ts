@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { BINDING_SPEC_V2 } from "./constants.js";
+import { BINDING_SPEC_V2, profileForBindingSpec } from "./constants.js";
 import {
   parseRoutedEnvelope,
   routeEnvelope,
@@ -19,7 +19,7 @@ describe("OpenAPI revision-2 routed input", () => {
         { in: "query", name: "id", field: "shared" },
       ],
       body: {},
-    }])).toThrow(/more than one destination/);
+    }], profileForBindingSpec(BINDING_SPEC_V2))).toThrow(/more than one destination/);
   });
 
   it("requires the private descriptor's exact top-level shape", () => {
@@ -29,7 +29,7 @@ describe("OpenAPI revision-2 routed input", () => {
       parameters: [],
       body: {},
       extra: true,
-    }])).toThrow(/exactly/);
+    }], profileForBindingSpec(BINDING_SPEC_V2))).toThrow(/exactly/);
   });
 
   it("leaves a marker-shaped application object in the flat representation", () => {
@@ -50,6 +50,7 @@ describe("OpenAPI revision-2 routed input", () => {
       [{ in: "path", name: "id", schema: { type: "string" } }],
       [],
       envelope,
+      profileForBindingSpec(BINDING_SPEC_V2),
     )).toThrow(/does not identify/);
   });
 
@@ -70,6 +71,6 @@ describe("OpenAPI revision-2 routed input", () => {
       props: new Set(["name"]),
       synthetic: false,
     };
-    expect(routeEnvelope([], envelope, "/items", plan).bodyFields).toEqual({ renamed: "x" });
+    expect(routeEnvelope([], envelope, "/items", plan, profileForBindingSpec(BINDING_SPEC_V2)).bodyFields).toEqual({ renamed: "x" });
   });
 });

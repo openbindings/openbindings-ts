@@ -14,6 +14,7 @@ import {
   hasResponseFidelity,
   hasRoutedInputs,
   hasSchemaOmittedOAS30ByteCarriage,
+  profileForBindingSpec,
 } from "./constants.js";
 import {
   DegenerateMediaError,
@@ -146,7 +147,7 @@ export async function convertToInterface(
       const ref = buildJsonPointerRef(pathStr, method);
 
       const params = effectiveParameters(pathItem, opObj);
-      const unflattenable = unflattenableParam(params, bindingSpec);
+      const unflattenable = unflattenableParam(params, profileForBindingSpec(bindingSpec));
       if (unflattenable) {
         const reason = `parameter ${JSON.stringify(unflattenable)} has no unique revision-1 flattened identity`;
         if (onUnrealizable) {
@@ -207,7 +208,7 @@ export async function convertToInterface(
         let planError: unknown;
         let plannedCount = 0;
         try {
-          const plans = planRequestBodies(opObj, { bindingSpec, openapiVersion: doc.openapi });
+          const plans = planRequestBodies(opObj, { profile: profileForBindingSpec(bindingSpec), openapiVersion: doc.openapi });
           plannedCount = plans.length;
           requestPlans = plans.filter((plan) => hasRoutedInputs(bindingSpec) || !candidateCollides(params, plan));
         } catch (error: unknown) {
@@ -280,7 +281,7 @@ export async function convertToInterface(
       // schema root, referenced by same-document pointers from the OBI root
       // (OBI-D-16); translation then runs on an acyclic tree.
       const opPointer = `#/operations/${escapePointerSegment(opKey)}`;
-      const routes = planAbstractInputRoutes(params, requestPlans, bindingSpec);
+      const routes = planAbstractInputRoutes(params, requestPlans, profileForBindingSpec(bindingSpec));
       const requestProjector = createOpenAPISchemaProjector("request", schemaNames);
       const inputSchema = buildInputSchemaForPlans(
         opObj,

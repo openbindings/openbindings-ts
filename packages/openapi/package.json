@@ -1,7 +1,7 @@
 {
   "name": "@openbindings/openapi",
   "version": "0.2.0",
-  "description": "OpenBindings OpenAPI/HTTP binding invoker",
+  "description": "OpenBindings adapter and OBI synthesizer for the standalone OpenAPI runtime",
   "type": "module",
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
@@ -49,14 +49,13 @@
     "node": ">=18"
   },
   "dependencies": {
-    "js-yaml": "^4.2.0"
+    "@openbindings/openapi-client": "^0.1.0"
   },
   "peerDependencies": {
     "@openbindings/sdk": "^0.2.0"
   },
   "devDependencies": {
     "@openbindings/sdk": "workspace:*",
-    "@types/js-yaml": "^4.0.9",
     "@types/json-schema": "^7.0.15",
     "@types/node": "^22.0.0",
     "jsonata": "2.1.1"

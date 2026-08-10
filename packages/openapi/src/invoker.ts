@@ -1,12 +1,10 @@
 import {
+  MultipleSourcesError,
   InvocationError,
   InvocationImpl,
-  MultipleSourcesError,
   finalizeSynthesis,
   finalizeSynthesisCoverage,
   synthesisSkeleton,
-  ERR_RUNTIME,
-  ERR_SOURCE_LOAD_FAILED,
   type BindingInvoker,
   type BindingInvocationArgs,
   type ContextRequiredDetails,
@@ -16,11 +14,20 @@ import {
   type CoverageSynthesizer,
   type SynthesizeResult,
   type Invocation,
+  type Metadata,
   type OBInterface,
   type Source,
   type SourceInspection,
   type SourceInspector,
 } from "@openbindings/sdk";
+import {
+  OPENAPI_USE_DEFAULT,
+  OpenAPIEngine,
+  OpenAPIExecutionError,
+  type OpenAPIExecution,
+  type OpenAPIExecutionHooks,
+  type OpenAPIHookResult,
+} from "@openbindings/openapi-client/engine";
 import type { OpenAPIDocument } from "./types.js";
 import {
   DEFAULT_SOURCE_NAME,
@@ -31,47 +38,15 @@ import {
   BINDING_SPEC_V5,
   BINDING_SPEC_V6,
   LEGACY_BINDING_SPEC,
+  profileForBindingSpec,
 } from "./constants.js";
-import { preflightTarget, requiredContext, requiredRequestMediaContext, runBinding } from "./invoke.js";
 import { convertToInterface, type UnrealizableTarget } from "./synthesize.js";
 import { openAPISynthesisCoverage } from "./coverage.js";
-import { codePointCompare, errorMessage, loadOpenAPIDocument, validateDocumentAddress } from "./util.js";
+import { codePointCompare, validateDocumentAddress } from "./util.js";
 import {
   normalizeAuthoringLocation,
   readAuthoringArtifact,
 } from "./platform.js";
-
-// ---------------------------------------------------------------------------
-// Shared doc-cache helper
-// ---------------------------------------------------------------------------
-
-// loadDoc loads an OpenAPI doc, caching by location within one Invoker
-// instance. A content+location invocation bypasses the cache READ (content
-// is authoritative — no fetch happens) but still WRITES the parsed result
-// under the location key, so a later location-only prepareBinding is served
-// warm (Go parity: cachedLoadDocument primes e.docCache[location] even on
-// the content-provided path).
-async function loadDoc(
-  cache: Map<string, OpenAPIDocument>,
-  location?: string,
-  content?: unknown,
-  options?: { signal?: AbortSignal },
-  fetchFn?: typeof globalThis.fetch,
-): Promise<OpenAPIDocument> {
-  if (content !== undefined) {
-    const doc = await loadOpenAPIDocument(location, content, options, fetchFn);
-    if (location) cache.set(location, doc);
-    return doc;
-  }
-  if (!location) {
-    return loadOpenAPIDocument(location, content, options, fetchFn);
-  }
-  const cached = cache.get(location);
-  if (cached) return cached;
-  const doc = await loadOpenAPIDocument(location, undefined, options, fetchFn);
-  cache.set(location, doc);
-  return doc;
-}
 
 // ---------------------------------------------------------------------------
 // Invoker
@@ -79,7 +54,11 @@ async function loadDoc(
 
 /** Invokes OpenAPI bindings by performing HTTP requests against the described API. */
 export class OpenAPIInvoker implements BindingInvoker {
-  private readonly docCache = new Map<string, OpenAPIDocument>();
+  private readonly engine: OpenAPIEngine;
+
+  constructor(options?: { engine?: OpenAPIEngine }) {
+    this.engine = options?.engine ?? new OpenAPIEngine();
+  }
 
   /** Returns the binding specifications this invoker supports, by exact identifier. */
   bindingSpecs(): BindingSpecInfo[] {
@@ -102,17 +81,13 @@ export class OpenAPIInvoker implements BindingInvoker {
    * any network side effect.
    */
   invokeBinding<I = unknown, O = unknown>(args: BindingInvocationArgs): Invocation<I, O> {
-    const inv = new InvocationImpl<unknown, unknown>({ signal: args.signal });
+    const invocation = new InvocationImpl<I, O>({ signal: args.signal });
     queueMicrotask(() => {
-      this.run(args, inv).catch((err: unknown) => {
-        inv.fireError(
-          err instanceof InvocationError
-            ? err
-            : new InvocationError(ERR_RUNTIME, errorMessage(err)),
-        );
+      this.runAdapter(args, invocation).catch((error: unknown) => {
+        invocation.fireError(toSDKError(error));
       });
     });
-    return inv as Invocation<I, O>;
+    return invocation;
   }
 
   /**
@@ -127,75 +102,167 @@ export class OpenAPIInvoker implements BindingInvoker {
    * raise the challenge instead.
    */
   async prepareBinding(args: BindingInvocationArgs): Promise<ContextRequiredDetails | null> {
-    let doc: OpenAPIDocument | undefined;
-    if (args.source.content !== undefined) {
-      try {
-        // Side-effect-free preflight: internal $refs still resolve locally,
-        // but external $ref fetches are disabled (Go parity: prepareDoc's
-        // content path uses a loader with external refs NOT allowed — "no
-        // I/O").
-        doc = await loadOpenAPIDocument(args.source.location, args.source.content, {
-          allowExternalRefs: false,
-          signal: args.signal,
-        });
-      } catch {
-        return null;
-      }
-    } else if (args.source.location) {
-      doc = this.docCache.get(args.source.location);
+    try {
+      const prepared = await this.engine.prepareCached({
+        source: { location: args.source.location, content: args.source.content },
+        ref: args.ref,
+        profile: profileForBindingSpec(args.source.bindingSpec),
+        context: args.context,
+        signal: args.signal,
+        fetch: args.fetch,
+        hooks: adaptHooks(args),
+        maxDeliveryUnitBytes: args.maxDeliveryUnitBytes,
+      });
+      return prepared?.prerequisites ?? null;
+    } catch {
+      // The optional prepareBinding surface reports context only. Source and
+      // operation failures remain authoritative on the invocation terminal.
+      return null;
     }
-    if (!doc) return null;
-
-    // An unresolvable ref or server means the invocation fails with its own
-    // pre-dispatch refusal before auth matters: no context to report.
-    const target = preflightTarget(doc, args.ref, args.context, args.source.location);
-    if (!target) return null;
-    const auth = requiredContext(doc, target.op, args.context, target.baseURL, target.params);
-    const requestMedia = requiredRequestMediaContext(
-      doc,
-      target.op,
-      args.source.bindingSpec,
-      args.context,
-      target.baseURL,
-    );
-    return composeContextRequirements(auth, requestMedia);
   }
 
-  private async run(
+  private async runAdapter<I, O>(
     args: BindingInvocationArgs,
-    inv: InvocationImpl<unknown, unknown>,
+    outer: InvocationImpl<I, O>,
   ): Promise<void> {
-    let doc: OpenAPIDocument;
-    try {
-      doc = await loadDoc(
-        this.docCache,
-        args.source.location,
-        args.source.content,
-        { signal: inv.signal },
-        args.fetch,
-      );
-    } catch (e: unknown) {
-      inv.fireError(new InvocationError(ERR_SOURCE_LOAD_FAILED, errorMessage(e)));
-      return;
-    }
-    await runBinding(args, inv, doc);
+    const prepared = await this.engine.prepare({
+      source: { location: args.source.location, content: args.source.content },
+      ref: args.ref,
+      profile: profileForBindingSpec(args.source.bindingSpec),
+      context: args.context,
+      signal: outer.signal,
+      fetch: args.fetch,
+      hooks: adaptHooks(args),
+      maxDeliveryUnitBytes: args.maxDeliveryUnitBytes,
+    });
+    // start() resolves only after all artifact/configuration checks that do
+    // not require application input. Only then does the bridge acquire the
+    // SDK input sequence.
+    const execution = await prepared.start<I, O>();
+    await bridgeExecution(execution, outer);
   }
 }
 
-function composeContextRequirements(
-  left: ContextRequiredDetails | null,
-  right: ContextRequiredDetails | null,
-): ContextRequiredDetails | null {
-  if (left === null) return right;
-  if (right === null) return left;
+async function bridgeExecution<I, O>(
+  execution: OpenAPIExecution<I, O>,
+  outer: InvocationImpl<I, O>,
+): Promise<void> {
+  const mirrorInnerInputClose = execution.inputFinished.then(() => outer.closeInput());
+  const input = (async () => {
+    try {
+      for await (const value of outer.inputs()) {
+        await execution.send(value);
+      }
+      await execution.finishInput();
+    } catch (error: unknown) {
+      if (!outer.signal.aborted) throw error;
+    }
+  })();
+
+  const output = (async () => {
+    const leading = await execution.diagnostics.leading;
+    outer.setHeader(cloneMetadata(leading));
+    for await (const event of execution.events) {
+      await outer.emitOutput(event.value);
+    }
+    await execution.completed;
+    outer.setTrailer(cloneMetadata(execution.diagnostics.trailing()));
+    outer.closeOutput();
+  })();
+
+  try {
+    await output;
+  } catch (error: unknown) {
+    outer.fireError(toSDKError(error));
+  } finally {
+    await execution.cancel();
+    await Promise.allSettled([input, mirrorInnerInputClose]);
+  }
+}
+
+function adaptHooks(args: BindingInvocationArgs): OpenAPIExecutionHooks | undefined {
+  const hooks = args.hooks;
+  if (!hooks) return undefined;
+  const site = (target: string) => ({
+    ...(args.site ?? {
+      operation: "",
+      invokedAs: "",
+      bindingKey: "",
+      bindingSpec: args.source.bindingSpec,
+      ref: args.ref,
+      target: "",
+    }),
+    target,
+  });
+  const raw = (result: OpenAPIHookResult) => ({
+    status: result.status,
+    body: result.body,
+    meta: cloneMetadata(result.metadata),
+  });
   return {
-    target: left.target || right.target,
-    alternatives: left.alternatives.flatMap((leftAlternative) =>
-      right.alternatives.map((rightAlternative) => ({
-        requirements: [...leftAlternative.requirements, ...rightAlternative.requirements],
-      })),
-    ),
+    decode: async (engineSite, result) => {
+      const declined = Symbol("openapi-adapter: decode declined");
+      try {
+        const value = await hooks.decodeOutput(
+          site(engineSite.target),
+          raw(result),
+          () => declined,
+        );
+        return value === declined ? OPENAPI_USE_DEFAULT : value;
+      } catch (error: unknown) {
+        throw toEngineError(error);
+      }
+    },
+    classify: async (engineSite, result) => {
+      const declined = Symbol("openapi-adapter: classify declined");
+      try {
+        const value = await hooks.classify(
+          site(engineSite.target),
+          raw(result),
+          () => declined as unknown as boolean,
+        );
+        return value === (declined as unknown) ? OPENAPI_USE_DEFAULT : value;
+      } catch (error: unknown) {
+        throw toEngineError(error);
+      }
+    },
   };
+}
+
+function toSDKError(error: unknown): InvocationError {
+  if (error instanceof InvocationError) return error;
+  if (error instanceof OpenAPIExecutionError) {
+    const code = error.code === "SOURCE_LOAD_FAILED" ? "ERR_SOURCE_LOAD_FAILED"
+      : error.code === "INVALID_OPERATION_REF" ? "ERR_INVALID_REF"
+      : error.code === "OPERATION_NOT_FOUND" ? "ERR_REF_NOT_FOUND"
+      : error.code === "INVALID_DOCUMENT" ? "ERR_SOURCE_CONFIG_ERROR"
+      : error.code;
+    return new InvocationError(code, error.message, error.details, error.evidence);
+  }
+  return new InvocationError(
+    "ERR_RUNTIME",
+    error instanceof Error ? error.message : String(error),
+  );
+}
+
+function toEngineError(error: unknown): OpenAPIExecutionError {
+  if (error instanceof OpenAPIExecutionError) return error;
+  if (error instanceof InvocationError) {
+    return new OpenAPIExecutionError(error.code, error.message, {
+      cause: error,
+      details: error.details,
+      evidence: error.diagnostics,
+    });
+  }
+  return new OpenAPIExecutionError(
+    "ERR_RUNTIME",
+    error instanceof Error ? error.message : String(error),
+    { cause: error },
+  );
+}
+
+function cloneMetadata(metadata: Record<string, string[]>): Metadata {
+  return Object.fromEntries(Object.entries(metadata).map(([name, values]) => [name, [...values]]));
 }
 
 // ---------------------------------------------------------------------------

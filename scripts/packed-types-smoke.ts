@@ -1,4 +1,5 @@
 import type { OBInterface, OperationRequirement } from "@openbindings/sdk";
+import type { OpenAPIClient } from "@openbindings/openapi-client";
 import type { OpenAPIInvoker } from "@openbindings/openapi";
 import type { AsyncAPIInvoker } from "@openbindings/asyncapi";
 import type { MCPInvoker } from "@openbindings/mcp";
@@ -11,6 +12,7 @@ import type { OperationGraphInvoker } from "@openbindings/operationgraph";
 type PackedSurface = [
   OBInterface,
   OperationRequirement<unknown, unknown>,
+  OpenAPIClient,
   OpenAPIInvoker,
   AsyncAPIInvoker,
   MCPInvoker,

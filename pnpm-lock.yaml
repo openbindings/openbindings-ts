@@ -184,16 +184,13 @@ importers:
 
   packages/openapi:
     dependencies:
-      js-yaml:
-        specifier: ^4.2.0
-        version: 4.3.0
+      '@openbindings/openapi-client':
+        specifier: ^0.1.0
+        version: link:../../../openapi-client/typescript
     devDependencies:
       '@openbindings/sdk':
         specifier: workspace:*
         version: link:../sdk
-      '@types/js-yaml':
-        specifier: ^4.0.9
-        version: 4.0.9
       '@types/json-schema':
         specifier: ^7.0.15
         version: 7.0.15

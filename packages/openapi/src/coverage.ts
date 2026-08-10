@@ -30,6 +30,7 @@ import {
   LEGACY_BINDING_SPEC,
   hasMediaFidelity,
   hasRoutedInputs,
+  profileForBindingSpec,
 } from "./constants.js";
 
 /**
@@ -124,7 +125,7 @@ function requestMediaTargetRequirements(
   if (!hasMediaFidelity(bindingSpec) || operation.requestBody?.required !== true) return [];
   try {
     const params = effectiveParameters(pathItem, operation);
-    const admissible = planRequestBodies(operation, { bindingSpec, openapiVersion })
+    const admissible = planRequestBodies(operation, { profile: profileForBindingSpec(bindingSpec), openapiVersion })
       .filter((plan) => hasRoutedInputs(bindingSpec) || !candidateCollides(params, plan));
     return admissible.length > 0 && admissible.every((plan) => plan.range)
       ? ["configuration.requestMedia"]
@@ -161,7 +162,7 @@ function requestMediaCoverage(
   let planError: unknown;
   let plans: ReturnType<typeof planRequestBodies> = [];
   try {
-    plans = planRequestBodies(operation, { bindingSpec, openapiVersion });
+    plans = planRequestBodies(operation, { profile: profileForBindingSpec(bindingSpec), openapiVersion });
   } catch (error: unknown) {
     planError = error;
   }
