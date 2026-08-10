@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { convertToInterface } from "./synthesize.js";
-import { BINDING_SPEC } from "./constants.js";
+import { BINDING_SPEC, LEGACY_BINDING_SPEC } from "./constants.js";
 import { parseAsyncAPIDocument } from "./util.js";
 import { AsyncAPISynthesizer } from "./invoker.js";
 
@@ -41,6 +41,50 @@ async function parsedDoc(spec: Record<string, unknown>) {
 }
 
 describe("convertToInterface", () => {
+  it("ignores Reference Object siblings and canonically orders schema alternatives", async () => {
+    const doc = await parsedDoc({
+      asyncapi: "3.0.0",
+      info: { title: "Reference semantics", version: "1" },
+      servers: { ws: { host: "events.example", protocol: "wss" } },
+      channels: {
+        events: {
+          address: "/events",
+          messages: {
+            z: { payload: { $ref: "#/components/schemas/z", description: "ignored sibling" } },
+            a: { payload: { $ref: "#/components/schemas/a" } },
+          },
+        },
+      },
+      operations: {
+        subscribe: {
+          action: "send",
+          channel: { $ref: "#/channels/events" },
+          messages: [
+            { $ref: "#/channels/events/messages/z" },
+            { $ref: "#/channels/events/messages/a" },
+          ],
+        },
+      },
+      components: {
+        schemas: {
+          z: { type: "object", properties: { a: { type: "string" }, A: { type: "number" } } },
+          a: { properties: { z: { type: "string" } }, type: "object" },
+        },
+      },
+    });
+    const iface = await convertToInterface(undefined, doc);
+    const output = iface.operations["subscribe"]?.output as Record<string, unknown>;
+    const alternatives = output["anyOf"] as Array<Record<string, unknown>>;
+
+    expect(alternatives).toHaveLength(2);
+    expect(alternatives[0]).toEqual({
+      type: "object",
+      properties: { a: { type: "string" }, A: { type: "number" } },
+    });
+    expect(alternatives[1]).toEqual({ properties: { z: { type: "string" } }, type: "object" });
+    expect(alternatives[0]).not.toHaveProperty("description");
+  });
+
   it("copies metadata from info", async () => {
     const doc = await parsedDoc(MINIMAL_DOC);
     const iface = await convertToInterface(undefined, doc);
@@ -205,6 +249,54 @@ describe("convertToInterface", () => {
 });
 
 describe("AsyncAPI synthesis coverage", () => {
+  it("refuses a reply-bearing WebSocket send in revision 2 without changing revision 1", async () => {
+    const content = {
+      asyncapi: "3.0.0",
+      info: { title: "Reply-bearing send", version: "1" },
+      servers: { ws: { host: "api.example", protocol: "wss" } },
+      channels: {
+        events: {
+          address: "/events",
+          messages: { event: { payload: { type: "object" } } },
+        },
+        commands: {
+          address: "/commands",
+          messages: { command: { payload: { type: "string" } } },
+        },
+      },
+      operations: {
+        subscribe: {
+          action: "send",
+          channel: { $ref: "#/channels/events" },
+          messages: [{ $ref: "#/channels/events/messages/event" }],
+          reply: { messages: [{ $ref: "#/channels/commands/messages/command" }] },
+        },
+      },
+    };
+
+    const current = await new AsyncAPISynthesizer().synthesizeInterfaceWithCoverage({
+      sources: [{ bindingSpec: BINDING_SPEC, content }],
+    });
+    expect(current.interface.operations).toEqual({});
+    expect(current.coverage.entries).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        sourceRef: "#/operations/subscribe",
+        status: "excluded",
+        reasonCode: "asyncapi.websocket_reply",
+      }),
+      expect.objectContaining({
+        sourceRef: "#/operations/subscribe#reply-message[0]=#/channels/commands/messages/command",
+        status: "excluded",
+      }),
+    ]));
+
+    const legacy = await new AsyncAPISynthesizer().synthesizeInterface({
+      sources: [{ bindingSpec: LEGACY_BINDING_SPEC, content }],
+    });
+    expect(legacy.operations["subscribe"]).toBeDefined();
+    expect(legacy.sources?.["asyncapi"]?.bindingSpec).toBe(LEGACY_BINDING_SPEC);
+  });
+
   it("accounts for message alternatives and declared protocol cells", async () => {
     const content = {
       asyncapi: "3.0.0",

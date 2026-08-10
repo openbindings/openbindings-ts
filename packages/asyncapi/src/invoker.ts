@@ -24,7 +24,7 @@ import {
   ERR_SOURCE_LOAD_FAILED,
 } from "@openbindings/sdk";
 import type { AsyncAPIDocument } from "./asyncapi-types.js";
-import { BINDING_SPEC, DEFAULT_SOURCE_NAME } from "./constants.js";
+import { BINDING_SPEC, DEFAULT_SOURCE_NAME, LEGACY_BINDING_SPEC } from "./constants.js";
 import { runBinding, requiredContext } from "./invoke.js";
 import { resolveTarget } from "./target.js";
 import { bindableOperationEntries, convertToInterface } from "./synthesize.js";
@@ -69,7 +69,7 @@ async function loadDoc(
 const rejectNetworkFetch: typeof globalThis.fetch = () =>
   Promise.reject(new Error("openbindings: prepareBinding performs no network I/O"));
 
-/** Invokes revision-1 AsyncAPI cells: unary HTTP publish and WebSocket publish/subscription. */
+/** Invokes current and immutable compatibility AsyncAPI cells. */
 export class AsyncAPIInvoker implements BindingInvoker {
   private readonly docCache = new Map<string, AsyncAPIDocument>();
   // Connection pooling is an implementation concern (not part of the
@@ -79,7 +79,10 @@ export class AsyncAPIInvoker implements BindingInvoker {
 
   /** Returns the binding specifications this invoker supports, by exact identifier. */
   bindingSpecs(): BindingSpecInfo[] {
-    return [{ bindingSpec: BINDING_SPEC, description: "AsyncAPI 3.x event-driven APIs" }];
+    return [
+      { bindingSpec: BINDING_SPEC, description: "AsyncAPI 3.0 event-driven APIs (reply-preserving revision)" },
+      { bindingSpec: LEGACY_BINDING_SPEC, description: "AsyncAPI 3.0 event-driven APIs (revision-1 compatibility)" },
+    ];
   }
 
   /**
@@ -180,7 +183,10 @@ export class AsyncAPIInvoker implements BindingInvoker {
 export class AsyncAPISynthesizer implements InterfaceSynthesizer, CoverageSynthesizer, SourceInspector {
   /** Returns the binding specifications this synthesizer supports, by exact identifier. */
   bindingSpecs(): BindingSpecInfo[] {
-    return [{ bindingSpec: BINDING_SPEC, description: "AsyncAPI 3.x event-driven APIs" }];
+    return [
+      { bindingSpec: BINDING_SPEC, description: "AsyncAPI 3.0 event-driven APIs (reply-preserving revision)" },
+      { bindingSpec: LEGACY_BINDING_SPEC, description: "AsyncAPI 3.0 event-driven APIs (revision-1 compatibility)" },
+    ];
   }
 
   /** Parses an AsyncAPI document and converts it into an OBInterface. */
@@ -215,14 +221,16 @@ export class AsyncAPISynthesizer implements InterfaceSynthesizer, CoverageSynthe
     if (sources.length > 1) {
       throw new MultipleSourcesError();
     }
-    if (src.bindingSpec !== BINDING_SPEC) throw new Error(`synthesizer supports exact binding specification ${JSON.stringify(BINDING_SPEC)}, got ${JSON.stringify(src.bindingSpec)}`);
+    if (src.bindingSpec !== BINDING_SPEC && src.bindingSpec !== LEGACY_BINDING_SPEC) {
+      throw new Error(`synthesizer supports exact binding specifications ${JSON.stringify(BINDING_SPEC)} and ${JSON.stringify(LEGACY_BINDING_SPEC)}, got ${JSON.stringify(src.bindingSpec)}`);
+    }
     if (src.outputLocation) validateDocumentAddress(src.outputLocation);
     const location = normalizeAuthoringLocation(src.location);
     const artifactContent = src.content === undefined && src.embed && location
       ? await readAuthoringArtifact(location, options?.signal)
       : src.content;
     const doc = await parseAsyncAPIDocument(location, artifactContent, options);
-    const iface = await convertToInterface(location, doc, options);
+    const iface = await convertToInterface(location, doc, options, src.bindingSpec);
     // Content-fed synthesis: the emitted source must stay invocable. A
     // source needs location or content; with no location, dropping the
     // provided content would emit neither (mirrors the Go SDK's
@@ -236,7 +244,7 @@ export class AsyncAPISynthesizer implements InterfaceSynthesizer, CoverageSynthe
       }
     }
     return {
-      interface: finalizeSynthesis(iface, input, DEFAULT_SOURCE_NAME, BINDING_SPEC),
+      interface: finalizeSynthesis(iface, input, DEFAULT_SOURCE_NAME, src.bindingSpec),
       document: doc,
     };
   }
@@ -255,7 +263,10 @@ export class AsyncAPISynthesizer implements InterfaceSynthesizer, CoverageSynthe
       // sorted iteration and sanitizeKey + uniqueKey de-duplication), so an
       // inspection previews exactly what synthesis names.
       const usedKeys = new Set<string>();
-      for (const [opID, asyncOp] of bindableOperationEntries(doc)) {
+      const bindingSpec = source.bindingSpec === LEGACY_BINDING_SPEC
+        ? LEGACY_BINDING_SPEC
+        : BINDING_SPEC;
+      for (const [opID, asyncOp] of bindableOperationEntries(doc, bindingSpec)) {
         const desc = asyncOp?.description || asyncOp?.summary || undefined;
         const operationKey = uniqueKey(sanitizeKey(opID), usedKeys);
         usedKeys.add(operationKey);

@@ -4,7 +4,9 @@ import { dereference } from "@openbindings/sdk";
 import type { AsyncAPIDocument } from "./asyncapi-types.js";
 import {
   CHANNEL_NAME_TAG,
+  CHANNEL_REF_TAG,
   MESSAGE_NAME_TAG,
+  MESSAGE_REF_TAG,
   REF_NAME_TAG,
   SERVER_NAME_TAG,
 } from "./constants.js";
@@ -164,6 +166,84 @@ function tagChannelMessageNames(raw: unknown): void {
   }
 }
 
+/** Retains the source spelling of operation and reply message references. */
+function tagMessageRefs(raw: unknown): void {
+  if (raw == null || typeof raw !== "object") return;
+  const operations = (raw as Record<string, unknown>)["operations"];
+  if (operations == null || typeof operations !== "object" || Array.isArray(operations)) return;
+  for (const operation of Object.values(operations as Record<string, unknown>)) {
+    if (operation == null || typeof operation !== "object" || Array.isArray(operation)) continue;
+    const op = operation as Record<string, unknown>;
+    for (const owner of [op, op["reply"]]) {
+      if (owner == null || typeof owner !== "object" || Array.isArray(owner)) continue;
+      const channel = (owner as Record<string, unknown>)["channel"];
+      if (channel == null || typeof channel !== "object" || Array.isArray(channel)) continue;
+      const ref = (channel as Record<string, unknown>)["$ref"];
+      if (typeof ref === "string" && !ref.startsWith("#/")) {
+        (channel as Record<string, unknown>)[CHANNEL_REF_TAG] = ref;
+      }
+    }
+    const lists: unknown[] = [op["messages"]];
+    const reply = op["reply"];
+    if (reply != null && typeof reply === "object" && !Array.isArray(reply)) {
+      lists.push((reply as Record<string, unknown>)["messages"]);
+    }
+    for (const list of lists) {
+      if (!Array.isArray(list)) continue;
+      for (const member of list) {
+        if (member == null || typeof member !== "object" || Array.isArray(member)) continue;
+        const ref = (member as Record<string, unknown>)["$ref"];
+        if (typeof ref === "string") {
+          (member as Record<string, unknown>)[MESSAGE_REF_TAG] = ref;
+        }
+      }
+    }
+  }
+}
+
+function validateRawFixedFields(raw: Record<string, unknown>): void {
+  const operations = raw["operations"];
+  if (operations != null) {
+    if (typeof operations !== "object" || Array.isArray(operations)) {
+      throw new Error("not a valid AsyncAPI document (operations must be an object)");
+    }
+    for (const [name, value] of Object.entries(operations as Record<string, unknown>)) {
+      if (value == null || typeof value !== "object" || Array.isArray(value)) {
+        throw new Error(`not a valid AsyncAPI document (operation ${JSON.stringify(name)} must be an object)`);
+      }
+      const operation = value as Record<string, unknown>;
+      if (typeof operation["$ref"] === "string") continue;
+      const channel = operation["channel"];
+      if (
+        channel == null
+        || typeof channel !== "object"
+        || Array.isArray(channel)
+        || typeof (channel as Record<string, unknown>)["$ref"] !== "string"
+      ) {
+        throw new Error(`not a valid AsyncAPI document (operation ${JSON.stringify(name)} channel must be a Reference Object)`);
+      }
+    }
+  }
+
+  const channels = raw["channels"];
+  if (channels == null || typeof channels !== "object" || Array.isArray(channels)) return;
+  for (const [name, value] of Object.entries(channels as Record<string, unknown>)) {
+    if (value == null || typeof value !== "object" || Array.isArray(value)) continue;
+    const servers = (value as Record<string, unknown>)["servers"];
+    if (servers === undefined) continue;
+    if (
+      !Array.isArray(servers)
+      || servers.some((member) =>
+        member == null
+        || typeof member !== "object"
+        || Array.isArray(member)
+        || typeof (member as Record<string, unknown>)["$ref"] !== "string")
+    ) {
+      throw new Error(`not a valid AsyncAPI document (channel ${JSON.stringify(name)} servers must contain Reference Objects)`);
+    }
+  }
+}
+
 /** Fetches (if needed) and parses an AsyncAPI document from a location URL or inline content. */
 export async function parseAsyncAPIDocument(
   location?: string,
@@ -202,9 +282,25 @@ export async function parseAsyncAPIDocument(
     throw new Error("not a valid AsyncAPI document (missing 'asyncapi' field)");
   }
 
+  // ASYNC-P-01 is the root discriminator and therefore precedes reference
+  // resolution. An unsupported edition must refuse deterministically without
+  // fetching a closure that this binding will never interpret.
+  const declaredVersion = (raw as Record<string, unknown>)["asyncapi"];
+  if (declaredVersion === undefined) {
+    throw new Error("not a valid AsyncAPI document (missing 'asyncapi' field)");
+  }
+  if (declaredVersion !== "3.0.0") {
+    throw new Error(
+      `unsupported AsyncAPI version ${JSON.stringify(declaredVersion)}: the supported openbindings.asyncapi revisions accept exactly 3.0.0 (ASYNC-P-01)`,
+    );
+  }
+
+  validateRawFixedFields(raw as Record<string, unknown>);
+
   tagNameKeys(raw, "channels", CHANNEL_NAME_TAG);
   tagNameKeys(raw, "servers", SERVER_NAME_TAG);
   tagChannelMessageNames(raw);
+  tagMessageRefs(raw);
   tagAllSecurityRefNames(raw);
 
   // Resolve all $ref pointers. External $refs fetch through the injected
@@ -220,19 +316,36 @@ export async function parseAsyncAPIDocument(
       // Preserve a dangling target here so the eligibility/coverage layer can
       // exclude that operation without rejecting unrelated valid operations.
       allowUnresolved: true,
+      // AsyncAPI 3.0 Reference Objects cannot be extended; siblings are
+      // ignored. Preserve only our private identity tags, which are removed
+      // from projected operation schemas and exist solely to retain source
+      // addresses after dereferencing.
+      mergeRefSiblings: (target, reference) => {
+        const merged = { ...target };
+        for (const tag of [
+          CHANNEL_NAME_TAG,
+          CHANNEL_REF_TAG,
+          MESSAGE_NAME_TAG,
+          MESSAGE_REF_TAG,
+          REF_NAME_TAG,
+          SERVER_NAME_TAG,
+        ]) {
+          if (!Object.hasOwn(merged, tag) && Object.hasOwn(reference, tag)) {
+            merged[tag] = reference[tag];
+          }
+        }
+        return merged;
+      },
     },
   );
 
-  if (!resolved.asyncapi) {
-    throw new Error("not a valid AsyncAPI document (missing 'asyncapi' field)");
-  }
-  // ASYNC-P-01: the artifact's own `asyncapi` field discriminates the
-  // accepted artifact — exactly 3.0.0. A later edition requires a new
-  // binding-specification identifier, never range inference.
-  if (resolved.asyncapi !== "3.0.0") {
-    throw new Error(
-      `unsupported AsyncAPI version "${resolved.asyncapi}": openbindings.asyncapi@1 accepts exactly 3.0.0 (ASYNC-P-01)`,
-    );
+  if (
+    resolved.info == null
+    || typeof resolved.info !== "object"
+    || typeof resolved.info.title !== "string"
+    || typeof resolved.info.version !== "string"
+  ) {
+    throw new Error("not a valid AsyncAPI document (info.title and info.version are required strings)");
   }
 
   return resolved;

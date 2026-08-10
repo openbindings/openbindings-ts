@@ -73,7 +73,7 @@ import type {
   AsyncAPIServer,
 } from "./asyncapi-types.js";
 import { isSecurityScheme } from "./asyncapi-types.js";
-import { REF_NAME_TAG } from "./constants.js";
+import { REF_NAME_TAG, preservesSendReplies } from "./constants.js";
 import {
   mergeQuery,
   protocolFieldValues,
@@ -188,7 +188,7 @@ export async function runBinding(
   }
 
   try {
-    validateCell(doc, ch, asyncOp, target.protocol, args.context);
+    validateCell(doc, ch, asyncOp, target.protocol, args.source.bindingSpec, args.context);
   } catch (e: unknown) {
     h.fireError(new InvocationError(ERR_SOURCE_CONFIG_ERROR, errorMessage(e)));
     return;
@@ -289,7 +289,7 @@ export async function runBinding(
       h.fireError(
         new InvocationError(
           ERR_SOURCE_CONFIG_ERROR,
-          `protocol "${target.protocol}" is not bound by openbindings.asyncapi@1 (supported: http, https, ws, wss)`,
+          `protocol "${target.protocol}" is not bound by the supported openbindings.asyncapi revisions (supported: http, https, ws, wss)`,
         ),
       );
   }
@@ -308,6 +308,7 @@ function validateCell(
   ch: AsyncAPIChannel | undefined,
   op: AsyncAPIOperation,
   protocol: string,
+  bindingSpec: string,
   context?: Record<string, unknown>,
 ): void {
   const httpBinding = op.bindings?.http;
@@ -342,6 +343,9 @@ function validateCell(
       throw new Error("configuration.websocketMessageType must select text or binary for a WebSocket publish");
     }
   } else {
+    if (op.reply && preservesSendReplies(bindingSpec)) {
+      throw new Error("reply-bearing WebSocket send operations are excluded from revision 2");
+    }
     // This validates non-empty output declarations, message-header
     // exclusions, declaration identity, and the decode point when absent.
     decodeContentType(doc, governingMessages(op, ch), context);
@@ -989,7 +993,7 @@ async function runSSESubscribe(
     h.fireError(
       new InvocationError(
         ERR_PROTOCOL,
-        `SSE subscription establishment requires a text/event-stream response, got content type ${JSON.stringify(ct)} (openbindings.asyncapi@1 §8)`,
+        `SSE subscription establishment requires a text/event-stream response, got content type ${JSON.stringify(ct)} (openbindings.asyncapi §8)`,
       ),
     );
     return;

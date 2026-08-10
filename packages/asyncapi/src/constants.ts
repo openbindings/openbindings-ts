@@ -1,5 +1,13 @@
-/** The binding-specification identifier this package implements (exact and opaque, core §6). */
-export const BINDING_SPEC = "openbindings.asyncapi@1";
+/** The current binding-specification identifier (exact and opaque, core §6). */
+export const BINDING_SPEC = "openbindings.asyncapi@2";
+
+/** Immutable revision-1 compatibility identifier. */
+export const LEGACY_BINDING_SPEC = "openbindings.asyncapi@1";
+
+/** Whether the revision refuses reply-bearing WebSocket send operations. */
+export function preservesSendReplies(bindingSpec: string): boolean {
+  return bindingSpec === BINDING_SPEC;
+}
 
 /** Default source key used when generating OBInterface entries from AsyncAPI docs. */
 export const DEFAULT_SOURCE_NAME = "asyncapi";
@@ -36,6 +44,9 @@ export const REF_NAME_TAG = "x-ob-asyncapi-ref-name";
  */
 export const CHANNEL_NAME_TAG = "x-ob-asyncapi-channel-name";
 
+/** Synthetic original external operation/reply channel reference. */
+export const CHANNEL_REF_TAG = "x-ob-asyncapi-channel-ref";
+
 /**
  * Synthetic field tagged onto each entry of the raw document's `servers`
  * map (its own map key) before the shared dereferencer runs, and read back
@@ -49,3 +60,6 @@ export const SERVER_NAME_TAG = "x-ob-asyncapi-server-name";
 
 /** Synthetic channel-message map key preserved through dereferencing. */
 export const MESSAGE_NAME_TAG = "x-ob-asyncapi-message-name";
+
+/** Synthetic original operation/reply message reference for coverage identity. */
+export const MESSAGE_REF_TAG = "x-ob-asyncapi-message-ref";

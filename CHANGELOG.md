@@ -4,6 +4,17 @@
 
 ### Changed
 
+- **OpenAPI invocation is now exposed as a standalone document-driven client.**
+  `@openbindings/openapi-client` invokes a directly selected OpenAPI 3.0/3.1
+  operation without an OBI document, while `@openbindings/openapi` is the thin
+  binding-invoker and synthesis adapter over its SDK-neutral execution engine.
+  The client lives in its own repository and can be adopted without OpenBindings.
+  The extraction preserves all current
+  revision-7 behavior and exact revision compatibility. Swagger Client remains
+  a differential-test witness: focused qualification found value-shape and
+  media-range gaps, a higher Node floor, and a larger dependency footprint, so
+  no incomplete production substitution was introduced.
+
 - **`@openbindings/openapi` now defaults to `openbindings.openapi@7` for exact
   schema-omitted OAS 3.0 byte carriage.** Exact non-JSON request and response
   octets cross the protocol-independent boundary as canonical Base64. Media

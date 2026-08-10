@@ -17,6 +17,7 @@ OpenBindings is an open standard. **One interface. Any binding.** Describe what 
 | Package | Description | Install |
 |---------|-------------|---------|
 | `@openbindings/sdk` | Core types, validation, compatibility, invocation | `npm install @openbindings/sdk` |
+| [`@openbindings/openapi-client`](../openapi-client) | Standalone OpenAPI 3.0/3.1 document-driven client and execution engine (separate repository) | `npm install @openbindings/openapi-client` |
 | `@openbindings/openapi` | OpenAPI 3.x binding invoker and interface synthesizer | `npm install @openbindings/openapi` |
 | `@openbindings/asyncapi` | AsyncAPI 3.x binding invoker and interface synthesizer | `npm install @openbindings/asyncapi` |
 | `@openbindings/mcp` | MCP binding invoker and interface synthesizer | `npm install @openbindings/mcp` |
@@ -233,14 +234,14 @@ directly on OpenBindings concepts. See the binding-specification guide's
 ```typescript
 const invoker = new OperationInvoker([
   new OpenAPIInvoker(),    // openbindings.openapi@7 (plus @6/@5/@4/@3/@2/@1 compatibility)
-  new AsyncAPIInvoker(),   // openbindings.asyncapi@1
+  new AsyncAPIInvoker(),   // openbindings.asyncapi@2
 ]);
 ```
 
 | Package | Binding specification | Synthesizes OBIs? |
 |---------|--------------|-------------------|
 | `@openbindings/openapi` | `openbindings.openapi@7` (`@6`/`@5`/`@4`/`@3`/`@2`/`@1` compatibility) | yes |
-| `@openbindings/asyncapi` | `openbindings.asyncapi@1` | yes |
+| `@openbindings/asyncapi` | `openbindings.asyncapi@2` | yes |
 | `@openbindings/mcp` | `openbindings.mcp@2` (latest), `openbindings.mcp@1` (compatibility) | yes |
 | `@openbindings/grpc` | `openbindings.grpc@1` | yes |
 | `@openbindings/connect` | `openbindings.connect@1` | yes |

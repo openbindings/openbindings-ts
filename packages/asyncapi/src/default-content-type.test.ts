@@ -3,7 +3,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { AsyncAPIInvoker } from "./invoker.js";
 import { BINDING_SPEC } from "./constants.js";
 
-// Regression coverage for openbindings.asyncapi@1 §9.3 (ASYNC-P-05): the
+// Regression coverage for openbindings.asyncapi@2 §9.3 (ASYNC-P-05): the
 // per-message EFFECTIVE content type is the message's `contentType`, else
 // the document's `defaultContentType` — still the declared lane, never
 // payload sniffing. A publish output decodes by the REPLY-side governing

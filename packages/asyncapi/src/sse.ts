@@ -1,5 +1,5 @@
 /**
- * SSE subscription streaming for the AsyncAPI invoker (openbindings.asyncapi@1
+ * SSE subscription streaming for the AsyncAPI invoker (openbindings.asyncapi@2
  * §8, ASYNC-P-06): reads an established `text/event-stream` response per the
  * WHATWG server-sent events processing model — incorporated for EVENT
  * FRAMING ONLY — emitting one output value per event as units arrive

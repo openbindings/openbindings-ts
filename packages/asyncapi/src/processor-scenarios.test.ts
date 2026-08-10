@@ -115,7 +115,7 @@ async function runScenario(scenario: ProcessorScenario, joined = false): Promise
     };
     const phase: ProcessorObservation["phase"] = scenario.id === "ASYNC-PS-01"
       ? "load"
-      : ["ASYNC-PS-02", "ASYNC-PS-03", "ASYNC-PS-12", "ASYNC-PS-13", "ASYNC-PS-15"].includes(scenario.id)
+      : ["ASYNC-PS-02", "ASYNC-PS-03", "ASYNC-PS-12", "ASYNC-PS-13", "ASYNC-PS-15", "ASYNC-PS-19"].includes(scenario.id)
         ? "resolution"
         : ["ASYNC-PS-08", "ASYNC-PS-17", "ASYNC-PS-18"].includes(scenario.id)
           ? "response"

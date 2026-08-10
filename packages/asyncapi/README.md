@@ -2,7 +2,7 @@
 
 AsyncAPI 3.x binding invoker and interface synthesizer for the [OpenBindings](https://openbindings.com) TypeScript SDK.
 
-This package enables OpenBindings to invoke operations against AsyncAPI documents and synthesize OBI documents from them. Revision 1 supports unary HTTP publishes using the artifact-declared method, WebSocket client-streaming publishes, and WebSocket server-streaming subscriptions. Standalone HTTP `send` operations, broker protocols, and message carriage the core value boundary cannot preserve are reported as explicit exclusions. Documents are parsed with `js-yaml` and `$ref` pointers resolved with `@openbindings/sdk`'s built-in dereferencer. The package has no Node import: HTTP(S) artifact locations use web-platform `fetch`, and a filesystem-owning host passes process-local artifacts as `content`. Credentials are applied only through the document's security schemes.
+This package enables OpenBindings to invoke operations against AsyncAPI documents and synthesize OBI documents from them. Revision 2 supports unary HTTP publishes using the artifact-declared method, WebSocket client-streaming publishes, and WebSocket server-streaming subscriptions. It refuses any reply-bearing WebSocket operation rather than discarding the declared reply contract. Standalone HTTP `send` operations, broker protocols, and message carriage the core value boundary cannot preserve are reported as explicit exclusions. Documents are parsed with `js-yaml` and `$ref` pointers resolved with `@openbindings/sdk`'s built-in dereferencer. The package has no Node import: HTTP(S) artifact locations use web-platform `fetch`, and a filesystem-owning host passes process-local artifacts as `content`. Credentials are applied only through the document's security schemes. Immutable revision 1 remains supported by exact identifier for compatibility.
 
 See the [spec](https://github.com/openbindings/spec) and the [invocation pattern](https://openbindings.com/spec/invocation-pattern) for how binding invokers and interface synthesizers fit into the OpenBindings architecture.
 
@@ -25,7 +25,7 @@ import { AsyncAPIInvoker } from "@openbindings/asyncapi";
 const invoker = new OperationInvoker([new AsyncAPIInvoker()]);
 ```
 
-The invoker declares the binding-spec identifier `openbindings.asyncapi@1` — exact and opaque, never a version range; the operation invoker routes a source to it by string equality on the source's `bindingSpec`. Accepted artifacts declare exactly AsyncAPI **3.0.0**, discriminated by the document's own `asyncapi` field (ASYNC-P-01).
+The invoker declares the binding-spec identifier `openbindings.asyncapi@2` — exact and opaque, never a version range; the operation invoker routes a source to it by string equality on the source's `bindingSpec`. Accepted artifacts declare exactly AsyncAPI **3.0.0**, discriminated by the document's own `asyncapi` field (ASYNC-P-01).
 
 ### Invoke a binding
 
@@ -44,7 +44,7 @@ import { single } from "@openbindings/sdk";
 
 const invoker = new AsyncAPIInvoker();
 const source = {
-  bindingSpec: "openbindings.asyncapi@1",
+  bindingSpec: "openbindings.asyncapi@2",
   location: "https://api.example.com/asyncapi.json",
 };
 
@@ -96,7 +96,7 @@ const synth = new AsyncAPISynthesizer();
 const iface = await synth.synthesizeInterface({
   sources: [
     {
-      bindingSpec: "openbindings.asyncapi@1",
+      bindingSpec: "openbindings.asyncapi@2",
       location: "https://api.example.com/asyncapi.json",
     },
   ],

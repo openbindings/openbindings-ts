@@ -1,5 +1,5 @@
 /**
- * The server and address configuration points of openbindings.asyncapi@1
+ * The server and address configuration points of openbindings.asyncapi@2
  * §9.2 (ASYNC-P-04): the effective server set and its deterministic
  * ordering, server-variable substitution, channel-address parameter
  * expansion, and the concatenation URL-assembly rule. Every unresolvable
@@ -178,7 +178,7 @@ export function resolveTarget(
     if (!def) {
       const names = boundServerNames(candidates);
       if (names.length === 0) {
-        throw new Error("the effective server set declares no server with a protocol bound by openbindings.asyncapi@1");
+        throw new Error("the effective server set declares no server with a protocol bound by the supported openbindings.asyncapi revisions");
       }
       throw new ConfigRequired(
         "server",
@@ -194,7 +194,7 @@ export function resolveTarget(
   if (!def) {
     const names = boundServerNames(candidates);
     if (names.length === 0) {
-      throw new Error("the effective server set declares no server with a protocol bound by openbindings.asyncapi@1");
+      throw new Error("the effective server set declares no server with a protocol bound by the supported openbindings.asyncapi revisions");
     }
     throw new ConfigRequired(
       "server",
@@ -277,7 +277,7 @@ function resolveServerConfig(
   if (!member) {
     const names = boundServerNames(candidates);
     if (names.length === 0) {
-      throw new Error("the effective server set declares no server with a protocol bound by openbindings.asyncapi@1");
+      throw new Error("the effective server set declares no server with a protocol bound by the supported openbindings.asyncapi revisions");
     }
     throw new ConfigRequired(
       "server",
@@ -341,7 +341,7 @@ function fullURLOverride(full: string, selected: NamedServer): ResolvedTarget {
   const scheme = u.protocol.replace(/:$/, "").toLowerCase();
   if (!isBoundProtocol(scheme)) {
     throw new Error(
-      `connection URL ${JSON.stringify(full)}: scheme ${JSON.stringify(scheme)} is not bound by openbindings.asyncapi@1 (supported: http, https, ws, wss)`,
+      `connection URL ${JSON.stringify(full)}: scheme ${JSON.stringify(scheme)} is not bound by the supported openbindings.asyncapi revisions (supported: http, https, ws, wss)`,
     );
   }
   const selectedProtocol = selected.server.protocol.toLowerCase();
@@ -397,7 +397,7 @@ function assembleServer(
   const proto = srv.protocol.toLowerCase();
   if (!isBoundProtocol(proto)) {
     throw new Error(
-      `server ${JSON.stringify(member.name)}: protocol ${JSON.stringify(srv.protocol)} is not bound by openbindings.asyncapi@1 (supported: http, https, ws, wss)`,
+      `server ${JSON.stringify(member.name)}: protocol ${JSON.stringify(srv.protocol)} is not bound by the supported openbindings.asyncapi revisions (supported: http, https, ws, wss)`,
     );
   }
 

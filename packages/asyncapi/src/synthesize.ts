@@ -1,5 +1,5 @@
 import type { OBInterface, Operation, Source } from "@openbindings/sdk";
-import { MAX_TESTED_VERSION } from "@openbindings/sdk";
+import { MAX_TESTED_VERSION, canonicalize } from "@openbindings/sdk";
 import type {
   AsyncAPIChannel,
   AsyncAPIDocument,
@@ -7,7 +7,11 @@ import type {
   AsyncAPIOperation,
   AsyncAPIOperationReply,
 } from "./asyncapi-types.js";
-import { BINDING_SPEC, DEFAULT_SOURCE_NAME } from "./constants.js";
+import {
+  BINDING_SPEC,
+  DEFAULT_SOURCE_NAME,
+  preservesSendReplies,
+} from "./constants.js";
 import { codePointCompare, operationRef, sanitizeKey, uniqueKey } from "./util.js";
 import {
   decodeContentType,
@@ -22,12 +26,13 @@ export async function convertToInterface(
   location?: string,
   content?: AsyncAPIDocument,
   _options?: { signal?: AbortSignal },
+  bindingSpec = BINDING_SPEC,
 ): Promise<OBInterface> {
   if (!content) throw new Error("asyncapi convertToInterface: content is required");
   const doc = content;
 
   const sourceEntry: Source = {
-    bindingSpec: BINDING_SPEC,
+    bindingSpec,
   };
   if (location) sourceEntry.location = location;
 
@@ -43,7 +48,7 @@ export async function convertToInterface(
   };
 
   const usedKeys = new Set<string>();
-  const ops = bindableOperationEntries(doc);
+  const ops = bindableOperationEntries(doc, bindingSpec);
   // Sort by id, code point order, for deterministic output
   ops.sort(([a], [b]) => codePointCompare(a, b));
 
@@ -100,13 +105,18 @@ export async function convertToInterface(
     };
   }
 
+  if (Object.keys(iface.bindings ?? {}).length === 0) delete iface.bindings;
+
   return iface;
 }
 
 /** Shared creation-time eligibility for synthesis and inspection. */
-export function bindableOperationEntries(doc: AsyncAPIDocument): Array<[string, AsyncAPIOperation]> {
+export function bindableOperationEntries(
+  doc: AsyncAPIDocument,
+  bindingSpec = BINDING_SPEC,
+): Array<[string, AsyncAPIOperation]> {
   return Object.entries(doc.operations ?? {})
-    .filter(([, operation]) => operationBindable(doc, operation))
+    .filter(([, operation]) => operationBindable(doc, operation, bindingSpec))
     .sort(([a], [b]) => codePointCompare(a, b));
 }
 
@@ -117,13 +127,18 @@ export interface AuthoringExclusion {
   message: string;
 }
 
-function operationBindable(doc: AsyncAPIDocument, op: AsyncAPIOperation): boolean {
-  return operationExclusion(doc, op) === undefined;
+function operationBindable(
+  doc: AsyncAPIDocument,
+  op: AsyncAPIOperation,
+  bindingSpec: string,
+): boolean {
+  return operationExclusion(doc, op, bindingSpec) === undefined;
 }
 
 export function operationExclusion(
   doc: AsyncAPIDocument,
   op: AsyncAPIOperation,
+  bindingSpec = BINDING_SPEC,
 ): AuthoringExclusion | undefined {
   const unresolvedRef = (op as unknown as Record<string, unknown>)["$ref"];
   if (typeof unresolvedRef === "string") {
@@ -191,6 +206,12 @@ export function operationExclusion(
     return {
       status: "excluded", code: "asyncapi.no_faithful_protocol_cell", rule: "ASYNC-P-02",
       message: "the operation's effective server set provides no WebSocket subscription cell",
+    };
+  }
+  if (op.reply && preservesSendReplies(bindingSpec)) {
+    return {
+      status: "excluded", code: "asyncapi.websocket_reply", rule: "ASYNC-P-02",
+      message: "reply-bearing WebSocket send operations require request/reply session semantics revision 2 does not define",
     };
   }
   if (!wsFieldsMayBeStrings(channel)) {
@@ -299,7 +320,10 @@ function unionPayloadSchemas(messages: AsyncAPIMessage[]): Record<string, unknow
   const unique = new Map<string, Record<string, unknown>>();
   for (const message of messages) {
     const schema = stripParserExtensions(message.payload!);
-    unique.set(JSON.stringify(schema), schema);
+    // JSON object member order is not semantic. Use canonical JSON both for
+    // de-duplication and anyOf ordering so source spelling cannot make the
+    // TypeScript and Go projections disagree.
+    unique.set(canonicalize(schema) ?? JSON.stringify(schema), schema);
   }
   const schemas = [...unique.entries()].sort(([a], [b]) => codePointCompare(a, b)).map(([, schema]) => schema);
   return schemas.length === 1 ? schemas[0] : { anyOf: schemas };

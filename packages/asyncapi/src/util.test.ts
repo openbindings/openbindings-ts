@@ -152,6 +152,29 @@ describe("parseAsyncAPIDocument", () => {
     );
   });
 
+  it("discriminates an unsupported edition before resolving external references", async () => {
+    let fetches = 0;
+    const fetchFn = (async () => {
+      fetches += 1;
+      throw new Error("must not fetch");
+    }) as typeof globalThis.fetch;
+    const doc2x = {
+      asyncapi: "2.0.0",
+      info: { title: "Legacy external schema", version: "1" },
+      channels: {},
+      components: {
+        messages: {
+          Event: { payload: { $ref: "https://schema.example.com/shared.json" } },
+        },
+      },
+    };
+
+    await expect(
+      parseAsyncAPIDocument(undefined, doc2x, undefined, fetchFn),
+    ).rejects.toThrow("ASYNC-P-01");
+    expect(fetches).toBe(0);
+  });
+
   it("accepts exactly the artifact version adopted by revision 1", async () => {
     const doc = await parseAsyncAPIDocument(undefined, validDoc);
     expect(doc.asyncapi).toBe("3.0.0");

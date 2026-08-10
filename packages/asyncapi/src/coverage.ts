@@ -8,7 +8,15 @@ import type {
   AsyncAPIMessage,
   AsyncAPIOperation,
 } from "./asyncapi-types.js";
-import { CHANNEL_NAME_TAG, MESSAGE_NAME_TAG } from "./constants.js";
+import {
+  BINDING_SPEC,
+  CHANNEL_NAME_TAG,
+  CHANNEL_REF_TAG,
+  DEFAULT_SOURCE_NAME,
+  MESSAGE_NAME_TAG,
+  MESSAGE_REF_TAG,
+  preservesSendReplies,
+} from "./constants.js";
 import { decodeContentType, governingMessages } from "./content.js";
 import {
   type AuthoringExclusion,
@@ -36,6 +44,7 @@ export function synthesisCoverage(
   doc: AsyncAPIDocument,
   iface: OBInterface,
 ): SynthesisCoverageEntry[] {
+  const bindingSpec = iface.sources?.[DEFAULT_SOURCE_NAME]?.bindingSpec ?? BINDING_SPEC;
   const represented = new Map<string, BindingIdentity>();
   for (const binding of Object.values(iface.bindings ?? {})) {
     represented.set(binding.ref ?? "", {
@@ -50,7 +59,7 @@ export function synthesisCoverage(
   for (const [operationID, operation] of operations) {
     const ref = operationRef(operationID);
     const identity = represented.get(ref);
-    const exclusion = operationExclusion(doc, operation);
+    const exclusion = operationExclusion(doc, operation, bindingSpec);
     if (exclusion) {
       entries.push(coverageExclusion(ref, "target", exclusion));
     } else if (!identity) {
@@ -78,7 +87,7 @@ export function synthesisCoverage(
     for (const candidate of governingMessageInventory(operation, channel, `${ref}#message`)) {
       entries.push(messageCoverage(doc, candidate, identity, exclusion));
     }
-    if (operation.action === "receive" && operation.reply) {
+    if (operation.reply) {
       for (const candidate of replyMessageInventory(operation, `${ref}#reply-message`)) {
         entries.push(messageCoverage(doc, candidate, identity, exclusion));
       }
@@ -98,7 +107,7 @@ export function synthesisCoverage(
         });
         continue;
       }
-      const cell = protocolCellExclusion(doc, operation, channel, protocol);
+      const cell = protocolCellExclusion(doc, operation, channel, protocol, bindingSpec);
       if (cell) {
         entries.push(coverageExclusion(sourceRef, "alternative", cell));
       } else if (identity) {
@@ -172,7 +181,7 @@ function governingMessageInventory(
   return Object.entries(channel.messages ?? {})
     .sort(([a], [b]) => codePointCompare(a, b))
     .map(([name, message], index) => ({
-      sourceRef: `${prefix}[${index}]=#/channels/${channelName(channel)}/messages/${name}`,
+      sourceRef: `${prefix}[${index}]=${channelSourceRef(channel)}/messages/${name}`,
       message: unresolvedMessage(message) ? undefined : message,
     }));
 }
@@ -196,7 +205,7 @@ function replyMessageInventory(
   return Object.entries(reply.channel.messages ?? {})
     .sort(([a], [b]) => codePointCompare(a, b))
     .map(([name, message], index) => ({
-      sourceRef: `${prefix}[${index}]=#/channels/${channelName(reply.channel!)}/messages/${name}`,
+      sourceRef: `${prefix}[${index}]=${channelSourceRef(reply.channel!)}/messages/${name}`,
       message: unresolvedMessage(message) ? undefined : message,
     }));
 }
@@ -278,6 +287,7 @@ function protocolCellExclusion(
   operation: AsyncAPIOperation,
   channel: AsyncAPIChannel,
   protocol: string,
+  bindingSpec: string,
 ): AuthoringExclusion | undefined {
   if (protocol === "http" || protocol === "https") {
     if (operation.action === "send") {
@@ -306,10 +316,10 @@ function protocolCellExclusion(
     }
     return undefined;
   }
-  if (operation.action === "receive" && operation.reply) {
+  if (operation.reply && (operation.action === "receive" || preservesSendReplies(bindingSpec))) {
     return {
       status: "excluded", code: "asyncapi.websocket_reply", rule: "ASYNC-P-02",
-      message: "reply-bearing publish is not representable over the WebSocket cell",
+      message: "reply-bearing WebSocket operations require request/reply session semantics this revision does not define",
     };
   }
   if (!wsFieldsMayBeStrings(channel)) {
@@ -360,6 +370,8 @@ function messageIdentity(message: AsyncAPIMessage, index: number): string {
   const raw = message as unknown as Record<string, unknown>;
   const ref = raw["$ref"];
   if (typeof ref === "string") return ref;
+  const sourceRef = raw[MESSAGE_REF_TAG];
+  if (typeof sourceRef === "string") return sourceRef;
   const tagged = raw[MESSAGE_NAME_TAG];
   if (typeof tagged === "string") return tagged;
   return message.name ?? `<inline:${index}>`;
@@ -368,4 +380,10 @@ function messageIdentity(message: AsyncAPIMessage, index: number): string {
 function channelName(channel: AsyncAPIChannel): string {
   const tagged = (channel as unknown as Record<string, unknown>)[CHANNEL_NAME_TAG];
   return typeof tagged === "string" ? tagged : "<inline>";
+}
+
+function channelSourceRef(channel: AsyncAPIChannel): string {
+  const external = (channel as unknown as Record<string, unknown>)[CHANNEL_REF_TAG];
+  if (typeof external === "string" && external !== "") return external;
+  return `#/channels/${channelName(channel)}`;
 }

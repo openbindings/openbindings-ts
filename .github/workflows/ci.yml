@@ -8,8 +8,13 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: openbindings-ts
     steps:
       - uses: actions/checkout@v7
+        with:
+          path: openbindings-ts
       # The conformance corpora are normative and live in the sibling spec and
       # interfaces repos; without these checkouts the corpus gates skip
       # silently. Interfaces was never checked out here, so the selection and
@@ -29,11 +34,19 @@ jobs:
           repository: openbindings/openbindings-go
           ref: release/0.2
           path: openbindings-go
+      - uses: actions/checkout@v7
+        with:
+          repository: openbindings/openapi-client
+          ref: main
+          path: openapi-client
       - uses: pnpm/action-setup@v6
+        with:
+          package_json_file: openbindings-ts/package.json
       - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: pnpm
+          cache-dependency-path: openbindings-ts/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
       - run: pnpm run build
       - run: pnpm run pack:verify
@@ -54,4 +67,4 @@ jobs:
           OB_SPEC_CORPUS: ${{ github.workspace }}/spec/conformance
           OB_INTERFACES_CORPUS: ${{ github.workspace }}/interfaces/conformance
           OB_CORPUS_REQUIRED: "1"
-      - run: pnpm conformance -- --corpus=spec/conformance
+      - run: pnpm conformance -- --corpus=${{ github.workspace }}/spec/conformance

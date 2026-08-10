@@ -5,7 +5,7 @@ import type { Invocation } from "@openbindings/sdk";
 import { AsyncAPIInvoker } from "./invoker.js";
 import { BINDING_SPEC } from "./constants.js";
 
-// Conformance tests for the openbindings.asyncapi@1 remainder: the server
+// Conformance tests for the openbindings.asyncapi@2 remainder: the server
 // and address configuration points (ASYNC-P-04), protocol-bindings honoring
 // (ASYNC-P-02), SSE establishment and WHATWG event framing (§8,
 // ASYNC-P-06), and the §9.1/§9.3 encode/decode lanes (ASYNC-P-03,
