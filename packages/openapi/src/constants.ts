@@ -1,5 +1,5 @@
 /** The current binding-specification identifier (exact and opaque, core §6). */
-export const BINDING_SPEC = "openbindings.openapi@6";
+export const BINDING_SPEC = "openbindings.openapi@7";
 
 /** Immutable revision-1 compatibility identifier. */
 export const LEGACY_BINDING_SPEC = "openbindings.openapi@1";
@@ -16,8 +16,11 @@ export const BINDING_SPEC_V4 = "openbindings.openapi@4";
 /** Immutable dynamic-object-carriage revision. */
 export const BINDING_SPEC_V5 = "openbindings.openapi@5";
 
-/** Current whole-JSON-carriage revision. */
-export const BINDING_SPEC_V6 = BINDING_SPEC;
+/** Immutable whole-JSON-carriage revision. */
+export const BINDING_SPEC_V6 = "openbindings.openapi@6";
+
+/** Current OpenAPI 3.0 schema-omitted byte-carriage revision. */
+export const BINDING_SPEC_V7 = BINDING_SPEC;
 
 /** Revisions whose abstract input surface uses collision-preserving routes. */
 export function hasRoutedInputs(bindingSpec: string): boolean {
@@ -25,7 +28,8 @@ export function hasRoutedInputs(bindingSpec: string): boolean {
     || bindingSpec === BINDING_SPEC_V3
     || bindingSpec === BINDING_SPEC_V4
     || bindingSpec === BINDING_SPEC_V5
-    || bindingSpec === BINDING_SPEC_V6;
+    || bindingSpec === BINDING_SPEC_V6
+    || bindingSpec === BINDING_SPEC_V7;
 }
 
 /** Revisions using the RFC 9110 request-media and carriage rules introduced by revision 3. */
@@ -33,24 +37,31 @@ export function hasMediaFidelity(bindingSpec: string): boolean {
   return bindingSpec === BINDING_SPEC_V3
     || bindingSpec === BINDING_SPEC_V4
     || bindingSpec === BINDING_SPEC_V5
-    || bindingSpec === BINDING_SPEC_V6;
+    || bindingSpec === BINDING_SPEC_V6
+    || bindingSpec === BINDING_SPEC_V7;
 }
 
 /** Revisions that admit response media ranges and exact raw-byte output carriage. */
 export function hasResponseFidelity(bindingSpec: string): boolean {
   return bindingSpec === BINDING_SPEC_V4
     || bindingSpec === BINDING_SPEC_V5
-    || bindingSpec === BINDING_SPEC_V6;
+    || bindingSpec === BINDING_SPEC_V6
+    || bindingSpec === BINDING_SPEC_V7;
 }
 
 /** Revisions that preserve explicitly dynamic object bodies as one application value. */
 export function hasDynamicObjectCarriage(bindingSpec: string): boolean {
-  return bindingSpec === BINDING_SPEC_V5 || bindingSpec === BINDING_SPEC_V6;
+  return bindingSpec === BINDING_SPEC_V5 || bindingSpec === BINDING_SPEC_V6 || bindingSpec === BINDING_SPEC_V7;
 }
 
 /** Revisions that route declaration-complex JSON schemas as one application value. */
 export function hasWholeJSONCarriage(bindingSpec: string): boolean {
-  return bindingSpec === BINDING_SPEC_V6;
+  return bindingSpec === BINDING_SPEC_V6 || bindingSpec === BINDING_SPEC_V7;
+}
+
+/** Revisions that carry exact schema-omitted OAS 3.0 non-JSON representations as bytes. */
+export function hasSchemaOmittedOAS30ByteCarriage(bindingSpec: string): boolean {
+  return bindingSpec === BINDING_SPEC_V7;
 }
 
 /** Default source name used when registering an OpenAPI source in an OBInterface. */

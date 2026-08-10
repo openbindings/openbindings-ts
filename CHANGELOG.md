@@ -4,6 +4,13 @@
 
 ### Changed
 
+- **`@openbindings/openapi` now defaults to `openbindings.openapi@7` for exact
+  schema-omitted OAS 3.0 byte carriage.** Exact non-JSON request and response
+  octets cross the protocol-independent boundary as canonical Base64. Media
+  ranges and artifact-defined codecs remain unchanged; exact revision 6 and
+  earlier revisions remain available. The Core OBI document model is
+  unchanged.
+
 - **`@openbindings/openapi` now defaults to `openbindings.openapi@6` for
   whole-JSON carriage.** Exact JSON-family request schemas whose top-level
   declarations require combinators, conditionals, dependent schemas, or

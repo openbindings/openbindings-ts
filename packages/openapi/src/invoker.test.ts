@@ -142,6 +142,7 @@ function authSource(spec: Record<string, unknown>) {
 describe("OpenAPIInvoker.bindingSpecs", () => {
   it("advertises the current and immutable compatibility revisions", () => {
     expect(new OpenAPIInvoker().bindingSpecs()).toEqual([
+      { bindingSpec: "openbindings.openapi@7", description: "OpenAPI 3.x HTTP APIs (OAS 3.0 schema-omitted byte-carriage revision)" },
       { bindingSpec: "openbindings.openapi@6", description: "OpenAPI 3.x HTTP APIs (whole-JSON carriage revision)" },
       { bindingSpec: "openbindings.openapi@5", description: "OpenAPI 3.x HTTP APIs (dynamic-object carriage revision)" },
       { bindingSpec: "openbindings.openapi@4", description: "OpenAPI 3.x HTTP APIs (response-carriage fidelity revision)" },

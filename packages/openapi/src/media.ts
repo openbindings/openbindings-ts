@@ -12,7 +12,12 @@ import {
   serializeQueryValue,
 } from "./params.js";
 import { bodySchemaFlattens } from "./util.js";
-import { hasDynamicObjectCarriage, hasMediaFidelity, hasWholeJSONCarriage } from "./constants.js";
+import {
+  hasDynamicObjectCarriage,
+  hasMediaFidelity,
+  hasSchemaOmittedOAS30ByteCarriage,
+  hasWholeJSONCarriage,
+} from "./constants.js";
 
 // This file implements §9.2 of openbindings.openapi@1 (OAPI-P-04): request
 // media selection with its deterministic tiebreaks and pre-dispatch
@@ -322,6 +327,7 @@ export function planRequestBodies(
   if (!content || Object.keys(content).length === 0) return [];
 
   const revision3 = hasMediaFidelity(options.bindingSpec ?? "");
+  const schemaOmittedOAS30Bytes = hasSchemaOmittedOAS30ByteCarriage(options.bindingSpec ?? "");
   const wholeJSON = hasWholeJSONCarriage(options.bindingSpec ?? "");
   const openapiVersion = options.openapiVersion ?? "3.0";
   interface Candidate {
@@ -383,7 +389,14 @@ export function planRequestBodies(
       continue;
     }
     const media = content[key] ?? null;
-    const family = concreteBodyFamily(parsed.base, mediaSchema(media), openapiVersion, revision3, revision3);
+    const family = concreteBodyFamily(
+      parsed.base,
+      mediaSchema(media),
+      openapiVersion,
+      revision3,
+      revision3,
+      schemaOmittedOAS30Bytes,
+    );
     if (family) candidates.push({ key, parsed, family, range: false });
     else if (options.inventoryUnsupported) candidates.push({ key, parsed, family: "", range: false, unsupported: true });
   }
@@ -589,7 +602,7 @@ function buildBodyPlan(
     plan.synthetic = true;
   } else if (candidate.family === FAMILY_RAW) {
     plan.synthetic = true;
-    plan.rawBoundary = revision3 && rawBoundarySchema(schema, openapiVersion);
+    plan.rawBoundary = revision3 && candidate.family === FAMILY_RAW;
   }
   if (!plan.synthetic && shape.props.size > 0) plan.props = shape.props;
   return plan;
@@ -958,13 +971,14 @@ function concreteBodyFamily(
   openapiVersion: string,
   revision3: boolean,
   allowRaw: boolean,
+  allowSchemaOmittedOAS30Bytes = false,
 ): string {
   if (isJSONMediaType(base)) return FAMILY_JSON;
   if (base === "multipart/form-data") return FAMILY_MULTIPART;
   if (base === "application/x-www-form-urlencoded") return FAMILY_URLENCODED;
   if (base === "text/plain") return FAMILY_TEXT;
   if (!revision3) return "";
-  if (allowRaw && rawBoundarySchema(schema, openapiVersion)) return FAMILY_RAW;
+  if (allowRaw && rawBoundarySchema(schema, openapiVersion, allowSchemaOmittedOAS30Bytes)) return FAMILY_RAW;
   // In OAS 3.1 contentEncoding describes the string's own representation.
   // The caller supplies that encoded string verbatim; it is not decoded at
   // the OpenBindings boundary merely because the concrete media is binary.
@@ -983,9 +997,11 @@ function concreteBodyFamily(
 function rawBoundarySchema(
   schema: MediaSchema,
   openapiVersion: string,
+  allowSchemaOmittedOAS30Bytes = false,
 ): boolean {
   if (openapiVersion.startsWith("3.0")) {
-    return schema !== null && typeof schema === "object" && schemaTypeIs(schema, "string") && schemaFormatIs(schema, "binary");
+    return (allowSchemaOmittedOAS30Bytes && schema === null)
+      || (schema !== null && typeof schema === "object" && schemaTypeIs(schema, "string") && schemaFormatIs(schema, "binary"));
   }
   return schema === null;
 }
@@ -1109,14 +1125,17 @@ export function responseUsesRawBoundary(
   media: OpenAPIMediaType,
   actualContentType: string,
   openapiVersion: string,
+  bindingSpec = "",
+  exactDeclaration = true,
 ): boolean {
   const actual = parseMediaType(actualContentType, true).base;
   if (isJSONMediaType(actual) || actual.startsWith("text/")) return false;
   const schema = mediaSchema(media);
   if (openapiVersion.startsWith("3.0")) {
-    return schema !== null
+    return (hasSchemaOmittedOAS30ByteCarriage(bindingSpec) && exactDeclaration && !Object.hasOwn(media, "schema"))
+      || (schema !== null
       && typeof schema === "object"
-      && binarySignaled(schema, true);
+      && binarySignaled(schema, true));
   }
   return !Object.hasOwn(media, "schema");
 }

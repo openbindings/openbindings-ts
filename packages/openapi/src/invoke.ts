@@ -684,7 +684,13 @@ export async function runBinding(
     const builtin = responseFidelity
       && contentType !== null
       && mediaMatch !== null
-      && responseUsesRawBoundary(mediaMatch.media, contentType, doc.openapi ?? "3.0")
+      && responseUsesRawBoundary(
+        mediaMatch.media,
+        contentType,
+        doc.openapi ?? "3.0",
+        args.source.bindingSpec,
+        !("specificity" in mediaMatch.declared),
+      )
       ? ((_site: InvokeSite, _raw: RawResult): unknown => bytesToBase64(bodyBytes))
       : decodeBytesByContentType(contentType, bodyBytes, revision3);
     output = await decodeThroughHooks(args.hooks, site, raw, builtin);

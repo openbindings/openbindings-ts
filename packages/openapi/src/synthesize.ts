@@ -13,6 +13,7 @@ import {
   hasMediaFidelity,
   hasResponseFidelity,
   hasRoutedInputs,
+  hasSchemaOmittedOAS30ByteCarriage,
 } from "./constants.js";
 import {
   DegenerateMediaError,
@@ -945,9 +946,10 @@ function buildOutputSchema(
           && !base.startsWith("text/")
           && (
             (openapiVersion.startsWith("3.0")
-              && media.schema !== null
-              && typeof media.schema === "object"
-              && binarySignaled(media.schema, true))
+              && ((hasSchemaOmittedOAS30ByteCarriage(bindingSpec) && !range && !Object.hasOwn(media, "schema"))
+                || (media.schema !== null
+                  && typeof media.schema === "object"
+                  && binarySignaled(media.schema, true))))
             || (!openapiVersion.startsWith("3.0") && !Object.hasOwn(media, "schema"))
           );
         // Revision 1's builtin non-JSON response lane is text, including

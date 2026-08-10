@@ -18,7 +18,7 @@ import { existsSync, readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { BINDING_SPEC, BINDING_SPEC_V2, BINDING_SPEC_V3, BINDING_SPEC_V4, BINDING_SPEC_V5, LEGACY_BINDING_SPEC } from "./constants.js";
+import { BINDING_SPEC, BINDING_SPEC_V2, BINDING_SPEC_V3, BINDING_SPEC_V4, BINDING_SPEC_V5, BINDING_SPEC_V6, LEGACY_BINDING_SPEC } from "./constants.js";
 import { loadOpenAPIDocument, parseRef, validateDocumentAddress, errorMessage } from "./util.js";
 
 const FAMILY = "openapi";
@@ -66,7 +66,7 @@ interface CorpusBinding {
  */
 async function judgeDocument(doc: CorpusDocument): Promise<string | undefined> {
   for (const [name, src] of Object.entries(doc.sources ?? {})) {
-    if (src.bindingSpec !== BINDING_SPEC && src.bindingSpec !== BINDING_SPEC_V5 && src.bindingSpec !== BINDING_SPEC_V4 && src.bindingSpec !== BINDING_SPEC_V3 && src.bindingSpec !== BINDING_SPEC_V2 && src.bindingSpec !== LEGACY_BINDING_SPEC) continue;
+    if (src.bindingSpec !== BINDING_SPEC && src.bindingSpec !== BINDING_SPEC_V6 && src.bindingSpec !== BINDING_SPEC_V5 && src.bindingSpec !== BINDING_SPEC_V4 && src.bindingSpec !== BINDING_SPEC_V3 && src.bindingSpec !== BINDING_SPEC_V2 && src.bindingSpec !== LEGACY_BINDING_SPEC) continue;
 
     // Content lane (OAPI-D-01): a present member — null included — must be
     // the parsed document object or its source text. External refs are
@@ -137,7 +137,7 @@ describe.skipIf(!dir)("binding-spec conformance corpus (openapi)", () => {
   expect(files.length).toBeGreaterThan(0);
   for (const file of files) {
     const fixture = JSON.parse(readFileSync(path.join(dir, file), "utf8")) as CorpusFixture;
-    expect([BINDING_SPEC, BINDING_SPEC_V5, BINDING_SPEC_V4, BINDING_SPEC_V3, BINDING_SPEC_V2]).toContain(fixture.bindingSpec);
+    expect([BINDING_SPEC, BINDING_SPEC_V6, BINDING_SPEC_V5, BINDING_SPEC_V4, BINDING_SPEC_V3, BINDING_SPEC_V2]).toContain(fixture.bindingSpec);
     describe(fixture.rule, () => {
       for (const t of fixture.tests) {
         it(t.description, async () => {
