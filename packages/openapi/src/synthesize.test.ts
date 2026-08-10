@@ -154,7 +154,7 @@ describe("convertToInterface", () => {
     const iface = await convertToInterface(undefined, MINIMAL_SPEC);
 
     expect(iface.sources?.["openapi"]).toBeDefined();
-    expect(iface.sources?.["openapi"]?.bindingSpec).toBe("openbindings.openapi@4");
+    expect(iface.sources?.["openapi"]?.bindingSpec).toBe("openbindings.openapi@5");
   });
 
   it("handles specs with no paths", async () => {
@@ -278,7 +278,7 @@ describe("convertToInterface — OpenAPI 3.0 dialect translation", () => {
 
   it("stamps the exact identifier for 3.0.x sources (the artifact version drives dialect only)", async () => {
     const iface = await convertToInterface(undefined, SPEC_30_NULLABLE);
-    expect(iface.sources?.["openapi"]?.bindingSpec).toBe("openbindings.openapi@4");
+    expect(iface.sources?.["openapi"]?.bindingSpec).toBe("openbindings.openapi@5");
   });
 
   it("preserves 3.1 schemas verbatim (already 2020-12)", async () => {

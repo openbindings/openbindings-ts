@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
+import jsonata from "jsonata";
 import {
   CONTEXT_REQUIRED,
   ERR_INVALID_REF,
@@ -108,7 +109,12 @@ async function runScenario(
   };
   const joined = scenarioFile.format === "openbindings.invocation-fidelity-scenarios@1";
   const call = joined
-    ? new OperationInvoker([new OpenAPIInvoker()], { fetch: fetchMock }).invoke(
+    ? new OperationInvoker([new OpenAPIInvoker()], {
+      fetch: fetchMock,
+      transformEvaluator: {
+        evaluate: (expression, data) => jsonata(expression).evaluate(data),
+      },
+    }).invoke(
       await new OpenAPISynthesizer({ fetch: fetchMock }).synthesizeInterface({ sources: [invocationSource] }),
       operationSignature(fidelityOperationId(source.content)),
       { context },
@@ -211,7 +217,7 @@ async function observedBody(
     const bytes = new Uint8Array(body.buffer, body.byteOffset, body.byteLength);
     return {
       present: true,
-      value: String(body),
+      value: new TextDecoder().decode(bytes),
       base64: bytesToBase64(bytes),
       byteLength: bytes.byteLength,
     };
@@ -220,7 +226,7 @@ async function observedBody(
     const bytes = new Uint8Array(body);
     return {
       present: true,
-      value: String(body),
+      value: new TextDecoder().decode(bytes),
       base64: bytesToBase64(bytes),
       byteLength: bytes.byteLength,
     };

@@ -163,14 +163,13 @@ export function routeInput(
     const value = input[name];
     if (!plan?.declared) {
       unmatched.push(name);
-    } else if (plan.synthetic) {
+    } else if (plan.synthetic || plan.wholeObject) {
       if (name === SYNTHETIC_BODY_PROPERTY) {
         r.bodyValue = value;
         r.bodySet = true;
       } else {
-        // The flattened contract of a non-object body carries only
-        // parameters and the synthetic `body` property; there is no object
-        // body to pass through into.
+        // A whole-value body carries only parameters and the synthetic
+        // `body` property at this private boundary.
         unmatched.push(name);
       }
     } else {
@@ -180,9 +179,9 @@ export function routeInput(
     }
   }
   if (unmatched.length > 0) {
-    if (plan?.declared && plan.synthetic) {
+    if (plan?.declared && (plan.synthetic || plan.wholeObject)) {
       throw new Error(
-        `field(s) ${unmatched.join(", ")} match no declared parameter, and the declared request body is non-object (its flattened contract carries only the synthetic "${SYNTHETIC_BODY_PROPERTY}" property)`,
+        `field(s) ${unmatched.join(", ")} match no declared parameter, and the declared request body uses whole-value carriage (its flattened contract carries only the synthetic "${SYNTHETIC_BODY_PROPERTY}" property)`,
       );
     }
     throw new Error(

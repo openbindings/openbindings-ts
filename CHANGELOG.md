@@ -4,11 +4,12 @@
 
 ### Changed
 
-- **`@openbindings/openapi` now defaults to `openbindings.openapi@4` for
-  response-carriage fidelity.** Revision 4 admits response media ranges and
-  preserves artifact-authorized raw response bytes through a canonical Base64
-  application value. HTTP status, headers, and media identity remain outside
-  ordinary outputs. Exact revision 3 remains available for compatibility.
+- **`@openbindings/openapi` now defaults to `openbindings.openapi@5` for
+  dynamic object carriage.** Explicit `additionalProperties` and
+  `patternProperties` request bodies remain one protocol-neutral application
+  object while binding-private routing preserves every runtime field through
+  JSON, form, and multipart carriage. Exact revisions 4, 3, 2, and 1 remain
+  available for compatibility; the Core OBI document model is unchanged.
 
 - **`openbindings.openapi@3` added media-faithful request carriage.** Revision
   3 adds canonical Base64 boundary

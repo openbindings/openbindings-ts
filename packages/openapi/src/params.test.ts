@@ -294,6 +294,6 @@ describe("routeInput — synthetic body", () => {
   });
 
   it("refuses a non-body field on a synthetic-body operation", () => {
-    expect(() => routeInput([], { stray: 1 }, "/x", plan)).toThrow("non-object");
+    expect(() => routeInput([], { stray: 1 }, "/x", plan)).toThrow("whole-value carriage");
   });
 });

@@ -51,7 +51,11 @@ describe("OpenAPI native-client differential", () => {
         const iface = await new OpenAPISynthesizer().synthesizeInterface({
           sources: [{ bindingSpec: corpus.bindingSpec, content }],
         });
-        const call = new OperationInvoker([new OpenAPIInvoker()]).invoke(
+        const call = new OperationInvoker([new OpenAPIInvoker()], {
+          transformEvaluator: {
+            evaluate: (expression, data) => jsonata(expression).evaluate(data),
+          },
+        }).invoke(
           iface,
           operationSignature(fidelityOperationId(content)),
           scenario.given.configuration

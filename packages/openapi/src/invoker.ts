@@ -27,6 +27,7 @@ import {
   BINDING_SPEC,
   BINDING_SPEC_V2,
   BINDING_SPEC_V3,
+  BINDING_SPEC_V4,
   LEGACY_BINDING_SPEC,
 } from "./constants.js";
 import { preflightTarget, requiredContext, requiredRequestMediaContext, runBinding } from "./invoke.js";
@@ -81,7 +82,8 @@ export class OpenAPIInvoker implements BindingInvoker {
   /** Returns the binding specifications this invoker supports, by exact identifier. */
   bindingSpecs(): BindingSpecInfo[] {
     return [
-      { bindingSpec: BINDING_SPEC, description: "OpenAPI 3.x HTTP APIs (response-carriage fidelity revision)" },
+      { bindingSpec: BINDING_SPEC, description: "OpenAPI 3.x HTTP APIs (dynamic-object carriage revision)" },
+      { bindingSpec: BINDING_SPEC_V4, description: "OpenAPI 3.x HTTP APIs (response-carriage fidelity revision)" },
       { bindingSpec: BINDING_SPEC_V3, description: "OpenAPI 3.x HTTP APIs (request-carriage fidelity revision)" },
       { bindingSpec: BINDING_SPEC_V2, description: "OpenAPI 3.x HTTP APIs (collision-preserving revision)" },
       { bindingSpec: LEGACY_BINDING_SPEC, description: "OpenAPI 3.x HTTP APIs (revision-1 compatibility)" },
@@ -212,7 +214,8 @@ export class OpenAPISynthesizer implements InterfaceSynthesizer, CoverageSynthes
   /** Returns the binding specifications this synthesizer supports, by exact identifier. */
   bindingSpecs(): BindingSpecInfo[] {
     return [
-      { bindingSpec: BINDING_SPEC, description: "OpenAPI 3.x HTTP APIs (response-carriage fidelity revision)" },
+      { bindingSpec: BINDING_SPEC, description: "OpenAPI 3.x HTTP APIs (dynamic-object carriage revision)" },
+      { bindingSpec: BINDING_SPEC_V4, description: "OpenAPI 3.x HTTP APIs (response-carriage fidelity revision)" },
       { bindingSpec: BINDING_SPEC_V3, description: "OpenAPI 3.x HTTP APIs (request-carriage fidelity revision)" },
       { bindingSpec: BINDING_SPEC_V2, description: "OpenAPI 3.x HTTP APIs (collision-preserving revision)" },
       { bindingSpec: LEGACY_BINDING_SPEC, description: "OpenAPI 3.x HTTP APIs (revision-1 compatibility)" },
@@ -271,8 +274,8 @@ export class OpenAPISynthesizer implements InterfaceSynthesizer, CoverageSynthes
     if (sources.length > 1) {
       throw new MultipleSourcesError();
     }
-    if (src.bindingSpec !== BINDING_SPEC && src.bindingSpec !== BINDING_SPEC_V3 && src.bindingSpec !== BINDING_SPEC_V2 && src.bindingSpec !== LEGACY_BINDING_SPEC) {
-      throw new Error(`synthesizer supports exact binding specifications ${JSON.stringify(BINDING_SPEC)}, ${JSON.stringify(BINDING_SPEC_V3)}, ${JSON.stringify(BINDING_SPEC_V2)}, and ${JSON.stringify(LEGACY_BINDING_SPEC)}, got ${JSON.stringify(src.bindingSpec)}`);
+    if (src.bindingSpec !== BINDING_SPEC && src.bindingSpec !== BINDING_SPEC_V4 && src.bindingSpec !== BINDING_SPEC_V3 && src.bindingSpec !== BINDING_SPEC_V2 && src.bindingSpec !== LEGACY_BINDING_SPEC) {
+      throw new Error(`synthesizer supports exact binding specifications ${JSON.stringify(BINDING_SPEC)}, ${JSON.stringify(BINDING_SPEC_V4)}, ${JSON.stringify(BINDING_SPEC_V3)}, ${JSON.stringify(BINDING_SPEC_V2)}, and ${JSON.stringify(LEGACY_BINDING_SPEC)}, got ${JSON.stringify(src.bindingSpec)}`);
     }
     if (src.outputLocation) validateDocumentAddress(src.outputLocation);
     const location = normalizeAuthoringLocation(src.location);

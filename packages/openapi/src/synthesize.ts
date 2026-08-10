@@ -599,6 +599,7 @@ function buildInputSchema(
   // binding rule. Multipart/form and parameter-only surfaces stay closed.
   const hasOpenBody = requestPlan !== undefined
     && !requestPlan.synthetic
+    && !requestPlan.wholeObject
     && (requestPlan.family === FAMILY_JSON || requestPlan.range === true);
 
   for (const param of allParams) {
@@ -646,8 +647,11 @@ function buildInputSchema(
       } else {
       const bodyShape = resolvedSynthesisBodyShape(bodySchema as Record<string, unknown>, new Set());
       const bodyProps = bodyShape.properties;
-      if (!bodyShape.object) {
-        // A non-object body schema — array, scalar, binary, or TYPELESS
+      if (!bodyShape.object || requestPlan.wholeObject) {
+        // A non-object body, or an explicitly dynamic object whose property
+        // names cannot be safely interleaved with independent parameters,
+        // rides as one protocol-independent application value.
+        // Non-object schemas include array, scalar, binary, and TYPELESS
         // (neither `properties` nor an explicit object type; §9.1's
         // determination is declaration-only): the flattened contract
         // carries it under the synthetic `body` property, unwrapped at

@@ -301,7 +301,7 @@ describe("OAPI-P-03 — flattened-model refusals", () => {
   // of refusal as the no-body unmatched case above).
   it("refuses an unmatched field loudly for a non-object request body", async () => {
     const wantMsg =
-      'field(s) stray match no declared parameter, and the declared request body is non-object (its flattened contract carries only the synthetic "body" property)';
+      'field(s) stray match no declared parameter, and the declared request body uses whole-value carriage (its flattened contract carries only the synthetic "body" property)';
     const cases: Array<[string, Record<string, unknown>]> = [
       [
         "string JSON body",

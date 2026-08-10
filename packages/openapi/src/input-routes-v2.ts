@@ -62,9 +62,11 @@ export function planAbstractInputRoutes(
 
   const bodyNames = new Set<string>();
   let wholeBody = false;
+  let dynamicObjectBody = false;
   for (const plan of plans) {
-    if (plan.synthetic) {
+    if (plan.synthetic || plan.wholeObject) {
       wholeBody = true;
+      dynamicObjectBody ||= plan.wholeObject === true;
     } else {
       for (const name of plan.props ?? []) bodyNames.add(name);
     }
@@ -73,7 +75,7 @@ export function planAbstractInputRoutes(
     slots.push({ kind: "body", inValue: "", name, base: name });
   }
   if (wholeBody) {
-    slots.push({ kind: "wholeBody", inValue: "", name: "", base: "body" });
+    slots.push({ kind: "wholeBody", inValue: "", name: "", base: dynamicObjectBody ? "payload" : "body" });
   }
 
   const reserved = new Set(slots.map((slot) => slot.base));
@@ -106,7 +108,10 @@ export function planAbstractInputRoutes(
       wholeBodyField = field;
     }
   });
-  const needsTransform = slots.some((slot, index) => assigned[index] !== slot.base);
+  // A dynamic object uses a protocol-neutral public field and therefore
+  // always needs the private whole-body route, even without a collision.
+  const needsTransform = dynamicObjectBody
+    || slots.some((slot, index) => assigned[index] !== slot.base);
 
   return {
     parameters,
@@ -269,7 +274,7 @@ export function validateEnvelopeRoutes(
   const knownBodyFields = new Set<string>();
   let wholeBody = false;
   for (const plan of plans) {
-    if (plan.synthetic) wholeBody = true;
+    if (plan.synthetic || plan.wholeObject) wholeBody = true;
     else for (const name of plan.props ?? []) knownBodyFields.add(name);
   }
   for (const name of Object.keys(envelope.bodyFields)) {
@@ -281,7 +286,7 @@ export function validateEnvelopeRoutes(
   }
   if (envelope.wholeBodyField && !wholeBody) {
     throw new Error(
-      `${revision} routed whole-body field does not identify any admissible non-object request-body candidate`,
+      `${revision} routed whole-body field does not identify any admissible whole-value request-body candidate`,
     );
   }
 }
@@ -327,7 +332,7 @@ export function routeEnvelope(
   }
 
   if (plan?.declared) {
-    if (plan.synthetic) {
+    if (plan.synthetic || plan.wholeObject) {
       if (envelope.wholeBodyField && envelope.wholeBodyField in envelope.value) {
         routed.bodyValue = envelope.value[envelope.wholeBodyField];
         routed.bodySet = true;
@@ -352,7 +357,7 @@ export function routeEnvelope(
     // for the selected open JSON object and therefore passes through. The
     // abstract envelope must not make one candidate's route table close a
     // different candidate's otherwise-open JSON body.
-    if (plan?.declared && !plan.synthetic && plan.family === FAMILY_JSON) {
+    if (plan?.declared && !plan.synthetic && !plan.wholeObject && plan.family === FAMILY_JSON) {
       routed.bodyFields[name] = envelope.value[name];
     } else {
       unmatched.push(name);

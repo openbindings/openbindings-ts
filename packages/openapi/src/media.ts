@@ -12,7 +12,7 @@ import {
   serializeQueryValue,
 } from "./params.js";
 import { bodySchemaFlattens } from "./util.js";
-import { hasMediaFidelity } from "./constants.js";
+import { hasDynamicObjectCarriage, hasMediaFidelity } from "./constants.js";
 
 // This file implements §9.2 of openbindings.openapi@1 (OAPI-P-04): request
 // media selection with its deterministic tiebreaks and pre-dispatch
@@ -259,6 +259,8 @@ export interface BodyPlan {
   media: OpenAPIMediaType | null;
   family: string;
   synthetic: boolean;
+  /** True when an explicitly dynamic object body rides as one application object. */
+  wholeObject?: boolean;
   /** True while a revision-3 media range awaits a concrete requestMedia choice. */
   range?: boolean;
   /** True when the OBI boundary is a Base64 string representing raw wire octets. */
@@ -395,7 +397,9 @@ export function planRequestBodies(
   const rejected: string[] = [];
   for (const candidate of candidates) {
     try {
-      plans.push(buildBodyPlan(rb.required === true, content, candidate, openapiVersion, revision3));
+      const plan = buildBodyPlan(rb.required === true, content, candidate, openapiVersion, revision3);
+      if (hasDynamicObjectCarriage(options.bindingSpec ?? "")) applyDynamicObjectShape(plan);
+      plans.push(plan);
     } catch (error: unknown) {
       if (options.inventoryUnsupported) {
         plans.push(buildBodyPlan(
@@ -411,6 +415,36 @@ export function planRequestBodies(
   }
   if (plans.length === 0) throw new DegenerateMediaError(rejected.join("; "));
   return plans;
+}
+
+function applyDynamicObjectShape(plan: BodyPlan): void {
+  if (plan.synthetic || plan.unsupported) return;
+  const raw = mediaSchema(plan.media);
+  const schema = raw && typeof raw === "object" && !Array.isArray(raw) ? raw : null;
+  if (schema === null || !hasExplicitDynamicProperties(schema, new Set())) return;
+  plan.wholeObject = true;
+  plan.props = undefined;
+}
+
+function hasExplicitDynamicProperties(
+  schema: Record<string, unknown>,
+  seen: Set<Record<string, unknown>>,
+): boolean {
+  if (seen.has(schema)) return false;
+  seen.add(schema);
+  try {
+    const patterns = asObject(schema.patternProperties);
+    if (patterns && Object.keys(patterns).length > 0) return true;
+    if (Object.hasOwn(schema, "additionalProperties") && schema.additionalProperties !== false) {
+      return true;
+    }
+    return Array.isArray(schema.allOf) && schema.allOf.some((member) => {
+      const nested = asObject(member);
+      return nested !== null && hasExplicitDynamicProperties(nested, seen);
+    });
+  } finally {
+    seen.delete(schema);
+  }
 }
 
 /**
@@ -990,6 +1024,7 @@ export function configureRequestMedia(
       // particular, a schema-omitted range always uses the synthetic whole
       // body even when the configured concrete member is JSON.
       synthetic: plan.synthetic,
+      wholeObject: plan.wholeObject,
       props: plan.props,
     }));
   } catch {
@@ -1083,7 +1118,8 @@ function resolvedBodyShape(
 export function candidateCollides(params: Array<{ name?: string }>, plan: BodyPlan): boolean {
   return params.some((parameter) => {
     const name = parameter.name ?? "";
-    return (plan.synthetic && name === "body") || (!plan.synthetic && plan.props?.has(name) === true);
+    return ((plan.synthetic || plan.wholeObject) && name === "body")
+      || (!plan.synthetic && !plan.wholeObject && plan.props?.has(name) === true);
   });
 }
 
@@ -1120,7 +1156,7 @@ export function buildRequestBody(
   if (!plan?.declared) return { body: undefined, contentType: "" };
   switch (plan.family) {
     case FAMILY_JSON: {
-      if (plan.synthetic) {
+      if (plan.synthetic || plan.wholeObject) {
         if (!routed.bodySet) {
           // A supplied input missing the synthetic body member is sent
           // as-is (the server's declared validation is the authority): no
@@ -1136,12 +1172,19 @@ export function buildRequestBody(
       return { body: JSON.stringify(routed.bodyFields), contentType: plan.mediaType };
     }
     case FAMILY_MULTIPART: {
-      if (Object.keys(routed.bodyFields).length === 0 && !plan.required) {
+      const fields = objectBodyFields(plan, routed);
+      if (Object.keys(fields).length === 0 && !plan.required) {
         return { body: undefined, contentType: "" };
       }
       // The runtime stamps the multipart boundary onto Content-Type itself.
       return {
-        body: buildMultipartBody(doc, plan.media, routed.bodyFields, plan.revision3 === true),
+        body: buildMultipartBody(
+          doc,
+          plan.media,
+          fields,
+          plan.revision3 === true,
+          plan.wholeObject === true,
+        ),
         contentType: "",
         ...(plan.revision3 === true ? {
           multipartMediaType: plan.mediaType,
@@ -1150,15 +1193,17 @@ export function buildRequestBody(
       };
     }
     case FAMILY_URLENCODED: {
-      if (Object.keys(routed.bodyFields).length === 0 && !plan.required) {
+      const fields = objectBodyFields(plan, routed);
+      if (Object.keys(fields).length === 0 && !plan.required) {
         return { body: undefined, contentType: "" };
       }
       return {
         body: buildURLEncodedBody(
           plan.media,
-          routed.bodyFields,
+          fields,
           plan.revision3 === true,
           plan.openapiVersion ?? "3.0",
+          plan.wholeObject === true,
         ),
         contentType: plan.mediaType,
       };
@@ -1305,6 +1350,16 @@ function validateMultipartBoundary(boundary: string): void {
   }
 }
 
+function objectBodyFields(plan: BodyPlan, routed: RoutedBody): Record<string, unknown> {
+  if (!plan.wholeObject) return routed.bodyFields;
+  if (!routed.bodySet) return {};
+  const value = asObject(routed.bodyValue);
+  if (value === null) {
+    throw new Error(`request media ${plan.mediaType} requires the whole body value to be an object`);
+  }
+  return value;
+}
+
 function replaceMultipartBoundary(
   bytes: Uint8Array,
   from: string,
@@ -1417,17 +1472,19 @@ export function buildMultipartBody(
   media: OpenAPIMediaType | null,
   fields: Record<string, unknown>,
   revision3 = false,
+  dynamicProperties = false,
 ): FormData {
   const fd = new FormData();
   const is30 = isOpenAPI30(doc);
   const rawSchema = mediaSchema(media);
   const schema = rawSchema && typeof rawSchema === "object" ? rawSchema : null;
-  const properties = resolvedMultipartProperties(schema, new Set());
   const encoding = (media?.encoding ?? {}) as Record<string, Record<string, unknown>>;
 
   for (const name of Object.keys(fields).sort()) {
     const value = fields[name];
-    const propSchema = asObject(properties[name]);
+    const propSchema = dynamicProperties
+      ? resolvedMultipartProperty(schema, name, new Set())
+      : asObject(resolvedMultipartProperties(schema, new Set())[name]);
     const enc = asObject(encoding[name]);
 
     // A declared array expands into repeated parts of the same name, each
@@ -1450,6 +1507,52 @@ export function buildMultipartBody(
     writeMultipartPart(fd, name, value, propSchema, enc, is30, revision3);
   }
   return fd;
+}
+
+function resolvedMultipartProperty(
+  schema: Record<string, unknown> | null,
+  name: string,
+  seen: Set<Record<string, unknown>>,
+): Record<string, unknown> | null {
+  if (schema === null || seen.has(schema)) return null;
+  seen.add(schema);
+  try {
+    const candidates: Record<string, unknown>[] = [];
+    const properties = asObject(schema.properties);
+    const exact = properties ? asObject(properties[name]) : null;
+    if (exact !== null) candidates.push(exact);
+
+    let patternMatched = false;
+    const patterns = asObject(schema.patternProperties);
+    for (const [pattern, raw] of Object.entries(patterns ?? {})) {
+      let matches = false;
+      try { matches = new RegExp(pattern, "u").test(name); } catch { /* validation owns invalid patterns */ }
+      if (!matches) continue;
+      patternMatched = true;
+      const candidate = asObject(raw);
+      if (candidate !== null) candidates.push(candidate);
+    }
+
+    if (exact === null && !patternMatched) {
+      const additional = schema.additionalProperties;
+      const candidate = asObject(additional);
+      if (candidate !== null) candidates.push(candidate);
+      else if (additional === true || !Object.hasOwn(schema, "additionalProperties")) candidates.push({});
+    }
+
+    if (Array.isArray(schema.allOf)) {
+      for (const member of schema.allOf) {
+        const nested = asObject(member);
+        if (nested === null) continue;
+        const candidate = resolvedMultipartProperty(nested, name, seen);
+        if (candidate !== null) candidates.push(candidate);
+      }
+    }
+    if (candidates.length === 0) return null;
+    return candidates.length === 1 ? candidates[0]! : { allOf: candidates };
+  } finally {
+    seen.delete(schema);
+  }
 }
 
 function schemaTypeIs(schema: Record<string, unknown>, want: string): boolean {
@@ -1926,10 +2029,11 @@ export function buildURLEncodedBody(
   fields: Record<string, unknown>,
   revision3 = false,
   openapiVersion = "3.0",
+  dynamicProperties = false,
 ): string {
   const encoding = (media?.encoding ?? {}) as Record<string, Record<string, unknown>>;
   if (revision3) {
-    return buildRevision3URLEncodedBody(media, fields, openapiVersion);
+    return buildRevision3URLEncodedBody(media, fields, openapiVersion, dynamicProperties);
   }
   const units: string[] = [];
   for (const name of Object.keys(fields).sort()) {
@@ -1955,6 +2059,7 @@ function buildRevision3URLEncodedBody(
   media: OpenAPIMediaType | null,
   fields: Record<string, unknown>,
   openapiVersion: string,
+  dynamicProperties: boolean,
 ): string {
   const rawSchema = mediaSchema(media);
   const schema = rawSchema && typeof rawSchema === "object" ? rawSchema : null;
@@ -1962,7 +2067,9 @@ function buildRevision3URLEncodedBody(
   const encoding = asObject(media?.encoding) ?? {};
   const units: string[] = [];
   for (const name of Object.keys(fields).sort()) {
-    const property = asObject(properties[name]);
+    const property = dynamicProperties
+      ? resolvedMultipartProperty(schema, name, new Set())
+      : asObject(properties[name]);
     if (property === null) {
       throw new Error(`urlencoded property ${JSON.stringify(name)} has no declaration-defined carriage`);
     }
