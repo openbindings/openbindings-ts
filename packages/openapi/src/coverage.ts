@@ -21,7 +21,7 @@ import {
   codePointCompare,
 } from "./util.js";
 import { resolveServer } from "./servers.js";
-import { BINDING_SPEC, BINDING_SPEC_V2, LEGACY_BINDING_SPEC } from "./constants.js";
+import { BINDING_SPEC, BINDING_SPEC_V2, BINDING_SPEC_V3, LEGACY_BINDING_SPEC, hasRoutedInputs } from "./constants.js";
 
 /**
  * Inventories path operations, request-media alternatives, callbacks, and
@@ -41,7 +41,10 @@ export function openAPISynthesisCoverage(
     if (binding.ref) byRef.set(binding.ref, { operationKey: binding.operation, ref: binding.ref });
   }
   const source = Object.values(iface.sources ?? {})
-    .find((candidate) => candidate.bindingSpec === BINDING_SPEC || candidate.bindingSpec === LEGACY_BINDING_SPEC);
+    .find((candidate) => candidate.bindingSpec === BINDING_SPEC
+      || candidate.bindingSpec === BINDING_SPEC_V2
+      || candidate.bindingSpec === BINDING_SPEC_V3
+      || candidate.bindingSpec === LEGACY_BINDING_SPEC);
   const sourceLocation = source?.location ?? "";
   const bindingSpec = source?.bindingSpec ?? BINDING_SPEC;
 
@@ -88,14 +91,36 @@ export function openAPISynthesisCoverage(
         status: "represented",
         operationKey: identity.operationKey,
         bindingRef: identity.ref,
-        requirements: serverRequirements(doc, pathItem, operation, sourceLocation),
+        requirements: [
+          ...serverRequirements(doc, pathItem, operation, sourceLocation),
+          ...requestMediaTargetRequirements(operation, pathItem, bindingSpec, doc.openapi),
+        ],
       });
-      entries.push(...requestMediaCoverage(operation, pathItem, identity, bindingSpec));
+      entries.push(...requestMediaCoverage(operation, pathItem, identity, bindingSpec, doc.openapi));
       entries.push(...callbackCoverage(operation, ref));
     }
   }
   entries.push(...webhookCoverage(doc));
   return entries;
+}
+
+function requestMediaTargetRequirements(
+  operation: OpenAPIOperation,
+  pathItem: OpenAPIPathItem,
+  bindingSpec: string,
+  openapiVersion: string | undefined,
+): string[] {
+  if (bindingSpec !== BINDING_SPEC_V3 || operation.requestBody?.required !== true) return [];
+  try {
+    const params = effectiveParameters(pathItem, operation);
+    const admissible = planRequestBodies(operation, { bindingSpec, openapiVersion })
+      .filter((plan) => hasRoutedInputs(bindingSpec) || !candidateCollides(params, plan));
+    return admissible.length > 0 && admissible.every((plan) => plan.range)
+      ? ["configuration.requestMedia"]
+      : [];
+  } catch {
+    return [];
+  }
 }
 
 function serverRequirements(
@@ -117,6 +142,7 @@ function requestMediaCoverage(
   pathItem: OpenAPIPathItem,
   identity: { operationKey: string; ref: string },
   bindingSpec: string,
+  openapiVersion: string | undefined,
 ): SynthesisCoverageEntry[] {
   const content = operation.requestBody?.content;
   if (!content || Object.keys(content).length === 0) return [];
@@ -124,20 +150,20 @@ function requestMediaCoverage(
   let planError: unknown;
   let plans: ReturnType<typeof planRequestBodies> = [];
   try {
-    plans = planRequestBodies(operation);
+    plans = planRequestBodies(operation, { bindingSpec, openapiVersion });
   } catch (error: unknown) {
     planError = error;
   }
   const planned = new Set(plans.map((plan) => plan.mediaKey));
   const represented = new Set(
     plans
-      .filter((plan) => bindingSpec === BINDING_SPEC_V2 || !candidateCollides(params, plan))
+      .filter((plan) => hasRoutedInputs(bindingSpec) || !candidateCollides(params, plan))
       .map((plan) => plan.mediaKey),
   );
   return Object.keys(content).sort(codePointCompare).map((mediaType): SynthesisCoverageEntry => {
     const sourceRef = `${identity.ref}/requestBody/content/${escapeJSONPointerToken(mediaType)}`;
     if (represented.has(mediaType)) {
-      return {
+      const entry: SynthesisCoverageEntry = {
         sourceIndex: 0,
         sourceRef,
         scope: "alternative",
@@ -145,6 +171,10 @@ function requestMediaCoverage(
         operationKey: identity.operationKey,
         bindingRef: identity.ref,
       };
+      if (bindingSpec === BINDING_SPEC_V3 && plans.some((plan) => plan.mediaKey === mediaType && plan.range)) {
+        entry.requirements = ["configuration.requestMedia"];
+      }
+      return entry;
     }
     const collision = planned.has(mediaType);
     return {

@@ -4,6 +4,20 @@
 
 ### Changed
 
+- **`@openbindings/openapi` now defaults to `openbindings.openapi@3` for
+  media-faithful request carriage.** Revision 3 adds canonical Base64 boundary
+  values for artifact-declared raw request bytes, preserves OpenAPI 3.1
+  `contentEncoding` strings as artifact-encoded wire text, and admits concrete
+  `requestMedia` choices governed by OpenAPI media ranges without exposing
+  HTTP concepts in operation schemas. Required range-only bodies participate
+  in side-effect-free preflight before input consumption. Exact revisions 2
+  and 1 remain available for compatibility; the Core OBI document model is
+  unchanged. Form and multipart carriage follows each accepted OAS edition's
+  own immutable rules, including the older 3.0.0–3.0.3 urlencoded defaults;
+  multipart binary parts retain author-declared non-default media types; and
+  underdefined form candidates fail closed rather than inferring routes or
+  byte conversions from caller values.
+
 - **OpenAPI security and request-channel handling now preserves complete
   artifact alternatives.** Invocation selects one satisfiable,
   collision-free Security Requirement Object instead of unioning OR
@@ -42,7 +56,8 @@
   partially dereferenced contract. Resolver configuration remains
   binding-private and does not alter the protocol-blind OBI document model.
 
-- **`@openbindings/openapi` now defaults to `openbindings.openapi@2` and
+- **`@openbindings/openapi` revision 2 introduced collision-preserving routed
+  inputs and
   preserves same-named application inputs.** Synthesis retains unique author
   names, assigns deterministic neutral suffixes only for collisions, and uses
   a binding-private core `inputTransform` for the exact OpenAPI route. The

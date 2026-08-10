@@ -1,7 +1,7 @@
 import type { OpenAPIParameter, OpenAPIPathItem, OpenAPIOperation } from "./types.js";
 import { mergeParameters } from "./util.js";
-import { isJSONMediaType, normalizeMediaType, type BodyPlan } from "./media.js";
-import { BINDING_SPEC_V2 } from "./constants.js";
+import { isJSONMediaType, normalizeMediaType, parseMediaType, type BodyPlan } from "./media.js";
+import { BINDING_SPEC_V3, hasRoutedInputs } from "./constants.js";
 
 // This file implements the flattened input model of openbindings.openapi@1
 // §9.1 (OAPI-P-02, OAPI-P-03): the caller-facing input value is one JSON
@@ -49,7 +49,7 @@ export function unflattenableParam(
   for (const p of params) {
     if (!p?.name || !p?.in) continue;
     const prev = locs.get(p.name);
-    if (bindingSpec !== BINDING_SPEC_V2 && prev !== undefined && prev !== p.in) return p.name;
+    if (!hasRoutedInputs(bindingSpec) && prev !== undefined && prev !== p.in) return p.name;
     locs.set(p.name, p.in);
     if (p.in === "header") {
       const folded = p.name.toLowerCase();
@@ -121,6 +121,7 @@ export function routeInput(
   input: Record<string, unknown>,
   pathTemplate: string,
   plan: BodyPlan | null,
+  bindingSpec = "openbindings.openapi@1",
 ): RoutedInput {
   const r: RoutedInput = {
     resolvedPath: pathTemplate,
@@ -145,7 +146,7 @@ export function routeInput(
     consumed.add(p.name);
     const value = input[p.name];
 
-    routeParameter(r, p, value);
+    routeParameter(r, p, value, bindingSpec);
   }
 
   if (missingPath.length > 0) {
@@ -207,31 +208,109 @@ export function serializationMethod(p: OpenAPIParameter): { style: string; explo
   return { style, explode };
 }
 
+/** Validates the OAS per-location style table without consulting a value. */
+export function validateParameterSerialization(p: OpenAPIParameter): void {
+  if (p.content && typeof p.content === "object") return;
+  if (Object.hasOwn(p, "style") && (typeof p.style !== "string" || p.style === "")) {
+    throw new Error(`parameter ${JSON.stringify(p.name)} declares an invalid style`);
+  }
+  if (Object.hasOwn(p, "explode") && typeof p.explode !== "boolean") {
+    throw new Error(`parameter ${JSON.stringify(p.name)} declares a non-boolean explode`);
+  }
+  const { style, explode } = serializationMethod(p);
+  const schema = asObject(p.schema);
+  const types = schema ? parameterSchemaTypes(schema) : [];
+  switch (p.in) {
+    case "path":
+      if (!["simple", "label", "matrix"].includes(style)) {
+        throw new Error(`path parameter ${JSON.stringify(p.name)} declares unsupported style ${JSON.stringify(style)}`);
+      }
+      return;
+    case "header":
+      if (style !== "simple") throw new Error(`header parameter ${JSON.stringify(p.name)} requires simple style`);
+      return;
+    case "cookie":
+      if (style !== "form") throw new Error(`cookie parameter ${JSON.stringify(p.name)} requires form style`);
+      return;
+    case "query":
+      if (style === "form") return;
+      if (style === "spaceDelimited" || style === "pipeDelimited") {
+        if (explode || types.length === 0 || types.some((type) => type !== "array")) {
+          throw new Error(
+            `query parameter ${JSON.stringify(p.name)} uses ${style}, which is defined only for arrays with explode=false`,
+          );
+        }
+        return;
+      }
+      if (style === "deepObject") {
+        if (!explode || types.length === 0 || types.some((type) => type !== "object")) {
+          throw new Error(
+            `query parameter ${JSON.stringify(p.name)} uses deepObject, which is defined only for objects with explode=true`,
+          );
+        }
+        return;
+      }
+      throw new Error(`query parameter ${JSON.stringify(p.name)} declares unsupported style ${JSON.stringify(style)}`);
+    default:
+      throw new Error(`parameter ${JSON.stringify(p.name)} declares unsupported location ${JSON.stringify(p.in)}`);
+  }
+}
+
+function parameterSchemaTypes(schema: Record<string, unknown>): string[] {
+  const result = new Set<string>();
+  if (typeof schema.type === "string") result.add(schema.type);
+  else if (Array.isArray(schema.type)) {
+    for (const type of schema.type) if (typeof type === "string") result.add(type);
+  }
+  if (Array.isArray(schema.allOf)) {
+    for (const member of schema.allOf) {
+      const nested = asObject(member);
+      if (nested) for (const type of parameterSchemaTypes(nested)) result.add(type);
+    }
+  }
+  return [...result];
+}
+
 /** Serializes one populated parameter onto its wire location. */
-export function routeParameter(r: RoutedInput, p: OpenAPIParameter, value: unknown): void {
+export function routeParameter(
+  r: RoutedInput,
+  p: OpenAPIParameter,
+  value: unknown,
+  bindingSpec = "openbindings.openapi@1",
+): void {
   const name = p.name ?? "";
   const allowReserved = p.allowReserved === true;
+  const revision3 = bindingSpec === BINDING_SPEC_V3;
 
   // A `content`-form parameter (schema-less, a single-entry content map)
   // serializes its value per its declared media type and rides its location
   // as that serialized string (OAPI-P-02).
   const content = p.content as Record<string, unknown> | undefined;
   if (content && Object.keys(content).length > 0) {
-    const serialized = serializeParamContent(p, value);
+    const serialized = serializeParamContentValue(p, value, bindingSpec);
     switch (p.in) {
       case "path":
-        r.resolvedPath = r.resolvedPath.replaceAll(`{${name}}`, encodePathValue(serialized));
+        r.resolvedPath = r.resolvedPath.replaceAll(
+          `{${name}}`,
+          serialized.bytes ? percentEncodeBytes(serialized.bytes, false) : encodePathValue(serialized.text, revision3),
+        );
         break;
       case "query":
-        r.queryUnits.push(queryEscape(name, false) + "=" + queryEscape(serialized, allowReserved));
+        r.queryUnits.push(
+          queryEscape(name, false, revision3) + "=" + (
+            serialized.bytes
+              ? percentEncodeBytes(serialized.bytes, allowReserved)
+              : queryEscape(serialized.text, allowReserved, revision3)
+          ),
+        );
         r.populated.query.add(name);
         break;
       case "header":
-        r.headers.push([name, serialized]);
+        r.headers.push([name, serialized.bytes ? bytesAsLatin1(serialized.bytes) : serialized.text]);
         r.populated.header.add(name.toLowerCase());
         break;
       case "cookie":
-        r.cookieUnits.push(name + "=" + serialized);
+        r.cookieUnits.push(name + "=" + (serialized.bytes ? bytesAsLatin1(serialized.bytes) : serialized.text));
         r.populated.cookie.add(name);
         break;
       default:
@@ -246,7 +325,7 @@ export function routeParameter(r: RoutedInput, p: OpenAPIParameter, value: unkno
     case "path": {
       let expanded: string;
       try {
-        expanded = serializePathValue(name, value, style, explode);
+        expanded = serializePathValue(name, value, style, explode, revision3);
       } catch (e) {
         throw new Error(`path parameter "${name}": ${(e as Error).message}`, { cause: e });
       }
@@ -256,7 +335,7 @@ export function routeParameter(r: RoutedInput, p: OpenAPIParameter, value: unkno
     case "query": {
       let units: string[];
       try {
-        units = serializeQueryValue(name, value, style, explode, allowReserved);
+        units = serializeQueryValue(name, value, style, explode, allowReserved, revision3);
       } catch (e) {
         throw new Error(`query parameter "${name}": ${(e as Error).message}`, { cause: e });
       }
@@ -298,26 +377,89 @@ export function routeParameter(r: RoutedInput, p: OpenAPIParameter, value: unkno
  * in revision 1 and refuses loudly.
  */
 export function serializeParamContent(p: OpenAPIParameter, value: unknown): string {
+  return serializeParamContentValue(p, value, "openbindings.openapi@1").text;
+}
+
+function serializeParamContentValue(
+  p: OpenAPIParameter,
+  value: unknown,
+  bindingSpec: string,
+): { text: string; bytes?: Uint8Array<ArrayBuffer> } {
   const content = p.content as Record<string, unknown>;
   // The OAS requires exactly one entry; a malformed empty map yields the
   // zero-value key and falls to the loud no-carriage refusal below (Go
   // parity: the zero mediaKey takes the same path).
   const mediaKey = Object.keys(content)[0] ?? "";
-  const mt = normalizeMediaType(mediaKey);
-  if (isJSONMediaType(mt)) {
-    return JSON.stringify(value);
+  if (bindingSpec === BINDING_SPEC_V3 && Object.keys(content).length !== 1) {
+    throw new Error(`parameter ${JSON.stringify(p.name)} must declare exactly one content media type`);
   }
-  if (mt === "text/plain") {
+  const parsed = bindingSpec === BINDING_SPEC_V3 ? parseMediaType(mediaKey, true) : null;
+  const mt = parsed?.base ?? normalizeMediaType(mediaKey);
+  let text: string;
+  if (isJSONMediaType(mt)) {
+    text = JSON.stringify(value);
+  } else if (mt === "text/plain") {
     if (typeof value !== "string") {
       throw new Error(
         `parameter "${p.name}" declares content "${mediaKey}": the value must be a string, got ${typeof value}`,
       );
     }
-    return value;
+    text = value;
+  } else {
+    throw new Error(
+      `parameter "${p.name}" declares content "${mediaKey}": no parameter carriage is defined for that media type in openbindings.openapi@1`,
+    );
   }
-  throw new Error(
-    `parameter "${p.name}" declares content "${mediaKey}": no parameter carriage is defined for that media type in openbindings.openapi@1`,
-  );
+  if (parsed === null) return { text };
+  return { text, bytes: encodeParameterContent(text, parsed.params["charset"]) };
+}
+
+function encodeParameterContent(text: string, charset: string | undefined): Uint8Array<ArrayBuffer> {
+  switch (charset?.toLowerCase() ?? "utf-8") {
+    case "utf-8":
+      return new TextEncoder().encode(text);
+    case "us-ascii": {
+      const result = new Uint8Array(text.length);
+      for (let index = 0; index < text.length; index++) {
+        const code = text.charCodeAt(index);
+        if (code > 0x7f) throw new Error("parameter content cannot represent its value as US-ASCII");
+        result[index] = code;
+      }
+      return result;
+    }
+    case "iso-8859-1": {
+      const result = new Uint8Array(text.length);
+      for (let index = 0; index < text.length; index++) {
+        const code = text.charCodeAt(index);
+        if (code > 0xff) throw new Error("parameter content cannot represent its value as ISO-8859-1");
+        result[index] = code;
+      }
+      return result;
+    }
+    default:
+      throw new Error(`parameter content declares unsupported charset ${JSON.stringify(charset)}`);
+  }
+}
+
+const RESERVED_BYTES = new Set(Array.from(":/?#[]@!$&'()*+,;=").map((char) => char.charCodeAt(0)));
+
+function percentEncodeBytes(bytes: Uint8Array, allowReserved: boolean): string {
+  let result = "";
+  for (const byte of bytes) {
+    const safe = (
+      (byte >= 0x41 && byte <= 0x5a)
+      || (byte >= 0x61 && byte <= 0x7a)
+      || (byte >= 0x30 && byte <= 0x39)
+      || [0x2d, 0x5f, 0x2e, 0x7e].includes(byte)
+      || (allowReserved && RESERVED_BYTES.has(byte))
+    );
+    result += safe ? String.fromCharCode(byte) : `%${byte.toString(16).toUpperCase().padStart(2, "0")}`;
+  }
+  return result;
+}
+
+function bytesAsLatin1(bytes: Uint8Array): string {
+  return Array.from(bytes, (byte) => String.fromCharCode(byte)).join("");
 }
 
 // ---------------------------------------------------------------------------
@@ -339,14 +481,16 @@ export function serializePathValue(
   value: unknown,
   style: string,
   explode: boolean,
+  revision3 = false,
 ): string {
+  const escape: Escaper = revision3 ? rfc3986Escape : encodePathValue;
   switch (style) {
     case "simple":
-      return expandSimple(value, explode, encodePathValue);
+      return expandSimple(value, explode, escape);
     case "label":
-      return expandLabel(value, explode, encodePathValue);
+      return expandLabel(value, explode, escape);
     case "matrix":
-      return expandMatrix(name, value, explode, encodePathValue);
+      return expandMatrix(name, value, explode, escape);
     default:
       throw new Error(`style "${style}" is not defined for path parameters`);
   }
@@ -374,25 +518,76 @@ export function serializeQueryValue(
   style: string,
   explode: boolean,
   allowReserved: boolean,
+  revision3 = false,
+  formBody = false,
 ): string[] {
-  const n = queryEscape(name, false);
-  const esc: Escaper = (s) => queryEscape(s, allowReserved);
+  const n = queryEscape(name, false, revision3, formBody);
+  const esc: Escaper = (s) => queryEscape(s, allowReserved, revision3, formBody);
   switch (style) {
     case "form":
       return expandFormPairs(n, value, explode, esc);
     case "spaceDelimited":
-      return expandDelimited(n, value, explode, "%20", esc);
+      if (explode) throw new Error("style spaceDelimited is defined only with explode=false");
+      if (!asArray(value)) throw new Error("style spaceDelimited is defined for arrays only");
+      return expandDelimited(n, value, false, "%20", esc);
     case "pipeDelimited":
-      return expandDelimited(n, value, explode, "|", esc);
+      if (explode) throw new Error("style pipeDelimited is defined only with explode=false");
+      if (!asArray(value)) throw new Error("style pipeDelimited is defined for arrays only");
+      return expandDelimited(n, value, false, "|", esc);
     case "deepObject": {
+      if (!explode) throw new Error("style deepObject is defined only with explode=true");
       const obj = asObject(value);
       if (!obj) {
         throw new Error(`style deepObject is defined for objects only, got ${typeof value}`);
       }
-      return objectPairs(obj).map(([k, v]) => `${n}[${queryEscape(k, false)}]=${esc(v)}`);
+      return objectPairs(obj).map(([k, v]) => `${n}[${queryEscape(k, false, revision3, formBody)}]=${esc(v)}`);
     }
     default:
       throw new Error(`style "${style}" is not defined for query parameters`);
+  }
+}
+
+/**
+ * Expands one multipart property through the Encoding Object's RFC 6570
+ * style/explode rules. Unlike query expansion, multipart names and values
+ * are not URI percent-encoded: each expanded name becomes a part name and
+ * its corresponding value becomes that part's body.
+ */
+export function serializeMultipartValue(
+  name: string,
+  value: unknown,
+  style: string,
+  explode: boolean,
+): Array<[string, string]> {
+  const array = asArray(value);
+  const object = asObject(value);
+  const values = (): string[] => arrayStrings(array ?? []);
+  switch (style) {
+    case "form": {
+      if (array) return explode
+        ? values().map((member) => [name, member])
+        : [[name, values().join(",")]];
+      if (object) return explode
+        ? objectPairs(object)
+        : [[name, flattenPairs(objectPairs(object)).join(",")]];
+      return [[name, primitiveString(value)]];
+    }
+    case "spaceDelimited":
+    case "pipeDelimited": {
+      if (explode) throw new Error(`${style} style is defined only with explode=false`);
+      if (!array) throw new Error(`${style} style is defined for arrays only`);
+      const delimiter = style === "spaceDelimited" ? " " : "|";
+      return [[name, values().join(delimiter)]];
+    }
+    case "deepObject": {
+      if (!explode) throw new Error("style deepObject is defined only with explode=true");
+      if (!object) {
+        throw new Error(`style deepObject is defined for objects only, got ${typeof value}`);
+      }
+      return objectPairs(object).map(([key, member]) => [`${name}[${key}]`, member]);
+    }
+    default:
+      throw new Error(`style "${style}" is not defined for multipart properties`);
   }
 }
 
@@ -495,13 +690,9 @@ function expandFormPairs(name: string, value: unknown, explode: boolean, esc: Es
 }
 
 /**
- * spaceDelimited / pipeDelimited (defined by the OAS for arrays and
- * objects, explode=false; the delimiter separates the escaped pieces). An
- * exploded spaceDelimited/pipeDelimited parameter has no OAS-defined
- * expansion of its own — the delimiter is unused when each value rides its
- * own name=value pair — so it degrades to the form-style exploded
- * expansion, matching common OpenAPI tooling. Primitives are undefined for
- * these styles and refuse loudly.
+ * spaceDelimited / pipeDelimited expansion internals. Public callers first
+ * enforce the OAS table's defined cell: arrays with explode=false. Keeping
+ * the helper general does not make the object/exploded cells admissible.
  */
 function expandDelimited(
   name: string,
@@ -608,7 +799,13 @@ const RESERVED_ESCAPES: Record<string, string> = {
  * allowReserved rule. (The full RFC 3986 reserved set is gen-delims +
  * sub-delims; !, ', (, ), and * already pass through unescaped.)
  */
-export function queryEscape(s: string, allowReserved: boolean): string {
+export function queryEscape(
+  s: string,
+  allowReserved: boolean,
+  revision3 = false,
+  formBody = false,
+): string {
+  if (revision3) return rfc3986Escape(s, allowReserved, formBody);
   const escaped = encodeURIComponent(s);
   if (!allowReserved) return escaped;
   // Every alternative the regex admits has a table entry; the fallback is inert.
@@ -621,6 +818,26 @@ export function queryEscape(s: string, allowReserved: boolean): string {
  * byte-identical URL path segments (Go's encodePathValue hand-rolls the
  * same set).
  */
-export function encodePathValue(s: string): string {
-  return encodeURIComponent(s);
+export function encodePathValue(s: string, revision3 = false): string {
+  return revision3 ? rfc3986Escape(s) : encodeURIComponent(s);
+}
+
+function rfc3986Escape(s: string, allowReserved = false, formBody = false): string {
+  const allowed = formBody
+    ? new Set(Array.from(":/?@!$'()*,;").map((char) => char.charCodeAt(0)))
+    : RESERVED_BYTES;
+  const bytes = new TextEncoder().encode(s);
+  let result = "";
+  for (const byte of bytes) {
+    const unreserved = (
+      (byte >= 0x41 && byte <= 0x5a)
+      || (byte >= 0x61 && byte <= 0x7a)
+      || (byte >= 0x30 && byte <= 0x39)
+      || [0x2d, 0x2e, 0x5f, 0x7e].includes(byte)
+    );
+    result += unreserved || (allowReserved && allowed.has(byte))
+      ? String.fromCharCode(byte)
+      : `%${byte.toString(16).toUpperCase().padStart(2, "0")}`;
+  }
+  return result;
 }

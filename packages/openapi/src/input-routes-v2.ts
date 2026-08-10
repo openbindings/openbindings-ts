@@ -47,6 +47,7 @@ interface InputSlot {
 export function planAbstractInputRoutes(
   params: OpenAPIParameter[],
   plans: BodyPlan[],
+  bindingSpec: string = BINDING_SPEC_V2,
 ): AbstractInputRoutes {
   const slots: InputSlot[] = [];
   for (const parameter of params) {
@@ -122,7 +123,7 @@ export function planAbstractInputRoutes(
       const body: Record<string, unknown> = {};
       if (Object.keys(bodyFields).length > 0) body.properties = bodyFields;
       if (wholeBodyField) body.whole = wholeBodyField;
-      return `[{"$openbindings":${JSON.stringify(BINDING_SPEC_V2)},"value":$,"parameters":${JSON.stringify(parameters)},"body":${JSON.stringify(body)}}]`;
+      return `[{"$openbindings":${JSON.stringify(bindingSpec)},"value":$,"parameters":${JSON.stringify(parameters)},"body":${JSON.stringify(body)}}]`;
     },
   };
 }
@@ -155,15 +156,17 @@ export interface RoutedEnvelope {
 
 export function parseRoutedEnvelope(
   input: unknown,
+  bindingSpec: string = BINDING_SPEC_V2,
 ): RoutedEnvelope | null {
+  const revision = bindingSpec === BINDING_SPEC_V2 ? "revision-2" : "revision-3";
   if (!Array.isArray(input)) return null;
   if (input.length !== 1) {
-    throw new Error("revision-2 routed input must be an exact one-item array");
+    throw new Error(`${revision} routed input must be an exact one-item array`);
   }
   const envelope = asRecord(input[0]);
-  if (!envelope) throw new Error("revision-2 routed input array item must be an object");
+  if (!envelope) throw new Error(`${revision} routed input array item must be an object`);
   if (!("$openbindings" in envelope)) {
-    throw new Error("revision-2 routed input array item requires $openbindings marker");
+    throw new Error(`${revision} routed input array item requires $openbindings marker`);
   }
   if (
     Object.keys(envelope).length !== 4
@@ -172,37 +175,37 @@ export function parseRoutedEnvelope(
     || envelope.body === undefined
   ) {
     throw new Error(
-      "revision-2 routed input array item must contain exactly $openbindings, value, parameters, and body",
+      `${revision} routed input array item must contain exactly $openbindings, value, parameters, and body`,
     );
   }
-  if (envelope.$openbindings !== BINDING_SPEC_V2) {
-    throw new Error(`revision-2 routed input has invalid $openbindings marker ${JSON.stringify(envelope.$openbindings)}`);
+  if (envelope.$openbindings !== bindingSpec) {
+    throw new Error(`${revision} routed input has invalid $openbindings marker ${JSON.stringify(envelope.$openbindings)}`);
   }
   const value = asRecord(envelope.value);
-  if (!value) throw new Error("revision-2 routed input value must be a JSON object");
+  if (!value) throw new Error(`${revision} routed input value must be a JSON object`);
 
   const rawParameters = envelope.parameters ?? [];
   if (!Array.isArray(rawParameters)) {
-    throw new Error("revision-2 routed input parameters must be an array");
+    throw new Error(`${revision} routed input parameters must be an array`);
   }
   const parameters: AbstractParameterRoute[] = [];
   const seen = new Set<string>();
   const seenFields = new Set<string>();
   for (const raw of rawParameters) {
     const entry = asRecord(raw);
-    if (!entry) throw new Error("revision-2 routed parameter entry must be an object");
+    if (!entry) throw new Error(`${revision} routed parameter entry must be an object`);
     const inValue = typeof entry.in === "string" ? entry.in : "";
     const name = typeof entry.name === "string" ? entry.name : "";
     const field = typeof entry.field === "string" ? entry.field : "";
     if (!inValue || !name || !field) {
-      throw new Error("revision-2 routed parameter entry requires non-empty in, name, and field");
+      throw new Error(`${revision} routed parameter entry requires non-empty in, name, and field`);
     }
     const identity = `${inValue}\u0000${name}`;
     if (seen.has(identity)) {
-      throw new Error(`revision-2 routed input repeats parameter ${JSON.stringify(name)} in ${JSON.stringify(inValue)}`);
+      throw new Error(`${revision} routed input repeats parameter ${JSON.stringify(name)} in ${JSON.stringify(inValue)}`);
     }
     if (seenFields.has(field)) {
-      throw new Error(`revision-2 routed input field ${JSON.stringify(field)} supplies more than one destination`);
+      throw new Error(`${revision} routed input field ${JSON.stringify(field)} supplies more than one destination`);
     }
     seen.add(identity);
     seenFields.add(field);
@@ -213,16 +216,16 @@ export function parseRoutedEnvelope(
   let wholeBodyField = "";
   if (envelope.body !== undefined) {
     const body = asRecord(envelope.body);
-    if (!body) throw new Error("revision-2 routed input body descriptor must be an object");
+    if (!body) throw new Error(`${revision} routed input body descriptor must be an object`);
     if (body.properties !== undefined) {
       const properties = asRecord(body.properties);
-      if (!properties) throw new Error("revision-2 routed body properties must be an object");
+      if (!properties) throw new Error(`${revision} routed body properties must be an object`);
       for (const [name, rawField] of Object.entries(properties)) {
         if (!name || typeof rawField !== "string" || !rawField) {
-          throw new Error("revision-2 routed body property mappings require non-empty string names and fields");
+          throw new Error(`${revision} routed body property mappings require non-empty string names and fields`);
         }
         if (seenFields.has(rawField)) {
-          throw new Error(`revision-2 routed input field ${JSON.stringify(rawField)} supplies more than one destination`);
+          throw new Error(`${revision} routed input field ${JSON.stringify(rawField)} supplies more than one destination`);
         }
         seenFields.add(rawField);
         bodyFields[name] = rawField;
@@ -230,10 +233,10 @@ export function parseRoutedEnvelope(
     }
     if (body.whole !== undefined) {
       if (typeof body.whole !== "string" || !body.whole) {
-        throw new Error("revision-2 routed whole-body field must be a non-empty string");
+        throw new Error(`${revision} routed whole-body field must be a non-empty string`);
       }
       if (seenFields.has(body.whole)) {
-        throw new Error(`revision-2 routed input field ${JSON.stringify(body.whole)} supplies more than one destination`);
+        throw new Error(`${revision} routed input field ${JSON.stringify(body.whole)} supplies more than one destination`);
       }
       seenFields.add(body.whole);
       wholeBodyField = body.whole;
@@ -247,7 +250,9 @@ export function validateEnvelopeRoutes(
   params: OpenAPIParameter[],
   plans: BodyPlan[],
   envelope: RoutedEnvelope,
+  bindingSpec: string = BINDING_SPEC_V2,
 ): void {
+  const revision = bindingSpec === BINDING_SPEC_V2 ? "revision-2" : "revision-3";
   const knownParameters = new Set(
     params
       .filter((parameter) => parameter.name && parameter.in)
@@ -256,7 +261,7 @@ export function validateEnvelopeRoutes(
   for (const route of envelope.parameters) {
     if (!knownParameters.has(`${route.in}\u0000${route.name}`)) {
       throw new Error(
-        `revision-2 routed parameter ${JSON.stringify(route.name)} in ${JSON.stringify(route.in)} does not identify an effective OpenAPI declaration`,
+        `${revision} routed parameter ${JSON.stringify(route.name)} in ${JSON.stringify(route.in)} does not identify an effective OpenAPI declaration`,
       );
     }
   }
@@ -270,13 +275,13 @@ export function validateEnvelopeRoutes(
   for (const name of Object.keys(envelope.bodyFields)) {
     if (!knownBodyFields.has(name)) {
       throw new Error(
-        `revision-2 routed body property ${JSON.stringify(name)} does not identify a property in any admissible request-body candidate`,
+        `${revision} routed body property ${JSON.stringify(name)} does not identify a property in any admissible request-body candidate`,
       );
     }
   }
   if (envelope.wholeBodyField && !wholeBody) {
     throw new Error(
-      "revision-2 routed whole-body field does not identify any admissible non-object request-body candidate",
+      `${revision} routed whole-body field does not identify any admissible non-object request-body candidate`,
     );
   }
 }
@@ -287,6 +292,7 @@ export function routeEnvelope(
   envelope: RoutedEnvelope,
   pathTemplate: string,
   plan: BodyPlan | null,
+  bindingSpec: string = BINDING_SPEC_V2,
 ): RoutedInput {
   const routed: RoutedInput = {
     resolvedPath: pathTemplate,
@@ -311,7 +317,7 @@ export function routeEnvelope(
       continue;
     }
     consumed.add(mapping.field);
-    routeParameter(routed, parameter, envelope.value[mapping.field]);
+    routeParameter(routed, parameter, envelope.value[mapping.field], bindingSpec);
   }
   if (missingPath.length > 0) {
     missingPath.sort(codePointCompare);
@@ -339,13 +345,14 @@ export function routeEnvelope(
   }
 
   const unmatched: string[] = [];
-  const routedBodyFields = new Set([
-    ...Object.values(envelope.bodyFields),
-    ...(envelope.wholeBodyField ? [envelope.wholeBodyField] : []),
-  ]);
   for (const name of Object.keys(envelope.value).sort(codePointCompare)) {
     if (consumed.has(name)) continue;
-    if (plan?.declared && !plan.synthetic && plan.family === FAMILY_JSON && !routedBodyFields.has(name)) {
+    // Body-property routes describe candidate-specific destinations. A
+    // field reserved by some other candidate is still an unmatched field
+    // for the selected open JSON object and therefore passes through. The
+    // abstract envelope must not make one candidate's route table close a
+    // different candidate's otherwise-open JSON body.
+    if (plan?.declared && !plan.synthetic && plan.family === FAMILY_JSON) {
       routed.bodyFields[name] = envelope.value[name];
     } else {
       unmatched.push(name);

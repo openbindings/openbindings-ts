@@ -5,13 +5,16 @@ import {
   routeInput,
   routeParameter,
   serializeHeaderValue,
+  serializeMultipartValue,
   serializePathValue,
   serializeQueryValue,
   unflattenableParam,
+  validateParameterSerialization,
   type RoutedInput,
 } from "./params.js";
 import type { BodyPlan } from "./media.js";
 import { FAMILY_JSON } from "./media.js";
+import { BINDING_SPEC_V3 } from "./constants.js";
 
 // The OAS style-examples table (OAPI-P-02: serialization incorporated
 // wholesale), exercised cell by cell with the OAS's own example values:
@@ -69,9 +72,7 @@ describe("serializeQueryValue — the OAS style table", () => {
     ["form", true, tableObject, ["B=150", "G=200", "R=100"]],
 
     ["spaceDelimited", false, tableArray, ["color=blue%20black%20brown"]],
-    ["spaceDelimited", false, tableObject, ["color=B%20150%20G%20200%20R%20100"]],
     ["pipeDelimited", false, tableArray, ["color=blue|black|brown"]],
-    ["pipeDelimited", false, tableObject, ["color=B|150|G|200|R|100"]],
 
     ["deepObject", true, tableObject, ["color[B]=150", "color[G]=200", "color[R]=100"]],
 
@@ -89,6 +90,10 @@ describe("serializeQueryValue — the OAS style table", () => {
     expect(() => serializeQueryValue("color", "blue", "spaceDelimited", false, false)).toThrow();
     expect(() => serializeQueryValue("color", "blue", "pipeDelimited", false, false)).toThrow();
     expect(() => serializeQueryValue("color", tableArray, "deepObject", true, false)).toThrow();
+    expect(() => serializeQueryValue("color", tableObject, "spaceDelimited", false, false)).toThrow();
+    expect(() => serializeQueryValue("color", tableObject, "pipeDelimited", false, false)).toThrow();
+    expect(() => serializeQueryValue("color", tableArray, "spaceDelimited", true, false)).toThrow();
+    expect(() => serializeQueryValue("color", tableObject, "deepObject", false, false)).toThrow();
     expect(() => serializePathValue("id", "x", "form", false)).toThrow();
     // Nested non-primitives inside an expansion have no OAS-defined form.
     expect(() => serializeQueryValue("f", [{ x: 1 }], "form", false, false)).toThrow();
@@ -101,6 +106,43 @@ describe("serializeQueryValue — the OAS style table", () => {
       "path=a%2Fb%3Fc%3Dd",
     ]);
     expect(serializeQueryValue("path", "a/b?c=d", "form", true, true)).toEqual(["path=a/b?c=d"]);
+  });
+
+  it("uses the RFC 3986 unreserved set in revision 3", () => {
+    expect(serializeQueryValue("q", "!*'()", "form", true, false, true))
+      .toEqual(["q=%21%2A%27%28%29"]);
+    expect(serializePathValue("id", "!*'()", "simple", false, true))
+      .toBe("%21%2A%27%28%29");
+  });
+});
+
+describe("serializeMultipartValue", () => {
+  it("applies RFC 6570 expansion without URI percent-encoding", () => {
+    expect(serializeMultipartValue("tags", ["a/b", "c d"], "form", false))
+      .toEqual([["tags", "a/b,c d"]]);
+    expect(serializeMultipartValue("filter", { R: 100, G: 200 }, "form", true))
+      .toEqual([["G", "200"], ["R", "100"]]);
+    expect(serializeMultipartValue("filter", { "a=b": "c=d" }, "form", true))
+      .toEqual([["a=b", "c=d"]]);
+  });
+});
+
+describe("validateParameterSerialization", () => {
+  it("refuses undefined OAS style-table cells", () => {
+    expect(() => validateParameterSerialization({
+      name: "filter",
+      in: "query",
+      style: "deepObject",
+      explode: false,
+      schema: { type: "object" },
+    })).toThrow(/explode=true/);
+    expect(() => validateParameterSerialization({
+      name: "filter",
+      in: "query",
+      style: "pipeDelimited",
+      explode: false,
+      schema: { type: "object" },
+    })).toThrow(/arrays/);
   });
 });
 
@@ -164,6 +206,25 @@ describe("routeParameter — content-form parameters", () => {
     expect(() =>
       routeParameter(r, { name: "blob", in: "query", content: { "application/octet-stream": {} } }, "x"),
     ).toThrow("no parameter carriage");
+  });
+
+  it("uses revision-3 semantic media parsing and declared charset bytes before query carriage", () => {
+    const r = emptyRouted();
+    routeParameter(r, {
+      name: "note",
+      in: "query",
+      content: { "text/plain; charset=iso-8859-1; profile=demo": {} },
+    }, "café", BINDING_SPEC_V3);
+    expect(r.queryUnits).toEqual(["note=caf%E9"]);
+  });
+
+  it("refuses unsupported revision-3 parameter content charset", () => {
+    const r = emptyRouted();
+    expect(() => routeParameter(r, {
+      name: "note",
+      in: "query",
+      content: { "text/plain; charset=utf-16": {} },
+    }, "hello", BINDING_SPEC_V3)).toThrow(/unsupported charset/);
   });
 });
 

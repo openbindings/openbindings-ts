@@ -140,8 +140,9 @@ function authSource(spec: Record<string, unknown>) {
 // ---------------------------------------------------------------------------
 
 describe("OpenAPIInvoker.bindingSpecs", () => {
-  it("advertises both immutable binding-specification revisions", () => {
+  it("advertises the current and both immutable compatibility revisions", () => {
     expect(new OpenAPIInvoker().bindingSpecs()).toEqual([
+      { bindingSpec: "openbindings.openapi@3", description: "OpenAPI 3.x HTTP APIs (request-carriage fidelity revision)" },
       { bindingSpec: "openbindings.openapi@2", description: "OpenAPI 3.x HTTP APIs (collision-preserving revision)" },
       { bindingSpec: "openbindings.openapi@1", description: "OpenAPI 3.x HTTP APIs (revision-1 compatibility)" },
     ]);

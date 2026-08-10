@@ -232,14 +232,14 @@ directly on OpenBindings concepts. See the binding-specification guide's
 
 ```typescript
 const invoker = new OperationInvoker([
-  new OpenAPIInvoker(),    // openbindings.openapi@2 (plus @1 compatibility)
+  new OpenAPIInvoker(),    // openbindings.openapi@3 (plus @2/@1 compatibility)
   new AsyncAPIInvoker(),   // openbindings.asyncapi@1
 ]);
 ```
 
 | Package | Binding specification | Synthesizes OBIs? |
 |---------|--------------|-------------------|
-| `@openbindings/openapi` | `openbindings.openapi@2` (`@1` compatibility) | yes |
+| `@openbindings/openapi` | `openbindings.openapi@3` (`@2`/`@1` compatibility) | yes |
 | `@openbindings/asyncapi` | `openbindings.asyncapi@1` | yes |
 | `@openbindings/mcp` | `openbindings.mcp@2` (latest), `openbindings.mcp@1` (compatibility) | yes |
 | `@openbindings/grpc` | `openbindings.grpc@1` | yes |
@@ -248,9 +248,10 @@ const invoker = new OperationInvoker([
 | `@openbindings/graphql` | `openbindings.graphql@2` (latest), `openbindings.graphql@1` (compatibility) | yes |
 | `@openbindings/operationgraph` | `openbindings.operation-graph@1` | no (graphs are authored, then composed at invoke time) |
 
-OpenAPI, AsyncAPI, gRPC, Connect, usage, and Operation Graph retain their
-published revision-1 identifiers; MCP and GraphQL advertise protocol-blind
-revision-2 contracts alongside explicit revision-1 compatibility.
+OpenAPI advertises its protocol-blind revision-3 contract alongside exact
+revision-2 and revision-1 compatibility. AsyncAPI, gRPC, Connect, usage, and
+Operation Graph retain their published revision-1 identifiers; MCP and GraphQL
+advertise revision-2 contracts alongside explicit revision-1 compatibility.
 
 Invokers implement `BindingInvoker`. Interface synthesizers implement
 `InterfaceSynthesizer`; synthesizers that can return durable, explicitly

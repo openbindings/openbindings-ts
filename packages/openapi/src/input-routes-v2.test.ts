@@ -53,7 +53,7 @@ describe("OpenAPI revision-2 routed input", () => {
     )).toThrow(/does not identify/);
   });
 
-  it("does not leak a mapping for another media candidate into a JSON body", () => {
+  it("passes a field mapped only by another candidate into the selected open JSON body", () => {
     const envelope: RoutedEnvelope = {
       value: { renamed: "x" },
       parameters: [],
@@ -70,6 +70,6 @@ describe("OpenAPI revision-2 routed input", () => {
       props: new Set(["name"]),
       synthetic: false,
     };
-    expect(() => routeEnvelope([], envelope, "/items", plan)).toThrow(/no destination/);
+    expect(routeEnvelope([], envelope, "/items", plan).bodyFields).toEqual({ renamed: "x" });
   });
 });

@@ -72,7 +72,11 @@ async function runScenario(
       headers: normalizedHeaders(headers),
     };
     const body = await observedBody(init?.body);
-    if (body.present) dispatch.body = body.value;
+    if (body.present) {
+      dispatch.body = body.value;
+      if (body.base64 !== undefined) dispatch.bodyBase64 = body.base64;
+      if (body.byteLength !== undefined) dispatch.bodyByteLength = body.byteLength;
+    }
     dispatches.push(dispatch);
 
     const status = typeof peer.status === "number" ? peer.status : 599;
@@ -151,6 +155,9 @@ async function runScenario(
     phase: errorPhase(terminal, dispatches.length > 0),
     data: {
       ...data,
+      ...(terminal.code === CONTEXT_REQUIRED && terminal.details !== undefined
+        ? { context: terminal.details }
+        : {}),
       error: {
         code: terminal.code,
         message: terminal.message,
@@ -178,18 +185,53 @@ function base64ToBytes(value: string): Uint8Array<ArrayBuffer> {
 
 async function observedBody(
   body: BodyInit | null | undefined,
-): Promise<{ present: boolean; value?: unknown }> {
+): Promise<{ present: boolean; value?: unknown; base64?: string; byteLength?: number }> {
   if (body == null) return { present: false };
   if (typeof body === "string") {
     if (body === "") return { present: false };
+    const bytes = new TextEncoder().encode(body);
     try {
-      return { present: true, value: JSON.parse(body) };
+      return {
+        present: true,
+        value: JSON.parse(body),
+        base64: bytesToBase64(bytes),
+        byteLength: bytes.byteLength,
+      };
     } catch {
-      return { present: true, value: body };
+      return {
+        present: true,
+        value: body,
+        base64: bytesToBase64(bytes),
+        byteLength: bytes.byteLength,
+      };
     }
   }
   if (body instanceof URLSearchParams) return { present: true, value: body.toString() };
+  if (ArrayBuffer.isView(body)) {
+    const bytes = new Uint8Array(body.buffer, body.byteOffset, body.byteLength);
+    return {
+      present: true,
+      value: String(body),
+      base64: bytesToBase64(bytes),
+      byteLength: bytes.byteLength,
+    };
+  }
+  if (body instanceof ArrayBuffer) {
+    const bytes = new Uint8Array(body);
+    return {
+      present: true,
+      value: String(body),
+      base64: bytesToBase64(bytes),
+      byteLength: bytes.byteLength,
+    };
+  }
   return { present: true, value: String(body) };
+}
+
+function bytesToBase64(bytes: Uint8Array): string {
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary);
 }
 
 function normalizedHeaders(headers: Headers): Record<string, string> {

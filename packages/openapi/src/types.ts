@@ -44,7 +44,7 @@ export interface OpenAPIParameter {
   in?: string;
   required?: boolean;
   description?: string;
-  schema?: Record<string, unknown>;
+  schema?: Record<string, unknown> | boolean;
   [key: string]: unknown;
 }
 
@@ -64,7 +64,7 @@ export interface OpenAPIResponse {
 
 /** Represents a media type entry (e.g. application/json) with its associated schema. */
 export interface OpenAPIMediaType {
-  schema?: Record<string, unknown>;
+  schema?: Record<string, unknown> | boolean;
   [key: string]: unknown;
 }
 

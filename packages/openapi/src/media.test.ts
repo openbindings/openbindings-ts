@@ -7,11 +7,15 @@ import {
   buildMultipartBody,
   buildRequestBody,
   buildURLEncodedBody,
+  governingResponseMedia,
   isStreamingCapable,
+  parseMediaType,
   planRequestBody,
+  planRequestBodies,
   successMediaTypes,
   type BodyPlan,
 } from "./media.js";
+import { BINDING_SPEC_V3 } from "./constants.js";
 import type { OpenAPIDocument, OpenAPIMediaType, OpenAPIOperation } from "./types.js";
 import type { RoutedInput } from "./params.js";
 
@@ -112,6 +116,43 @@ describe("planRequestBody — deterministic unconfigured selection", () => {
         "outside the families",
       );
     }
+  });
+});
+
+describe("revision-3 media-range carriage existence", () => {
+  const options = { bindingSpec: BINDING_SPEC_V3, openapiVersion: "3.1.2" };
+
+  it.each([
+    ["application/*", { type: "object", properties: { name: { type: "string" } } }],
+    ["*/*", { type: "object", properties: { name: { type: "string" } } }],
+    ["text/*", { type: "string" }],
+    ["image/*", { type: "string", contentEncoding: "base64" }],
+    ["image/*", undefined],
+    ["image/*", { type: "object" }],
+  ])("admits %s when at least one matching concrete member has defined carriage", (range, schema) => {
+    const plans = planRequestBodies(
+      opWithRequestBody({ [range]: schema === undefined ? {} : { schema } }, true),
+      options,
+    );
+    expect(plans).toHaveLength(1);
+    expect(plans[0]).toMatchObject({ mediaKey: range, range: true });
+  });
+
+  it("admits OAS 3.0 binary image ranges through a possible configured raw member", () => {
+    const plans = planRequestBodies(
+      opWithRequestBody({ "image/*": { schema: { type: "string", format: "binary" } } }, true),
+      { bindingSpec: BINDING_SPEC_V3, openapiVersion: "3.0.4" },
+    );
+    expect(plans).toHaveLength(1);
+    expect(plans[0]).toMatchObject({ mediaKey: "image/*", range: true });
+  });
+
+  it("rejects invalid request declaration syntax", () => {
+    const op = opWithRequestBody({ "application/json/extra": { schema: { type: "object" } } }, true);
+    expect(() => planRequestBodies(op, {
+      bindingSpec: BINDING_SPEC_V3,
+      openapiVersion: "3.1.2",
+    })).toThrow(/outside the families/);
   });
 });
 
@@ -279,6 +320,64 @@ describe("buildMultipartBody", () => {
     );
   });
 
+  it.each(["AB==", "AQI", "AQI=\n"])(
+    "revision 3 rejects non-canonical OAS 3.0 multipart Base64 %j",
+    (value) => {
+      const media: OpenAPIMediaType = {
+        schema: {
+          type: "object",
+          properties: { file: { type: "string", format: "binary" } },
+        },
+      };
+      const plan = planRequestBody(
+        opWithRequestBody({ "multipart/form-data": media }, true),
+        { bindingSpec: BINDING_SPEC_V3, openapiVersion: "3.0.4" },
+      );
+      expect(() => buildRequestBody(DOC_30, plan, routedWith({ bodyFields: { file: value } })))
+        .toThrow(/invalid canonical base64/);
+    },
+  );
+
+  it("carries OAS 3.0 binary parts under their declared non-default content type", async () => {
+    const media: OpenAPIMediaType = {
+      schema: {
+        type: "object",
+        properties: { archive: { type: "string", format: "binary" } },
+      },
+      encoding: { archive: { contentType: "application/zip" } },
+    };
+    const plan = planRequestBody(
+      opWithRequestBody({ "multipart/form-data": media }, true),
+      { bindingSpec: BINDING_SPEC_V3, openapiVersion: "3.0.3" },
+    );
+    const wire = buildRequestBody(
+      DOC_30,
+      plan,
+      routedWith({ bodyFields: { archive: b64("zip-bytes") } }),
+    );
+    const parts = await formDataParts(wire.body as FormData);
+    expect(parts.archive?.[0]).toEqual(["application/zip", "zip-bytes"]);
+  });
+
+  it.each([
+    new Uint8Array([1, 2]),
+    new Blob([new Uint8Array([1, 2])]),
+  ])("revision 3 rejects non-JSON multipart binary convenience value %s", (value) => {
+    const media: OpenAPIMediaType = {
+      schema: {
+        type: "object",
+        properties: { file: { type: "string", format: "binary" } },
+      },
+    };
+    const plan = planRequestBody(
+      opWithRequestBody({ "multipart/form-data": media }, true),
+      { bindingSpec: BINDING_SPEC_V3, openapiVersion: "3.0.4" },
+    );
+    expect(() => buildRequestBody(DOC_30, plan, routedWith({ bodyFields: { file: value } })))
+      .toThrow(/requires a canonical Base64 string/);
+    expect(() => buildMultipartBody(DOC_30, media, { file: value })).not.toThrow();
+  });
+
   // 3.1.x: a string schema carrying contentMediaType/contentEncoding
   // signals binary; a declared contentEncoding decides the decode, and the
   // declared contentMediaType rides as the part's content type.
@@ -303,6 +402,68 @@ describe("buildMultipartBody", () => {
     // UTF-8, so compare the raw bytes).
     const img = fd.get("img") as File;
     expect([...new Uint8Array(await img.arrayBuffer())]).toEqual([0xff, 0xfe]);
+  });
+
+  it("revision 3 keeps OAS 3.1 contentEncoding and identity-encoded contentMediaType strings unchanged", async () => {
+    const media: OpenAPIMediaType = {
+      schema: {
+        type: "object",
+        properties: {
+          encoded: {
+            type: "string",
+            contentMediaType: "image/png",
+            contentEncoding: "base64",
+          },
+          identity: {
+            type: "string",
+            contentMediaType: "text/custom",
+          },
+        },
+      },
+    };
+    const fd = buildMultipartBody(DOC_31, media, {
+      encoded: "AAH+/w==",
+      identity: "literal text",
+    }, true);
+    const encoded = fd.get("encoded") as File;
+    const identity = fd.get("identity") as File;
+    expect(encoded.type).toBe("application/octet-stream");
+    expect(await encoded.text()).toBe("AAH+/w==");
+    expect(identity).toBe("literal text");
+  });
+
+  it("revision 3 resolves multipart content keywords through allOf and refuses conflicts", async () => {
+    const inherited: OpenAPIMediaType = {
+      schema: {
+        type: "object",
+        properties: {
+          encoded: {
+            allOf: [
+              { type: "string" },
+              { contentMediaType: "image/png", contentEncoding: "base64" },
+            ],
+          },
+        },
+      },
+    };
+    const fd = buildMultipartBody(DOC_31, inherited, { encoded: "AAH+/w==" }, true);
+    expect(await (fd.get("encoded") as File).text()).toBe("AAH+/w==");
+
+    const conflicting: OpenAPIMediaType = {
+      schema: {
+        type: "object",
+        properties: {
+          encoded: {
+            allOf: [
+              { type: "string", contentEncoding: "base64" },
+              { contentEncoding: "base64url" },
+            ],
+          },
+        },
+      },
+    };
+    expect(() => buildMultipartBody(DOC_31, conflicting, { encoded: "AAH+/w==" }, true))
+      .toThrow(/conflicting contentEncoding/);
   });
 
   // Parts that are not binary-signaled follow the per-type defaults:
@@ -401,5 +562,126 @@ describe("successMediaTypes / acceptHeader / isStreamingCapable", () => {
       responses: { default: { content: { "text/event-stream": {} } } },
     };
     expect(isStreamingCapable(op)).toBe(true);
+  });
+
+  it("revision 3 recognizes parameterized event-stream capability by parsed base", () => {
+    const op: OpenAPIOperation = {
+      responses: { "200": { content: { "text/event-stream; charset=utf-8": {} } } },
+    };
+    expect(isStreamingCapable(op)).toBe(false);
+    expect(isStreamingCapable(op, true)).toBe(true);
+  });
+
+  it("revision 3 builds Accept from semantic parameter identities", () => {
+    const op: OpenAPIOperation = {
+      responses: {
+        "200": {
+          content: {
+            'application/json; note="a\\z"': {},
+            "text/plain; charset=UTF-8": {},
+            "TEXT/PLAIN; CHARSET=utf-8": {},
+          },
+        },
+      },
+    };
+    expect(acceptHeader(op, true)).toBe("application/json; note=az, text/plain; charset=UTF-8");
+  });
+});
+
+describe("revision-3 response media governance", () => {
+  it("ignores response ranges when a concrete sibling governs", () => {
+    expect(governingResponseMedia({
+      content: { "application/json": {}, "*/*": {} },
+    }, "application/json", true)).toBe("application/json");
+  });
+
+  it("rejects unrelated normalized concrete collisions before matching", () => {
+    expect(() => governingResponseMedia({
+      content: {
+        "text/plain": {},
+        "application/json; charset=UTF-8": {},
+        "APPLICATION/JSON; CHARSET=utf-8": {},
+      },
+    }, "text/plain", true)).toThrow(/normalized collision/);
+  });
+
+  it("rejects normalized range collisions before excluding ranges from matching", () => {
+    expect(() => governingResponseMedia({
+      content: {
+        "application/json": {},
+        "*/*; charset=UTF-8": {},
+        "*/*; CHARSET=utf-8": {},
+      },
+    }, "application/json", true)).toThrow(/normalized collision/);
+  });
+
+  it("matches charset values case-insensitively and fully unescapes quoted pairs", () => {
+    expect(governingResponseMedia({
+      content: { 'text/plain; charset=UTF-8; note="a\\z"': {} },
+    }, "text/plain; charset=utf-8; note=az", true)).toBe("text/plain; charset=UTF-8; note=az");
+  });
+
+  it("allows trailing OWS after parameter values while rejecting OWS around equals", () => {
+    expect(parseMediaType("text/plain; note=x ; charset=utf-8", true).params).toEqual({
+      note: "x",
+      charset: "utf-8",
+    });
+    expect(parseMediaType('text/plain; note="x" ', true).params["note"]).toBe("x");
+    expect(() => parseMediaType("text/plain; note =x", true)).toThrow();
+    expect(() => parseMediaType("text/plain; note= x", true)).toThrow();
+  });
+
+  it("accepts RFC 9110 empty parameter slots in revision 3", () => {
+    expect(parseMediaType("application/json;", true).canonical).toBe("application/json");
+    expect(parseMediaType("application/json;; charset=utf-8; ;", true).canonical)
+      .toBe("application/json; charset=utf-8");
+    expect(() => parseMediaType("application/json;")).toThrow();
+  });
+
+  it("treats only structural wildcards as ranges in revision 3", () => {
+    expect(parseMediaType("application/vnd.foo*bar", true).base).toBe("application/vnd.foo*bar");
+    expect(() => parseMediaType("application/*", true)).toThrow();
+  });
+
+  it("accepts prototype-like parameter names in the revision-3 parser", () => {
+    const params = parseMediaType("text/plain; constructor=x; __proto__=y", true).params;
+    expect(Object.hasOwn(params, "constructor")).toBe(true);
+    expect(Object.hasOwn(params, "__proto__")).toBe(true);
+    expect(params["constructor"]).toBe("x");
+    expect(params["__proto__"]).toBe("y");
+  });
+
+  it("compares registered nested type parameters semantically and unknown parameters bytewise", () => {
+    const upper = parseMediaType(
+      'multipart/related; type="Application/JSON; Charset=UTF-8"; profile=Case',
+      true,
+    );
+    const lower = parseMediaType(
+      'multipart/related; type="application/json; charset=utf-8"; profile=Case',
+      true,
+    );
+    expect(upper.identity).toBe(lower.identity);
+    expect(parseMediaType('multipart/related; profile=case', true).identity)
+      .not.toBe(parseMediaType('multipart/related; profile=Case', true).identity);
+  });
+
+  it.each([
+    "text/plain/extra",
+    "text /plain",
+    "text/plain; bad name=x",
+    "text/plain; note=",
+    "text/plain; note=two words",
+    "text/plain; note =x",
+    "text/plain; note= x",
+    'text/plain; note="line\nfeed"',
+    'text/plain; note="\\\n"',
+    'text/plain; note="Ā"',
+  ])("revision 3 rejects invalid RFC 9110 media syntax %j", (value) => {
+    expect(() => parseMediaType(value, true)).toThrow();
+  });
+
+  it("keeps the legacy parser's former minimal malformed-base acceptance", () => {
+    expect(parseMediaType("text/plain/extra").base).toBe("text/plain/extra");
+    expect(() => parseMediaType("text/plain/extra", true)).toThrow();
   });
 });

@@ -207,7 +207,10 @@ export async function streamSSE(
   }
 
   const reader = body.getReader();
-  const decoder = new TextDecoder();
+  // WHATWG event streams are always UTF-8 in replacement mode. A charset
+  // parameter on the HTTP Content-Type does not select another decoder;
+  // malformed byte sequences become U+FFFD before line parsing.
+  const decoder = new TextDecoder("utf-8");
   // buffer holds text with no line terminator yet; scanned marks how far
   // terminator scanning has advanced (everything before it is known
   // terminator-free), so an arriving chunk never re-scans text a previous

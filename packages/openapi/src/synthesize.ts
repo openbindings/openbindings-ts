@@ -7,17 +7,18 @@ import type {
   OpenAPIParameter,
   OpenAPIPathItem,
 } from "./types.js";
-import { BINDING_SPEC, BINDING_SPEC_V2, DEFAULT_SOURCE_NAME } from "./constants.js";
+import { BINDING_SPEC, BINDING_SPEC_V3, DEFAULT_SOURCE_NAME, hasRoutedInputs } from "./constants.js";
 import {
   DegenerateMediaError,
   FAMILY_JSON,
+  FAMILY_MULTIPART,
   candidateCollides,
   isJSONMediaType,
   parseMediaType,
   planRequestBodies,
   type BodyPlan,
 } from "./media.js";
-import { effectiveParameters, unflattenableParam } from "./params.js";
+import { effectiveParameters, unflattenableParam, validateParameterSerialization } from "./params.js";
 import { planAbstractInputRoutes, type AbstractInputRoutes } from "./input-routes-v2.js";
 import { translateSchemaDialect } from "./translate.js";
 import {
@@ -111,7 +112,10 @@ export async function convertToInterface(
     if (doc.info.description) iface.description = doc.info.description;
   }
 
-  if (!doc.paths) return iface;
+  if (!doc.paths) {
+    delete iface.bindings;
+    return iface;
+  }
 
   // Full dereference aliases internal $refs to shared nodes, so a recursive
   // component is a true object cycle here. Schema embedding rewrites cycle
@@ -149,7 +153,7 @@ export async function convertToInterface(
         throw unrealizableOperation(opKey, reason);
       }
 
-      const unsupportedParameter = unsupportedParameterContent(params);
+      const unsupportedParameter = unsupportedParameterContent(params, bindingSpec);
       if (unsupportedParameter) {
         const reason = `parameter ${JSON.stringify(unsupportedParameter)} declares content with no faithful revision-2 carriage`;
         if (onUnrealizable) {
@@ -165,14 +169,38 @@ export async function convertToInterface(
         throw unrealizableOperation(opKey, reason);
       }
 
+      if (bindingSpec === BINDING_SPEC_V3) {
+        let serializationError: unknown;
+        for (const parameter of params) {
+          try { validateParameterSerialization(parameter); } catch (error: unknown) {
+            serializationError = error;
+            break;
+          }
+        }
+        if (serializationError !== undefined) {
+          const reason = safeErrorMessage(serializationError);
+          if (onUnrealizable) {
+            onUnrealizable({
+              ref,
+              operationKey: opKey,
+              reasonCode: "openapi.parameter_serialization_excluded",
+              rule: "OAPI-P-02",
+              message: reason,
+            });
+            continue;
+          }
+          throw unrealizableOperation(opKey, reason);
+        }
+      }
+
       let requestPlans: BodyPlan[] = [];
       if (opObj.requestBody) {
         let planError: unknown;
         let plannedCount = 0;
         try {
-          const plans = planRequestBodies(opObj);
+          const plans = planRequestBodies(opObj, { bindingSpec, openapiVersion: doc.openapi });
           plannedCount = plans.length;
-          requestPlans = plans.filter((plan) => bindingSpec === BINDING_SPEC_V2 || !candidateCollides(params, plan));
+          requestPlans = plans.filter((plan) => hasRoutedInputs(bindingSpec) || !candidateCollides(params, plan));
         } catch (error: unknown) {
           planError = error;
         }
@@ -243,7 +271,7 @@ export async function convertToInterface(
       // schema root, referenced by same-document pointers from the OBI root
       // (OBI-D-16); translation then runs on an acyclic tree.
       const opPointer = `#/operations/${escapePointerSegment(opKey)}`;
-      const routes = planAbstractInputRoutes(params, requestPlans);
+      const routes = planAbstractInputRoutes(params, requestPlans, bindingSpec);
       const requestProjector = createOpenAPISchemaProjector("request", schemaNames);
       const inputSchema = buildInputSchemaForPlans(
         opObj,
@@ -263,7 +291,7 @@ export async function convertToInterface(
 
       const responseProjector = createOpenAPISchemaProjector("response", schemaNames);
       const outputSchema = buildOutputSchema(opObj, responseProjector);
-      if (outputSchema) {
+      if (outputSchema !== undefined) {
         const acyclicOutput = decycleSchema(
           outputSchema,
           responseProjector.componentNames,
@@ -280,13 +308,14 @@ export async function convertToInterface(
         source: DEFAULT_SOURCE_NAME,
         ref,
       };
-      if (bindingSpec === BINDING_SPEC_V2 && routes.needsTransform) {
+      if (hasRoutedInputs(bindingSpec) && routes.needsTransform) {
         binding.inputTransform = routes.transformExpression();
       }
       (iface.bindings as Record<string, BindingEntry>)[bindingKey] = binding;
     }
   }
 
+  if (Object.keys(iface.bindings ?? {}).length === 0) delete iface.bindings;
   return iface;
 }
 
@@ -467,8 +496,8 @@ function projectedSuccessSchemaRoots(op: OpenAPIOperation): unknown[] {
       if (!isJSONMediaType(parsed.base)) continue;
       // One unconstrained JSON lane makes the entire synthesized output
       // unconstrained, so no response schema is projected at all.
-      if (!media.schema) return [];
-      schemas.push(media.schema);
+      if (!Object.hasOwn(media, "schema")) return [];
+      if (media.schema && typeof media.schema === "object") schemas.push(media.schema);
     }
   }
   return schemas;
@@ -546,23 +575,54 @@ function buildInputSchema(
   const required: string[] = [];
   // Only JSON-family object candidates can carry undeclared fields by the
   // binding rule. Multipart/form and parameter-only surfaces stay closed.
-  const hasOpenBody = requestPlan?.family === FAMILY_JSON && !requestPlan.synthetic;
+  const hasOpenBody = requestPlan !== undefined
+    && !requestPlan.synthetic
+    && (requestPlan.family === FAMILY_JSON || requestPlan.range === true);
 
   for (const param of allParams) {
     if (!param?.name) continue;
     const prop = paramToSchema(param, projector);
     const field = routes.parameterField(param.in ?? "", param.name);
-    if (prop) properties[field] = prop;
+    if (prop !== undefined) properties[field] = prop;
     if (param.required) required.push(field);
   }
 
   if (op.requestBody && requestPlan) {
     const rb = op.requestBody;
-    const bodySchema = requestPlan.media?.schema
-      ? projector.project(requestPlan.media.schema) as Record<string, unknown>
+    let projectedBodySchema: unknown = requestPlan.media && Object.hasOwn(requestPlan.media, "schema")
+      ? projector.project(requestPlan.media.schema)
       : undefined;
-    if (bodySchema) {
-      const bodyShape = resolvedSynthesisBodyShape(bodySchema, new Set());
+    if (
+      projectedBodySchema
+      && typeof projectedBodySchema === "object"
+      && !Array.isArray(projectedBodySchema)
+      && requestPlan.revision3
+      && requestPlan.family === FAMILY_MULTIPART
+      && requestPlan.openapiVersion?.startsWith("3.0")
+    ) {
+      projectedBodySchema = decorateMultipartBinaryBoundaries(
+        candidateLocalSchemaClone(
+          projectedBodySchema as Record<string, unknown>,
+          new Map(),
+          projector.componentNames,
+        ),
+        new Set(),
+      );
+    }
+    const bodySchema: unknown = requestPlan.rawBoundary
+      ? { ...(
+          projectedBodySchema && typeof projectedBodySchema === "object" && !Array.isArray(projectedBodySchema)
+            ? projectedBodySchema
+            : { type: "string" }
+        ), contentEncoding: "base64" }
+      : projectedBodySchema ?? (requestPlan.revision3 && requestPlan.synthetic ? {} : undefined);
+    if (bodySchema !== undefined) {
+      if (typeof bodySchema === "boolean") {
+        const field = routes.wholeBodyField || "body";
+        properties[field] = bodySchema;
+        if (rb.required) required.push(field);
+      } else {
+      const bodyShape = resolvedSynthesisBodyShape(bodySchema as Record<string, unknown>, new Set());
       const bodyProps = bodyShape.properties;
       if (!bodyShape.object) {
         // A non-object body schema — array, scalar, binary, or TYPELESS
@@ -588,6 +648,7 @@ function buildInputSchema(
         // field the conformant invoker refuses as unmatched.
         // hasOpenBody was determined by the selected candidate's family.
       }
+      }
     }
   }
 
@@ -606,6 +667,109 @@ function buildInputSchema(
     schema.required = [...required].sort(codePointCompare);
   }
   return schema;
+}
+
+function decorateMultipartBinaryBoundaries(
+  schema: Record<string, unknown>,
+  seen: Set<Record<string, unknown>>,
+): Record<string, unknown> {
+  if (seen.has(schema)) return schema;
+  seen.add(schema);
+  // The multipart runtime decodes only direct property parts and repeated
+  // array item parts. Nested properties inside an object part are JSON
+  // members, not independent binary parts, so recursively decorating them
+  // would overclaim a decode the wire builder never performs.
+  const properties = schema.properties;
+  if (properties && typeof properties === "object" && !Array.isArray(properties)) {
+    for (const property of Object.values(properties as Record<string, unknown>)) {
+      if (property && typeof property === "object" && !Array.isArray(property)) {
+        decorateMultipartPartBoundary(property as Record<string, unknown>);
+      }
+    }
+  }
+  if (Array.isArray(schema.allOf)) {
+    for (const member of schema.allOf) {
+      if (member && typeof member === "object" && !Array.isArray(member)) {
+        decorateMultipartBinaryBoundaries(member as Record<string, unknown>, seen);
+      }
+    }
+  }
+  return schema;
+}
+
+function decorateMultipartPartBoundary(schema: Record<string, unknown>): void {
+  if (synthesisSchemaTypeIs(schema, "string") && synthesisSchemaFormatIs(schema, "binary")) {
+    schema.contentEncoding = "base64";
+    return;
+  }
+  if (!synthesisSchemaTypeIs(schema, "array")) return;
+  decorateMultipartItemBoundary(schema.items);
+  if (Array.isArray(schema.allOf)) {
+    for (const member of schema.allOf) {
+      if (member && typeof member === "object" && !Array.isArray(member)) {
+        decorateMultipartItemBoundary((member as Record<string, unknown>).items);
+      }
+    }
+  }
+}
+
+function decorateMultipartItemBoundary(items: unknown): void {
+  if (
+    items
+    && typeof items === "object"
+    && !Array.isArray(items)
+    && synthesisSchemaTypeIs(items as Record<string, unknown>, "string")
+    && synthesisSchemaFormatIs(items as Record<string, unknown>, "binary")
+  ) {
+    (items as Record<string, unknown>).contentEncoding = "base64";
+  }
+}
+
+function candidateLocalSchemaClone<T>(
+  value: T,
+  memo: Map<object, unknown>,
+  componentNames: ReadonlyMap<object, string>,
+): T {
+  if (value === null || typeof value !== "object") return value;
+  const cached = memo.get(value);
+  if (cached !== undefined) return cached as T;
+  if (Array.isArray(value)) {
+    const clone: unknown[] = [];
+    memo.set(value, clone);
+    for (const member of value) {
+      clone.push(candidateLocalSchemaClone(member, memo, componentNames));
+    }
+    return clone as T;
+  }
+  const clone: Record<string, unknown> = {};
+  memo.set(value, clone);
+  const componentName = componentNames.get(value);
+  if (componentName !== undefined) {
+    (componentNames as Map<object, string>).set(clone, componentName);
+  }
+  for (const [key, member] of Object.entries(value as Record<string, unknown>)) {
+    clone[key] = candidateLocalSchemaClone(member, memo, componentNames);
+  }
+  return clone as T;
+}
+
+function synthesisSchemaTypeIs(schema: Record<string, unknown>, want: string): boolean {
+  if (schema.type === want) return true;
+  if (Array.isArray(schema.type) && schema.type.includes(want)) return true;
+  return Array.isArray(schema.allOf) && schema.allOf.some((member) =>
+    member !== null
+    && typeof member === "object"
+    && !Array.isArray(member)
+    && synthesisSchemaTypeIs(member as Record<string, unknown>, want));
+}
+
+function synthesisSchemaFormatIs(schema: Record<string, unknown>, want: string): boolean {
+  if (schema.format === want) return true;
+  return Array.isArray(schema.allOf) && schema.allOf.some((member) =>
+    member !== null
+    && typeof member === "object"
+    && !Array.isArray(member)
+    && synthesisSchemaFormatIs(member as Record<string, unknown>, want));
 }
 
 interface SynthesisBodyShape {
@@ -664,19 +828,23 @@ function resolvedSynthesisBodyShape(
 function paramToSchema(
   param: OpenAPIParameter,
   projector: OpenAPISchemaProjector,
-): Record<string, unknown> | undefined {
-  let schema: Record<string, unknown>;
-  if (param.schema && typeof param.schema === "object") {
-    schema = { ...(projector.project(param.schema) as Record<string, unknown>) };
+): JSONSchema | undefined {
+  let schema: JSONSchema;
+  if (Object.hasOwn(param, "schema")) {
+    schema = projector.project(param.schema) as JSONSchema;
   } else if (param.content && typeof param.content === "object") {
     const media = Object.values(param.content as Record<string, OpenAPIMediaType>)[0];
-    schema = media?.schema && typeof media.schema === "object"
-      ? { ...(projector.project(media.schema) as Record<string, unknown>) }
+    schema = media && Object.hasOwn(media, "schema")
+      ? projector.project(media.schema) as JSONSchema
       : { type: "string" };
   } else {
     schema = { type: "string" };
   }
-  if (param.description) schema.description = param.description;
+  if (param.description) {
+    schema = typeof schema === "boolean"
+      ? { allOf: [schema], description: param.description }
+      : { ...schema, description: param.description };
+  }
   return schema;
 }
 
@@ -686,14 +854,22 @@ function paramToSchema(
  * that the binding is statically guaranteed to refuse when that parameter is
  * used; tolerant synthesis excludes the complete target with durable evidence.
  */
-function unsupportedParameterContent(params: OpenAPIParameter[]): string | undefined {
+function unsupportedParameterContent(
+  params: OpenAPIParameter[],
+  bindingSpec: string,
+): string | undefined {
   for (const param of params) {
     if (!param?.name || !param.content || typeof param.content !== "object") continue;
     const keys = Object.keys(param.content);
     if (keys.length !== 1) return param.name;
     try {
-      const media = parseMediaType(keys[0]!);
+      const media = parseMediaType(keys[0]!, bindingSpec === BINDING_SPEC_V3);
       if (!isJSONMediaType(media.base) && media.base !== "text/plain") return param.name;
+      if (
+        bindingSpec === BINDING_SPEC_V3
+        && media.params["charset"] !== undefined
+        && !["utf-8", "us-ascii", "iso-8859-1"].includes(media.params["charset"].toLowerCase())
+      ) return param.name;
     } catch {
       return param.name;
     }
@@ -709,7 +885,7 @@ function buildOutputSchema(
   const keys = Object.keys(op.responses);
   const hasRange = Object.hasOwn(op.responses, "2XX");
   const exact = keys.filter((key) => /^2[0-9][0-9]$/.test(key));
-  const schemas: Record<string, unknown>[] = [];
+  const schemas: JSONSchema[] = [];
   for (const key of keys.sort(codePointCompare)) {
     if (!/^2[0-9][0-9]$/.test(key) && key !== "2XX" && !(key === "default" && !hasRange && exact.length < 100)) continue;
     const response = op.responses[key];
@@ -720,8 +896,8 @@ function buildOutputSchema(
       if (isJSONMediaType(parsed.base)) {
         // A JSON success declaration without a schema can emit any JSON
         // value; the synthesized OBI must not make a narrower claim.
-        if (!media.schema) return undefined;
-        schemas.push(projector.project(media.schema) as Record<string, unknown>);
+        if (!Object.hasOwn(media, "schema")) return undefined;
+        schemas.push(projector.project(media.schema) as JSONSchema);
       } else {
         // Revision 1's builtin non-JSON response lane is text, including
         // one string per SSE event, irrespective of an OAS schema claim.

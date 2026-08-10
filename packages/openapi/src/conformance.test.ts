@@ -805,7 +805,7 @@ describe("OAPI-P-04 — request media on the wire", () => {
     };
     const { fetch, requests } = mockFetch(() => jsonResponse({}));
     const call = new OpenAPIInvoker().invokeBinding({
-      source: src(spec),
+      source: { ...src(spec), bindingSpec: "openbindings.openapi@2" },
       ref: "#/paths/~1blob/post",
       fetch,
     });

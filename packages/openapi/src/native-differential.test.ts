@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import jsonata from "jsonata";
 import {
+  CONTEXT_REQUIRED,
   OperationInvoker,
   operationSignature,
   type InvocationError,
@@ -53,8 +54,15 @@ describe("OpenAPI native-client differential", () => {
         const call = new OperationInvoker([new OpenAPIInvoker()]).invoke(
           iface,
           operationSignature(fidelityOperationId(content)),
+          scenario.given.configuration
+            ? { context: { configuration: scenario.given.configuration } }
+            : undefined,
         );
-        await call.close().catch(() => {});
+        if (scenario.given.invocation.inputPresent === true) {
+          await call.write(scenario.given.invocation.input).catch(() => {});
+        } else {
+          await call.close().catch(() => {});
+        }
         const outputs: unknown[] = [];
         let terminal: InvocationError | undefined;
         try {
@@ -63,11 +71,22 @@ describe("OpenAPI native-client differential", () => {
           terminal = error as InvocationError;
         }
 
+        const expectsContext = scenario.expected.some((alternative) => alternative.disposition === "context-required");
+        if (expectsContext) {
+          expect(terminal?.code).toBe(CONTEXT_REQUIRED);
+          expect(outputs).toEqual([]);
+          return;
+        }
+
         const nativeSucceeded = nativeResponse.status >= 200 && nativeResponse.status < 300;
         if (nativeSucceeded) {
           expect(terminal).toBeUndefined();
-          const nativeValue = JSON.parse(new TextDecoder().decode(nativeBody)) as unknown;
-          expect(outputs).toEqual([nativeValue]);
+          if (nativeBody.byteLength === 0) {
+            expect(outputs).toEqual([]);
+          } else {
+            const nativeValue = JSON.parse(new TextDecoder().decode(nativeBody)) as unknown;
+            expect(outputs).toEqual([nativeValue]);
+          }
           return;
         }
 

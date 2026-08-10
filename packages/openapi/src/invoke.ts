@@ -48,8 +48,9 @@ import {
   queryEscape,
   routeInput,
   unflattenableParam,
+  validateParameterSerialization,
 } from "./params.js";
-import { BINDING_SPEC_V2 } from "./constants.js";
+import { BINDING_SPEC_V3, hasRoutedInputs } from "./constants.js";
 import {
   envelopeWillEmitBody,
   flatInputHasAmbiguousParameter,
@@ -62,6 +63,8 @@ import {
   acceptHeader,
   buildRequestBody,
   candidateCollides,
+  configureRequestMedia,
+  finalizeRequestBody,
   governingResponse,
   governingResponseMedia,
   isJSONMediaType,
@@ -142,7 +145,14 @@ export async function runBinding(
     return;
   }
 
-  const revision2 = args.source.bindingSpec === BINDING_SPEC_V2;
+  const routedRevision = hasRoutedInputs(args.source.bindingSpec);
+  const revision3 = args.source.bindingSpec === BINDING_SPEC_V3;
+  const planningOptions = {
+    bindingSpec: args.source.bindingSpec,
+    openapiVersion: doc.openapi,
+    inventoryUnsupported: revision3,
+  };
+  const configuredMedia = contextConfiguration(args.context)["requestMedia"];
   // Revision 2 lifts cross-location name collisions through its routed
   // source value. Case-distinct declarations that HTTP itself treats as one
   // header name remain unresolvable in both revisions.
@@ -166,6 +176,14 @@ export async function runBinding(
       ),
     );
     return;
+  }
+  if (revision3) {
+    try {
+      for (const parameter of params) validateParameterSerialization(parameter);
+    } catch (error: unknown) {
+      inv.fireError(new InvocationError(ERR_SOURCE_CONFIG_ERROR, errorMessage(error)));
+      return;
+    }
   }
   let baseURL: string;
   try {
@@ -198,9 +216,26 @@ export async function runBinding(
   let requiredBodyPlans: BodyPlan[] | undefined;
   if (op.requestBody?.required === true) {
     try {
-      requiredBodyPlans = planRequestBodies(op);
+      requiredBodyPlans = planRequestBodies(op, planningOptions);
     } catch (e: unknown) {
       inv.fireError(new InvocationError(ERR_SOURCE_CONFIG_ERROR, errorMessage(e)));
+      return;
+    }
+    const supportedBodyPlans = requiredBodyPlans.filter((plan) => !plan.unsupported);
+    if (revision3 && supportedBodyPlans.length === 0) {
+      inv.fireError(new InvocationError(
+        ERR_SOURCE_CONFIG_ERROR,
+        "required request body has no declaration with a revision-3 supported carriage",
+      ));
+      return;
+    }
+    if (
+      revision3
+      && supportedBodyPlans.length > 0
+      && supportedBodyPlans.every((plan) => plan.range)
+      && (configuredMedia === undefined || configuredMedia === null)
+    ) {
+      inv.fireError(requestMediaContextRequired(baseURL));
       return;
     }
   }
@@ -235,9 +270,9 @@ export async function runBinding(
       inputMap = {};
     } else {
       inputSupplied = true;
-      if (revision2) {
+      if (routedRevision) {
         try {
-          envelope = parseRoutedEnvelope(first);
+          envelope = parseRoutedEnvelope(first, args.source.bindingSpec);
         } catch (e: unknown) {
           inv.fireError(new InvocationError(ERR_VALIDATION_FAILED, errorMessage(e)));
           return;
@@ -257,10 +292,10 @@ export async function runBinding(
 
   // ----- Routing (§9.1) and body construction (§9.2): still pre-dispatch. -----
 
-  if (revision2 && inputSupplied && envelope === null && flatInputHasAmbiguousParameter(params, inputMap)) {
+  if (routedRevision && inputSupplied && envelope === null && flatInputHasAmbiguousParameter(params, inputMap)) {
     inv.fireError(new InvocationError(
       ERR_VALIDATION_FAILED,
-      "this revision-2 input supplies one flat field for independently declared same-named parameters and requires a routed source input (normally produced by the binding's inputTransform)",
+      `this ${revision3 ? "revision-3" : "revision-2"} input supplies one flat field for independently declared same-named parameters and requires a routed source input (normally produced by the binding's inputTransform)`,
     ));
     return;
   }
@@ -271,7 +306,7 @@ export async function runBinding(
     : requestWillEmitBody(params, inputMap, op);
   if (willEmitBody || envelope) {
     try {
-      plans = requiredBodyPlans ?? planRequestBodies(op);
+      plans = requiredBodyPlans ?? planRequestBodies(op, planningOptions);
     } catch (e: unknown) {
       inv.fireError(new InvocationError(ERR_SOURCE_CONFIG_ERROR, errorMessage(e)));
       return;
@@ -279,7 +314,7 @@ export async function runBinding(
   }
   if (envelope) {
     try {
-      validateEnvelopeRoutes(params, plans, envelope);
+      validateEnvelopeRoutes(params, plans.filter((plan) => !plan.unsupported), envelope, args.source.bindingSpec);
     } catch (e: unknown) {
       inv.fireError(new InvocationError(ERR_VALIDATION_FAILED, errorMessage(e)));
       return;
@@ -293,7 +328,7 @@ export async function runBinding(
   const reasons: string[] = [];
   const candidates = plans.length === 0
     ? [null]
-    : configuredRequestPlans(plans, args.context);
+    : configuredRequestPlans(plans, args.context, planningOptions);
   for (const candidate of candidates) {
     if (envelope === null && candidate && candidateCollides(params, candidate)) {
       reasons.push(
@@ -303,9 +338,11 @@ export async function runBinding(
     }
     try {
       const candidateRouted = envelope
-        ? routeEnvelope(params, envelope, path, candidate)
-        : routeInput(params, inputMap, path, candidate);
-      const candidateWire = buildRequestBody(doc, candidate, candidateRouted);
+        ? routeEnvelope(params, envelope, path, candidate, args.source.bindingSpec)
+        : routeInput(params, inputMap, path, candidate, args.source.bindingSpec);
+      const candidateWire = await finalizeRequestBody(
+        buildRequestBody(doc, candidate, candidateRouted),
+      );
       routed = candidateRouted;
       wire = candidateWire;
       break;
@@ -370,7 +407,7 @@ export async function runBinding(
   }
   // Advertise only artifact-declared concrete success media; an empty set
   // leaves Accept absent.
-  const accept = acceptHeader(op);
+  const accept = acceptHeader(op, revision3);
   if (accept !== "") fetchHeaders.set("Accept", accept);
 
   for (const [k, v] of routed.headers) {
@@ -417,6 +454,43 @@ export async function runBinding(
   const contentType = resp.headers.get("content-type");
   const site = siteFor(args, baseURL);
   const responseDeclaration = governingResponse(op, resp.status);
+
+  // A truly empty 2xx carries no output regardless of a stray streaming
+  // Content-Type. Peek without buffering the stream: a non-empty first
+  // chunk is replayed into a replacement Response for normal SSE handling.
+  if (isSSEContentType(contentType)) {
+    try {
+      const peeked = await peekResponseBody(resp);
+      resp = peeked.response;
+      if (peeked.empty) {
+        const raw: RawResult = { status: resp.status, body: "", meta: invocationMeta };
+        const ok = await classifyThroughHooks(args.hooks, site, raw, builtinClassify);
+        if (!ok) {
+          inv.fireError(new InvocationError(
+            httpErrorCode(resp.status),
+            "Invocation completed unsuccessfully",
+            undefined,
+            openAPIFailureDetails(
+              resp,
+              new Uint8Array(),
+              "",
+              invocationMeta,
+              responseDeclaration,
+              contentType,
+              revision3,
+            ),
+          ));
+          return;
+        }
+        inv.setTrailer(decodeClassifyTrailer(args.hooks, "not-consulted/empty"));
+        inv.closeOutput();
+        return;
+      }
+    } catch (error: unknown) {
+      inv.fireError(toInvocationError(error));
+      return;
+    }
+  }
 
   // Interaction-shape dispatch (§8, OAPI-P-06): the shape is bounded by
   // declaration and selected by framing. An operation is streaming-capable
@@ -470,6 +544,7 @@ export async function runBinding(
             invocationMeta,
             responseDeclaration,
             contentType,
+            revision3,
           ),
         ),
       );
@@ -478,7 +553,7 @@ export async function runBinding(
     let governingMedia: string | null;
     try {
       governingMedia = responseDeclaration
-        ? governingResponseMedia(responseDeclaration.response, contentType)
+        ? governingResponseMedia(responseDeclaration.response, contentType, revision3)
         : null;
     } catch (e: unknown) {
       await resp.body?.cancel().catch(() => {});
@@ -558,8 +633,9 @@ export async function runBinding(
           bodyBytes,
           lossyText,
           invocationMeta,
-          responseDeclaration,
-          contentType,
+        responseDeclaration,
+        contentType,
+        revision3,
         ),
       ),
     );
@@ -578,7 +654,7 @@ export async function runBinding(
     if (!responseDeclaration) {
       throw new Error(`status ${resp.status} has no governing Response Object`);
     }
-    governingMedia = governingResponseMedia(responseDeclaration.response, contentType) ?? "";
+    governingMedia = governingResponseMedia(responseDeclaration.response, contentType, revision3) ?? "";
     if (!governingMedia) throw new Error("the governing Response Object declares no response content");
   } catch (e: unknown) {
     inv.fireError(new InvocationError(ERR_PROTOCOL, errorMessage(e)));
@@ -587,7 +663,12 @@ export async function runBinding(
 
   let output: unknown;
   try {
-    output = await decodeThroughHooks(args.hooks, site, raw, decodeBytesByContentType(contentType, bodyBytes));
+    output = await decodeThroughHooks(
+      args.hooks,
+      site,
+      raw,
+      decodeBytesByContentType(contentType, bodyBytes, revision3),
+    );
   } catch (e: unknown) {
     inv.fireError(toInvocationError(e));
     return;
@@ -644,10 +725,16 @@ function requestWillEmitBody(
 function configuredRequestPlans(
   plans: BodyPlan[],
   ctx: Record<string, unknown> | undefined,
+  options: { bindingSpec: string; openapiVersion?: string },
 ): BodyPlan[] {
   const raw = contextConfiguration(ctx)["requestMedia"];
-  if (raw == null) return plans;
+  if (raw == null) return options.bindingSpec === BINDING_SPEC_V3
+    ? plans.filter((plan) => !plan.range && !plan.unsupported)
+    : plans;
   if (typeof raw !== "string") return [];
+  if (options.bindingSpec === BINDING_SPEC_V3) {
+    return configureRequestMedia(plans, raw, options);
+  }
   let wanted: string;
   try {
     wanted = parseMediaType(raw).identity;
@@ -661,6 +748,51 @@ function configuredRequestPlans(
       return false;
     }
   });
+}
+
+function requestMediaContextRequired(target: string): InvocationError {
+  return contextRequiredError(
+    "OpenAPI request media range requires a concrete requestMedia choice",
+    requestMediaContextDetails(target),
+  );
+}
+
+function requestMediaContextDetails(target: string): ContextRequiredDetails {
+  return {
+    target,
+    alternatives: [{
+      requirements: [configValueRequirement(
+        "requestMedia",
+        "mediaType",
+        "select a concrete request media type admitted by the OpenAPI content declarations",
+      )],
+    }],
+  };
+}
+
+/** Side-effect-free requestMedia preflight for a required represented range-only body. */
+export function requiredRequestMediaContext(
+  doc: OpenAPIDocument,
+  op: OpenAPIOperation,
+  bindingSpec: string,
+  ctx: Record<string, unknown> | undefined,
+  target: string,
+): ContextRequiredDetails | null {
+  if (
+    bindingSpec !== BINDING_SPEC_V3
+    || op.requestBody?.required !== true
+    || contextConfiguration(ctx)["requestMedia"] != null
+  ) {
+    return null;
+  }
+  try {
+    const supported = planRequestBodies(op, { bindingSpec, openapiVersion: doc.openapi });
+    return supported.length > 0 && supported.every((plan) => plan.range)
+      ? requestMediaContextDetails(target)
+      : null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -707,13 +839,14 @@ export function decodeByContentType(contentType: string | null): OutputDecoder {
 export function decodeBytesByContentType(
   contentType: string | null,
   bytes: Uint8Array,
+  revision3 = false,
 ): OutputDecoder {
   const isJSON = isJSONMediaType(normalizeMediaType(contentType ?? ""));
   return (_site: InvokeSite, _raw: RawResult): unknown => {
     if (bytes.length === 0) return null;
     if (isJSON) {
       try {
-        return JSON.parse(new TextDecoder().decode(bytes));
+        return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
       } catch (e: unknown) {
         throw new InvocationError(
           ERR_RESPONSE_ERROR,
@@ -721,7 +854,7 @@ export function decodeBytesByContentType(
         );
       }
     }
-    return decodeTextLane(contentType, bytes);
+    return decodeTextLane(contentType, bytes, revision3);
   };
 }
 
@@ -732,11 +865,28 @@ export function decodeBytesByContentType(
  * consumer needing another charset overrides at the decode configuration
  * point.
  */
-export function decodeTextLane(contentType: string | null, bytes: Uint8Array): string {
+export function decodeTextLane(
+  contentType: string | null,
+  bytes: Uint8Array,
+  revision3 = false,
+): string {
   let charset = "utf-8";
   if (contentType) {
-    const m = /;\s*charset\s*=\s*"?([^";]+)"?/i.exec(contentType);
-    if (m?.[1]) charset = m[1].trim();
+    if (revision3) {
+      let parsed;
+      try {
+        parsed = parseMediaType(contentType, true);
+      } catch (error: unknown) {
+        throw new InvocationError(
+          ERR_RESPONSE_ERROR,
+          `response Content-Type is invalid: ${errorMessage(error)}`,
+        );
+      }
+      if (Object.hasOwn(parsed.params, "charset")) charset = parsed.params["charset"]!;
+    } else {
+      const m = /;\s*charset\s*=\s*"?([^";]+)"?/i.exec(contentType);
+      if (m?.[1]) charset = m[1].trim();
+    }
   }
   switch (charset.toLowerCase()) {
     case "utf-8":
@@ -852,6 +1002,7 @@ function openAPIFailureDetails(
   metadata: Metadata,
   declaration: ReturnType<typeof governingResponse>,
   contentType: string | null,
+  revision3: boolean,
 ): Record<string, unknown> {
   const httpResponse: Record<string, unknown> = {
     status: resp.status,
@@ -872,7 +1023,7 @@ function openAPIFailureDetails(
   if (declaration) {
     artifact.responseKey = declaration.key;
     try {
-      const governingMedia = governingResponseMedia(declaration.response, contentType);
+      const governingMedia = governingResponseMedia(declaration.response, contentType, revision3);
       if (governingMedia) artifact.governingMedia = governingMedia;
     } catch {
       // The mismatch is already preserved by the actual headers and matched
@@ -1421,6 +1572,66 @@ export function credentialCollision(
 // ---------------------------------------------------------------------------
 // Response reading
 // ---------------------------------------------------------------------------
+
+async function peekResponseBody(
+  response: Response,
+): Promise<{ empty: boolean; response: Response }> {
+  if (!response.body) return { empty: true, response };
+  const reader = response.body.getReader();
+  let first: Uint8Array;
+  for (;;) {
+    const chunk = await reader.read();
+    if (chunk.done) {
+      reader.releaseLock();
+      return {
+        empty: true,
+        response: new Response(null, {
+          status: response.status,
+          statusText: response.statusText,
+          headers: response.headers,
+        }),
+      };
+    }
+    if (chunk.value.length > 0) {
+      first = chunk.value;
+      break;
+    }
+  }
+  let replayedFirst = false;
+  const replay = new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      if (!replayedFirst) {
+        replayedFirst = true;
+        controller.enqueue(first);
+        return;
+      }
+      try {
+        const chunk = await reader.read();
+        if (chunk.done) {
+          controller.close();
+          reader.releaseLock();
+          return;
+        }
+        controller.enqueue(chunk.value);
+      } catch (error: unknown) {
+        controller.error(error);
+        reader.releaseLock();
+      }
+    },
+    async cancel(reason) {
+      await reader.cancel(reason);
+      reader.releaseLock();
+    },
+  });
+  return {
+    empty: false,
+    response: new Response(replay, {
+      status: response.status,
+      statusText: response.statusText,
+      headers: response.headers,
+    }),
+  };
+}
 
 async function readResponseBytes(resp: Response, maxBytes: number): Promise<Uint8Array> {
   if (!resp.body) {
