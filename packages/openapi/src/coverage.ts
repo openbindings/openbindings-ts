@@ -26,6 +26,7 @@ import {
   BINDING_SPEC_V2,
   BINDING_SPEC_V3,
   BINDING_SPEC_V4,
+  BINDING_SPEC_V5,
   LEGACY_BINDING_SPEC,
   hasMediaFidelity,
   hasRoutedInputs,
@@ -53,6 +54,7 @@ export function openAPISynthesisCoverage(
       || candidate.bindingSpec === BINDING_SPEC_V2
       || candidate.bindingSpec === BINDING_SPEC_V3
       || candidate.bindingSpec === BINDING_SPEC_V4
+      || candidate.bindingSpec === BINDING_SPEC_V5
       || candidate.bindingSpec === LEGACY_BINDING_SPEC);
   const sourceLocation = source?.location ?? "";
   const bindingSpec = source?.bindingSpec ?? BINDING_SPEC;

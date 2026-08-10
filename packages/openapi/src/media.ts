@@ -12,7 +12,7 @@ import {
   serializeQueryValue,
 } from "./params.js";
 import { bodySchemaFlattens } from "./util.js";
-import { hasDynamicObjectCarriage, hasMediaFidelity } from "./constants.js";
+import { hasDynamicObjectCarriage, hasMediaFidelity, hasWholeJSONCarriage } from "./constants.js";
 
 // This file implements §9.2 of openbindings.openapi@1 (OAPI-P-04): request
 // media selection with its deterministic tiebreaks and pre-dispatch
@@ -259,7 +259,7 @@ export interface BodyPlan {
   media: OpenAPIMediaType | null;
   family: string;
   synthetic: boolean;
-  /** True when an explicitly dynamic object body rides as one application object. */
+  /** True when a body rides as one complete application value under a public payload field. */
   wholeObject?: boolean;
   /** True while a revision-3 media range awaits a concrete requestMedia choice. */
   range?: boolean;
@@ -322,6 +322,7 @@ export function planRequestBodies(
   if (!content || Object.keys(content).length === 0) return [];
 
   const revision3 = hasMediaFidelity(options.bindingSpec ?? "");
+  const wholeJSON = hasWholeJSONCarriage(options.bindingSpec ?? "");
   const openapiVersion = options.openapiVersion ?? "3.0";
   interface Candidate {
     key: string;
@@ -397,7 +398,7 @@ export function planRequestBodies(
   const rejected: string[] = [];
   for (const candidate of candidates) {
     try {
-      const plan = buildBodyPlan(rb.required === true, content, candidate, openapiVersion, revision3);
+      const plan = buildBodyPlan(rb.required === true, content, candidate, openapiVersion, revision3, wholeJSON);
       if (hasDynamicObjectCarriage(options.bindingSpec ?? "")) applyDynamicObjectShape(plan);
       plans.push(plan);
     } catch (error: unknown) {
@@ -516,6 +517,7 @@ function buildBodyPlan(
   candidate: { key: string; parsed: ParsedMediaType | ParsedMediaRange; family: string; range: boolean; rawOnlyRange?: boolean; unsupported?: boolean },
   openapiVersion: string,
   revision3: boolean,
+  wholeJSON = false,
 ): BodyPlan {
   const plan: BodyPlan = {
     declared: true,
@@ -532,7 +534,14 @@ function buildBodyPlan(
   };
   const schema = mediaSchema(plan.media);
   const objectSchema = schema && typeof schema === "object" ? schema : null;
-  const shape = typeof schema === "boolean"
+  const declarationComplexJSON = wholeJSON
+    && !candidate.range
+    && candidate.family === FAMILY_JSON
+    && objectSchema !== null
+    && requiresWholeJSONCarriage(objectSchema, new Set());
+  const shape = declarationComplexJSON
+    ? { object: false, props: new Set<string>() }
+    : typeof schema === "boolean"
     ? { object: false, props: new Set<string>() }
     : resolvedBodyShape(objectSchema, new Set());
   if (plan.unsupported) {
@@ -552,7 +561,11 @@ function buildBodyPlan(
     requireSupportedCharset(candidate.parsed, `request media ${plan.mediaType}`);
   }
   if (candidate.family === FAMILY_JSON) {
-    plan.synthetic = revision3 ? schema === null || !shape.object : schema !== null && !shape.object;
+    if (declarationComplexJSON) {
+      plan.wholeObject = true;
+    } else {
+      plan.synthetic = revision3 ? schema === null || !shape.object : schema !== null && !shape.object;
+    }
   } else if (candidate.family === FAMILY_MULTIPART || candidate.family === FAMILY_URLENCODED) {
     // Revision 3 §9.1 defines neither declared property routes nor a whole
     // body expansion for schema-omitted form declarations. Guessing fields
@@ -580,6 +593,39 @@ function buildBodyPlan(
   }
   if (!plan.synthetic && shape.props.size > 0) plan.props = shape.props;
   return plan;
+}
+
+/**
+ * Reports top-level JSON Schema applicators whose complete validation and
+ * possible object surface cannot be preserved by projecting a fixed set of
+ * named body properties. Only `allOf` is traversed because nested property
+ * schemas do not alter the top-level route shape.
+ */
+function requiresWholeJSONCarriage(
+  schema: Record<string, unknown>,
+  seen: Set<Record<string, unknown>>,
+): boolean {
+  if (seen.has(schema)) return false;
+  seen.add(schema);
+  try {
+    const dependentSchemas = asObject(schema.dependentSchemas);
+    if (
+      Array.isArray(schema.oneOf)
+      || Array.isArray(schema.anyOf)
+      || schema.not !== undefined
+      || schema.if !== undefined
+      || schema.then !== undefined
+      || schema.else !== undefined
+      || (dependentSchemas !== null && Object.keys(dependentSchemas).length > 0)
+      || (Object.hasOwn(schema, "unevaluatedProperties") && schema.unevaluatedProperties !== false)
+    ) return true;
+    return Array.isArray(schema.allOf) && schema.allOf.some((member) => {
+      const nested = asObject(member);
+      return nested !== null && requiresWholeJSONCarriage(nested, seen);
+    });
+  } finally {
+    seen.delete(schema);
+  }
 }
 
 function validateRevision3URLEncoded(

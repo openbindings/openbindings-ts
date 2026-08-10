@@ -648,9 +648,9 @@ function buildInputSchema(
       const bodyShape = resolvedSynthesisBodyShape(bodySchema as Record<string, unknown>, new Set());
       const bodyProps = bodyShape.properties;
       if (!bodyShape.object || requestPlan.wholeObject) {
-        // A non-object body, or an explicitly dynamic object whose property
-        // names cannot be safely interleaved with independent parameters,
-        // rides as one protocol-independent application value.
+        // A non-object body, an explicitly dynamic object, or a
+        // declaration-complex JSON body rides as one protocol-independent
+        // application value.
         // Non-object schemas include array, scalar, binary, and TYPELESS
         // (neither `properties` nor an explicit object type; §9.1's
         // determination is declaration-only): the flattened contract

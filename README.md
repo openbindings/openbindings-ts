@@ -232,14 +232,14 @@ directly on OpenBindings concepts. See the binding-specification guide's
 
 ```typescript
 const invoker = new OperationInvoker([
-  new OpenAPIInvoker(),    // openbindings.openapi@5 (plus @4/@3/@2/@1 compatibility)
+  new OpenAPIInvoker(),    // openbindings.openapi@6 (plus @5/@4/@3/@2/@1 compatibility)
   new AsyncAPIInvoker(),   // openbindings.asyncapi@1
 ]);
 ```
 
 | Package | Binding specification | Synthesizes OBIs? |
 |---------|--------------|-------------------|
-| `@openbindings/openapi` | `openbindings.openapi@5` (`@4`/`@3`/`@2`/`@1` compatibility) | yes |
+| `@openbindings/openapi` | `openbindings.openapi@6` (`@5`/`@4`/`@3`/`@2`/`@1` compatibility) | yes |
 | `@openbindings/asyncapi` | `openbindings.asyncapi@1` | yes |
 | `@openbindings/mcp` | `openbindings.mcp@2` (latest), `openbindings.mcp@1` (compatibility) | yes |
 | `@openbindings/grpc` | `openbindings.grpc@1` | yes |

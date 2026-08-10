@@ -4,12 +4,15 @@
 
 ### Changed
 
-- **`@openbindings/openapi` now defaults to `openbindings.openapi@5` for
-  dynamic object carriage.** Explicit `additionalProperties` and
-  `patternProperties` request bodies remain one protocol-neutral application
-  object while binding-private routing preserves every runtime field through
-  JSON, form, and multipart carriage. Exact revisions 4, 3, 2, and 1 remain
-  available for compatibility; the Core OBI document model is unchanged.
+- **`@openbindings/openapi` now defaults to `openbindings.openapi@6` for
+  whole-JSON carriage.** Exact JSON-family request schemas whose top-level
+  declarations require combinators, conditionals, dependent schemas, or
+  explicit `unevaluatedProperties` remain one protocol-neutral application
+  value. Binding-private routing preserves the complete value without
+  choosing a schema branch or exposing HTTP concepts. Revision 6 retains
+  revision 5's dynamic-object carriage; exact revisions 5, 4, 3, 2, and 1
+  remain available for compatibility. The Core OBI document model is
+  unchanged.
 
 - **`openbindings.openapi@3` added media-faithful request carriage.** Revision
   3 adds canonical Base64 boundary

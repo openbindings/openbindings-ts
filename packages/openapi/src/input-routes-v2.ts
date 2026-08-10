@@ -62,11 +62,11 @@ export function planAbstractInputRoutes(
 
   const bodyNames = new Set<string>();
   let wholeBody = false;
-  let dynamicObjectBody = false;
+  let protocolNeutralWholeBody = false;
   for (const plan of plans) {
     if (plan.synthetic || plan.wholeObject) {
       wholeBody = true;
-      dynamicObjectBody ||= plan.wholeObject === true;
+      protocolNeutralWholeBody ||= plan.wholeObject === true;
     } else {
       for (const name of plan.props ?? []) bodyNames.add(name);
     }
@@ -75,7 +75,7 @@ export function planAbstractInputRoutes(
     slots.push({ kind: "body", inValue: "", name, base: name });
   }
   if (wholeBody) {
-    slots.push({ kind: "wholeBody", inValue: "", name: "", base: dynamicObjectBody ? "payload" : "body" });
+    slots.push({ kind: "wholeBody", inValue: "", name: "", base: protocolNeutralWholeBody ? "payload" : "body" });
   }
 
   const reserved = new Set(slots.map((slot) => slot.base));
@@ -108,9 +108,10 @@ export function planAbstractInputRoutes(
       wholeBodyField = field;
     }
   });
-  // A dynamic object uses a protocol-neutral public field and therefore
-  // always needs the private whole-body route, even without a collision.
-  const needsTransform = dynamicObjectBody
+  // A complete application body uses a protocol-neutral public field and
+  // therefore always needs the private whole-body route, even without a
+  // collision.
+  const needsTransform = protocolNeutralWholeBody
     || slots.some((slot, index) => assigned[index] !== slot.base);
 
   return {

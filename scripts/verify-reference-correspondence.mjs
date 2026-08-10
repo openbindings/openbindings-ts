@@ -9,7 +9,7 @@ const matrix = JSON.parse(await readFile(resolve(specCorpus, "reference-sdk-corr
 if (matrix.format !== "openbindings.reference-sdk-correspondence@1") throw new Error("unsupported correspondence matrix format");
 
 const expected = new Map([
-  ["openbindings.openapi@5", ["openapi", "OpenAPIInvoker", "OpenAPISynthesizer"]],
+  ["openbindings.openapi@6", ["openapi", "OpenAPIInvoker", "OpenAPISynthesizer"]],
   ["openbindings.asyncapi@1", ["asyncapi", "AsyncAPIInvoker", "AsyncAPISynthesizer"]],
   ["openbindings.mcp@2", ["mcp", "MCPInvoker", "MCPSynthesizer"]],
   ["openbindings.grpc@1", ["grpc", "GrpcInvoker", "GrpcSynthesizer"]],
