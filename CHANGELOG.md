@@ -4,8 +4,14 @@
 
 ### Changed
 
-- **`@openbindings/openapi` now defaults to `openbindings.openapi@3` for
-  media-faithful request carriage.** Revision 3 adds canonical Base64 boundary
+- **`@openbindings/openapi` now defaults to `openbindings.openapi@4` for
+  response-carriage fidelity.** Revision 4 admits response media ranges and
+  preserves artifact-authorized raw response bytes through a canonical Base64
+  application value. HTTP status, headers, and media identity remain outside
+  ordinary outputs. Exact revision 3 remains available for compatibility.
+
+- **`openbindings.openapi@3` added media-faithful request carriage.** Revision
+  3 adds canonical Base64 boundary
   values for artifact-declared raw request bytes, preserves OpenAPI 3.1
   `contentEncoding` strings as artifact-encoded wire text, and admits concrete
   `requestMedia` choices governed by OpenAPI media ranges without exposing

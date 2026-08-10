@@ -1,5 +1,5 @@
 /** The current binding-specification identifier (exact and opaque, core §6). */
-export const BINDING_SPEC = "openbindings.openapi@3";
+export const BINDING_SPEC = "openbindings.openapi@4";
 
 /** Immutable revision-1 compatibility identifier. */
 export const LEGACY_BINDING_SPEC = "openbindings.openapi@1";
@@ -7,12 +7,27 @@ export const LEGACY_BINDING_SPEC = "openbindings.openapi@1";
 /** Immutable collision-preserving revision-2 identifier. */
 export const BINDING_SPEC_V2 = "openbindings.openapi@2";
 
-/** Current OpenAPI binding revision. */
-export const BINDING_SPEC_V3 = BINDING_SPEC;
+/** Immutable request-media-fidelity revision. */
+export const BINDING_SPEC_V3 = "openbindings.openapi@3";
+
+/** Current response-carriage-fidelity revision. */
+export const BINDING_SPEC_V4 = BINDING_SPEC;
 
 /** Revisions whose abstract input surface uses collision-preserving routes. */
 export function hasRoutedInputs(bindingSpec: string): boolean {
-  return bindingSpec === BINDING_SPEC_V2 || bindingSpec === BINDING_SPEC_V3;
+  return bindingSpec === BINDING_SPEC_V2
+    || bindingSpec === BINDING_SPEC_V3
+    || bindingSpec === BINDING_SPEC_V4;
+}
+
+/** Revisions using the RFC 9110 request-media and carriage rules introduced by revision 3. */
+export function hasMediaFidelity(bindingSpec: string): boolean {
+  return bindingSpec === BINDING_SPEC_V3 || bindingSpec === BINDING_SPEC_V4;
+}
+
+/** Revisions that admit response media ranges and exact raw-byte output carriage. */
+export function hasResponseFidelity(bindingSpec: string): boolean {
+  return bindingSpec === BINDING_SPEC_V4;
 }
 
 /** Default source name used when registering an OpenAPI source in an OBInterface. */

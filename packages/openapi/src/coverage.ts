@@ -21,7 +21,15 @@ import {
   codePointCompare,
 } from "./util.js";
 import { resolveServer } from "./servers.js";
-import { BINDING_SPEC, BINDING_SPEC_V2, BINDING_SPEC_V3, LEGACY_BINDING_SPEC, hasRoutedInputs } from "./constants.js";
+import {
+  BINDING_SPEC,
+  BINDING_SPEC_V2,
+  BINDING_SPEC_V3,
+  BINDING_SPEC_V4,
+  LEGACY_BINDING_SPEC,
+  hasMediaFidelity,
+  hasRoutedInputs,
+} from "./constants.js";
 
 /**
  * Inventories path operations, request-media alternatives, callbacks, and
@@ -44,6 +52,7 @@ export function openAPISynthesisCoverage(
     .find((candidate) => candidate.bindingSpec === BINDING_SPEC
       || candidate.bindingSpec === BINDING_SPEC_V2
       || candidate.bindingSpec === BINDING_SPEC_V3
+      || candidate.bindingSpec === BINDING_SPEC_V4
       || candidate.bindingSpec === LEGACY_BINDING_SPEC);
   const sourceLocation = source?.location ?? "";
   const bindingSpec = source?.bindingSpec ?? BINDING_SPEC;
@@ -110,7 +119,7 @@ function requestMediaTargetRequirements(
   bindingSpec: string,
   openapiVersion: string | undefined,
 ): string[] {
-  if (bindingSpec !== BINDING_SPEC_V3 || operation.requestBody?.required !== true) return [];
+  if (!hasMediaFidelity(bindingSpec) || operation.requestBody?.required !== true) return [];
   try {
     const params = effectiveParameters(pathItem, operation);
     const admissible = planRequestBodies(operation, { bindingSpec, openapiVersion })
@@ -171,7 +180,7 @@ function requestMediaCoverage(
         operationKey: identity.operationKey,
         bindingRef: identity.ref,
       };
-      if (bindingSpec === BINDING_SPEC_V3 && plans.some((plan) => plan.mediaKey === mediaType && plan.range)) {
+      if (hasMediaFidelity(bindingSpec) && plans.some((plan) => plan.mediaKey === mediaType && plan.range)) {
         entry.requirements = ["configuration.requestMedia"];
       }
       return entry;

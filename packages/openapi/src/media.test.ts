@@ -572,6 +572,14 @@ describe("successMediaTypes / acceptHeader / isStreamingCapable", () => {
     expect(isStreamingCapable(op, true)).toBe(true);
   });
 
+  it("revision 4 treats parameterized ranges as possible event-stream declarations", () => {
+    const op: OpenAPIOperation = {
+      responses: { "200": { content: { "text/*; profile=events": {} } } },
+    };
+    expect(isStreamingCapable(op, true, false)).toBe(false);
+    expect(isStreamingCapable(op, true, true)).toBe(true);
+  });
+
   it("revision 3 builds Accept from semantic parameter identities", () => {
     const op: OpenAPIOperation = {
       responses: {

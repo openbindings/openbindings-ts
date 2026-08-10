@@ -84,8 +84,12 @@ describe("OpenAPI native-client differential", () => {
           if (nativeBody.byteLength === 0) {
             expect(outputs).toEqual([]);
           } else {
-            const nativeValue = JSON.parse(new TextDecoder().decode(nativeBody)) as unknown;
-            expect(outputs).toEqual([nativeValue]);
+            const complete = scenario.expected.find((alternative) => alternative.disposition === "complete");
+            const outputAssertion = complete?.assertions.find((assertion) => assertion.path === "/outputs");
+            expect(outputAssertion && "equals" in outputAssertion).toBe(true);
+            expect(outputs).toEqual(outputAssertion && "equals" in outputAssertion
+              ? outputAssertion.equals
+              : undefined);
           }
           return;
         }

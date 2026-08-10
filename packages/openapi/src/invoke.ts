@@ -50,7 +50,7 @@ import {
   unflattenableParam,
   validateParameterSerialization,
 } from "./params.js";
-import { BINDING_SPEC_V3, hasRoutedInputs } from "./constants.js";
+import { hasMediaFidelity, hasResponseFidelity, hasRoutedInputs } from "./constants.js";
 import {
   envelopeWillEmitBody,
   flatInputHasAmbiguousParameter,
@@ -67,10 +67,12 @@ import {
   finalizeRequestBody,
   governingResponse,
   governingResponseMedia,
+  governingResponseMediaMatch,
   isJSONMediaType,
   normalizeMediaType,
   parseMediaType,
   planRequestBodies,
+  responseUsesRawBoundary,
   type BodyPlan,
 } from "./media.js";
 import { ConfigRequired, resolveServer } from "./servers.js";
@@ -146,7 +148,8 @@ export async function runBinding(
   }
 
   const routedRevision = hasRoutedInputs(args.source.bindingSpec);
-  const revision3 = args.source.bindingSpec === BINDING_SPEC_V3;
+  const revision3 = hasMediaFidelity(args.source.bindingSpec);
+  const responseFidelity = hasResponseFidelity(args.source.bindingSpec);
   const planningOptions = {
     bindingSpec: args.source.bindingSpec,
     openapiVersion: doc.openapi,
@@ -407,7 +410,7 @@ export async function runBinding(
   }
   // Advertise only artifact-declared concrete success media; an empty set
   // leaves Accept absent.
-  const accept = acceptHeader(op, revision3);
+  const accept = acceptHeader(op, revision3, responseFidelity);
   if (accept !== "") fetchHeaders.set("Accept", accept);
 
   for (const [k, v] of routed.headers) {
@@ -478,6 +481,7 @@ export async function runBinding(
               responseDeclaration,
               contentType,
               revision3,
+              responseFidelity,
             ),
           ));
           return;
@@ -545,6 +549,7 @@ export async function runBinding(
             responseDeclaration,
             contentType,
             revision3,
+            responseFidelity,
           ),
         ),
       );
@@ -553,7 +558,7 @@ export async function runBinding(
     let governingMedia: string | null;
     try {
       governingMedia = responseDeclaration
-        ? governingResponseMedia(responseDeclaration.response, contentType, revision3)
+        ? governingResponseMedia(responseDeclaration.response, contentType, revision3, responseFidelity)
         : null;
     } catch (e: unknown) {
       await resp.body?.cancel().catch(() => {});
@@ -565,7 +570,10 @@ export async function runBinding(
       );
       return;
     }
-    if (!governingMedia || parseMediaType(governingMedia).base !== "text/event-stream") {
+    if (
+      !governingMedia
+      || (!responseFidelity && parseMediaType(governingMedia).base !== "text/event-stream")
+    ) {
       await resp.body?.cancel().catch(() => {});
       inv.fireError(
         new InvocationError(
@@ -633,9 +641,10 @@ export async function runBinding(
           bodyBytes,
           lossyText,
           invocationMeta,
-        responseDeclaration,
-        contentType,
-        revision3,
+          responseDeclaration,
+          contentType,
+          revision3,
+          responseFidelity,
         ),
       ),
     );
@@ -650,12 +659,21 @@ export async function runBinding(
   }
 
   let governingMedia: string;
+  let mediaMatch: ReturnType<typeof governingResponseMediaMatch>;
   try {
     if (!responseDeclaration) {
       throw new Error(`status ${resp.status} has no governing Response Object`);
     }
-    governingMedia = governingResponseMedia(responseDeclaration.response, contentType, revision3) ?? "";
-    if (!governingMedia) throw new Error("the governing Response Object declares no response content");
+    mediaMatch = governingResponseMediaMatch(
+      responseDeclaration.response,
+      contentType,
+      revision3,
+      responseFidelity,
+    );
+    governingMedia = mediaMatch?.declared.canonical ?? "";
+    if (!mediaMatch || !governingMedia) {
+      throw new Error("the governing Response Object declares no response content");
+    }
   } catch (e: unknown) {
     inv.fireError(new InvocationError(ERR_PROTOCOL, errorMessage(e)));
     return;
@@ -663,12 +681,13 @@ export async function runBinding(
 
   let output: unknown;
   try {
-    output = await decodeThroughHooks(
-      args.hooks,
-      site,
-      raw,
-      decodeBytesByContentType(contentType, bodyBytes, revision3),
-    );
+    const builtin = responseFidelity
+      && contentType !== null
+      && mediaMatch !== null
+      && responseUsesRawBoundary(mediaMatch.media, contentType, doc.openapi ?? "3.0")
+      ? ((_site: InvokeSite, _raw: RawResult): unknown => bytesToBase64(bodyBytes))
+      : decodeBytesByContentType(contentType, bodyBytes, revision3);
+    output = await decodeThroughHooks(args.hooks, site, raw, builtin);
   } catch (e: unknown) {
     inv.fireError(toInvocationError(e));
     return;
@@ -728,11 +747,11 @@ function configuredRequestPlans(
   options: { bindingSpec: string; openapiVersion?: string },
 ): BodyPlan[] {
   const raw = contextConfiguration(ctx)["requestMedia"];
-  if (raw == null) return options.bindingSpec === BINDING_SPEC_V3
+  if (raw == null) return hasMediaFidelity(options.bindingSpec)
     ? plans.filter((plan) => !plan.range && !plan.unsupported)
     : plans;
   if (typeof raw !== "string") return [];
-  if (options.bindingSpec === BINDING_SPEC_V3) {
+  if (hasMediaFidelity(options.bindingSpec)) {
     return configureRequestMedia(plans, raw, options);
   }
   let wanted: string;
@@ -779,7 +798,7 @@ export function requiredRequestMediaContext(
   target: string,
 ): ContextRequiredDetails | null {
   if (
-    bindingSpec !== BINDING_SPEC_V3
+    !hasMediaFidelity(bindingSpec)
     || op.requestBody?.required !== true
     || contextConfiguration(ctx)["requestMedia"] != null
   ) {
@@ -1003,6 +1022,7 @@ function openAPIFailureDetails(
   declaration: ReturnType<typeof governingResponse>,
   contentType: string | null,
   revision3: boolean,
+  responseFidelity: boolean,
 ): Record<string, unknown> {
   const httpResponse: Record<string, unknown> = {
     status: resp.status,
@@ -1023,7 +1043,12 @@ function openAPIFailureDetails(
   if (declaration) {
     artifact.responseKey = declaration.key;
     try {
-      const governingMedia = governingResponseMedia(declaration.response, contentType, revision3);
+      const governingMedia = governingResponseMedia(
+        declaration.response,
+        contentType,
+        revision3,
+        responseFidelity,
+      );
       if (governingMedia) artifact.governingMedia = governingMedia;
     } catch {
       // The mismatch is already preserved by the actual headers and matched

@@ -7,13 +7,21 @@ import type {
   OpenAPIParameter,
   OpenAPIPathItem,
 } from "./types.js";
-import { BINDING_SPEC, BINDING_SPEC_V3, DEFAULT_SOURCE_NAME, hasRoutedInputs } from "./constants.js";
+import {
+  BINDING_SPEC,
+  DEFAULT_SOURCE_NAME,
+  hasMediaFidelity,
+  hasResponseFidelity,
+  hasRoutedInputs,
+} from "./constants.js";
 import {
   DegenerateMediaError,
   FAMILY_JSON,
   FAMILY_MULTIPART,
   candidateCollides,
+  binarySignaled,
   isJSONMediaType,
+  parseMediaRange,
   parseMediaType,
   planRequestBodies,
   type BodyPlan,
@@ -169,7 +177,7 @@ export async function convertToInterface(
         throw unrealizableOperation(opKey, reason);
       }
 
-      if (bindingSpec === BINDING_SPEC_V3) {
+      if (hasMediaFidelity(bindingSpec)) {
         let serializationError: unknown;
         for (const parameter of params) {
           try { validateParameterSerialization(parameter); } catch (error: unknown) {
@@ -242,7 +250,7 @@ export async function convertToInterface(
         }
       }
 
-      const dialectIssue = operationSchemaDialectIssue(doc, params, requestPlans, opObj);
+      const dialectIssue = operationSchemaDialectIssue(doc, params, requestPlans, opObj, bindingSpec);
       if (dialectIssue) {
         const reason = `${dialectIssue.side} schema inherits unsupported dialect ${JSON.stringify(dialectIssue.dialect)} and cannot be projected into OBI's JSON Schema 2020-12 contract`;
         if (onUnrealizable) {
@@ -290,7 +298,12 @@ export async function convertToInterface(
       }
 
       const responseProjector = createOpenAPISchemaProjector("response", schemaNames);
-      const outputSchema = buildOutputSchema(opObj, responseProjector);
+      const outputSchema = buildOutputSchema(
+        opObj,
+        responseProjector,
+        bindingSpec,
+        doc.openapi ?? "3.0",
+      );
       if (outputSchema !== undefined) {
         const acyclicOutput = decycleSchema(
           outputSchema,
@@ -387,6 +400,7 @@ function operationSchemaDialectIssue(
   params: OpenAPIParameter[],
   requestPlans: BodyPlan[],
   op: OpenAPIOperation,
+  bindingSpec: string,
 ): OperationSchemaDialectIssue | undefined {
   if (majorMinor(doc.openapi ?? "3.0") !== "3.1") return undefined;
 
@@ -415,7 +429,7 @@ function operationSchemaDialectIssue(
     if (dialect.found) return { side: "input", dialect: dialect.value };
   }
 
-  for (const schema of projectedSuccessSchemaRoots(op)) {
+  for (const schema of projectedSuccessSchemaRoots(op, bindingSpec)) {
     const dialect = firstUnsupportedSchemaDialect(schema, inherited, new WeakMap());
     if (dialect.found) return { side: "output", dialect: dialect.value };
   }
@@ -480,7 +494,7 @@ function firstUnsupportedSchemaDialect(
 }
 
 /** Returns only source schemas that buildOutputSchema can actually project. */
-function projectedSuccessSchemaRoots(op: OpenAPIOperation): unknown[] {
+function projectedSuccessSchemaRoots(op: OpenAPIOperation, bindingSpec: string): unknown[] {
   if (!op.responses) return [];
   const keys = Object.keys(op.responses);
   const hasRange = Object.hasOwn(op.responses, "2XX");
@@ -491,9 +505,17 @@ function projectedSuccessSchemaRoots(op: OpenAPIOperation): unknown[] {
     const response = op.responses[key];
     if (!response?.content) continue;
     for (const [mediaKey, media] of Object.entries(response.content)) {
-      let parsed;
-      try { parsed = parseMediaType(mediaKey); } catch { continue; }
-      if (!isJSONMediaType(parsed.base)) continue;
+      let admitsJSON: boolean;
+      try {
+        admitsJSON = isJSONMediaType(parseMediaType(mediaKey, hasMediaFidelity(bindingSpec)).base);
+      } catch {
+        if (!hasResponseFidelity(bindingSpec)) continue;
+        try {
+          const range = parseMediaRange(mediaKey, true);
+          admitsJSON = range.base === "*/*" || range.base === "application/*";
+        } catch { continue; }
+      }
+      if (!admitsJSON) continue;
       // One unconstrained JSON lane makes the entire synthesized output
       // unconstrained, so no response schema is projected at all.
       if (!Object.hasOwn(media, "schema")) return [];
@@ -863,10 +885,10 @@ function unsupportedParameterContent(
     const keys = Object.keys(param.content);
     if (keys.length !== 1) return param.name;
     try {
-      const media = parseMediaType(keys[0]!, bindingSpec === BINDING_SPEC_V3);
+      const media = parseMediaType(keys[0]!, hasMediaFidelity(bindingSpec));
       if (!isJSONMediaType(media.base) && media.base !== "text/plain") return param.name;
       if (
-        bindingSpec === BINDING_SPEC_V3
+        hasMediaFidelity(bindingSpec)
         && media.params["charset"] !== undefined
         && !["utf-8", "us-ascii", "iso-8859-1"].includes(media.params["charset"].toLowerCase())
       ) return param.name;
@@ -880,6 +902,8 @@ function unsupportedParameterContent(
 function buildOutputSchema(
   op: OpenAPIOperation,
   projector: OpenAPISchemaProjector,
+  bindingSpec: string,
+  openapiVersion: string,
 ): JSONSchema | undefined {
   if (!op.responses) return undefined;
   const keys = Object.keys(op.responses);
@@ -891,17 +915,43 @@ function buildOutputSchema(
     const response = op.responses[key];
     if (!response?.content) continue; // this outcome emits no value
     for (const [mediaKey, media] of Object.entries(response.content).sort(([a], [b]) => codePointCompare(a, b))) {
-      let parsed;
-      try { parsed = parseMediaType(mediaKey); } catch { continue; }
-      if (isJSONMediaType(parsed.base)) {
+      let base: string;
+      let range = false;
+      try {
+        base = parseMediaType(mediaKey, hasMediaFidelity(bindingSpec)).base;
+      } catch {
+        if (!hasResponseFidelity(bindingSpec)) continue;
+        try {
+          base = parseMediaRange(mediaKey, true).base;
+          range = true;
+        } catch { continue; }
+      }
+      const admitsJSON = isJSONMediaType(base)
+        || (range && (base === "application/*" || base === "*/*"));
+      if (admitsJSON) {
         // A JSON success declaration without a schema can emit any JSON
         // value; the synthesized OBI must not make a narrower claim.
         if (!Object.hasOwn(media, "schema")) return undefined;
         schemas.push(projector.project(media.schema) as JSONSchema);
-      } else {
+      }
+
+      const admitsNonJSON = !isJSONMediaType(base) || range;
+      if (admitsNonJSON) {
+        const rawBoundary = hasResponseFidelity(bindingSpec)
+          && !base.startsWith("text/")
+          && (
+            (openapiVersion.startsWith("3.0")
+              && media.schema !== null
+              && typeof media.schema === "object"
+              && binarySignaled(media.schema, true))
+            || (!openapiVersion.startsWith("3.0") && !Object.hasOwn(media, "schema"))
+          );
         // Revision 1's builtin non-JSON response lane is text, including
-        // one string per SSE event, irrespective of an OAS schema claim.
-        schemas.push({ type: "string" });
+        // one string per SSE event. Revision 4's artifact-authorized byte
+        // lane uses a protocol-independent canonical Base64 boundary.
+        schemas.push(rawBoundary
+          ? { type: "string", contentEncoding: "base64" }
+          : { type: "string" });
       }
     }
   }

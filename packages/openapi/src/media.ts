@@ -12,7 +12,7 @@ import {
   serializeQueryValue,
 } from "./params.js";
 import { bodySchemaFlattens } from "./util.js";
-import { BINDING_SPEC_V3 } from "./constants.js";
+import { hasMediaFidelity } from "./constants.js";
 
 // This file implements §9.2 of openbindings.openapi@1 (OAPI-P-04): request
 // media selection with its deterministic tiebreaks and pre-dispatch
@@ -319,7 +319,7 @@ export function planRequestBodies(
   const content = rb.content;
   if (!content || Object.keys(content).length === 0) return [];
 
-  const revision3 = options.bindingSpec === BINDING_SPEC_V3;
+  const revision3 = hasMediaFidelity(options.bindingSpec ?? "");
   const openapiVersion = options.openapiVersion ?? "3.0";
   interface Candidate {
     key: string;
@@ -575,7 +575,7 @@ function validateRevision3URLEncoded(
     }
     if (openapiVersion.startsWith("3.0") && binarySignaled(property, true)) {
       throw new Error(
-        `urlencoded binary property ${JSON.stringify(name)} has no Base64 boundary in openbindings.openapi@3`,
+        `urlencoded binary property ${JSON.stringify(name)} has no Base64 boundary in this binding revision`,
       );
     }
     validateContentBasedMedia(name, property, enc, openapiVersion.startsWith("3.0"), "urlencoded");
@@ -684,7 +684,7 @@ function validateRevision3Multipart(
     }
     if (headers !== null && Object.keys(headers).length > 0) {
       throw new Error(
-        `multipart property ${JSON.stringify(name)} declares encoding.headers, for which openbindings.openapi@3 defines no caller source mapping`,
+        `multipart property ${JSON.stringify(name)} declares encoding.headers, for which this binding revision defines no caller source mapping`,
       );
     }
     if (Object.hasOwn(enc, "contentType") && typeof enc.contentType !== "string") {
@@ -699,7 +699,7 @@ function validateRevision3Multipart(
     if (property === false) continue;
     if (property === true || (!openapiVersion.startsWith("3.0") && !hasDeclaredSchemaType(property))) {
       throw new Error(
-        `multipart property ${JSON.stringify(name)} has a typeless OAS 3.1 schema whose octet-stream boundary is not defined by openbindings.openapi@3`,
+        `multipart property ${JSON.stringify(name)} has a typeless OAS 3.1 schema whose octet-stream boundary is not defined by this binding revision`,
       );
     }
     validateContentTransferEncoding(name, property);
@@ -713,7 +713,7 @@ function validateRevision3Multipart(
       if (items === false) continue;
       if (items === null || items === true || !hasDeclaredSchemaType(items)) {
         throw new Error(
-          `multipart array property ${JSON.stringify(name)} has typeless items whose octet-stream boundary is not defined by openbindings.openapi@3`,
+          `multipart array property ${JSON.stringify(name)} has typeless items whose octet-stream boundary is not defined by this binding revision`,
         );
       }
       if (schemaTypeIs(items, "array")) {
@@ -838,7 +838,7 @@ function parseSingleMultipartContentType(raw: string, name: string): ParsedMedia
   const members = splitCommaList(raw);
   if (members.length !== 1) {
     throw new Error(
-      `multipart property ${JSON.stringify(name)} declares multiple encoding.contentType members, for which openbindings.openapi@3 defines no part-selection rule`,
+      `multipart property ${JSON.stringify(name)} declares multiple encoding.contentType members, for which this binding revision defines no part-selection rule`,
     );
   }
   try {
@@ -1016,6 +1016,28 @@ function mediaSchema(media: OpenAPIMediaType | null): MediaSchema {
   const schema = media?.schema;
   if (typeof schema === "boolean") return schema;
   return schema && typeof schema === "object" ? schema : null;
+}
+
+/**
+ * Whether revision 4's protocol-independent output boundary carries the
+ * exact response octets as canonical Base64. JSON, text, and SSE retain
+ * their application-value lanes; only artifact-authorized binary forms use
+ * the byte boundary.
+ */
+export function responseUsesRawBoundary(
+  media: OpenAPIMediaType,
+  actualContentType: string,
+  openapiVersion: string,
+): boolean {
+  const actual = parseMediaType(actualContentType, true).base;
+  if (isJSONMediaType(actual) || actual.startsWith("text/")) return false;
+  const schema = mediaSchema(media);
+  if (openapiVersion.startsWith("3.0")) {
+    return schema !== null
+      && typeof schema === "object"
+      && binarySignaled(schema, true);
+  }
+  return !Object.hasOwn(media, "schema");
 }
 
 /**
@@ -2036,7 +2058,11 @@ export function isSuccessResponseKey(key: string): boolean {
  * normalized, deduplicated, and sorted (membership is normative, ordering
  * is not). Media ranges are excluded: they are not concrete.
  */
-export function successMediaTypes(op: OpenAPIOperation | null | undefined, revision3 = false): string[] {
+export function successMediaTypes(
+  op: OpenAPIOperation | null | undefined,
+  revision3 = false,
+  responseFidelity = false,
+): string[] {
   if (!op?.responses) return [];
   const seen = new Map<string, string>();
   const hasRange = Object.hasOwn(op.responses, "2XX");
@@ -2053,8 +2079,12 @@ export function successMediaTypes(op: OpenAPIOperation | null | undefined, revis
         const parsed = parseMediaType(mt, revision3);
         if (!seen.has(parsed.identity)) seen.set(parsed.identity, parsed.canonical);
       } catch {
-        // A non-concrete media range cannot be advertised as one concrete
-        // representation. Malformed keys are handled when they govern.
+        if (revision3 && responseFidelity) {
+          try {
+            const parsed = parseMediaRange(mt, true);
+            if (!seen.has(parsed.identity)) seen.set(parsed.identity, parsed.canonical);
+          } catch { /* malformed keys are handled when they govern */ }
+        }
       }
     }
   }
@@ -2065,8 +2095,12 @@ export function successMediaTypes(op: OpenAPIOperation | null | undefined, revis
  * Advertises the declared concrete media types of the operation's success
  * responses. No declaration means no invented Accept preference.
  */
-export function acceptHeader(op: OpenAPIOperation, revision3 = false): string {
-  const types = successMediaTypes(op, revision3);
+export function acceptHeader(
+  op: OpenAPIOperation,
+  revision3 = false,
+  responseFidelity = false,
+): string {
+  const types = successMediaTypes(op, revision3, responseFidelity);
   return types.join(", ");
 }
 
@@ -2094,54 +2128,90 @@ export function governingResponseMedia(
   response: OpenAPIResponse,
   actualContentType: string | null,
   revision3 = false,
+  responseFidelity = false,
 ): string | null {
+  return governingResponseMediaMatch(
+    response,
+    actualContentType,
+    revision3,
+    responseFidelity,
+  )?.declared.canonical ?? null;
+}
+
+export interface GoverningResponseMediaMatch {
+  mediaKey: string;
+  declared: ParsedMediaType | ParsedMediaRange;
+  media: OpenAPIMediaType;
+}
+
+/**
+ * Selects the governing Media Type Object as well as its parsed declaration.
+ * Revision 4 lets an actual concrete Content-Type instantiate an artifact-
+ * declared range; earlier revisions inventory ranges only for collision
+ * detection and never select them.
+ */
+export function governingResponseMediaMatch(
+  response: OpenAPIResponse,
+  actualContentType: string | null,
+  revision3 = false,
+  responseFidelity = false,
+): GoverningResponseMediaMatch | null {
   const content = response.content ?? {};
   if (Object.keys(content).length === 0) return null;
   if (!actualContentType) {
     throw new Error("response declaration has content alternatives but the response omits Content-Type");
   }
   const actual = parseMediaType(actualContentType, revision3);
-  const matches: Array<{ media: ParsedMediaType; specificity: number }> = [];
+  const matches: Array<{
+    mediaKey: string;
+    declared: ParsedMediaType | ParsedMediaRange;
+    media: OpenAPIMediaType;
+    rangeSpecificity: number;
+    parameterSpecificity: number;
+  }> = [];
   const identities = new Map<string, string>();
-  const rangeIdentities = new Map<string, string>();
-  for (const key of Object.keys(content)) {
-    let declared: ParsedMediaType;
+  for (const [key, media] of Object.entries(content)) {
+    let declared: ParsedMediaType | ParsedMediaRange;
+    let rangeSpecificity = 2;
     try {
       declared = parseMediaType(key, revision3);
     } catch (error: unknown) {
       if (revision3) {
         try {
-          const range = parseMediaRange(key, true);
-          const previous = rangeIdentities.get(range.identity);
-          if (previous !== undefined) {
-            throw new Error(
-              `response content declarations ${JSON.stringify(previous)} and ${JSON.stringify(key)} denote the same parsed media range (normalized collision)`,
-              { cause: error },
-            );
-          }
-          rangeIdentities.set(range.identity, key);
-          continue;
-        } catch (rangeError: unknown) {
-          if (rangeError instanceof Error && rangeError.message.includes("normalized collision")) {
-            throw rangeError;
-          }
+          const parsedRange = parseMediaRange(key, true);
+          declared = parsedRange;
+          rangeSpecificity = parsedRange.specificity;
+        } catch (_rangeError: unknown) {
           // Preserve the concrete parse failure for a malformed declaration.
+          throw error;
         }
+      } else {
+        throw error;
       }
-      throw error;
     }
     if (revision3) {
       const previous = identities.get(declared.identity);
       if (previous !== undefined) {
         throw new Error(
-          `response content declarations ${JSON.stringify(previous)} and ${JSON.stringify(key)} denote the same parsed media type (normalized collision)`,
+          `response content declarations ${JSON.stringify(previous)} and ${JSON.stringify(key)} denote the same parsed media declaration (normalized collision)`,
         );
       }
       identities.set(declared.identity, key);
     }
-    if (declared.base !== actual.base) continue;
+    if (rangeSpecificity < 2 && !responseFidelity) continue;
+    if (rangeSpecificity === 2) {
+      if (declared.base !== actual.base) continue;
+    } else if (!mediaRangeMatches(declared as ParsedMediaRange, actual)) {
+      continue;
+    }
     if (Object.entries(declared.params).every(([name, value]) => actual.params[name] === value)) {
-      matches.push({ media: declared, specificity: Object.keys(declared.params).length });
+      matches.push({
+        mediaKey: key,
+        declared,
+        media,
+        rangeSpecificity,
+        parameterSpecificity: Object.keys(declared.params).length,
+      });
     }
   }
   if (matches.length === 0) {
@@ -2149,13 +2219,22 @@ export function governingResponseMedia(
       `response Content-Type ${JSON.stringify(actualContentType)} matches no media declaration in the governing Response Object`,
     );
   }
-  matches.sort((a, b) => b.specificity - a.specificity || a.media.identity.localeCompare(b.media.identity));
-  if (matches.length > 1 && matches[0]?.specificity === matches[1]?.specificity) {
+  matches.sort((a, b) => b.rangeSpecificity - a.rangeSpecificity
+    || b.parameterSpecificity - a.parameterSpecificity
+    || a.declared.identity.localeCompare(b.declared.identity));
+  if (
+    matches.length > 1
+    && matches[0]?.rangeSpecificity === matches[1]?.rangeSpecificity
+    && matches[0]?.parameterSpecificity === matches[1]?.parameterSpecificity
+  ) {
     throw new Error(
       `response Content-Type ${JSON.stringify(actualContentType)} ambiguously matches equally specific media declarations`,
     );
   }
-  return matches[0]?.media.canonical ?? null;
+  const selected = matches[0];
+  return selected
+    ? { mediaKey: selected.mediaKey, declared: selected.declared, media: selected.media }
+    : null;
 }
 
 /**
@@ -2163,10 +2242,23 @@ export function governingResponseMedia(
  * text/event-stream appears among the declared media types of its success
  * responses.
  */
-export function isStreamingCapable(op: OpenAPIOperation, revision3 = false): boolean {
-  const media = successMediaTypes(op, revision3);
+export function isStreamingCapable(
+  op: OpenAPIOperation,
+  revision3 = false,
+  responseFidelity = false,
+): boolean {
+  const media = successMediaTypes(op, revision3, responseFidelity);
   if (!revision3) return media.includes("text/event-stream");
   return media.some((value) => {
-    try { return parseMediaType(value, true).base === "text/event-stream"; } catch { return false; }
+    try { return parseMediaType(value, true).base === "text/event-stream"; } catch {
+      if (!responseFidelity) return false;
+      try {
+        const range = parseMediaRange(value, true);
+        // Static capability asks whether some concrete event-stream response
+        // could satisfy the declaration. Declaration parameters constrain the
+        // eventual response, but do not make that possibility disappear.
+        return range.base === "text/*" || range.base === "*/*";
+      } catch { return false; }
+    }
   });
 }

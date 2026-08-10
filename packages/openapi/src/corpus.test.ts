@@ -18,7 +18,7 @@ import { existsSync, readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { BINDING_SPEC, BINDING_SPEC_V2, LEGACY_BINDING_SPEC } from "./constants.js";
+import { BINDING_SPEC, BINDING_SPEC_V2, BINDING_SPEC_V3, LEGACY_BINDING_SPEC } from "./constants.js";
 import { loadOpenAPIDocument, parseRef, validateDocumentAddress, errorMessage } from "./util.js";
 
 const FAMILY = "openapi";
@@ -137,7 +137,7 @@ describe.skipIf(!dir)("binding-spec conformance corpus (openapi)", () => {
   expect(files.length).toBeGreaterThan(0);
   for (const file of files) {
     const fixture = JSON.parse(readFileSync(path.join(dir, file), "utf8")) as CorpusFixture;
-    expect([BINDING_SPEC, BINDING_SPEC_V2]).toContain(fixture.bindingSpec);
+    expect([BINDING_SPEC, BINDING_SPEC_V3, BINDING_SPEC_V2]).toContain(fixture.bindingSpec);
     describe(fixture.rule, () => {
       for (const t of fixture.tests) {
         it(t.description, async () => {

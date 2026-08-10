@@ -1,7 +1,7 @@
 import type { OpenAPIParameter, OpenAPIPathItem, OpenAPIOperation } from "./types.js";
 import { mergeParameters } from "./util.js";
 import { isJSONMediaType, normalizeMediaType, parseMediaType, type BodyPlan } from "./media.js";
-import { BINDING_SPEC_V3, hasRoutedInputs } from "./constants.js";
+import { hasMediaFidelity, hasRoutedInputs } from "./constants.js";
 
 // This file implements the flattened input model of openbindings.openapi@1
 // §9.1 (OAPI-P-02, OAPI-P-03): the caller-facing input value is one JSON
@@ -280,7 +280,7 @@ export function routeParameter(
 ): void {
   const name = p.name ?? "";
   const allowReserved = p.allowReserved === true;
-  const revision3 = bindingSpec === BINDING_SPEC_V3;
+  const revision3 = hasMediaFidelity(bindingSpec);
 
   // A `content`-form parameter (schema-less, a single-entry content map)
   // serializes its value per its declared media type and rides its location
@@ -390,10 +390,10 @@ function serializeParamContentValue(
   // zero-value key and falls to the loud no-carriage refusal below (Go
   // parity: the zero mediaKey takes the same path).
   const mediaKey = Object.keys(content)[0] ?? "";
-  if (bindingSpec === BINDING_SPEC_V3 && Object.keys(content).length !== 1) {
+  if (hasMediaFidelity(bindingSpec) && Object.keys(content).length !== 1) {
     throw new Error(`parameter ${JSON.stringify(p.name)} must declare exactly one content media type`);
   }
-  const parsed = bindingSpec === BINDING_SPEC_V3 ? parseMediaType(mediaKey, true) : null;
+  const parsed = hasMediaFidelity(bindingSpec) ? parseMediaType(mediaKey, true) : null;
   const mt = parsed?.base ?? normalizeMediaType(mediaKey);
   let text: string;
   if (isJSONMediaType(mt)) {
