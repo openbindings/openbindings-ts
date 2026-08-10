@@ -26,6 +26,7 @@ import {
   OpenAPIExecutionError,
   type OpenAPIExecution,
   type OpenAPIExecutionHooks,
+  type OpenAPIEngineSecurityHandler,
   type OpenAPIHookResult,
 } from "@openbindings/openapi-client/engine";
 import type { OpenAPIDocument } from "./types.js";
@@ -53,11 +54,24 @@ import {
 // ---------------------------------------------------------------------------
 
 /** Invokes OpenAPI bindings by performing HTTP requests against the described API. */
+export interface OpenAPIInvokerOptions {
+  engine?: OpenAPIEngine;
+  /**
+   * Artifact-scheme handlers for mechanisms the built-in OpenAPI credential
+   * adapter cannot apply, keyed by the authored security-scheme name.
+   */
+  securityHandlers?: Record<string, OpenAPIEngineSecurityHandler>;
+}
+
 export class OpenAPIInvoker implements BindingInvoker {
   private readonly engine: OpenAPIEngine;
+  private readonly securityHandlers?: Record<string, OpenAPIEngineSecurityHandler>;
 
-  constructor(options?: { engine?: OpenAPIEngine }) {
+  constructor(options: OpenAPIInvokerOptions = {}) {
     this.engine = options?.engine ?? new OpenAPIEngine();
+    this.securityHandlers = options.securityHandlers
+      ? { ...options.securityHandlers }
+      : undefined;
   }
 
   /** Returns the binding specifications this invoker supports, by exact identifier. */
@@ -112,6 +126,7 @@ export class OpenAPIInvoker implements BindingInvoker {
         fetch: args.fetch,
         hooks: adaptHooks(args),
         maxDeliveryUnitBytes: args.maxDeliveryUnitBytes,
+        securityHandlers: this.securityHandlers,
       });
       return prepared?.prerequisites ?? null;
     } catch {
@@ -134,6 +149,7 @@ export class OpenAPIInvoker implements BindingInvoker {
       fetch: args.fetch,
       hooks: adaptHooks(args),
       maxDeliveryUnitBytes: args.maxDeliveryUnitBytes,
+      securityHandlers: this.securityHandlers,
     });
     // start() resolves only after all artifact/configuration checks that do
     // not require application input. Only then does the bridge acquire the

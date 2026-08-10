@@ -211,6 +211,29 @@ single `apiKey` convenience.
 
 A scheme outside this table is **surfaced, never dropped**: it emits a requirement typed from the artifact's own scheme (`http`/`digest` → `auth.http.digest`; any other type `T` → `auth.<T>`, e.g. `auth.mutualTLS`) that this package cannot itself apply. The alternative stays discoverable — unselectable only for runtimes without a resolver for that family — and a document whose every alternative is unmapped produces a readable challenge instead of an unauthenticated dispatch into a blind 401.
 
+Install an artifact-scheme handler when the host has an implementation for one
+of those mechanisms. This is invoker configuration below the protocol-neutral
+operation boundary; it neither adds HTTP fields to the OBI nor changes the
+built-in schemes' Core context resolution:
+
+```typescript
+const invoker = new OpenAPIInvoker({
+  securityHandlers: {
+    digestAuth(request, { schemeName }) {
+      request.headers.set("authorization", buildDigest(request, credentialFor(schemeName)));
+    },
+  },
+});
+```
+
+Handlers are keyed by the name authored in `securitySchemes`, run after the
+built-in request is finalized, and may return a replacement `Request`. Without
+a matching installed handler, the existing artifact-derived
+`CONTEXT_REQUIRED` challenge remains authoritative and dispatch stays
+fail-closed. Installing one declares that the handler is the complete,
+configured implementation for that scheme; the handler therefore owns any
+scheme-specific credential or transport resolution it requires.
+
 ### Interface synthesis
 
 Deterministic generation of OBI documents is a synthesis concern outside the binding specification (`openbindings.openapi@7` §10); these are this package's conventions, chosen so both reference SDKs emit an identical OBI for the same artifact:

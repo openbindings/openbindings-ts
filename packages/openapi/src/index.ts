@@ -1,4 +1,5 @@
 export { OpenAPIInvoker, OpenAPISynthesizer } from "./invoker.js";
+export type { OpenAPIInvokerOptions } from "./invoker.js";
 export { openAPIFailureEvidence } from "./failure.js";
 export type {
   OpenAPIFailureEvidence,

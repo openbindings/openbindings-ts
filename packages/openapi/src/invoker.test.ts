@@ -37,10 +37,10 @@ function mockFetch(
   const fn = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const req: CapturedRequest = {
       url: input instanceof Request ? input.url : String(input),
-      method: init?.method ?? "GET",
-      headers: new Headers(init?.headers),
-      body: init?.body,
-      signal: init?.signal,
+      method: input instanceof Request ? input.method : (init?.method ?? "GET"),
+      headers: input instanceof Request ? new Headers(input.headers) : new Headers(init?.headers),
+      body: input instanceof Request ? input.body : init?.body,
+      signal: input instanceof Request ? input.signal : init?.signal,
     };
     requests.push(req);
     return respond(req);
@@ -1592,6 +1592,36 @@ describe("invokeBinding — context negotiation", () => {
     // was 0, requiredContext returned null, and the request WOULD have
     // dispatched here with no Authorization header at all).
     expect(requests).toHaveLength(0);
+  });
+
+  it("lets an installed artifact-security handler satisfy and apply an unmapped scheme", async () => {
+    const spec = authSpec({
+      securitySchemes: { digestAuth: { type: "http", scheme: "digest" } },
+      security: [{ digestAuth: [] }],
+    });
+    const { fetch, requests } = mockFetch(() => jsonResponse({}));
+    const invoker = new OpenAPIInvoker({
+      securityHandlers: {
+        digestAuth(request, context) {
+          expect(context.schemeName).toBe("digestAuth");
+          request.headers.set("Authorization", "Digest adapter-proof");
+        },
+      },
+    });
+    await expect(invoker.prepareBinding({
+      source: authSource(spec),
+      ref: REF_DATA,
+      fetch,
+    })).resolves.toBeNull();
+
+    const call = invoker.invokeBinding({
+      source: authSource(spec),
+      ref: REF_DATA,
+      fetch,
+    });
+    await single(call.outputs);
+    expect(requests).toHaveLength(1);
+    expect(requests[0]?.headers.get("Authorization")).toBe("Digest adapter-proof");
   });
 
   it("surfaces an unmapped scheme type verbatim as auth.<type> (mutualTLS)", async () => {
