@@ -50,6 +50,15 @@ the staged `0.2.0` versions are registry-visible before the release.
 
 The SDK defines the contracts that binding invokers implement but does not contain any binding-spec-specific logic itself. Binding support is added by installing binding packages.
 
+The exact binding specification named by a source is the semantic authority for
+that binding. A binding package may implement a specification that incorporates
+an upstream standard, deliberately diverges from one, or defines its own
+domain. If the specification leaves behavior open, package code may complete
+the gap locally, but that completion is implementation-defined and must not be
+presented as portable meaning of the identifier. The project binding packages
+instead treat such gaps in their unreleased `openbindings.*@1` candidates as
+specification work to close before publication.
+
 ## Conformance
 
 The core SDK is tested against the OpenBindings 0.2 conformance corpus. With the spec repo checked out alongside the workspace (at `../spec`, or `./spec` inside it), run:

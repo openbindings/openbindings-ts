@@ -267,7 +267,7 @@ describe("OAPI-P-03 — flattened-model refusals", () => {
     });
     await expect(call.closed).rejects.toMatchObject({
       code: ERR_SOURCE_CONFIG_ERROR,
-      message: expect.stringContaining("unflattenable"),
+      diagnostics: { openapiClient: { message: expect.stringContaining("unflattenable") } },
     });
     expect(requests).toHaveLength(0);
   });
@@ -284,7 +284,7 @@ describe("OAPI-P-03 — flattened-model refusals", () => {
     await call.write({ session_id: "s", bogus: 1 });
     await expect(call.closed).rejects.toMatchObject({
       code: ERR_VALIDATION_FAILED,
-      message: expect.stringContaining("bogus"),
+      diagnostics: { openapiClient: { message: expect.stringContaining("bogus") } },
     });
     expect(requests).toHaveLength(0);
   });
@@ -356,7 +356,7 @@ describe("OAPI-P-03 — flattened-model refusals", () => {
       await call.write({ body: "x", stray: 1 });
       await expect(call.closed, name).rejects.toMatchObject({
         code: ERR_VALIDATION_FAILED,
-        message: expect.stringContaining(wantMsg),
+        diagnostics: { openapiClient: { message: expect.stringContaining(wantMsg) } },
       });
       expect(requests, name).toHaveLength(0);
     }
@@ -523,7 +523,9 @@ describe("OAPI-P-03 — flattened-model refusals", () => {
     await call.write({ description: "d", note: "urgent", meta: { k: "v" } });
     await expect(call.closed).rejects.toMatchObject({
       code: ERR_VALIDATION_FAILED,
-      message: expect.stringContaining("has no declaration-defined mapping"),
+      diagnostics: {
+        openapiClient: { message: expect.stringContaining("has no declaration-defined mapping") },
+      },
     });
     expect(requests).toHaveLength(0);
   });
@@ -563,7 +565,9 @@ describe("OAPI-P-03 — flattened-model refusals", () => {
     await call.write({ name: "a b", extra: "y" });
     await expect(call.closed).rejects.toMatchObject({
       code: ERR_VALIDATION_FAILED,
-      message: expect.stringContaining("has no declaration-defined carriage"),
+      diagnostics: {
+        openapiClient: { message: expect.stringContaining("has no declaration-defined carriage") },
+      },
     });
     expect(requests).toHaveLength(0);
   });
@@ -867,7 +871,11 @@ describe("OAPI-P-04 — request media on the wire", () => {
       });
       await expect(call.closed).rejects.toMatchObject({
         code: ERR_SOURCE_CONFIG_ERROR,
-        message: expect.stringContaining("required request body has no declaration"),
+        diagnostics: {
+          openapiClient: {
+            message: expect.stringContaining("required request body has no declaration"),
+          },
+        },
       });
       expect(requests).toHaveLength(0);
     });
@@ -1282,7 +1290,7 @@ describe("OAPI-P-07 — decode", () => {
     await call.close();
     await expect(call.closed).rejects.toMatchObject({
       code: ERR_RESPONSE_ERROR,
-      message: expect.stringContaining("UTF-8"),
+      diagnostics: { openapiClient: { message: expect.stringContaining("UTF-8") } },
     });
   });
 
@@ -1302,7 +1310,7 @@ describe("OAPI-P-07 — decode", () => {
     await call.close();
     await expect(call.closed).rejects.toMatchObject({
       code: ERR_RESPONSE_ERROR,
-      message: expect.stringContaining("shift_jis"),
+      diagnostics: { openapiClient: { message: expect.stringContaining("shift_jis") } },
     });
   });
 
@@ -1408,7 +1416,7 @@ describe("OAPI-P-10 — channel assembly", () => {
       await call.write({ [tc.param]: "caller-value" });
       await expect(call.closed).rejects.toMatchObject({
         code: ERR_VALIDATION_FAILED,
-        message: expect.stringContaining("OAPI-P-10"),
+        diagnostics: { openapiClient: { message: expect.stringContaining("OAPI-P-10") } },
       });
       expect(requests).toHaveLength(0);
     });

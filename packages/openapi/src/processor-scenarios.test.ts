@@ -253,7 +253,11 @@ function normalizedHeaders(headers: Headers): Record<string, string> {
 function errorPhase(error: InvocationError, dispatched: boolean): ProcessorObservation["phase"] {
   if (dispatched) return "response";
   if (error.code === ERR_SOURCE_LOAD_FAILED) return "load";
-  const message = error.message ?? "";
+  const diagnostics = error.diagnostics as
+    | { openapiClient?: { message?: unknown } }
+    | undefined;
+  const nativeMessage = diagnostics?.openapiClient?.message;
+  const message = typeof nativeMessage === "string" ? nativeMessage : (error.message ?? "");
   if (
     error.code === ERR_INVALID_REF || error.code === ERR_REF_NOT_FOUND ||
     message.includes("unflattenable") || message.includes("normalized collision") ||

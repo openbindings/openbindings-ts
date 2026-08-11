@@ -28,6 +28,14 @@ npm install @openbindings/sdk
 
 The SDK defines the contracts that binding invokers implement but does not contain any binding-spec-specific logic. Binding support is added by installing packages like [`@openbindings/openapi`](https://www.npmjs.com/package/@openbindings/openapi) or [`@openbindings/asyncapi`](https://www.npmjs.com/package/@openbindings/asyncapi).
 
+The named binding specification—not an artifact format inferred from its
+contents—is the semantic authority for a source. A binding package can complete
+an underdefined specification locally, but that behavior is
+implementation-defined and does not become portable meaning under the
+identifier. Applications evaluating support for such a specification should
+consult the package's documented completion profile rather than infer
+cross-implementation agreement.
+
 ## Quick start
 
 ```typescript

@@ -1,12 +1,14 @@
 /**
  * Canonical invocation error codes. Wire values are SCREAMING_SNAKE with an
  * `ERR_` prefix, plus the un-prefixed negotiation signal `CONTEXT_REQUIRED`,
- * matching the `openbindings.binding-invoker` interface. The Go SDK uses the same
- * values for the same failure classes, so consumers switching on `code` are
- * portable for every code an invocation handle can carry. (One idiom split:
- * wiring errors — unknown operation/binding/source — THROW synchronously in
- * TypeScript but surface as pre-errored handles in Go; the local wiring
- * codes below exist so the Go-emitted values are documented here too.)
+ * matching the `openbindings.binding-invoker` interface where that interface
+ * defines them. Only interface-owned lifecycle and negotiation codes have
+ * cross-implementation portability by definition. The remaining codes are
+ * open SDK conventions, not an exhaustive cross-protocol failure vocabulary;
+ * binding specifications and third-party implementations may define others.
+ * (One idiom split: wiring errors — unknown operation/binding/source — throw
+ * synchronously in TypeScript but surface as pre-errored handles in Go; the
+ * local wiring codes below exist so Go-emitted values are documented here.)
  *
  * The lifecycle codes (`ERR_CANCELLED`, `ERR_ALREADY_CONSUMED`, ...) are
  * produced by the SDK's invocation machinery; the operational codes are

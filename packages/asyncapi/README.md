@@ -17,9 +17,10 @@ The layering is deliberate:
 - protocol drivers own concrete transport and nested AsyncAPI protocol-binding
   behavior.
 
-AsyncAPI Core and the artifact's nested protocol binding remain the upstream
-authorities. The OpenBindings layer does not recreate their semantics or
-restrict synthesis to an allowlist of installed protocols.
+Under `openbindings.asyncapi@1`, AsyncAPI Core and the artifact's nested
+protocol binding are deliberately incorporated as authorities. The
+OpenBindings layer does not recreate their semantics or restrict synthesis to
+an allowlist of installed protocols.
 
 ## Install and register
 

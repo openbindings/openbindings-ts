@@ -7,6 +7,9 @@ import {
 /** The current binding-specification identifier (exact and opaque, core §6). */
 export const BINDING_SPEC = "openbindings.openapi@1";
 
+// Numbered "revision" labels retained in some internal helper/test filenames
+// are development-history markers, not published binding-spec revisions.
+
 const PROFILES: Readonly<Record<string, OpenAPIExecutionProfile>> = Object.freeze({
   [BINDING_SPEC]: withInputRouteMarker(OPENAPI_PROFILE_FULL, BINDING_SPEC),
 });

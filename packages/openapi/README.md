@@ -74,12 +74,14 @@ immediately — don't `write`. Error outcomes terminate the handle:
 try {
   await call.closed;
 } catch (err) {
-  console.error(err.code, err.message); // e.g. "ERR_EXECUTION_FAILED", "HTTP 401 Unauthorized"
+  console.error(err.code, err.message); // protocol-independent failure presentation
 }
 ```
 
 An unsuccessful HTTP response is a failure completion, not an operation
-output. `openAPIFailureEvidence(err)` recovers the native status, headers,
+output. Ordinary error code/message handling does not require knowing that the
+selected binding used HTTP. `openAPIFailureEvidence(err)` is the explicit
+diagnostic escape hatch that recovers the native status, headers,
 final URL/status text where the Fetch runtime exposes them, exact response
 bytes, and the OpenAPI Response Object key/media that governed the response:
 

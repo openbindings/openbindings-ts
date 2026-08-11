@@ -97,8 +97,8 @@ describe("SSE size cap is per-event, not cumulative", () => {
 
   it("honors a caller-tuned per-event delivery-unit bound (identity unchanged)", async () => {
     // The ruled knob (sdk-review ruling 4(a), 2026-07-20): a tiny
-    // args.maxDeliveryUnitBytes trips the SAME ERR_RESPONSE_ERROR with the
-    // SAME message template as the default per-event cap (asyncapi parity).
+    // args.maxDeliveryUnitBytes trips the same abstract error identity; the
+    // concrete SSE limit remains explicit native diagnostic evidence.
     const payload = "x".repeat(4096);
 
     await new Promise<void>((resolve) => {
@@ -122,7 +122,12 @@ describe("SSE size cap is per-event, not cumulative", () => {
 
     await expect(call.closed).rejects.toMatchObject({
       code: "ERR_RESPONSE_ERROR",
-      message: expect.stringContaining("SSE event exceeds 1024 byte limit"),
+      message: "Invocation result could not be processed",
+      diagnostics: {
+        openapiClient: {
+          message: expect.stringContaining("SSE event exceeds 1024 byte limit"),
+        },
+      },
     });
   });
 });

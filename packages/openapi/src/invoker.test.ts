@@ -551,10 +551,15 @@ describe("invokeBinding — pre-dispatch failures", () => {
       Promise.reject(new TypeError("fetch failed"))) as typeof globalThis.fetch;
     const call = new OpenAPIInvoker().invokeBinding({ source: SOURCE, ref: REF_PING, fetch });
 
-    await expect(call.closed).rejects.toMatchObject({
+    const error = await call.closed.catch((caught: unknown) => caught);
+    expect(error).toMatchObject({
       code: ERR_CONNECT_FAILED,
-      message: "fetch failed",
+      message: "Invocation could not reach its target",
+      diagnostics: {
+        openapiClient: { code: ERR_CONNECT_FAILED, message: "fetch failed" },
+      },
     });
+    expect((error as Error).message).not.toMatch(/fetch|http|openapi/i);
   });
 });
 
@@ -616,7 +621,18 @@ describe("invokeBinding — responses", () => {
       () => new Response("not json {", { status: 200, headers: { "Content-Type": "application/json" } }),
     );
     const call = new OpenAPIInvoker().invokeBinding({ source: SOURCE, ref: REF_PING, fetch });
-    await expect(call.closed).rejects.toMatchObject({ code: ERR_RESPONSE_ERROR });
+    const error = await call.closed.catch((caught: unknown) => caught);
+    expect(error).toMatchObject({
+      code: ERR_RESPONSE_ERROR,
+      message: "Invocation result could not be processed",
+      diagnostics: {
+        openapiClient: {
+          code: ERR_RESPONSE_ERROR,
+          message: expect.stringContaining("valid JSON"),
+        },
+      },
+    });
+    expect((error as Error).message).not.toMatch(/response|content-type|json|http|openapi/i);
   });
 
   it("an undeclared lane decodes as text — the header decides, never the bytes", async () => {
@@ -676,15 +692,16 @@ describe("invokeBinding — responses", () => {
 
     await expect(call.closed).rejects.toMatchObject({
       code: ERR_RESPONSE_ERROR,
-      message: expect.stringContaining("byte limit"),
+      message: "Invocation result could not be processed",
+      diagnostics: { openapiClient: { message: expect.stringContaining("byte limit") } },
     });
     expect(bodyCancelled).toBe(true);
   });
 
   it("honors a caller-tuned delivery-unit bound with the unchanged error identity", async () => {
     // The ruled knob (sdk-review ruling 4(a), 2026-07-20): a tiny
-    // args.maxDeliveryUnitBytes trips the SAME ERR_RESPONSE_ERROR with the
-    // SAME message template as the default cap — only the value is dynamic.
+    // args.maxDeliveryUnitBytes trips the same abstract error identity. The
+    // concrete byte-bound explanation remains available as native evidence.
     const { fetch } = mockFetch(
       () => new Response("x".repeat(4096), { status: 200, headers: { "Content-Type": "text/plain" } }),
     );
@@ -697,7 +714,12 @@ describe("invokeBinding — responses", () => {
 
     await expect(call.closed).rejects.toMatchObject({
       code: ERR_RESPONSE_ERROR,
-      message: expect.stringContaining("response exceeds 1024 byte limit"),
+      message: "Invocation result could not be processed",
+      diagnostics: {
+        openapiClient: {
+          message: expect.stringContaining("response exceeds 1024 byte limit"),
+        },
+      },
     });
   });
 
@@ -1514,7 +1536,9 @@ describe("invokeBinding — context negotiation", () => {
 
     await expect(call.closed).rejects.toMatchObject({
       code: ERR_VALIDATION_FAILED,
-      message: expect.stringContaining("two credentials collide"),
+      diagnostics: {
+        openapiClient: { message: expect.stringContaining("two credentials collide") },
+      },
     });
     expect(requests).toHaveLength(0);
   });
@@ -1709,7 +1733,7 @@ describe("invokeBinding — context negotiation", () => {
 
     await expect(call.closed).rejects.toMatchObject({
       code: ERR_SOURCE_CONFIG_ERROR,
-      message: expect.stringContaining("missingAuth"),
+      diagnostics: { openapiClient: { message: expect.stringContaining("missingAuth") } },
     });
     expect(requests).toHaveLength(0);
   });
@@ -1729,7 +1753,7 @@ describe("invokeBinding — context negotiation", () => {
 
     await expect(call.closed).rejects.toMatchObject({
       code: ERR_SOURCE_CONFIG_ERROR,
-      message: expect.stringContaining("missingAuth"),
+      diagnostics: { openapiClient: { message: expect.stringContaining("missingAuth") } },
     });
     expect(requests).toHaveLength(0);
   });
@@ -1775,7 +1799,7 @@ describe("invokeBinding — context negotiation", () => {
 
       await expect(call.closed).rejects.toMatchObject({
         code: ERR_SOURCE_CONFIG_ERROR,
-        message: expect.stringContaining("OAPI-P-10"),
+        diagnostics: { openapiClient: { message: expect.stringContaining("OAPI-P-10") } },
       });
       expect(requests).toHaveLength(0);
     });
@@ -1797,7 +1821,7 @@ describe("invokeBinding — context negotiation", () => {
 
     await expect(call.closed).rejects.toMatchObject({
       code: ERR_SOURCE_CONFIG_ERROR,
-      message: expect.stringContaining("OAPI-P-10"),
+      diagnostics: { openapiClient: { message: expect.stringContaining("OAPI-P-10") } },
     });
     expect(requests).toHaveLength(0);
   });
@@ -1816,7 +1840,7 @@ describe("invokeBinding — context negotiation", () => {
 
     await expect(call.closed).rejects.toMatchObject({
       code: ERR_VALIDATION_FAILED,
-      message: expect.stringContaining("OAPI-P-10"),
+      diagnostics: { openapiClient: { message: expect.stringContaining("OAPI-P-10") } },
     });
     expect(requests).toHaveLength(0);
   });
@@ -1841,7 +1865,7 @@ describe("invokeBinding — context negotiation", () => {
 
     await expect(call.closed).rejects.toMatchObject({
       code: ERR_VALIDATION_FAILED,
-      message: expect.stringContaining("OAPI-P-10"),
+      diagnostics: { openapiClient: { message: expect.stringContaining("OAPI-P-10") } },
     });
     expect(requests).toHaveLength(0);
   });
@@ -1864,7 +1888,7 @@ describe("invokeBinding — context negotiation", () => {
 
     await expect(call.closed).rejects.toMatchObject({
       code: ERR_VALIDATION_FAILED,
-      message: expect.stringContaining("OAPI-P-10"),
+      diagnostics: { openapiClient: { message: expect.stringContaining("OAPI-P-10") } },
     });
     expect(requests).toHaveLength(0);
   });
