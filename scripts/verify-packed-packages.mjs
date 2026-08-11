@@ -19,6 +19,8 @@ const packages = [
 const temporary = mkdtempSync(join(tmpdir(), "openbindings-packed-consumer-"));
 const openAPIClientDirectory = process.env.OPENBINDINGS_OPENAPI_CLIENT_DIR
   ?? join(root, "..", "openapi-client", "typescript");
+const asyncAPIClientDirectory = process.env.OPENBINDINGS_ASYNCAPI_CLIENT_DIR
+  ?? join(root, "..", "asyncapi-client", "typescript");
 
 function run(command, args, cwd = root) {
   execFileSync(command, args, { cwd, stdio: "inherit" });
@@ -30,8 +32,15 @@ try {
       `standalone OpenAPI client checkout not found at ${openAPIClientDirectory}; set OPENBINDINGS_OPENAPI_CLIENT_DIR`,
     );
   }
+  if (!existsSync(join(asyncAPIClientDirectory, "package.json"))) {
+    throw new Error(
+      `standalone AsyncAPI client checkout not found at ${asyncAPIClientDirectory}; set OPENBINDINGS_ASYNCAPI_CLIENT_DIR`,
+    );
+  }
   const openAPIClientTarball = join(temporary, "openapi-client.tgz");
   run("pnpm", ["--dir", openAPIClientDirectory, "pack", "--out", openAPIClientTarball]);
+  const asyncAPIClientTarball = join(temporary, "asyncapi-client.tgz");
+  run("pnpm", ["--dir", asyncAPIClientDirectory, "pack", "--out", asyncAPIClientTarball]);
   const tarballs = packages.map(([name, slug]) => {
     const tarball = join(temporary, `${slug}.tgz`);
     run("pnpm", ["--filter", name, "pack", "--out", tarball]);
@@ -55,12 +64,17 @@ try {
           // qualification, force the adapter's semver dependency to the
           // sibling repository's packed artifact.
           "@openbindings/openapi-client": `file:${openAPIClientTarball}`,
+          "@openbindings/asyncapi-client": `file:${asyncAPIClientTarball}`,
         },
       },
     }, null, 2),
   );
 
-  const packageNames = ["@openbindings/openapi-client", ...packages.map(([name]) => name)];
+  const packageNames = [
+    "@openbindings/openapi-client",
+    "@openbindings/asyncapi-client",
+    ...packages.map(([name]) => name),
+  ];
   writeFileSync(
     join(temporary, "import-smoke.mjs"),
     `for (const name of ${JSON.stringify(packageNames)}) {
@@ -108,7 +122,7 @@ if (outputs[0]?.ok !== true) throw new Error("packed engine did not yield the ap
   // semver dependencies on them. pnpm otherwise attempts to resolve a new,
   // not-yet-published sibling package from the registry while constructing a
   // single multi-tarball add transaction.
-  run("pnpm", ["add", openAPIClientTarball, tarballs[0]], temporary);
+  run("pnpm", ["add", openAPIClientTarball, asyncAPIClientTarball, tarballs[0]], temporary);
   run("pnpm", ["add", ...tarballs.slice(1)], temporary);
   run(process.execPath, ["import-smoke.mjs"], temporary);
   run(process.execPath, ["require-smoke.cjs"], temporary);
