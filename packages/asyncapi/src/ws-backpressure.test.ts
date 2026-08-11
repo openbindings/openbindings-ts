@@ -3,7 +3,7 @@ import { describe, it, expect } from "vitest";
 import type { Invocation } from "@openbindings/sdk";
 import { AsyncAPIInvoker } from "./invoker.js";
 import { BINDING_SPEC } from "./constants.js";
-import { setBackpressureBoundsForTest } from "./invoke.js";
+import { setBackpressureBoundsForTest } from "@openbindings/asyncapi-client/testing";
 
 // WS slow-consumer backpressure (spec/binding-specs/asyncapi/openbindings.asyncapi.md, "WS slow-consumer
 // backpressure" open point, settled 2026-07-11): the receive path bounds

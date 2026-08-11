@@ -41,6 +41,45 @@ async function parsedDoc(spec: Record<string, unknown>) {
 }
 
 describe("convertToInterface", () => {
+  it("synthesizes from operation and message traits normalized by the standalone client", async () => {
+    const doc = await parsedDoc({
+      asyncapi: "3.0.0",
+      info: { title: "Trait API", version: "1" },
+      servers: { api: { host: "api.example.test", protocol: "https" } },
+      channels: {
+        commands: {
+          address: "/commands",
+          messages: {
+            Command: {
+              payload: { type: "object", properties: { id: { type: "integer" } } },
+              traits: [{ $ref: "#/components/messageTraits/json" }],
+            },
+          },
+        },
+      },
+      operations: {
+        submit: {
+          action: "receive",
+          channel: { $ref: "#/channels/commands" },
+          messages: [{ $ref: "#/channels/commands/messages/Command" }],
+          traits: [{ $ref: "#/components/operationTraits/httpPost" }],
+        },
+      },
+      components: {
+        operationTraits: {
+          httpPost: { summary: "Submit a command", bindings: { http: { method: "POST" } } },
+        },
+        messageTraits: { json: { contentType: "application/json" } },
+      },
+    });
+    const iface = await convertToInterface(undefined, doc);
+    expect(iface.operations["submit"]).toEqual(expect.objectContaining({
+      description: "Submit a command",
+      input: { type: "object", properties: { id: { type: "integer" } } },
+    }));
+    expect(iface.bindings?.["submit.asyncapi"]).toBeDefined();
+  });
+
   it("ignores Reference Object siblings and canonically orders schema alternatives", async () => {
     const doc = await parsedDoc({
       asyncapi: "3.0.0",

@@ -20,62 +20,38 @@ import {
   finalizeSynthesis,
   finalizeSynthesisCoverage,
   synthesisSkeleton,
-  ERR_RUNTIME,
-  ERR_SOURCE_LOAD_FAILED,
 } from "@openbindings/sdk";
+import {
+  ASYNCAPI_PROFILE_COMPAT,
+  ASYNCAPI_PROFILE_FULL,
+  ASYNCAPI_USE_DEFAULT,
+  AsyncAPIEngine,
+  AsyncAPIExecutionError,
+  type AsyncAPIExecution,
+  type AsyncAPIExecutionHooks,
+  type AsyncAPIHookResult,
+} from "@openbindings/asyncapi-client/engine";
 import type { AsyncAPIDocument } from "./asyncapi-types.js";
 import { BINDING_SPEC, DEFAULT_SOURCE_NAME, LEGACY_BINDING_SPEC } from "./constants.js";
-import { runBinding, requiredContext } from "./invoke.js";
-import { resolveTarget } from "./target.js";
 import { bindableOperationEntries, convertToInterface } from "./synthesize.js";
 import { synthesisCoverage } from "./coverage.js";
-import { operationRef, parseAsyncAPIDocument, parseRef, errorMessage, sanitizeKey, uniqueKey, validateDocumentAddress } from "./util.js";
-import { WSPool } from "./ws-pool.js";
+import { operationRef, parseAsyncAPIDocument, errorMessage, sanitizeKey, uniqueKey, validateDocumentAddress } from "./util.js";
 import {
   normalizeAuthoringLocation,
   readAuthoringArtifact,
 } from "./platform.js";
 
 // ---------------------------------------------------------------------------
-// Shared doc-cache helper
-// ---------------------------------------------------------------------------
-
-async function loadDoc(
-  cache: Map<string, AsyncAPIDocument>,
-  location?: string,
-  content?: unknown,
-  options?: { signal?: AbortSignal },
-  fetchFn?: typeof globalThis.fetch,
-): Promise<AsyncAPIDocument> {
-  if (content !== undefined || !location) {
-    return parseAsyncAPIDocument(location, content, options, fetchFn);
-  }
-  const cached = cache.get(location);
-  if (cached) return cached;
-  const doc = await parseAsyncAPIDocument(location, undefined, options, fetchFn);
-  cache.set(location, doc);
-  return doc;
-}
-
-// ---------------------------------------------------------------------------
 // Invoker
 // ---------------------------------------------------------------------------
 
-/**
- * A fetch that always rejects: `prepareBinding` is side-effect-free by
- * contract, so external $refs must never be resolved over the network in
- * the preflight path.
- */
-const rejectNetworkFetch: typeof globalThis.fetch = () =>
-  Promise.reject(new Error("openbindings: prepareBinding performs no network I/O"));
-
 /** Invokes current and immutable compatibility AsyncAPI cells. */
 export class AsyncAPIInvoker implements BindingInvoker {
-  private readonly docCache = new Map<string, AsyncAPIDocument>();
-  // Connection pooling is an implementation concern (not part of the
-  // binding-invoker contract); the pool stays fully private so it never
-  // surfaces in the package's public types, matching Go's unexported pool.
-  readonly #wsPool = new WSPool();
+  private readonly engine: AsyncAPIEngine;
+
+  constructor(engine: AsyncAPIEngine = new AsyncAPIEngine()) {
+    this.engine = engine;
+  }
 
   /** Returns the binding specifications this invoker supports, by exact identifier. */
   bindingSpecs(): BindingSpecInfo[] {
@@ -91,7 +67,7 @@ export class AsyncAPIInvoker implements BindingInvoker {
    * Close discipline on resource-holding invokers.
    */
   close(): void {
-    this.#wsPool.closeAll();
+    this.engine.close();
   }
 
   /**
@@ -101,17 +77,13 @@ export class AsyncAPIInvoker implements BindingInvoker {
    * before any observable side effect.
    */
   invokeBinding<I = unknown, O = unknown>(args: BindingInvocationArgs): Invocation<I, O> {
-    const inv = new InvocationImpl<unknown, unknown>({ signal: args.signal });
+    const inv = new InvocationImpl<I, O>({ signal: args.signal });
     queueMicrotask(() => {
-      void this.run(args, inv).catch((err: unknown) => {
-        inv.fireError(
-          err instanceof InvocationError
-            ? err
-            : new InvocationError(ERR_RUNTIME, errorMessage(err)),
-        );
+      void this.runAdapter(args, inv).catch((error: unknown) => {
+        inv.fireError(toSDKError(error));
       });
     });
-    return inv as Invocation<I, O>;
+    return inv;
   }
 
   /**
@@ -123,56 +95,144 @@ export class AsyncAPIInvoker implements BindingInvoker {
    * collapse to "not knowable" (null).
    */
   async prepareBinding(args: BindingInvocationArgs): Promise<ContextRequiredDetails | null> {
-    let doc: AsyncAPIDocument | undefined;
-    if (args.source.content !== undefined) {
-      try {
-        doc = await parseAsyncAPIDocument(
-          args.source.location,
-          args.source.content,
-          { signal: args.signal },
-          rejectNetworkFetch,
-        );
-      } catch {
-        return null;
-      }
-    } else if (args.source.location) {
-      doc = this.docCache.get(args.source.location);
-    }
-    if (!doc) return null;
-
     try {
-      const opID = parseRef(args.ref);
-      const asyncOp = (doc.operations ?? {})[opID];
-      if (!asyncOp) return null;
-      // The selected artifact server whose declared security applies (§9.5),
-      // including when configuration replaces only its connection target.
-      const target = resolveTarget(doc, asyncOp.channel, args.context);
-      return requiredContext(asyncOp, target.securityServer, target.serverURL, args.context);
+      const prepared = await this.engine.prepareCached({
+        source: { location: args.source.location, content: args.source.content },
+        ref: args.ref,
+        profile: profileForBindingSpec(args.source.bindingSpec),
+        context: args.context,
+        signal: args.signal,
+        fetch: args.fetch,
+        hooks: adaptHooks(args),
+        maxDeliveryUnitBytes: args.maxDeliveryUnitBytes,
+        acceptsInput: args.binding === undefined || args.inputSchema !== undefined,
+      });
+      return prepared?.prerequisites ?? null;
     } catch {
       return null;
     }
   }
 
-  private async run(
+  private async runAdapter<I, O>(
     args: BindingInvocationArgs,
-    inv: InvocationImpl<unknown, unknown>,
+    outer: InvocationImpl<I, O>,
   ): Promise<void> {
-    let doc: AsyncAPIDocument;
-    try {
-      doc = await loadDoc(
-        this.docCache,
-        args.source.location,
-        args.source.content,
-        { signal: inv.signal },
-        args.fetch,
-      );
-    } catch (e: unknown) {
-      if (inv.signal.aborted) return;
-      inv.fireError(new InvocationError(ERR_SOURCE_LOAD_FAILED, errorMessage(e)));
-      return;
-    }
-    await runBinding(args, inv, doc, this.#wsPool);
+    const prepared = await this.engine.prepare({
+      source: { location: args.source.location, content: args.source.content },
+      ref: args.ref,
+      profile: profileForBindingSpec(args.source.bindingSpec),
+      context: args.context,
+      signal: outer.signal,
+      fetch: args.fetch,
+      hooks: adaptHooks(args),
+      maxDeliveryUnitBytes: args.maxDeliveryUnitBytes,
+      acceptsInput: args.binding === undefined || args.inputSchema !== undefined,
+    });
+    await bridgeExecution(prepared.start<I, O>(), outer);
   }
+}
+
+function profileForBindingSpec(bindingSpec: string) {
+  if (bindingSpec === BINDING_SPEC) return ASYNCAPI_PROFILE_FULL;
+  if (bindingSpec === LEGACY_BINDING_SPEC) return ASYNCAPI_PROFILE_COMPAT;
+  throw new AsyncAPIExecutionError(
+    "SOURCE_CONFIG_ERROR",
+    `unsupported AsyncAPI binding specification ${JSON.stringify(bindingSpec)}`,
+  );
+}
+
+async function bridgeExecution<I, O>(
+  execution: AsyncAPIExecution<I, O>,
+  outer: InvocationImpl<I, O>,
+): Promise<void> {
+  const mirrorInnerInputClose = execution.inputFinished.then(() => outer.closeInput());
+  const input = (async () => {
+    try {
+      for await (const value of outer.inputs()) await execution.send(value);
+      await execution.finishInput();
+    } catch (error: unknown) {
+      if (!outer.signal.aborted) throw error;
+    }
+  })();
+  const output = (async () => {
+    outer.setHeader(cloneMetadata(await execution.diagnostics.leading));
+    for await (const event of execution.events) await outer.emitOutput(event.value);
+    await execution.completed;
+    outer.setTrailer(cloneMetadata(execution.diagnostics.trailing()));
+    outer.closeOutput();
+  })();
+  try {
+    await output;
+  } catch (error: unknown) {
+    outer.fireError(toSDKError(error));
+  } finally {
+    await execution.cancel();
+    await Promise.allSettled([input, mirrorInnerInputClose]);
+  }
+}
+
+function adaptHooks(args: BindingInvocationArgs): AsyncAPIExecutionHooks | undefined {
+  const hooks = args.hooks;
+  if (!hooks) return undefined;
+  const site = (target: string) => ({
+    ...(args.site ?? {
+      operation: "",
+      invokedAs: "",
+      bindingKey: "",
+      bindingSpec: args.source.bindingSpec,
+      ref: args.ref,
+      target: "",
+    }),
+    target,
+  });
+  const raw = (result: AsyncAPIHookResult) => ({
+    status: result.status,
+    body: result.body,
+    meta: cloneMetadata(result.metadata),
+  });
+  return {
+    decode: async (engineSite, result) => {
+      const declined = Symbol("asyncapi-adapter: decode declined");
+      try {
+        const value = await hooks.decodeOutput(
+          site(engineSite.target),
+          raw(result),
+          () => declined,
+        );
+        return value === declined ? ASYNCAPI_USE_DEFAULT : value;
+      } catch (error: unknown) {
+        throw toEngineError(error);
+      }
+    },
+  };
+}
+
+function toSDKError(error: unknown): InvocationError {
+  if (error instanceof InvocationError) return error;
+  if (error instanceof AsyncAPIExecutionError) {
+    const code = error.code === "SOURCE_LOAD_FAILED" ? "ERR_SOURCE_LOAD_FAILED"
+      : error.code === "INVALID_OPERATION_REF" ? "ERR_INVALID_REF"
+      : error.code === "OPERATION_NOT_FOUND" ? "ERR_REF_NOT_FOUND"
+      : error.code;
+    return new InvocationError(code, error.message, error.details, error.evidence);
+  }
+  return new InvocationError("ERR_RUNTIME", errorMessage(error));
+}
+
+function toEngineError(error: unknown): AsyncAPIExecutionError {
+  if (error instanceof AsyncAPIExecutionError) return error;
+  if (error instanceof InvocationError) {
+    return new AsyncAPIExecutionError(error.code, error.message, {
+      cause: error,
+      details: error.details,
+      evidence: error.diagnostics,
+    });
+  }
+  return new AsyncAPIExecutionError("ERR_RUNTIME", errorMessage(error), { cause: error });
+}
+
+function cloneMetadata(metadata: Record<string, string[]>): Record<string, string[]> {
+  return Object.fromEntries(Object.entries(metadata).map(([name, values]) => [name, [...values]]));
 }
 
 // ---------------------------------------------------------------------------

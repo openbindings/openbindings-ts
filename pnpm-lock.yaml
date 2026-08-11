@@ -111,16 +111,13 @@ importers:
 
   packages/asyncapi:
     dependencies:
-      js-yaml:
-        specifier: ^4.2.0
-        version: 4.3.0
+      '@openbindings/asyncapi-client':
+        specifier: ^0.1.0
+        version: link:../../../asyncapi-client/typescript
     devDependencies:
       '@openbindings/sdk':
         specifier: workspace:*
         version: link:../sdk
-      '@types/js-yaml':
-        specifier: ^4.0.9
-        version: 4.0.9
       '@types/node':
         specifier: ^22.0.0
         version: 22.19.17

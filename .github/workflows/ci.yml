@@ -39,6 +39,11 @@ jobs:
           repository: openbindings/openapi-client
           ref: main
           path: openapi-client
+      - uses: actions/checkout@v7
+        with:
+          repository: openbindings/asyncapi-client
+          ref: main
+          path: asyncapi-client
       - uses: pnpm/action-setup@v6
         with:
           package_json_file: openbindings-ts/package.json

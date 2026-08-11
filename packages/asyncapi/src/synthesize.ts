@@ -140,6 +140,13 @@ export function operationExclusion(
   op: AsyncAPIOperation,
   bindingSpec = BINDING_SPEC,
 ): AuthoringExclusion | undefined {
+  const unresolvedTrait = (op as unknown as Record<string, unknown>)["x-ob-asyncapi-unresolved-trait"];
+  if (typeof unresolvedTrait === "string") {
+    return {
+      status: "invalid", code: "asyncapi.unresolved_operation_trait", rule: "ASYNC-D-03",
+      message: `the operation trait reference ${JSON.stringify(unresolvedTrait)} does not resolve`,
+    };
+  }
   const unresolvedRef = (op as unknown as Record<string, unknown>)["$ref"];
   if (typeof unresolvedRef === "string") {
     return {
@@ -258,6 +265,7 @@ export function messageBindable(
   doc: AsyncAPIDocument,
   message: AsyncAPIMessage,
 ): boolean {
+  if ((message as unknown as Record<string, unknown>)["x-ob-asyncapi-unresolved-trait"] !== undefined) return false;
   if (message.headers !== undefined) return false;
   const version = message.bindings?.http?.bindingVersion;
   if (version !== undefined && version !== "0.3.0") return false;

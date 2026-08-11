@@ -17,10 +17,24 @@ permissions:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: openbindings-ts
     steps:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
+          path: openbindings-ts
+      - uses: actions/checkout@v7
+        with:
+          repository: openbindings/openapi-client
+          ref: main
+          path: openapi-client
+      - uses: actions/checkout@v7
+        with:
+          repository: openbindings/asyncapi-client
+          ref: main
+          path: asyncapi-client
       # Same corpus checkouts as ci.yml: the publish gate runs the full test
       # suite in corpus-required mode — nothing unverified ships.
       - uses: actions/checkout@v7
@@ -32,11 +46,14 @@ jobs:
           repository: openbindings/interfaces
           path: interfaces
       - uses: pnpm/action-setup@v6
+        with:
+          package_json_file: openbindings-ts/package.json
       - uses: actions/setup-node@v7
         with:
           # Node 24 ships npm 11+, required for the OIDC token exchange.
           node-version: 24
           cache: pnpm
+          cache-dependency-path: openbindings-ts/pnpm-lock.yaml
           registry-url: https://registry.npmjs.org
       - run: pnpm install --frozen-lockfile
       - name: Verify annotated tag and package versions
@@ -51,7 +68,7 @@ jobs:
           OB_SPEC_CORPUS: ${{ github.workspace }}/spec/conformance
           OB_INTERFACES_CORPUS: ${{ github.workspace }}/interfaces/conformance
           OB_CORPUS_REQUIRED: "1"
-      - run: pnpm conformance -- --corpus=spec/conformance
+      - run: pnpm conformance -- --corpus=${{ github.workspace }}/spec/conformance
       - run: pnpm pack:verify
       # --no-git-checks: the tag checkout is a detached HEAD, which pnpm
       # publish otherwise refuses. Each package's prepack rebuilds its dist.

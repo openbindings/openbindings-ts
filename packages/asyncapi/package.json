@@ -48,14 +48,13 @@
     "node": ">=22"
   },
   "dependencies": {
-    "js-yaml": "^4.2.0"
+    "@openbindings/asyncapi-client": "^0.1.0"
   },
   "peerDependencies": {
     "@openbindings/sdk": "^0.2.0"
   },
   "devDependencies": {
     "@openbindings/sdk": "workspace:*",
-    "@types/js-yaml": "^4.0.9",
     "@types/node": "^22.0.0",
     "@types/ws": "^8.18.1",
     "ws": "^8.21.0"
