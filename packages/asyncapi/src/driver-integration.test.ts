@@ -39,6 +39,7 @@ function mqttArtifact() {
   return {
     asyncapi: "3.1.0",
     info: { title: "MQTT bridge", version: "1" },
+    defaultContentType: "application/json",
     servers: { broker: { host: "broker.example", protocol: "mqtt" } },
     channels: {
       commands: {

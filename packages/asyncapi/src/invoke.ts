@@ -478,7 +478,7 @@ function resolveSecuritySchemes(
  * scheme maps to SOMETHING: a recognized family, or — per the R2.c ruling —
  * a surfaced "auth.<T>" requirement (an http scheme with an unmapped
  * `scheme` value becomes "auth.http.<scheme>"; any other unmapped artifact
- * `type` becomes "auth.<type>" verbatim, e.g. "auth.scramSha256",
+ * `type` becomes "auth.<type>" verbatim, e.g. "auth.futureSasl",
  * "auth.X509") so the alternative stays discoverable instead of being
  * silently dropped.
  */
@@ -493,6 +493,8 @@ function mapScheme(scheme: AsyncAPISecurityScheme, baseURL: string): ContextRequ
     case "httpBearer":
       return { type: "auth.bearer" };
     case "userPassword":
+    case "scramSha256":
+    case "scramSha512":
       return { type: "auth.basic" };
     case "apiKey":
     case "httpApiKey":

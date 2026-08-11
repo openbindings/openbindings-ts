@@ -367,7 +367,7 @@ describe("context requirements — unmapped schemes surfaced (R2.c ruling)", () 
     });
   });
 
-  it("surfaces unmapped scheme types verbatim as auth.<type> (scramSha256, X509)", async () => {
+  it("maps SCRAM to abstract username/password context while surfacing X509", async () => {
     const spec = {
       asyncapi: "3.0.0",
       info: { title: "Multi", version: "1.0.0" },
@@ -387,7 +387,7 @@ describe("context requirements — unmapped schemes surfaced (R2.c ruling)", () 
     });
     expect(details).toMatchObject({
       alternatives: [
-        { requirements: [{ type: "auth.scramSha256" }] },
+        { requirements: [{ type: "auth.basic" }] },
         { requirements: [{ type: "auth.X509" }] },
       ],
     });
@@ -399,6 +399,27 @@ describe("context requirements — unmapped schemes surfaced (R2.c ruling)", () 
     if (!req0 || !req1) throw new Error("expected a requirement in each alternative");
     expect(req0).not.toHaveProperty("name");
     expect(req1).not.toHaveProperty("name");
+  });
+
+  it("surfaces a genuinely unmapped scheme type verbatim as auth.<type>", async () => {
+    const spec = {
+      asyncapi: "3.0.0",
+      info: { title: "Future", version: "1.0.0" },
+      servers: { prod: { host: "api.example.com", protocol: "https" } },
+      channels: { pub: { address: "/pub", messages: { Msg: { contentType: "application/json", payload: { type: "object" } } } } },
+      operations: {
+        publish: {
+          action: "send" as const,
+          channel: { $ref: "#/channels/pub" },
+          security: [{ type: "futureSasl" }],
+        },
+      },
+    };
+    const details = await new AsyncAPIInvoker().prepareBinding({
+      source: { bindingSpec: BINDING_SPEC, content: spec },
+      ref: "#/operations/publish",
+    });
+    expect(details).toMatchObject({ alternatives: [{ requirements: [{ type: "auth.futureSasl" }] }] });
   });
 
   it("a document whose EVERY alternative is unmappable challenges CONTEXT_REQUIRED before dispatch, instead of a blind 401", async () => {

@@ -22,9 +22,10 @@ also guards the public role and family correspondence.
 | all compatible, invocable matches | `MatchOperationRequirement(...)` | `matchOperationRequirement(...)` |
 | conservative route-to-one resolution | `ResolveOperationRequirement(...)` | `resolveOperationRequirement(...)` |
 
-All seven published artifact/protocol binding families implement invocation,
-synthesis, and source inspection in both SDKs: OpenAPI, AsyncAPI, MCP, gRPC,
-Connect, usage, and GraphQL.
+All seven first-release artifact/protocol binding candidates implement
+invocation, synthesis, and source inspection in both SDKs: OpenAPI, AsyncAPI,
+MCP, gRPC, Connect, usage, and GraphQL. None of these binding specifications
+has been published yet.
 
 Parity means the same behavior at the OpenBindings boundary: exact
 `bindingSpec` support, resolution and refusal decisions, input/output values,
@@ -86,7 +87,7 @@ These are specification boundaries, not SDK parity gaps:
 | Family | Deliberately outside revision 1 |
 |---|---|
 | OpenAPI | webhooks, callbacks, NDJSON/other streaming framings, and operations whose effective parameter/body alternatives cannot be represented without collision or loss |
-| AsyncAPI | non-HTTP/WebSocket protocols, standalone HTTP `send`, message-header carriage, and arbitrary byte values without an artifact-declared boundary encoding |
+| AsyncAPI | protocols without a qualified installed driver; MQTT and Kafka cells outside their checked-in authority matrices; standalone HTTP `send`; message-header carriage; and arbitrary byte values without an artifact-declared boundary encoding |
 | MCP | stdio and deprecated HTTP+SSE transports, required task augmentation, and server-initiated subscriptions/sampling/elicitation/roots/log streams |
 | gRPC | schemas outside the canonical ProtoJSON-compatible bound closure; metadata is not promoted into operation values |
 | Connect | binary protobuf, gRPC-Web, GET dispatch, descriptorless streaming, and full-duplex use where the selected transport cannot provide HTTP/2 |
@@ -97,6 +98,12 @@ Within those boundaries, an implementation refuses rather than inventing a
 private approximation. Runtime capability limitations are declared and refuse
 before dispatch; they do not rewrite the binding specification's interaction
 shape.
+
+AsyncAPI protocol-driver evidence is independently release-qualified below
+the SDK adapter: MQTT 3.1.1 and Kafka have matching TypeScript and Go authority
+matrices, standalone live tests, and real OpenBindings bridge tests. Kafka
+wire behavior is delegated to mature native clients; the adapter supplies the
+artifact interpretation and protocol-blind boundary conversion.
 
 Authoring directives follow the same rule. Both SDKs honor source naming,
 description, `outputLocation`, and complete `embed` requests. OpenAPI,
