@@ -30,7 +30,7 @@ import {
   type SourceInspection,
   type SourceInspector,
 } from "@openbindings/sdk";
-import { BINDING_SPEC, DEFAULT_SOURCE_NAME, LEGACY_BINDING_SPEC } from "./constants.js";
+import { BINDING_SPEC, DEFAULT_SOURCE_NAME } from "./constants.js";
 import { graphQLFailureEvidence } from "./failure.js";
 import {
   introspect,
@@ -80,10 +80,7 @@ export class GraphQLInvoker implements BindingInvoker {
   constructor(private readonly webSocketFactory?: GraphQLWebSocketFactory) {}
 
   bindingSpecs(): BindingSpecInfo[] {
-    return [
-      { bindingSpec: BINDING_SPEC, description: "GraphQL query and mutation application values" },
-      { bindingSpec: LEGACY_BINDING_SPEC, description: "GraphQL response-envelope compatibility" },
-    ];
+    return [{ bindingSpec: BINDING_SPEC, description: "GraphQL query and mutation application values" }];
   }
 
   invokeBinding<I = unknown, O = unknown>(args: BindingInvocationArgs): Invocation<I, O> {
@@ -108,14 +105,14 @@ export class GraphQLInvoker implements BindingInvoker {
     } catch (e: unknown) {
       throw new InvocationError(ERR_INVALID_REF, errMsg(e));
     }
-    if (args.source.bindingSpec !== BINDING_SPEC && args.source.bindingSpec !== LEGACY_BINDING_SPEC) {
+    if (args.source.bindingSpec !== BINDING_SPEC) {
       throw new InvocationError(
         ERR_SOURCE_CONFIG_ERROR,
-        `GraphQL invoker supports exact binding specifications ${JSON.stringify(BINDING_SPEC)} and ${JSON.stringify(LEGACY_BINDING_SPEC)}, got ${JSON.stringify(args.source.bindingSpec)}`,
+        `GraphQL invoker supports exact binding specification ${JSON.stringify(BINDING_SPEC)}, got ${JSON.stringify(args.source.bindingSpec)}`,
       );
     }
-    if (args.source.bindingSpec === BINDING_SPEC && rootType === "subscription") {
-      throw new InvocationError(ERR_INVALID_REF, `GraphQL revision 2 does not bind subscription target ${JSON.stringify(args.ref)} (GQL-P-04)`);
+    if (rootType === "subscription") {
+      throw new InvocationError(ERR_INVALID_REF, `GraphQL subscriptions are outside the candidate binding specification ${JSON.stringify(args.ref)} (GQL-P-04)`);
     }
 
     let url: string;
@@ -265,11 +262,6 @@ export class GraphQLInvoker implements BindingInvoker {
     }
     const { response, headers: responseHeaders } = invoked;
     inv.setHeader(responseHeaders);
-    if (args.source.bindingSpec === LEGACY_BINDING_SPEC) {
-      await inv.emitOutput(response);
-      inv.closeOutput();
-      return;
-    }
     await emitProjectedGraphQLResult(inv, response, responseKey, invoked.mediaType);
   }
 
@@ -340,10 +332,7 @@ function introspectionCacheKey(endpoint: string, headers: Record<string, string>
 /** Synthesizes OBInterface definitions by introspecting GraphQL endpoints. */
 export class GraphQLSynthesizer implements InterfaceSynthesizer, CoverageSynthesizer, SourceInspector {
   bindingSpecs(): BindingSpecInfo[] {
-    return [
-      { bindingSpec: BINDING_SPEC, description: "GraphQL query and mutation application values" },
-      { bindingSpec: LEGACY_BINDING_SPEC, description: "GraphQL response-envelope compatibility" },
-    ];
+    return [{ bindingSpec: BINDING_SPEC, description: "GraphQL query and mutation application values" }];
   }
 
   async synthesizeInterface(
@@ -374,8 +363,8 @@ export class GraphQLSynthesizer implements InterfaceSynthesizer, CoverageSynthes
     const src = sources[0];
     if (src === undefined) return { iface: synthesisSkeleton(input) };
     if (sources.length > 1) throw new MultipleSourcesError();
-    if (src.bindingSpec !== BINDING_SPEC && src.bindingSpec !== LEGACY_BINDING_SPEC) {
-      throw new Error(`synthesizer supports exact binding specifications ${JSON.stringify(BINDING_SPEC)} and ${JSON.stringify(LEGACY_BINDING_SPEC)}, got ${JSON.stringify(src.bindingSpec)}`);
+    if (src.bindingSpec !== BINDING_SPEC) {
+      throw new Error(`synthesizer supports exact binding specification ${JSON.stringify(BINDING_SPEC)}, got ${JSON.stringify(src.bindingSpec)}`);
     }
     const location = validateHTTPLocation(src.location);
     if (src.outputLocation) validateHTTPLocation(src.outputLocation);
@@ -416,7 +405,7 @@ export class GraphQLSynthesizer implements InterfaceSynthesizer, CoverageSynthes
       { label: "mutation", typeName: rootTypeName(schema, "mutation") },
       { label: "subscription", typeName: rootTypeName(schema, "subscription") },
     ];
-    const bindingSpec = source.bindingSpec || LEGACY_BINDING_SPEC;
+    const bindingSpec = source.bindingSpec || BINDING_SPEC;
     if (bindingSpec === BINDING_SPEC) rootTypes = rootTypes.slice(0, 2);
 
     // Suggest the same operation key convertToInterface assigns (same
@@ -473,7 +462,7 @@ function graphQLSynthesisCoverage(
         status: "excluded",
         reasonCode: "graphql.subscription_lifecycle_not_representable",
         rule: "GQL-P-04",
-        message: "subscription events may carry partial data and errors while the native stream continues; revision 2 does not approximate that lifecycle",
+        message: "subscription events may carry partial data and errors while the native stream continues; the first-revision candidate does not approximate that lifecycle",
         requirements: [],
       });
     }

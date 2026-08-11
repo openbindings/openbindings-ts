@@ -3,7 +3,7 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 import { UriTemplate } from "@modelcontextprotocol/sdk/shared/uriTemplate.js";
 import type { OBInterface, Operation, BindingEntry, JSONSchema } from "@openbindings/sdk";
 import { MAX_TESTED_VERSION } from "@openbindings/sdk";
-import { CLIENT_NAME, CLIENT_VERSION, BINDING_SPEC, LEGACY_BINDING_SPEC, DEFAULT_SOURCE_NAME } from "./constants.js";
+import { CLIENT_NAME, CLIENT_VERSION, BINDING_SPEC, DEFAULT_SOURCE_NAME } from "./constants.js";
 import { exhaustPages, parsePinnedListing } from "./listing.js";
 
 export interface MCPDiscovery {
@@ -410,7 +410,7 @@ export function resolveKey(key: string, entityType: string, used: Map<string, st
 export function convertToInterface(
   disc: MCPDiscovery,
   location?: string,
-  bindingSpec = LEGACY_BINDING_SPEC,
+  bindingSpec = BINDING_SPEC,
 ): OBInterface {
   const operations: Record<string, Operation> = {};
   const bindings: Record<string, BindingEntry> = {};
@@ -529,7 +529,7 @@ export function convertToInterface(
  */
 export function bindableDiscovery(
   disc: MCPDiscovery,
-  bindingSpec = LEGACY_BINDING_SPEC,
+  bindingSpec = BINDING_SPEC,
 ): MCPDiscovery {
   const counts = <T>(items: T[], identity: (item: T) => string): Map<string, number> => {
     const result = new Map<string, number>();

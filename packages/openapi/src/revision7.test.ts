@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import jsonata from "jsonata";
 import { OperationInvoker, operationSignature } from "@openbindings/sdk";
-import { BINDING_SPEC_V6, BINDING_SPEC_V7 } from "./constants.js";
+import { BINDING_SPEC } from "./constants.js";
 import { OpenAPIInvoker, OpenAPISynthesizer } from "./invoker.js";
 
 function byteDocument(media = "application/octet-stream"): Record<string, unknown> {
@@ -23,29 +23,11 @@ function byteDocument(media = "application/octet-stream"): Record<string, unknow
   };
 }
 
-function responseOnlyByteDocument(media = "application/octet-stream"): Record<string, unknown> {
-  return {
-    openapi: "3.0.4",
-    info: { title: "schema-omitted response", version: "1" },
-    servers: [{ url: "https://api.example.test" }],
-    paths: {
-      "/archive": {
-        get: {
-          operationId: "readArchive",
-          responses: {
-            "200": { description: "archive", content: { [media]: {} } },
-          },
-        },
-      },
-    },
-  };
-}
-
-describe("openbindings.openapi@7 OAS 3.0 schema-omitted byte carriage", () => {
+describe("openbindings.openapi@1 OAS 3.0 schema-omitted byte carriage", () => {
   it("synthesizes one Base64 application value and preserves request and response octets", async () => {
     const source = byteDocument();
     const iface = await new OpenAPISynthesizer().synthesizeInterface({
-      sources: [{ bindingSpec: BINDING_SPEC_V7, content: source }],
+      sources: [{ bindingSpec: BINDING_SPEC, content: source }],
     });
     expect(iface.operations.storeArchive?.input).toEqual({
       type: "object",
@@ -78,31 +60,9 @@ describe("openbindings.openapi@7 OAS 3.0 schema-omitted byte carriage", () => {
     expect(outputs).toEqual(["3q2+7w=="]);
   });
 
-  it("keeps revision 6's schema-omitted OAS 3.0 request exclusion immutable", async () => {
-    await expect(new OpenAPISynthesizer().synthesizeInterface({
-      sources: [{ bindingSpec: BINDING_SPEC_V6, content: byteDocument() }],
-    })).rejects.toThrow(/outside the families/);
-  });
-
-  it("keeps revision 6's schema-omitted OAS 3.0 response on its immutable text lane", async () => {
-    const invoker = new OpenAPIInvoker();
-    const call = invoker.invokeBinding({
-      source: { bindingSpec: BINDING_SPEC_V6, content: responseOnlyByteDocument() },
-      ref: "#/paths/~1archive/get",
-      fetch: async () => new Response("raw", {
-        status: 200,
-        headers: { "Content-Type": "application/octet-stream" },
-      }),
-    });
-    const outputs: unknown[] = [];
-    for await (const output of call.outputs) outputs.push(output);
-    await call.closed;
-    expect(outputs).toEqual(["raw"]);
-  });
-
   it("does not turn a schema-omitted media range into one assumed byte representation", async () => {
     const iface = await new OpenAPISynthesizer().synthesizeInterface({
-      sources: [{ bindingSpec: BINDING_SPEC_V7, content: byteDocument("application/*") }],
+      sources: [{ bindingSpec: BINDING_SPEC, content: byteDocument("application/*") }],
     });
     expect(iface.operations.storeArchive?.input).toEqual({
       type: "object",

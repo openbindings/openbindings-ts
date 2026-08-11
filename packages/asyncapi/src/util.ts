@@ -1,7 +1,27 @@
 export {
-  parseAsyncAPIDocument,
+  operationRef,
+  parseRef,
   validateDocumentAddress,
 } from "@openbindings/asyncapi-client/analysis";
+import { parseAsyncAPIDocument as parseArtifactDocument } from "@openbindings/asyncapi-client/analysis";
+
+/** Adds the OpenBindings rule identity around the standalone artifact parser. */
+export async function parseAsyncAPIDocument(
+  location?: string,
+  content?: unknown,
+  options?: { signal?: AbortSignal },
+  fetchFn?: typeof globalThis.fetch,
+) {
+  try {
+    return await parseArtifactDocument(location, content, options, fetchFn);
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (message.includes("unsupported AsyncAPI version")) {
+      throw new Error(`${message} (ASYNC-P-01)`, { cause: error });
+    }
+    throw error;
+  }
+}
 
 // The u flag makes the class match whole code points, so an astral-plane
 // character replaces as one underscore, matching Go's rune-based regexp.
@@ -33,33 +53,6 @@ export function codePointCompare(a: string, b: string): number {
     i += ca > 0xffff ? 2 : 1;
   }
   return a.length - b.length;
-}
-
-/** Parses ASYNC-D-03's exact operation JSON Pointer spelling. */
-export function parseRef(ref: string): string {
-  ref = ref.trim();
-  if (!ref) {
-    throw new Error("ref is required and must be a JSON Pointer #/operations/<operation-key> (ASYNC-D-03)");
-  }
-  const prefix = "#/operations/";
-  if (!ref.startsWith(prefix)) {
-    throw new Error(
-      `ref "${ref}" is not a JSON Pointer #/operations/<operation-key>: the pointer is the only conformant spelling — a bare operation key is not accepted (ASYNC-D-03)`,
-    );
-  }
-  const token = ref.slice(prefix.length);
-  if (!token) throw new Error(`empty operation key in ref "${ref}" (ASYNC-D-03)`);
-  if (token.includes("/")) {
-    throw new Error(
-      `ref "${ref}" addresses a deeper path, not an operations-map entry: an operation key containing / carries RFC 6901 escaping (~1) (ASYNC-D-03)`,
-    );
-  }
-  return token.replaceAll("~1", "/").replaceAll("~0", "~");
-}
-
-/** Builds ASYNC-D-03's exact RFC 6901-escaped operation pointer. */
-export function operationRef(opID: string): string {
-  return `#/operations/${opID.replaceAll("~", "~0").replaceAll("/", "~1")}`;
 }
 
 /** Extracts a human-readable message from an unknown thrown value. */

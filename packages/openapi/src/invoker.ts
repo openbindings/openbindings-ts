@@ -33,12 +33,6 @@ import type { OpenAPIDocument } from "./types.js";
 import {
   DEFAULT_SOURCE_NAME,
   BINDING_SPEC,
-  BINDING_SPEC_V2,
-  BINDING_SPEC_V3,
-  BINDING_SPEC_V4,
-  BINDING_SPEC_V5,
-  BINDING_SPEC_V6,
-  LEGACY_BINDING_SPEC,
   profileForBindingSpec,
 } from "./constants.js";
 import { convertToInterface, type UnrealizableTarget } from "./synthesize.js";
@@ -77,13 +71,7 @@ export class OpenAPIInvoker implements BindingInvoker {
   /** Returns the binding specifications this invoker supports, by exact identifier. */
   bindingSpecs(): BindingSpecInfo[] {
     return [
-      { bindingSpec: BINDING_SPEC, description: "OpenAPI 3.x HTTP APIs (OAS 3.0 schema-omitted byte-carriage revision)" },
-      { bindingSpec: BINDING_SPEC_V6, description: "OpenAPI 3.x HTTP APIs (whole-JSON carriage revision)" },
-      { bindingSpec: BINDING_SPEC_V5, description: "OpenAPI 3.x HTTP APIs (dynamic-object carriage revision)" },
-      { bindingSpec: BINDING_SPEC_V4, description: "OpenAPI 3.x HTTP APIs (response-carriage fidelity revision)" },
-      { bindingSpec: BINDING_SPEC_V3, description: "OpenAPI 3.x HTTP APIs (request-carriage fidelity revision)" },
-      { bindingSpec: BINDING_SPEC_V2, description: "OpenAPI 3.x HTTP APIs (collision-preserving revision)" },
-      { bindingSpec: LEGACY_BINDING_SPEC, description: "OpenAPI 3.x HTTP APIs (revision-1 compatibility)" },
+      { bindingSpec: BINDING_SPEC, description: "OpenAPI 3.x HTTP APIs" },
     ];
   }
 
@@ -301,13 +289,7 @@ export class OpenAPISynthesizer implements InterfaceSynthesizer, CoverageSynthes
   /** Returns the binding specifications this synthesizer supports, by exact identifier. */
   bindingSpecs(): BindingSpecInfo[] {
     return [
-      { bindingSpec: BINDING_SPEC, description: "OpenAPI 3.x HTTP APIs (OAS 3.0 schema-omitted byte-carriage revision)" },
-      { bindingSpec: BINDING_SPEC_V6, description: "OpenAPI 3.x HTTP APIs (whole-JSON carriage revision)" },
-      { bindingSpec: BINDING_SPEC_V5, description: "OpenAPI 3.x HTTP APIs (dynamic-object carriage revision)" },
-      { bindingSpec: BINDING_SPEC_V4, description: "OpenAPI 3.x HTTP APIs (response-carriage fidelity revision)" },
-      { bindingSpec: BINDING_SPEC_V3, description: "OpenAPI 3.x HTTP APIs (request-carriage fidelity revision)" },
-      { bindingSpec: BINDING_SPEC_V2, description: "OpenAPI 3.x HTTP APIs (collision-preserving revision)" },
-      { bindingSpec: LEGACY_BINDING_SPEC, description: "OpenAPI 3.x HTTP APIs (revision-1 compatibility)" },
+      { bindingSpec: BINDING_SPEC, description: "OpenAPI 3.x HTTP APIs" },
     ];
   }
 
@@ -363,8 +345,8 @@ export class OpenAPISynthesizer implements InterfaceSynthesizer, CoverageSynthes
     if (sources.length > 1) {
       throw new MultipleSourcesError();
     }
-    if (src.bindingSpec !== BINDING_SPEC && src.bindingSpec !== BINDING_SPEC_V6 && src.bindingSpec !== BINDING_SPEC_V5 && src.bindingSpec !== BINDING_SPEC_V4 && src.bindingSpec !== BINDING_SPEC_V3 && src.bindingSpec !== BINDING_SPEC_V2 && src.bindingSpec !== LEGACY_BINDING_SPEC) {
-      throw new Error(`synthesizer supports exact binding specifications ${JSON.stringify(BINDING_SPEC)}, ${JSON.stringify(BINDING_SPEC_V6)}, ${JSON.stringify(BINDING_SPEC_V5)}, ${JSON.stringify(BINDING_SPEC_V4)}, ${JSON.stringify(BINDING_SPEC_V3)}, ${JSON.stringify(BINDING_SPEC_V2)}, and ${JSON.stringify(LEGACY_BINDING_SPEC)}, got ${JSON.stringify(src.bindingSpec)}`);
+    if (src.bindingSpec !== BINDING_SPEC) {
+      throw new Error(`synthesizer supports exact binding specification ${JSON.stringify(BINDING_SPEC)}, got ${JSON.stringify(src.bindingSpec)}`);
     }
     if (src.outputLocation) validateDocumentAddress(src.outputLocation);
     const location = normalizeAuthoringLocation(src.location);

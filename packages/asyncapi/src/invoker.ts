@@ -22,7 +22,6 @@ import {
   synthesisSkeleton,
 } from "@openbindings/sdk";
 import {
-  ASYNCAPI_PROFILE_COMPAT,
   ASYNCAPI_PROFILE_FULL,
   ASYNCAPI_USE_DEFAULT,
   AsyncAPIEngine,
@@ -32,7 +31,7 @@ import {
   type AsyncAPIHookResult,
 } from "@openbindings/asyncapi-client/engine";
 import type { AsyncAPIDocument } from "./asyncapi-types.js";
-import { BINDING_SPEC, DEFAULT_SOURCE_NAME, LEGACY_BINDING_SPEC } from "./constants.js";
+import { BINDING_SPEC, DEFAULT_SOURCE_NAME } from "./constants.js";
 import { bindableOperationEntries, convertToInterface } from "./synthesize.js";
 import { synthesisCoverage } from "./coverage.js";
 import { operationRef, parseAsyncAPIDocument, errorMessage, sanitizeKey, uniqueKey, validateDocumentAddress } from "./util.js";
@@ -45,7 +44,7 @@ import {
 // Invoker
 // ---------------------------------------------------------------------------
 
-/** Invokes current and immutable compatibility AsyncAPI cells. */
+/** Invokes the unreleased AsyncAPI @1 candidate through the standalone runtime. */
 export class AsyncAPIInvoker implements BindingInvoker {
   private readonly engine: AsyncAPIEngine;
 
@@ -56,8 +55,7 @@ export class AsyncAPIInvoker implements BindingInvoker {
   /** Returns the binding specifications this invoker supports, by exact identifier. */
   bindingSpecs(): BindingSpecInfo[] {
     return [
-      { bindingSpec: BINDING_SPEC, description: "AsyncAPI 3.0 event-driven APIs (reply-preserving revision)" },
-      { bindingSpec: LEGACY_BINDING_SPEC, description: "AsyncAPI 3.0 event-driven APIs (revision-1 compatibility)" },
+      { bindingSpec: BINDING_SPEC, description: "AsyncAPI 2.0–2.6 and 3.0–3.1 event-driven APIs" },
     ];
   }
 
@@ -134,7 +132,6 @@ export class AsyncAPIInvoker implements BindingInvoker {
 
 function profileForBindingSpec(bindingSpec: string) {
   if (bindingSpec === BINDING_SPEC) return ASYNCAPI_PROFILE_FULL;
-  if (bindingSpec === LEGACY_BINDING_SPEC) return ASYNCAPI_PROFILE_COMPAT;
   throw new AsyncAPIExecutionError(
     "SOURCE_CONFIG_ERROR",
     `unsupported AsyncAPI binding specification ${JSON.stringify(bindingSpec)}`,
@@ -245,7 +242,7 @@ export class AsyncAPISynthesizer implements InterfaceSynthesizer, CoverageSynthe
   bindingSpecs(): BindingSpecInfo[] {
     return [
       { bindingSpec: BINDING_SPEC, description: "AsyncAPI 3.0 event-driven APIs (reply-preserving revision)" },
-      { bindingSpec: LEGACY_BINDING_SPEC, description: "AsyncAPI 3.0 event-driven APIs (revision-1 compatibility)" },
+      { bindingSpec: BINDING_SPEC, description: "AsyncAPI 2.0–2.6 and 3.0–3.1 event-driven APIs (first unreleased candidate)" },
     ];
   }
 
@@ -281,8 +278,8 @@ export class AsyncAPISynthesizer implements InterfaceSynthesizer, CoverageSynthe
     if (sources.length > 1) {
       throw new MultipleSourcesError();
     }
-    if (src.bindingSpec !== BINDING_SPEC && src.bindingSpec !== LEGACY_BINDING_SPEC) {
-      throw new Error(`synthesizer supports exact binding specifications ${JSON.stringify(BINDING_SPEC)} and ${JSON.stringify(LEGACY_BINDING_SPEC)}, got ${JSON.stringify(src.bindingSpec)}`);
+    if (src.bindingSpec !== BINDING_SPEC) {
+      throw new Error(`synthesizer supports exact binding specification ${JSON.stringify(BINDING_SPEC)}, got ${JSON.stringify(src.bindingSpec)}`);
     }
     if (src.outputLocation) validateDocumentAddress(src.outputLocation);
     const location = normalizeAuthoringLocation(src.location);
@@ -323,8 +320,8 @@ export class AsyncAPISynthesizer implements InterfaceSynthesizer, CoverageSynthe
       // sorted iteration and sanitizeKey + uniqueKey de-duplication), so an
       // inspection previews exactly what synthesis names.
       const usedKeys = new Set<string>();
-      const bindingSpec = source.bindingSpec === LEGACY_BINDING_SPEC
-        ? LEGACY_BINDING_SPEC
+      const bindingSpec = source.bindingSpec === BINDING_SPEC
+        ? BINDING_SPEC
         : BINDING_SPEC;
       for (const [opID, asyncOp] of bindableOperationEntries(doc, bindingSpec)) {
         const desc = asyncOp?.description || asyncOp?.summary || undefined;

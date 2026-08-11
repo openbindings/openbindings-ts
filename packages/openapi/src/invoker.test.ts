@@ -140,15 +140,9 @@ function authSource(spec: Record<string, unknown>) {
 // ---------------------------------------------------------------------------
 
 describe("OpenAPIInvoker.bindingSpecs", () => {
-  it("advertises the current and immutable compatibility revisions", () => {
+  it("advertises only the unreleased first candidate", () => {
     expect(new OpenAPIInvoker().bindingSpecs()).toEqual([
-      { bindingSpec: "openbindings.openapi@7", description: "OpenAPI 3.x HTTP APIs (OAS 3.0 schema-omitted byte-carriage revision)" },
-      { bindingSpec: "openbindings.openapi@6", description: "OpenAPI 3.x HTTP APIs (whole-JSON carriage revision)" },
-      { bindingSpec: "openbindings.openapi@5", description: "OpenAPI 3.x HTTP APIs (dynamic-object carriage revision)" },
-      { bindingSpec: "openbindings.openapi@4", description: "OpenAPI 3.x HTTP APIs (response-carriage fidelity revision)" },
-      { bindingSpec: "openbindings.openapi@3", description: "OpenAPI 3.x HTTP APIs (request-carriage fidelity revision)" },
-      { bindingSpec: "openbindings.openapi@2", description: "OpenAPI 3.x HTTP APIs (collision-preserving revision)" },
-      { bindingSpec: "openbindings.openapi@1", description: "OpenAPI 3.x HTTP APIs (revision-1 compatibility)" },
+      { bindingSpec: "openbindings.openapi@1", description: "OpenAPI 3.x HTTP APIs" },
     ]);
   });
 });
@@ -171,7 +165,7 @@ describe("invokeBinding — request construction", () => {
     };
     const { fetch, requests } = mockFetch(() => new Response(null, { status: 204 }));
     const call = new OpenAPIInvoker().invokeBinding({
-      source: { bindingSpec: "openbindings.openapi@2", content: spec },
+      source: { bindingSpec: "openbindings.openapi@1", content: spec },
       ref: "#/paths/~1health/get",
       fetch,
     });
@@ -253,14 +247,14 @@ describe("invokeBinding — request construction", () => {
       },
     };
     const input = {
-      $openbindings: "openbindings.openapi@2",
+      $openbindings: "openbindings.openapi@1",
       value: { application: true },
       parameters: [],
       body: { application: true },
     };
     const { fetch, requests } = mockFetch(() => jsonResponse({ ok: true }));
     const call = new OpenAPIInvoker().invokeBinding({
-      source: { bindingSpec: "openbindings.openapi@2", content: spec },
+      source: { bindingSpec: "openbindings.openapi@1", content: spec },
       ref: "#/paths/~1objects/post",
       fetch,
     });

@@ -1,13 +1,5 @@
 /** The current binding-specification identifier (exact and opaque, core §6). */
-export const BINDING_SPEC = "openbindings.asyncapi@2";
-
-/** Immutable revision-1 compatibility identifier. */
-export const LEGACY_BINDING_SPEC = "openbindings.asyncapi@1";
-
-/** Whether the revision refuses reply-bearing WebSocket send operations. */
-export function preservesSendReplies(bindingSpec: string): boolean {
-  return bindingSpec === BINDING_SPEC;
-}
+export const BINDING_SPEC = "openbindings.asyncapi@1";
 
 /** Default source key used when generating OBInterface entries from AsyncAPI docs. */
 export const DEFAULT_SOURCE_NAME = "asyncapi";

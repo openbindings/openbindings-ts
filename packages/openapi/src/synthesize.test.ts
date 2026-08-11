@@ -154,7 +154,7 @@ describe("convertToInterface", () => {
     const iface = await convertToInterface(undefined, MINIMAL_SPEC);
 
     expect(iface.sources?.["openapi"]).toBeDefined();
-    expect(iface.sources?.["openapi"]?.bindingSpec).toBe("openbindings.openapi@7");
+    expect(iface.sources?.["openapi"]?.bindingSpec).toBe("openbindings.openapi@1");
   });
 
   it("handles specs with no paths", async () => {
@@ -278,7 +278,7 @@ describe("convertToInterface — OpenAPI 3.0 dialect translation", () => {
 
   it("stamps the exact identifier for 3.0.x sources (the artifact version drives dialect only)", async () => {
     const iface = await convertToInterface(undefined, SPEC_30_NULLABLE);
-    expect(iface.sources?.["openapi"]?.bindingSpec).toBe("openbindings.openapi@7");
+    expect(iface.sources?.["openapi"]?.bindingSpec).toBe("openbindings.openapi@1");
   });
 
   it("preserves 3.1 schemas verbatim (already 2020-12)", async () => {
@@ -392,7 +392,7 @@ describe("synthesizer artifact resolver", () => {
     };
     const iface = await new OpenAPISynthesizer({ fetch }).synthesizeInterface({
       sources: [{
-        bindingSpec: "openbindings.openapi@2",
+        bindingSpec: "openbindings.openapi@1",
         location: "https://description.example/openapi.yaml",
         content: `openapi: 3.1.2
 info: {title: External, version: "1"}
@@ -560,7 +560,7 @@ describe("free-form object bodies", () => {
 });
 
 describe("param/body field collision", () => {
-  it("refuses a partial interface when no required-body candidate can flatten faithfully", async () => {
+  it("preserves both application fields with a deterministic neutral suffix", async () => {
     const spec = {
       openapi: "3.1.0",
       info: { title: "t", version: "1" },
@@ -587,10 +587,20 @@ describe("param/body field collision", () => {
       },
     };
     const warnings: Array<{ code: string; path?: string }> = [];
-    await expect(new OpenAPISynthesizer().synthesizeInterface({
-        sources: [{ bindingSpec: "openbindings.openapi@1", content: spec }],
-        onWarning: (w) => warnings.push(w),
-      })).rejects.toThrow(/updateUser.*statically unbindable partial interface/);
+    const iface = await new OpenAPISynthesizer().synthesizeInterface({
+      sources: [{ bindingSpec: "openbindings.openapi@1", content: spec }],
+      onWarning: (w) => warnings.push(w),
+    });
+    expect(iface.operations.updateUser?.input).toEqual({
+      type: "object",
+      properties: {
+        id: { type: "string" },
+        id_2: { type: "string" },
+        name: { type: "string" },
+      },
+      required: ["id", "id_2", "name"],
+    });
+    expect(iface.bindings?.["updateUser.openapi"]?.inputTransform).toContain('"id":"id_2"');
     expect(warnings).toHaveLength(0);
   });
 });

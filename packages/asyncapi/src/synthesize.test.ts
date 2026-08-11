@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { convertToInterface } from "./synthesize.js";
-import { BINDING_SPEC, LEGACY_BINDING_SPEC } from "./constants.js";
+import { BINDING_SPEC } from "./constants.js";
 import { parseAsyncAPIDocument } from "./util.js";
 import { AsyncAPISynthesizer } from "./invoker.js";
 
@@ -288,7 +288,34 @@ describe("convertToInterface", () => {
 });
 
 describe("AsyncAPI synthesis coverage", () => {
-  it("refuses a reply-bearing WebSocket send in revision 2 without changing revision 1", async () => {
+  it("preserves native AsyncAPI 2.x refs and complementary perspective", async () => {
+    const content = {
+      asyncapi: "2.6.0",
+      info: { title: "Legacy events", version: "1" },
+      servers: { broker: { url: "mqtt://broker.example", protocol: "mqtt" } },
+      channels: {
+        "events/{tenant}": {
+          publish: { message: { payload: { type: "object", required: ["id"] } } },
+        },
+      },
+    };
+    const result = await new AsyncAPISynthesizer().synthesizeInterfaceWithCoverage({
+      sources: [{ bindingSpec: BINDING_SPEC, content }],
+    });
+    expect(Object.values(result.interface.bindings ?? {})[0]?.ref).toBe(
+      "#/channels/events~1{tenant}/publish",
+    );
+    expect(Object.values(result.interface.operations)[0]?.input).toMatchObject({
+      type: "object",
+      required: ["id"],
+    });
+    expect(result.coverage.entries).toEqual(expect.arrayContaining([
+      expect.objectContaining({ status: "represented", scope: "target" }),
+      expect.objectContaining({ sourceRef: expect.stringContaining("#server[0]=broker"), status: "represented" }),
+    ]));
+  });
+
+  it("synthesizes both directions of a reply-bearing send independently of driver support", async () => {
     const content = {
       asyncapi: "3.0.0",
       info: { title: "Reply-bearing send", version: "1" },
@@ -316,24 +343,20 @@ describe("AsyncAPI synthesis coverage", () => {
     const current = await new AsyncAPISynthesizer().synthesizeInterfaceWithCoverage({
       sources: [{ bindingSpec: BINDING_SPEC, content }],
     });
-    expect(current.interface.operations).toEqual({});
+    expect(current.interface.operations["subscribe"]).toMatchObject({
+      input: { type: "string" },
+      output: { type: "object" },
+    });
     expect(current.coverage.entries).toEqual(expect.arrayContaining([
       expect.objectContaining({
         sourceRef: "#/operations/subscribe",
-        status: "excluded",
-        reasonCode: "asyncapi.websocket_reply",
+        status: "represented",
       }),
       expect.objectContaining({
         sourceRef: "#/operations/subscribe#reply-message[0]=#/channels/commands/messages/command",
-        status: "excluded",
+        status: "represented",
       }),
     ]));
-
-    const legacy = await new AsyncAPISynthesizer().synthesizeInterface({
-      sources: [{ bindingSpec: LEGACY_BINDING_SPEC, content }],
-    });
-    expect(legacy.operations["subscribe"]).toBeDefined();
-    expect(legacy.sources?.["asyncapi"]?.bindingSpec).toBe(LEGACY_BINDING_SPEC);
   });
 
   it("accounts for message alternatives and declared protocol cells", async () => {
@@ -383,12 +406,12 @@ describe("AsyncAPI synthesis coverage", () => {
         reasonCode: "asyncapi.message_headers",
       }),
       expect.objectContaining({
-        status: "excluded",
-        reasonCode: "asyncapi.websocket_reply",
+        sourceRef: "#/operations/publish#server[0]=broker",
+        status: "represented",
       }),
       expect.objectContaining({
-        status: "excluded",
-        reasonCode: "asyncapi.protocol_outside_revision",
+        sourceRef: "#/operations/publish#server[2]=ws",
+        status: "represented",
       }),
     ]));
   });

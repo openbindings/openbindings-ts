@@ -1,6 +1,5 @@
 /** The binding-specification identifier this package implements (exact and opaque, core §6). */
-export const BINDING_SPEC = "openbindings.mcp@2";
-export const LEGACY_BINDING_SPEC = "openbindings.mcp@1";
+export const BINDING_SPEC = "openbindings.mcp@1";
 
 /** Default source name used when registering an MCP source in an OBInterface. */
 export const DEFAULT_SOURCE_NAME = "mcpServer";

@@ -233,26 +233,26 @@ directly on OpenBindings concepts. See the binding-specification guide's
 
 ```typescript
 const invoker = new OperationInvoker([
-  new OpenAPIInvoker(),    // openbindings.openapi@7 (plus @6/@5/@4/@3/@2/@1 compatibility)
-  new AsyncAPIInvoker(),   // openbindings.asyncapi@2
+  new OpenAPIInvoker(),    // unreleased openbindings.openapi@1 candidate
+  new AsyncAPIInvoker(),   // openbindings.asyncapi@1
 ]);
 ```
 
 | Package | Binding specification | Synthesizes OBIs? |
 |---------|--------------|-------------------|
-| `@openbindings/openapi` | `openbindings.openapi@7` (`@6`/`@5`/`@4`/`@3`/`@2`/`@1` compatibility) | yes |
-| `@openbindings/asyncapi` | `openbindings.asyncapi@2` | yes |
-| `@openbindings/mcp` | `openbindings.mcp@2` (latest), `openbindings.mcp@1` (compatibility) | yes |
+| `@openbindings/openapi` | `openbindings.openapi@1` candidate | yes |
+| `@openbindings/asyncapi` | `openbindings.asyncapi@1` | yes |
+| `@openbindings/mcp` | `openbindings.mcp@1` candidate | yes |
 | `@openbindings/grpc` | `openbindings.grpc@1` | yes |
 | `@openbindings/connect` | `openbindings.connect@1` | yes |
 | `@openbindings/usage` | `openbindings.usage@1` | yes |
-| `@openbindings/graphql` | `openbindings.graphql@2` (latest), `openbindings.graphql@1` (compatibility) | yes |
+| `@openbindings/graphql` | `openbindings.graphql@1` candidate | yes |
 | `@openbindings/operationgraph` | `openbindings.operation-graph@1` | no (graphs are authored, then composed at invoke time) |
 
-OpenAPI advertises its protocol-blind revision-3 contract alongside exact
-revision-2 and revision-1 compatibility. AsyncAPI, gRPC, Connect, usage, and
-Operation Graph retain their published revision-1 identifiers; MCP and GraphQL
-advertise revision-2 contracts alongside explicit revision-1 compatibility.
+Every listed binding specification is an unreleased first `@1` candidate.
+None has an older published meaning or compatibility revision. Exact opaque
+identifier routing is already exercised during development so the candidate
+implementation and conformance evidence can be qualified before publication.
 
 Invokers implement `BindingInvoker`. Interface synthesizers implement
 `InterfaceSynthesizer`; synthesizers that can return durable, explicitly

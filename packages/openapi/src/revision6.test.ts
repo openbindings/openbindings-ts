@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import jsonata from "jsonata";
 import { OperationInvoker, operationSignature } from "@openbindings/sdk";
-import { BINDING_SPEC_V5, BINDING_SPEC_V6 } from "./constants.js";
+import { BINDING_SPEC } from "./constants.js";
 import { OpenAPIInvoker, OpenAPISynthesizer } from "./invoker.js";
 
 function unionDocument(
@@ -50,11 +50,11 @@ function unionDocument(
   };
 }
 
-describe("openbindings.openapi@6 whole JSON carriage", () => {
+describe("openbindings.openapi@1 whole JSON carriage", () => {
   it("keeps a combinatorial JSON schema as one application value and sends it unchanged", async () => {
     const source = unionDocument();
     const iface = await new OpenAPISynthesizer().synthesizeInterface({
-      sources: [{ bindingSpec: BINDING_SPEC_V6, content: source }],
+      sources: [{ bindingSpec: BINDING_SPEC, content: source }],
     });
     expect(iface.operations.createItem?.input).toEqual({
       type: "object",
@@ -82,15 +82,9 @@ describe("openbindings.openapi@6 whole JSON carriage", () => {
     for await (const _output of call.outputs) { /* drain */ }
   });
 
-  it("does not mutate revision 5's fail-closed combinatorial contract", async () => {
-    await expect(new OpenAPISynthesizer().synthesizeInterface({
-      sources: [{ bindingSpec: BINDING_SPEC_V5, content: unionDocument() }],
-    })).rejects.toThrow(/conditional\/combinatorial request schema/);
-  });
-
   it("does not pretend that whole-JSON carriage defines form serialization", async () => {
     await expect(new OpenAPISynthesizer().synthesizeInterface({
-      sources: [{ bindingSpec: BINDING_SPEC_V6, content: unionDocument("application/x-www-form-urlencoded") }],
+      sources: [{ bindingSpec: BINDING_SPEC, content: unionDocument("application/x-www-form-urlencoded") }],
     })).rejects.toThrow(/conditional\/combinatorial request schema/);
   });
 
@@ -108,7 +102,7 @@ describe("openbindings.openapi@6 whole JSON carriage", () => {
 
     for (const [name, schema] of cases) {
       const iface = await new OpenAPISynthesizer().synthesizeInterface({
-        sources: [{ bindingSpec: BINDING_SPEC_V6, content: unionDocument("application/json", schema) }],
+        sources: [{ bindingSpec: BINDING_SPEC, content: unionDocument("application/json", schema) }],
       });
       const properties = (iface.operations.createItem?.input as any).properties;
       expect(properties.payload, name).toEqual(schema);
@@ -125,7 +119,7 @@ describe("openbindings.openapi@6 whole JSON carriage", () => {
 
     for (const [name, schema] of cases) {
       const iface = await new OpenAPISynthesizer().synthesizeInterface({
-        sources: [{ bindingSpec: BINDING_SPEC_V6, content: unionDocument("application/json", schema) }],
+        sources: [{ bindingSpec: BINDING_SPEC, content: unionDocument("application/json", schema) }],
       });
       const properties = (iface.operations.createItem?.input as any).properties;
       expect(properties.value, name).toEqual((schema.properties as any).value);

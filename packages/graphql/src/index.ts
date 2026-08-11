@@ -5,7 +5,7 @@ export {
   type GraphQLHTTPFailureEvidence,
   type GraphQLTransportWSEvidence,
 } from "./failure.js";
-export { BINDING_SPEC, LEGACY_BINDING_SPEC, DEFAULT_SOURCE_NAME } from "./constants.js";
+export { BINDING_SPEC, DEFAULT_SOURCE_NAME } from "./constants.js";
 export type {
   DocumentConfiguration,
   GraphQLWebSocketFactory,

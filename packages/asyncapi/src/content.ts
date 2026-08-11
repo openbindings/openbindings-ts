@@ -1,5 +1,5 @@
 /**
- * The governing content-type declarations of openbindings.asyncapi@2 §9.1
+ * The governing content-type declarations of openbindings.asyncapi@1 §9.1
  * (ASYNC-P-03, input encoding) and §9.3 (ASYNC-P-05, decode). Effective
  * content type resolves PER MESSAGE first — the message's own
  * `contentType`, else the document's `defaultContentType`, the AsyncAPI
@@ -139,7 +139,7 @@ export function decodeContentType(
   if (msgs.length === 0) throw new Error("operation has no resolved output message declaration");
   for (const message of msgs) {
     validateMessageBindingVersion(message);
-    if (message.headers !== undefined) throw new Error("output message declares headers, which revision 1 cannot carry");
+    if (message.headers !== undefined) throw new Error("output message declares headers, which the candidate application-value boundary cannot carry");
     supportedMessageContentType(messageEffectiveContentType(doc, message));
   }
   const types = completeEffectiveTypes(doc, msgs);
@@ -191,7 +191,7 @@ export function resolveInputCodec(
   supportedMessageContentType(effective);
   if (isJSONMediaType(t)) return { json: true, contentType: effective };
   if (isTextContentType(t)) return { json: false, contentType: effective };
-  throw new Error(`effective content type ${JSON.stringify(effective)} has no revision-1 value carriage`);
+  throw new Error(`effective content type ${JSON.stringify(effective)} has no candidate application-value carriage`);
 }
 
 export function messageEffectiveContentType(
@@ -211,7 +211,7 @@ export function supportedMessageContentType(contentType: string): void {
   if (contentType.trim() === "") return;
   const parsed = parseMedia(contentType);
   if (!isJSONMediaType(parsed.type) && !parsed.type.startsWith("text/")) {
-    throw new Error(`effective content type ${JSON.stringify(contentType)} has no revision-1 value carriage`);
+    throw new Error(`effective content type ${JSON.stringify(contentType)} has no candidate application-value carriage`);
   }
   const charset = parsed.parameters.get("charset")?.trim().toLowerCase();
   if (charset && charset !== "utf-8" && charset !== "utf8") {
@@ -234,7 +234,7 @@ export function resolveReplyContentType(
   if (candidates.length === 0) throw new Error(`non-empty HTTP ${status} response has no governing reply message`);
   for (const message of candidates) {
     validateMessageBindingVersion(message);
-    if (message.headers !== undefined) throw new Error("selected reply message declares headers, which revision 1 cannot carry");
+    if (message.headers !== undefined) throw new Error("selected reply message declares headers, which the candidate application-value boundary cannot carry");
     supportedMessageContentType(messageEffectiveContentType(doc, message));
   }
 
@@ -257,7 +257,7 @@ export function resolveReplyContentType(
 export function validateMessageBindingVersion(message: AsyncAPIMessage): void {
   const version = message.bindings?.http?.bindingVersion;
   if (version !== undefined && version !== "0.3.0") {
-    throw new Error(`HTTP message binding version ${JSON.stringify(version)} is outside revision 1's incorporated 0.3.0 envelope`);
+    throw new Error(`HTTP message binding version ${JSON.stringify(version)} is outside the candidate's incorporated 0.3.0 envelope`);
   }
 }
 

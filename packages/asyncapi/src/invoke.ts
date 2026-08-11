@@ -16,7 +16,7 @@
  *                           response -> at most one output
  *   - receive + ws/wss      client-streaming publish: every input -> one
  *                           socket frame; the caller closing input ends it
- *   - send + http/https     excluded in revision 1
+ *   - send + http/https     requires a subscription-capable driver
  *   - send + ws/wss         server-streaming subscription: socket frames
  *                           -> outputs, no caller input values
  *
@@ -73,7 +73,7 @@ import type {
   AsyncAPIServer,
 } from "./asyncapi-types.js";
 import { isSecurityScheme } from "./asyncapi-types.js";
-import { REF_NAME_TAG, preservesSendReplies } from "./constants.js";
+import { REF_NAME_TAG } from "./constants.js";
 import {
   mergeQuery,
   protocolFieldValues,
@@ -188,7 +188,7 @@ export async function runBinding(
   }
 
   try {
-    validateCell(doc, ch, asyncOp, target.protocol, args.source.bindingSpec, args.context);
+    validateCell(doc, ch, asyncOp, target.protocol, args.context);
   } catch (e: unknown) {
     h.fireError(new InvocationError(ERR_SOURCE_CONFIG_ERROR, errorMessage(e)));
     return;
@@ -226,7 +226,7 @@ export async function runBinding(
     if (needsPayload) {
       if (asyncOp.action !== "receive") throw new Error("subscription address uses a message runtime expression before any outgoing message exists");
       if (target.protocol !== "http" && target.protocol !== "https") {
-        throw new Error("WebSocket publish address runtime expressions are not available before connection in revision 1");
+        throw new Error("WebSocket publish address runtime expressions are not available before connection in the built-in driver");
       }
       if (noInputDeclared(args)) throw new Error("address runtime expression requires an outgoing message, but the operation declares no input");
       const first = await readFirstInput(h);
@@ -308,33 +308,32 @@ function validateCell(
   ch: AsyncAPIChannel | undefined,
   op: AsyncAPIOperation,
   protocol: string,
-  bindingSpec: string,
   context?: Record<string, unknown>,
 ): void {
   const httpBinding = op.bindings?.http;
   if (httpBinding?.bindingVersion !== undefined && httpBinding.bindingVersion !== "0.3.0") {
-    throw new Error(`HTTP binding version ${JSON.stringify(httpBinding.bindingVersion)} is outside revision 1's incorporated 0.3.0 envelope`);
+    throw new Error(`HTTP binding version ${JSON.stringify(httpBinding.bindingVersion)} is outside the candidate's incorporated 0.3.0 envelope`);
   }
   const wsBinding = ch?.bindings?.ws;
   if (wsBinding?.bindingVersion !== undefined && wsBinding.bindingVersion !== "0.1.0") {
-    throw new Error(`WebSockets binding version ${JSON.stringify(wsBinding.bindingVersion)} is outside revision 1's incorporated 0.1.0 envelope`);
+    throw new Error(`WebSockets binding version ${JSON.stringify(wsBinding.bindingVersion)} is outside the candidate's incorporated 0.1.0 envelope`);
   }
 
   if (protocol === "http" || protocol === "https") {
-    if (op.action === "send") throw new Error("standalone HTTP send operations are excluded from revision 1");
+    if (op.action === "send") throw new Error("standalone HTTP send operations require a subscription-capable protocol driver");
     if (!httpBinding?.method?.trim()) throw new Error("HTTP receive operation has no artifact-declared HTTP method; POST is not inferred");
     const selected = selectedInputMessages(op, ch, context);
     validateMessageBindingVersion(selected[0]!);
     resolveInputCodec(doc, selected, context);
     if (!replyMessagesBindable(doc, op)) {
-      throw new Error("an HTTP reply message uses carriage outside revision 1");
+      throw new Error("an HTTP reply message has no carriage supported by the selected protocol driver");
     }
     resolveHTTPQuery(op, protocolFieldValues(context).httpQuery);
     return;
   }
 
   if (op.action === "receive") {
-    if (op.reply) throw new Error("reply-bearing WebSocket receive operations are excluded from revision 1");
+    if (op.reply) throw new Error("reply-bearing WebSocket receive operations require request/reply session semantics the built-in WebSocket driver does not implement");
     const selected = selectedInputMessages(op, ch, context);
     validateMessageBindingVersion(selected[0]!);
     resolveInputCodec(doc, selected, context);
@@ -343,8 +342,8 @@ function validateCell(
       throw new Error("configuration.websocketMessageType must select text or binary for a WebSocket publish");
     }
   } else {
-    if (op.reply && preservesSendReplies(bindingSpec)) {
-      throw new Error("reply-bearing WebSocket send operations are excluded from revision 2");
+    if (op.reply) {
+      throw new Error("reply-bearing WebSocket send operations require request/reply session semantics the built-in WebSocket driver does not implement");
     }
     // This validates non-empty output declarations, message-header
     // exclusions, declaration identity, and the decode point when absent.

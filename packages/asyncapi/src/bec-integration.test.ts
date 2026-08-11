@@ -233,10 +233,12 @@ describe("AsyncAPI binding invoker (real HTTP)", () => {
     await expect(call.closed).rejects.toMatchObject({ code: "ERR_MISSING_INPUT" });
   });
 
-  it("excludes standalone HTTP send operations before dispatch", async () => {
+  it("synthesizes standalone HTTP send but lets the built-in driver refuse before dispatch", async () => {
     const before = requestCount;
     const obi = await buildOBI();
-    expect(obi.bindings?.["receiveEvents.asyncapi"]).toBeUndefined();
+    expect(obi.bindings?.["receiveEvents.asyncapi"]).toMatchObject({
+      ref: "#/operations/receiveEvents",
+    });
 
     const invoker = new AsyncAPIInvoker();
     const call = invoker.invokeBinding({

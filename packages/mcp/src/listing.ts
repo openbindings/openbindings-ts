@@ -1,6 +1,6 @@
 import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InvocationError, ERR_REF_NOT_FOUND, ERR_PROTOCOL } from "@openbindings/sdk";
-import { BINDING_SPEC, LEGACY_BINDING_SPEC } from "./constants.js";
+import { BINDING_SPEC } from "./constants.js";
 
 /**
  * A listing is this family's artifact (openbindings.mcp@1 §3): the aggregate
@@ -253,7 +253,7 @@ export function resolveRef(
   l: Listing,
   entityType: string,
   remainder: string,
-  bindingSpec = LEGACY_BINDING_SPEC,
+  bindingSpec = BINDING_SPEC,
 ): TargetKind {
   const where = l.pinned ? "pinned listing" : "server listing";
   const ref = `${entityType}/${remainder}`;
@@ -288,21 +288,21 @@ export function resolveRef(
       throw notFound("tool");
     }
     case "prompts": {
-      if (bindingSpec === BINDING_SPEC) throw new InvocationError(ERR_REF_NOT_FOUND, "MCP prompts have no application output schema and are excluded by openbindings.mcp@2 (MCP-P-04)");
+      if (bindingSpec === BINDING_SPEC) throw new InvocationError(ERR_REF_NOT_FOUND, "MCP prompts have no application output schema and are excluded by openbindings.mcp@1 (MCP-P-04)");
       const n = count(l.prompts);
       if (n === 1) return "prompt";
       if (n > 1) throw ambiguous("prompt", n);
       throw notFound("prompt");
     }
     case "resources": {
-      if (bindingSpec === BINDING_SPEC) throw new InvocationError(ERR_REF_NOT_FOUND, "MCP resources have no application output schema and are excluded by openbindings.mcp@2 (MCP-P-04)");
+      if (bindingSpec === BINDING_SPEC) throw new InvocationError(ERR_REF_NOT_FOUND, "MCP resources have no application output schema and are excluded by openbindings.mcp@1 (MCP-P-04)");
       const n = count(l.resources);
       if (n === 1) return "staticResource";
       if (n > 1) throw ambiguous("resource", n);
       throw notFound("resource");
     }
     case "resourceTemplates": {
-      if (bindingSpec === BINDING_SPEC) throw new InvocationError(ERR_REF_NOT_FOUND, "MCP resource templates have no application output schema and are excluded by openbindings.mcp@2 (MCP-P-04)");
+      if (bindingSpec === BINDING_SPEC) throw new InvocationError(ERR_REF_NOT_FOUND, "MCP resource templates have no application output schema and are excluded by openbindings.mcp@1 (MCP-P-04)");
       const t = count(l.templates);
       if (t === 1) return "templateResource";
       if (t > 1) throw ambiguous("resource template", t);

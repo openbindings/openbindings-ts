@@ -58,7 +58,7 @@ export interface AcquireOptions {
   /**
    * Fingerprint of the credential identity a dial would use (invoke.ts's
    * wsUpgradeMaterial hashes exactly the upgrade-request material — no
-   * credential rides in-band under openbindings.asyncapi@2 §9.5, so the
+   * credential rides in-band under openbindings.asyncapi@1 §9.5, so the
    * upgrade request IS the connection's credential identity). Included in
    * the pool key alongside server/address: two acquires with different
    * credential fingerprints MUST NOT share a connection (cross-tenant

@@ -139,7 +139,7 @@ describe("resolveInputCodec", () => {
   });
 
   it("refuses binary or codec-specific media rather than inventing string carriage", () => {
-    expect(() => resolveInputCodec(doc(), mk("application/avro"))).toThrow(/no revision-1 value carriage/);
+    expect(() => resolveInputCodec(doc(), mk("application/avro"))).toThrow(/no candidate application-value carriage/);
   });
 
   it("refuses a declared non-UTF-8 text charset", () => {

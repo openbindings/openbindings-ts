@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { BINDING_SPEC_V2, profileForBindingSpec } from "./constants.js";
+import { BINDING_SPEC, profileForBindingSpec } from "./constants.js";
 import {
   parseRoutedEnvelope,
   routeEnvelope,
@@ -12,29 +12,29 @@ import { FAMILY_JSON, type BodyPlan } from "./media.js";
 describe("OpenAPI revision-2 routed input", () => {
   it("refuses one source field supplying two destinations", () => {
     expect(() => parseRoutedEnvelope([{
-      $openbindings: BINDING_SPEC_V2,
+      $openbindings: BINDING_SPEC,
       value: { shared: "x" },
       parameters: [
         { in: "path", name: "id", field: "shared" },
         { in: "query", name: "id", field: "shared" },
       ],
       body: {},
-    }], profileForBindingSpec(BINDING_SPEC_V2))).toThrow(/more than one destination/);
+    }], profileForBindingSpec(BINDING_SPEC))).toThrow(/more than one destination/);
   });
 
   it("requires the private descriptor's exact top-level shape", () => {
     expect(() => parseRoutedEnvelope([{
-      $openbindings: BINDING_SPEC_V2,
+      $openbindings: BINDING_SPEC,
       value: {},
       parameters: [],
       body: {},
       extra: true,
-    }], profileForBindingSpec(BINDING_SPEC_V2))).toThrow(/exactly/);
+    }], profileForBindingSpec(BINDING_SPEC))).toThrow(/exactly/);
   });
 
   it("leaves a marker-shaped application object in the flat representation", () => {
     expect(parseRoutedEnvelope({
-      $openbindings: BINDING_SPEC_V2,
+      $openbindings: BINDING_SPEC,
       value: { application: true },
     })).toBeNull();
   });
@@ -50,7 +50,7 @@ describe("OpenAPI revision-2 routed input", () => {
       [{ in: "path", name: "id", schema: { type: "string" } }],
       [],
       envelope,
-      profileForBindingSpec(BINDING_SPEC_V2),
+      profileForBindingSpec(BINDING_SPEC),
     )).toThrow(/does not identify/);
   });
 
@@ -71,6 +71,6 @@ describe("OpenAPI revision-2 routed input", () => {
       props: new Set(["name"]),
       synthetic: false,
     };
-    expect(routeEnvelope([], envelope, "/items", plan, profileForBindingSpec(BINDING_SPEC_V2)).bodyFields).toEqual({ renamed: "x" });
+    expect(routeEnvelope([], envelope, "/items", plan, profileForBindingSpec(BINDING_SPEC)).bodyFields).toEqual({ renamed: "x" });
   });
 });

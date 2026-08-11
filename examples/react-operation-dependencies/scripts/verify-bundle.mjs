@@ -11,11 +11,11 @@ const source = (
 const forbidden = [
   "openbindings.asyncapi@1",
   "openbindings.graphql@1",
-  "openbindings.graphql@2",
+  "openbindings.graphql@1",
   "openbindings.grpc@1",
   "openbindings.connect@1",
   "openbindings.mcp@1",
-  "openbindings.mcp@2",
+  "openbindings.mcp@1",
   "openbindings.usage@1",
   "node:fs",
   "node:path",

@@ -1,7 +1,7 @@
 import { UriTemplate } from "@modelcontextprotocol/sdk/shared/uriTemplate.js";
 import type { OBInterface, SynthesisCoverageEntry } from "@openbindings/sdk";
 import type { MCPDiscovery } from "./synthesize.js";
-import { BINDING_SPEC, LEGACY_BINDING_SPEC, DEFAULT_SOURCE_NAME } from "./constants.js";
+import { BINDING_SPEC, DEFAULT_SOURCE_NAME } from "./constants.js";
 
 /** Accounts for every entity in the pagination-exhausted MCP listing. */
 export function mcpSynthesisCoverage(
@@ -9,7 +9,7 @@ export function mcpSynthesisCoverage(
   iface: OBInterface,
 ): SynthesisCoverageEntry[] {
   if (!disc) return [];
-	const bindingSpec = iface.sources?.[DEFAULT_SOURCE_NAME]?.bindingSpec ?? LEGACY_BINDING_SPEC;
+	const bindingSpec = iface.sources?.[DEFAULT_SOURCE_NAME]?.bindingSpec ?? BINDING_SPEC;
   const represented = new Map<string, { operationKey: string; bindingRef: string }>();
   for (const binding of Object.values(iface.bindings ?? {})) {
     if (binding.ref) represented.set(binding.ref, { operationKey: binding.operation, bindingRef: binding.ref });

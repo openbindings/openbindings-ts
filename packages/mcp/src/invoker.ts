@@ -19,7 +19,7 @@ import {
   type SourceInspector,
   type SynthesizeResult,
 } from "@openbindings/sdk";
-import { BINDING_SPEC, LEGACY_BINDING_SPEC, DEFAULT_SOURCE_NAME } from "./constants.js";
+import { BINDING_SPEC, DEFAULT_SOURCE_NAME } from "./constants.js";
 import { runMCPBinding, validateEndpoint } from "./invoke.js";
 import {
   discover,
@@ -34,10 +34,7 @@ import {
 import { mcpSynthesisCoverage } from "./coverage.js";
 
 function mcpBindingSpecs(): BindingSpecInfo[] {
-  return [
-    { bindingSpec: BINDING_SPEC, description: "MCP application-contract tools via Streamable HTTP" },
-    { bindingSpec: LEGACY_BINDING_SPEC, description: "MCP revision-1 compatibility via Streamable HTTP" },
-  ];
+  return [{ bindingSpec: BINDING_SPEC, description: "MCP application-contract tools via Streamable HTTP" }];
 }
 
 // ---------------------------------------------------------------------------
@@ -173,7 +170,7 @@ export class MCPSynthesizer implements InterfaceSynthesizer, CoverageSynthesizer
     if (sources.length > 1) {
       throw new MultipleSourcesError();
     }
-    if (src.bindingSpec !== BINDING_SPEC && src.bindingSpec !== LEGACY_BINDING_SPEC) throw new Error(`synthesizer supports exact binding specifications ${JSON.stringify(BINDING_SPEC)} and ${JSON.stringify(LEGACY_BINDING_SPEC)}, got ${JSON.stringify(src.bindingSpec)}`);
+    if (src.bindingSpec !== BINDING_SPEC) throw new Error(`synthesizer supports exact binding specification ${JSON.stringify(BINDING_SPEC)}, got ${JSON.stringify(src.bindingSpec)}`);
     if (src.outputLocation) validateEndpoint(src.outputLocation);
     let disc: MCPDiscovery;
     if (src.content !== undefined) {

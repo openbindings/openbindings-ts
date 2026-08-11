@@ -241,23 +241,18 @@ describe("OAPI-P-01 / §3 / §6 — loading", () => {
 // ---------------------------------------------------------------------------
 
 describe("OAPI-P-03 — flattened-model refusals", () => {
-  it("refuses an unflattenable operation before dispatch", async () => {
+  it("refuses case-folding header collisions before dispatch", async () => {
     const spec = {
       openapi: "3.0.3",
       info: { title: "t", version: "1" },
       servers: [{ url: BASE }],
       paths: {
-        "/items/{id}": {
+        "/items": {
           get: {
             operationId: "get",
             parameters: [
-              {
-                name: "id",
-                in: "path",
-                required: true,
-                schema: { type: "string" },
-              },
-              { name: "id", in: "query", schema: { type: "string" } },
+              { name: "X-ID", in: "header", schema: { type: "string" } },
+              { name: "x-id", in: "header", schema: { type: "string" } },
             ],
             responses: { "200": { description: "ok" } },
           },
@@ -267,7 +262,7 @@ describe("OAPI-P-03 — flattened-model refusals", () => {
     const { fetch, requests } = mockFetch(() => jsonResponse({}));
     const call = new OpenAPIInvoker().invokeBinding({
       source: src(spec),
-      ref: "#/paths/~1items~1{id}/get",
+      ref: "#/paths/~1items/get",
       fetch,
     });
     await expect(call.closed).rejects.toMatchObject({
@@ -492,11 +487,9 @@ describe("OAPI-P-03 — flattened-model refusals", () => {
     expect(requests[0]?.body).toBe('{"extra":"y","name":"x"}');
   });
 
-  // §9.1 (OAPI-P-03): passthrough rides the body's encoding — multipart
-  // here. A primitive passthrough field rides as a text part; an object
-  // passthrough field rides as an application/json part, per the same §9.2
-  // part rules as declared fields.
-  it("rides passthrough fields on a multipart body", async () => {
+  // Unlike JSON, multipart needs declaration-defined part carriage. Unknown
+  // members therefore fail closed instead of inheriting an invented codec.
+  it("refuses undeclared multipart members with no faithful part carriage", async () => {
     const spec = {
       openapi: "3.0.3",
       info: { title: "t", version: "1" },
@@ -528,21 +521,15 @@ describe("OAPI-P-03 — flattened-model refusals", () => {
       fetch,
     });
     await call.write({ description: "d", note: "urgent", meta: { k: "v" } });
-    await single(call.outputs);
-    const fd = requests[0]?.body as FormData;
-    expect(fd).toBeInstanceOf(FormData);
-    expect(fd.get("description")).toBe("d");
-    expect(fd.get("note")).toBe("urgent");
-    const meta = fd.get("meta") as Blob;
-    expect(meta).toBeInstanceOf(Blob);
-    expect(meta.type).toBe("application/json");
-    await expect(meta.text()).resolves.toBe('{"k":"v"}');
+    await expect(call.closed).rejects.toMatchObject({
+      code: ERR_VALIDATION_FAILED,
+      message: expect.stringContaining("has no declaration-defined mapping"),
+    });
+    expect(requests).toHaveLength(0);
   });
 
-  // §9.1 (OAPI-P-03): passthrough rides the body's encoding —
-  // application/x-www-form-urlencoded here, serialized like declared
-  // fields.
-  it("rides passthrough fields on a urlencoded body", async () => {
+  // urlencoded carriage likewise needs a declaration-defined serialization.
+  it("refuses undeclared urlencoded members", async () => {
     const spec = {
       openapi: "3.0.3",
       info: { title: "t", version: "1" },
@@ -574,11 +561,11 @@ describe("OAPI-P-03 — flattened-model refusals", () => {
       fetch,
     });
     await call.write({ name: "a b", extra: "y" });
-    await single(call.outputs);
-    expect(requests[0]?.headers.get("Content-Type")).toBe(
-      "application/x-www-form-urlencoded",
-    );
-    expect(requests[0]?.body).toBe("extra=y&name=a%20b");
+    await expect(call.closed).rejects.toMatchObject({
+      code: ERR_VALIDATION_FAILED,
+      message: expect.stringContaining("has no declaration-defined carriage"),
+    });
+    expect(requests).toHaveLength(0);
   });
 
   // A supplied input missing a declared path parameter always refuses
@@ -779,9 +766,7 @@ describe("OAPI-P-04 — request media on the wire", () => {
     expect(requests[0]?.body).toBe('{"k":"v"}');
   });
 
-  // An operation declaring only out-of-family request media refuses
-  // pre-dispatch with zero I/O.
-  it("refuses a binary-only request body pre-dispatch", async () => {
+  it("carries an OAS 3.0 binary request as exact Base64-decoded octets", async () => {
     const spec = {
       openapi: "3.0.3",
       info: { title: "t", version: "1" },
@@ -805,14 +790,15 @@ describe("OAPI-P-04 — request media on the wire", () => {
     };
     const { fetch, requests } = mockFetch(() => jsonResponse({}));
     const call = new OpenAPIInvoker().invokeBinding({
-      source: { ...src(spec), bindingSpec: "openbindings.openapi@2" },
+      source: { ...src(spec), bindingSpec: "openbindings.openapi@1" },
       ref: "#/paths/~1blob/post",
       fetch,
     });
-    await expect(call.closed).rejects.toMatchObject({
-      code: ERR_SOURCE_CONFIG_ERROR,
-    });
-    expect(requests).toHaveLength(0);
+    await call.write({ body: "AAEC" });
+    await single(call.outputs);
+    expect(requests).toHaveLength(1);
+    expect(requests[0]?.headers.get("Content-Type")).toBe("application/octet-stream");
+    expect([...new Uint8Array(requests[0]?.body as ArrayBuffer)]).toEqual([0, 1, 2]);
   });
 
   // §9.2 (OAPI-P-04): a degenerate media/schema combination — selection
@@ -857,7 +843,7 @@ describe("OAPI-P-04 — request media on the wire", () => {
       TEXT_DEGENERATE_MSG,
     ],
   ];
-  for (const [name, content, message] of degenerateCases) {
+  for (const [name, content] of degenerateCases) {
     it(`refuses a degenerate media/schema combination pre-dispatch: ${name}`, async () => {
       const spec = {
         openapi: "3.1.0",
@@ -881,7 +867,7 @@ describe("OAPI-P-04 — request media on the wire", () => {
       });
       await expect(call.closed).rejects.toMatchObject({
         code: ERR_SOURCE_CONFIG_ERROR,
-        message,
+        message: expect.stringContaining("required request body has no declaration"),
       });
       expect(requests).toHaveLength(0);
     });

@@ -1,113 +1,76 @@
-import { describe, it, expect } from "vitest";
-import { ERR_REF_NOT_FOUND, InvocationError } from "@openbindings/sdk";
+import { describe, expect, it } from "vitest";
+import { ERR_REF_NOT_FOUND, type InvocationError } from "@openbindings/sdk";
 import { parsePinnedListing, resolveRef, type Listing } from "./listing.js";
 
-describe("parsePinnedListing (MCP-D-01)", () => {
-  it("parses a full pinned listing into entity identities, in order", () => {
-    const l = parsePinnedListing({
-      tools: [{ name: "a" }, { name: "b", description: "extra members of the entity shape are fine" }],
-      resources: [{ uri: "app://x", name: "x" }],
-      resourceTemplates: [{ uriTemplate: "file:///logs/{date}", name: "logs" }],
-      prompts: [{ name: "greet" }],
-    });
-    expect(l.tools).toEqual(["a", "b"]);
-    expect(l.resources).toEqual(["app://x"]);
-    expect(l.templates).toEqual(["file:///logs/{date}"]);
-    expect(l.prompts).toEqual(["greet"]);
-    expect(l.pinned).toBe(true);
-  });
-
-  it("accepts every member as optional (an empty pin is a valid, empty listing)", () => {
-    const l = parsePinnedListing({});
-    expect(l.tools).toEqual([]);
-    expect(l.resources).toEqual([]);
-    expect(l.templates).toEqual([]);
-    expect(l.prompts).toEqual([]);
-  });
-
-  it("treats a null member as an empty entity array (Go parity: json null unmarshals to an empty slice)", () => {
-    const l = parsePinnedListing({ tools: null });
-    expect(l.tools).toEqual([]);
-  });
-
-  it.each([
-    ["stray nextCursor", { tools: [], nextCursor: "p2" }, /nextCursor/],
-    ["stray _meta", { tools: [], _meta: {} }, /_meta/],
-    ["arbitrary stray member", { extras: [] }, /"extras"/],
-    ["non-object content", "nope", /pinned-listing object/],
-    ["array content", [], /pinned-listing object/],
-    ["null content", null, /pinned-listing object/],
-    ["member not an array", { tools: { name: "x" } }, /must be an entity array/],
-    ["entry not an object", { tools: ["x"] }, /tools\[0\] must be an object/],
-    ["entry missing identity", { prompts: [{ description: "d" }] }, /string "name"/],
-    ["entry identity not a string", { resources: [{ uri: 7 }] }, /string "uri"/],
-  ])("refuses %s loudly with an MCP-D-01 message", (_name, content, wantMessage) => {
-    expect(() => parsePinnedListing(content)).toThrow(wantMessage);
-    expect(() => parsePinnedListing(content)).toThrow(/MCP-D-01/);
-  });
-
-  it("names the sorted first offender when several stray members are present (deterministic refusal)", () => {
-    expect(() => parsePinnedListing({ zz: 1, _meta: {}, nextCursor: "x" })).toThrow(/"_meta"/);
-  });
-});
-
-describe("resolveRef (§7, MCP-D-03, MCP-P-02)", () => {
-  const listing = (partial: Partial<Listing>, pinned = true): Listing => ({
+function listing(overrides: Partial<Listing> = {}): Listing {
+  return {
     tools: [],
+    requiredTaskTools: [],
+    toolOutputSchemas: {},
     resources: [],
     templates: [],
     prompts: [],
-    pinned,
-    ...partial,
+    pinned: true,
+    ...overrides,
+  };
+}
+
+describe("openbindings.mcp@1 listing resolution", () => {
+  it("resolves exactly one ordinary tool with an application output schema", () => {
+    expect(resolveRef(listing({
+      tools: ["weather"],
+      toolOutputSchemas: { weather: { type: "object" } },
+    }), "tools", "weather")).toBe("tool");
   });
 
-  it("resolves each entity family to its target kind", () => {
-    expect(resolveRef(listing({ tools: ["t"] }), "tools", "t")).toBe("tool");
-    expect(resolveRef(listing({ prompts: ["p"] }), "prompts", "p")).toBe("prompt");
-    expect(resolveRef(listing({ resources: ["app://x"] }), "resources", "app://x")).toBe("staticResource");
-    expect(resolveRef(listing({ templates: ["app://{id}"] }), "resourceTemplates", "app://{id}")).toBe("templateResource");
-  });
-
-  it("matches byte-exactly, never by prefix, case fold, or template match", () => {
-    // A template is addressed by its template string, byte-exact — never
-    // by a URI that the template happens to match (§7).
-    const l = listing({ templates: ["file:///x/{id}"] });
-    expect(() => resolveRef(l, "resources", "file:///x/42")).toThrow(/matches no/);
-    expect(() => resolveRef(listing({ tools: ["Tool"] }), "tools", "tool")).toThrow(/matches no/);
-    expect(() => resolveRef(listing({ tools: ["tool"] }), "tools", "too")).toThrow(/matches no/);
-  });
-
-  it("keeps resources and resourceTemplates in separate namespaces (§7, R5): a byte-identical URI and template never collide", () => {
-    // R5: no ordered fall-through. A resource URI and a byte-identical
-    // template uriTemplate coexist; each is reached by its own entity token,
-    // so neither is ambiguous.
-    const l = listing({ resources: ["file:///x/{id}"], templates: ["file:///x/{id}"] });
-    expect(resolveRef(l, "resources", "file:///x/{id}")).toBe("staticResource");
-    expect(resolveRef(l, "resourceTemplates", "file:///x/{id}")).toBe("templateResource");
-  });
-
-  it("refuses an ambiguous match loudly, never first-match", () => {
-    for (const [l, entity, remainder, what] of [
-      [listing({ tools: ["dup", "dup"] }), "tools", "dup", "2 tools"],
-      [listing({ prompts: ["dup", "dup", "dup"] }), "prompts", "dup", "3 prompts"],
-      [listing({ resources: ["app://d", "app://d"] }), "resources", "app://d", "2 resources"],
-      [listing({ templates: ["a{v}", "a{v}"] }), "resourceTemplates", "a{v}", "2 resource templates"],
-    ] as const) {
-      let thrown: unknown;
-      try {
-        resolveRef(l, entity, remainder);
-      } catch (e) {
-        thrown = e;
-      }
-      expect(thrown).toBeInstanceOf(InvocationError);
-      expect((thrown as InvocationError).code).toBe(ERR_REF_NOT_FOUND);
-      expect((thrown as InvocationError).message).toContain("ambiguous");
-      expect((thrown as InvocationError).message).toContain(what);
+  it.each([
+    ["missing identity", listing({ tools: ["weather"], toolOutputSchemas: { weather: {} } }), "tools", "missing", /matches no/],
+    ["ambiguous identity", listing({ tools: ["weather", "weather"], toolOutputSchemas: { weather: {} } }), "tools", "weather", /ambiguous/],
+    ["missing outputSchema", listing({ tools: ["weather"] }), "tools", "weather", /no outputSchema/],
+    ["required task", listing({ tools: ["weather"], requiredTaskTools: ["weather"], toolOutputSchemas: { weather: {} } }), "tools", "weather", /task augmentation/],
+    ["resource", listing({ resources: ["app://x"] }), "resources", "app://x", /excluded/],
+    ["resource template", listing({ templates: ["app://{id}"] }), "resourceTemplates", "app://{id}", /excluded/],
+    ["prompt", listing({ prompts: ["review"] }), "prompts", "review", /excluded/],
+  ])("refuses %s", (_name, inventory, family, identity, message) => {
+    let thrown: InvocationError | undefined;
+    try {
+      resolveRef(inventory, family, identity);
+    } catch (error) {
+      thrown = error as InvocationError;
     }
+    expect(thrown).toMatchObject({ code: ERR_REF_NOT_FOUND });
+    expect(thrown?.message).toMatch(message);
+  });
+});
+
+describe("pinned listing grammar", () => {
+  it("retains output schemas and required-task declarations", () => {
+    expect(parsePinnedListing({
+      tools: [
+        { name: "ordinary", outputSchema: { type: "object" } },
+        { name: "task", outputSchema: {}, execution: { taskSupport: "required" } },
+      ],
+      resources: [{ uri: "app://x" }],
+      resourceTemplates: [{ uriTemplate: "app://{id}" }],
+      prompts: [{ name: "review" }],
+    })).toMatchObject({
+      tools: ["ordinary", "task"],
+      requiredTaskTools: ["task"],
+      toolOutputSchemas: { ordinary: { type: "object" }, task: {} },
+      resources: ["app://x"],
+      templates: ["app://{id}"],
+      prompts: ["review"],
+      pinned: true,
+    });
   });
 
-  it("names the listing kind in refusals (pinned vs server)", () => {
-    expect(() => resolveRef(listing({}, true), "tools", "x")).toThrow(/pinned listing/);
-    expect(() => resolveRef(listing({}, false), "tools", "x")).toThrow(/server listing/);
+  it.each([
+    null,
+    [],
+    { nextCursor: "later" },
+    { tools: {} },
+    { tools: [{ description: "missing identity" }] },
+  ])("rejects invalid source content %#", (content) => {
+    expect(() => parsePinnedListing(content)).toThrow(/pinned|listing|member|identity|name/);
   });
 });

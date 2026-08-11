@@ -188,7 +188,7 @@ describe("OpenAPI native-client differential", () => {
         },
       };
       const iface = await new OpenAPISynthesizer().synthesizeInterface({
-        sources: [{ bindingSpec: "openbindings.openapi@2", content }],
+        sources: [{ bindingSpec: "openbindings.openapi@1", content }],
       });
       expect(iface.bindings?.["createItem.openapi"]?.inputTransform).toBeTypeOf("string");
       expect(Object.keys(
@@ -256,7 +256,7 @@ describe("OpenAPI native-client differential", () => {
       },
     };
     const iface = await new OpenAPISynthesizer().synthesizeInterface({
-      sources: [{ bindingSpec: "openbindings.openapi@2", content }],
+      sources: [{ bindingSpec: "openbindings.openapi@1", content }],
     });
     const input = iface.operations.uploadAllOf?.input as {
       properties?: Record<string, unknown>;

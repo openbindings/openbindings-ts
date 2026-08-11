@@ -100,7 +100,12 @@ export function mcpServer(respond: (req: RpcRequest) => RpcReply, opts?: MCPServ
       case "tools/list": {
         const { page, nextCursor } = paginate(opts?.tools ?? [], cursor, opts?.pageSize);
         return {
-          tools: page.map((name) => ({ name, description: "fixture tool", inputSchema: { type: "object" } })),
+          tools: page.map((name) => ({
+            name,
+            description: "fixture tool",
+            inputSchema: { type: "object" },
+            outputSchema: { type: "object", properties: { value: { type: "string" } }, required: ["value"] },
+          })),
           ...(nextCursor !== undefined ? { nextCursor } : {}),
         };
       }

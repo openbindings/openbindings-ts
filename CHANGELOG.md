@@ -9,39 +9,37 @@
   operation without an OBI document, while `@openbindings/openapi` is the thin
   binding-invoker and synthesis adapter over its SDK-neutral execution engine.
   The client lives in its own repository and can be adopted without OpenBindings.
-  The extraction preserves all current
-  revision-7 behavior and exact revision compatibility. Swagger Client remains
+  The extraction preserves the complete unreleased first `@1` candidate
+  behavior. Swagger Client remains
   a differential-test witness: focused qualification found value-shape and
   media-range gaps, a higher Node floor, and a larger dependency footprint, so
   no incomplete production substitution was introduced.
 
-- **`@openbindings/openapi` now defaults to `openbindings.openapi@7` for exact
+- **`@openbindings/openapi` now defaults to `openbindings.openapi@1` for exact
   schema-omitted OAS 3.0 byte carriage.** Exact non-JSON request and response
   octets cross the protocol-independent boundary as canonical Base64. Media
-  ranges and artifact-defined codecs remain unchanged; exact revision 6 and
-  earlier revisions remain available. The Core OBI document model is
-  unchanged.
+  ranges and artifact-defined codecs remain unchanged. No binding
+  specification has been published; this is part of the first `@1`
+  candidate. The Core OBI document model is unchanged.
 
-- **`@openbindings/openapi` now defaults to `openbindings.openapi@6` for
+- **`@openbindings/openapi` now defaults to `openbindings.openapi@1` for
   whole-JSON carriage.** Exact JSON-family request schemas whose top-level
   declarations require combinators, conditionals, dependent schemas, or
   explicit `unevaluatedProperties` remain one protocol-neutral application
   value. Binding-private routing preserves the complete value without
-  choosing a schema branch or exposing HTTP concepts. Revision 6 retains
-  revision 5's dynamic-object carriage; exact revisions 5, 4, 3, 2, and 1
-  remain available for compatibility. The Core OBI document model is
-  unchanged.
+  choosing a schema branch or exposing HTTP concepts. Dynamic-object
+  carriage remains part of the same first candidate. The Core OBI document
+  model is unchanged.
 
-- **`openbindings.openapi@3` added media-faithful request carriage.** Revision
-  3 adds canonical Base64 boundary
+- **`openbindings.openapi@1` added media-faithful request carriage.** The
+  candidate adds canonical Base64 boundary
   values for artifact-declared raw request bytes, preserves OpenAPI 3.1
   `contentEncoding` strings as artifact-encoded wire text, and admits concrete
   `requestMedia` choices governed by OpenAPI media ranges without exposing
   HTTP concepts in operation schemas. Required range-only bodies participate
-  in side-effect-free preflight before input consumption. Exact revisions 2
-  and 1 remain available for compatibility; the Core OBI document model is
-  unchanged. Form and multipart carriage follows each accepted OAS edition's
-  own immutable rules, including the older 3.0.0–3.0.3 urlencoded defaults;
+  in side-effect-free preflight before input consumption. The Core OBI
+  document model is unchanged. Form and multipart carriage follows each
+  accepted OAS edition's own rules, including the older 3.0.0–3.0.3 urlencoded defaults;
   multipart binary parts retain author-declared non-default media types; and
   underdefined form candidates fail closed rather than inferring routes or
   byte conversions from caller values.
@@ -55,7 +53,7 @@
   credentials are never volunteered for an anonymous
   operation; and processor-owned `Host`, `Content-Length`, and conflicting
   raw/structured cookie sources refuse before dispatch. Synthesis excludes
-  parameter-content media revision 2 cannot faithfully carry. The generic
+  parameter-content media the candidate cannot faithfully carry. The generic
   context helper now also enforces its existing reserved-`auth.*` rule, and
   the generic dereferencer exposes an adapter-scoped sibling-merge hook; the
   core OBI document model is unchanged.
@@ -84,13 +82,12 @@
   partially dereferenced contract. Resolver configuration remains
   binding-private and does not alter the protocol-blind OBI document model.
 
-- **`@openbindings/openapi` revision 2 introduced collision-preserving routed
-  inputs and
+- **`@openbindings/openapi` introduced collision-preserving routed inputs and
   preserves same-named application inputs.** Synthesis retains unique author
   names, assigns deterministic neutral suffixes only for collisions, and uses
   a binding-private core `inputTransform` for the exact OpenAPI route. The
-  operation schema remains protocol-blind. Immutable revision 1 remains
-  available as `LEGACY_BINDING_SPEC`.
+  operation schema remains protocol-blind. This is part of the unreleased
+  first `@1` candidate.
 
 - **Per-operation dependencies compose compatibility, invocability, and
   caller policy without introducing a registry.** The core SDK now exposes
@@ -464,7 +461,7 @@
   `compileOperationSchema` exposes the same interface-aware boundary to
   applications that drive binding invokers directly.
 
-- **Every published binding family now runs its shared D-rule corpus through
+- **Every binding-family candidate now runs its shared D-rule corpus through
   the TypeScript package's own family lanes.** Connect, gRPC, and Usage gained
   the missing adapters, GraphQL rejoined the core corpus inventory, and the
   stale Go-only skips were removed. The new proof exposed and fixed two real

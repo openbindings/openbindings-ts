@@ -282,6 +282,13 @@ export async function runMCPBinding(
   opts?: RunOptions,
 ): Promise<void> {
   // --- Pre-dispatch validation: no network I/O has happened yet. ---
+  if (args.source.bindingSpec !== BINDING_SPEC) {
+    inv.fireError(new InvocationError(
+      ERR_SOURCE_CONFIG_ERROR,
+      `MCP invoker supports exact binding specification ${JSON.stringify(BINDING_SPEC)}, got ${JSON.stringify(args.source.bindingSpec)}`,
+    ));
+    return;
+  }
   let entityType: string;
   let name: string;
   try {

@@ -1,14 +1,14 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   CONTEXT_REQUIRED,
   ERR_EXECUTION_FAILED,
+  ERR_INVALID_REF,
   ERR_REF_NOT_FOUND,
   ERR_SOURCE_CONFIG_ERROR,
   type Invocation,
 } from "@openbindings/sdk";
-import { BINDING_SPEC, LEGACY_BINDING_SPEC } from "./constants.js";
+import { BINDING_SPEC } from "./constants.js";
 import { GraphQLInvoker, GraphQLSynthesizer } from "./invoker.js";
-import type { GraphQLWebSocketInit } from "./configuration.js";
 
 const endpoint = "https://api.example.test/graphql";
 const schema = {
@@ -50,7 +50,7 @@ const schema = {
   ],
 };
 const source = {
-  bindingSpec: LEGACY_BINDING_SPEC,
+  bindingSpec: BINDING_SPEC,
   location: endpoint,
   content: { data: { __schema: schema } },
 };
@@ -59,6 +59,16 @@ async function outputs(invocation: Invocation<unknown, unknown>): Promise<unknow
   const values: unknown[] = [];
   for await (const value of invocation.outputs) values.push(value);
   return values;
+}
+
+async function drain(invocation: Invocation<unknown, unknown>): Promise<{ values: unknown[]; error?: unknown }> {
+  const values: unknown[] = [];
+  try {
+    for await (const value of invocation.outputs) values.push(value);
+    return { values };
+  } catch (error) {
+    return { values, error };
+  }
 }
 
 function response(
@@ -74,7 +84,7 @@ function response(
 }
 
 describe("GraphQLInvoker HTTP", () => {
-  it("carries the exact document and wholesale variables, preserving the whole envelope", async () => {
+  it("carries the exact document and wholesale variables, then preserves partial application data before failure", async () => {
     let dispatched: Record<string, unknown> | undefined;
     const fetchFn: typeof fetch = vi.fn(async (_url, init) => {
       dispatched = JSON.parse(String(init?.body)) as Record<string, unknown>;
@@ -101,9 +111,9 @@ describe("GraphQLInvoker HTTP", () => {
     });
     await invocation.write({ id: "u-1", unused: 7, _query: "ordinary variable" });
 
-    await expect(outputs(invocation)).resolves.toEqual([
-      { data: { viewer: null }, errors: [{ message: "resolver warning" }] },
-    ]);
+    const result = await drain(invocation);
+    expect(result.values).toEqual([null]);
+    expect(result.error).toMatchObject({ code: ERR_EXECUTION_FAILED });
     expect(dispatched).toEqual({
       query: "query Viewer($id: ID!) { viewer(id: $id) }",
       operationName: "Viewer",
@@ -123,11 +133,11 @@ describe("GraphQLInvoker HTTP", () => {
         return response({ data: { health: "ok" } });
       }),
     });
-    await expect(outputs(invocation)).resolves.toEqual([{ data: { health: "ok" } }]);
+    await expect(outputs(invocation)).resolves.toEqual(["ok"]);
     expect(dispatched).not.toHaveProperty("variables");
   });
 
-  it("emits a +json request-error response even at HTTP 400", async () => {
+  it("classifies a +json request-error response at HTTP 400 without emitting its native envelope", async () => {
     const body = { errors: [{ message: "request rejected" }] };
     const invocation = new GraphQLInvoker().invokeBinding({
       source,
@@ -135,7 +145,7 @@ describe("GraphQLInvoker HTTP", () => {
       context: { configuration: { document: "query { viewer }" } },
       fetch: vi.fn(async () => response(body, 400)),
     });
-    await expect(outputs(invocation)).resolves.toEqual([body]);
+    await expect(invocation.closed).rejects.toMatchObject({ code: ERR_EXECUTION_FAILED });
   });
 
   it("treats an application/json non-2xx response as terminal", async () => {
@@ -208,93 +218,21 @@ describe("GraphQLInvoker HTTP", () => {
   });
 });
 
-class FakeWebSocket {
-  static readonly OPEN = 1;
-  static readonly CONNECTING = 0;
-  readyState = FakeWebSocket.CONNECTING;
-  onopen: (() => void) | null = null;
-  onmessage: ((event: { data: string }) => void) | null = null;
-  onerror: (() => void) | null = null;
-  onclose: (() => void) | null = null;
-  readonly sent: unknown[] = [];
-  closed = false;
-
-  send(value: string): void { this.sent.push(JSON.parse(value)); }
-  close(): void { this.closed = true; this.readyState = 3; }
-  open(): void { this.readyState = FakeWebSocket.OPEN; this.onopen?.(); }
-  message(value: unknown): void { this.onmessage?.({ data: JSON.stringify(value) }); }
-}
-
-describe("GraphQLInvoker subscription", () => {
-  const priorWebSocket = globalThis.WebSocket;
-  beforeEach(() => {
-    Object.defineProperty(globalThis, "WebSocket", { configurable: true, value: FakeWebSocket });
-  });
-  afterEach(() => {
-    Object.defineProperty(globalThis, "WebSocket", { configurable: true, value: priorWebSocket });
-  });
-
-  it("uses the explicit target and emits complete next envelopes including errors", async () => {
-    let init: GraphQLWebSocketInit | undefined;
-    let socket: FakeWebSocket | undefined;
-    const invoker = new GraphQLInvoker((value) => {
-      init = value;
-      socket = new FakeWebSocket();
-      return socket as unknown as WebSocket;
-    });
-    const invocation = invoker.invokeBinding({
-      source,
-      ref: "subscription/updates",
-      context: {
-        configuration: {
-          document: { source: "subscription Watch { updates }", operationName: "Watch" },
-          subscriptionTarget: "wss://stream.example.test/graphql",
-          protocolFields: {
-            websocketHeaders: { "x-tenant": "demo" },
-            connectionInitPayload: { tenant: "demo" },
-          },
-        },
-      },
-    });
-    await vi.waitFor(() => expect(socket).toBeDefined());
-    socket!.open();
-    expect(socket!.sent[0]).toEqual({ type: "connection_init", payload: { tenant: "demo" } });
-    socket!.message({ type: "connection_ack" });
-    expect(socket!.sent[1]).toEqual({
-      id: "1",
-      type: "subscribe",
-      payload: { query: "subscription Watch { updates }", operationName: "Watch" },
-    });
-    socket!.message({
-      type: "next",
-      id: "1",
-      payload: { data: { updates: null }, errors: [{ message: "warning" }] },
-    });
-    socket!.message({ type: "complete", id: "1" });
-
-    await expect(outputs(invocation)).resolves.toEqual([
-      { data: { updates: null }, errors: [{ message: "warning" }] },
-    ]);
-    expect(init).toEqual({
-      url: "wss://stream.example.test/graphql",
-      protocols: ["graphql-transport-ws"],
-      headers: { "x-tenant": "demo" },
-    });
-  });
-
-  it("refuses explicit upgrade fields when no WebSocket factory can carry them", async () => {
+describe("GraphQLInvoker excluded targets", () => {
+  it("refuses subscription refs before dispatch", async () => {
+    const fetchFn = vi.fn();
     const invocation = new GraphQLInvoker().invokeBinding({
       source,
       ref: "subscription/updates",
       context: {
         configuration: {
           document: "subscription { updates }",
-          subscriptionTarget: "wss://stream.example.test/graphql",
-          protocolFields: { websocketHeaders: { "x-tenant": "demo" } },
         },
       },
+      fetch: fetchFn,
     });
-    await expect(invocation.closed).rejects.toMatchObject({ code: ERR_SOURCE_CONFIG_ERROR });
+    await expect(invocation.closed).rejects.toMatchObject({ code: ERR_INVALID_REF });
+    expect(fetchFn).not.toHaveBeenCalled();
   });
 });
 
@@ -305,7 +243,6 @@ describe("GraphQLSynthesizer", () => {
     expect(inspection.targets.map((target) => target.ref)).toEqual([
       "query/health",
       "query/viewer",
-      "subscription/updates",
     ]);
   });
 });

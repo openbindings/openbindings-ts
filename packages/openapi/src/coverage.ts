@@ -23,11 +23,6 @@ import {
 import { resolveServer } from "./servers.js";
 import {
   BINDING_SPEC,
-  BINDING_SPEC_V2,
-  BINDING_SPEC_V3,
-  BINDING_SPEC_V4,
-  BINDING_SPEC_V5,
-  LEGACY_BINDING_SPEC,
   hasMediaFidelity,
   hasRoutedInputs,
   profileForBindingSpec,
@@ -52,11 +47,11 @@ export function openAPISynthesisCoverage(
   }
   const source = Object.values(iface.sources ?? {})
     .find((candidate) => candidate.bindingSpec === BINDING_SPEC
-      || candidate.bindingSpec === BINDING_SPEC_V2
-      || candidate.bindingSpec === BINDING_SPEC_V3
-      || candidate.bindingSpec === BINDING_SPEC_V4
-      || candidate.bindingSpec === BINDING_SPEC_V5
-      || candidate.bindingSpec === LEGACY_BINDING_SPEC);
+      || candidate.bindingSpec === BINDING_SPEC
+      || candidate.bindingSpec === BINDING_SPEC
+      || candidate.bindingSpec === BINDING_SPEC
+      || candidate.bindingSpec === BINDING_SPEC
+      || candidate.bindingSpec === BINDING_SPEC);
   const sourceLocation = source?.location ?? "";
   const bindingSpec = source?.bindingSpec ?? BINDING_SPEC;
 
@@ -197,8 +192,8 @@ function requestMediaCoverage(
       reasonCode: collision ? "openapi.flattening_collision" : "openapi.request_media_excluded",
       rule: collision ? "OAPI-P-03" : "OAPI-P-04",
       message: collision
-        ? "request media alternative collides with an independently declared parameter in revision 1's flattened boundary"
-        : errorMessage(planError) || "request media alternative has no faithful revision-1 carriage",
+        ? "request media alternative collides with an independently declared parameter in the candidate's application boundary"
+        : errorMessage(planError) || "request media alternative has no faithful candidate carriage",
       details: { mediaType },
     };
   });

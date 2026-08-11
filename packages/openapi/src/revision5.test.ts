@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import jsonata from "jsonata";
 import { OperationInvoker, operationSignature } from "@openbindings/sdk";
-import { BINDING_SPEC_V4, BINDING_SPEC_V5 } from "./constants.js";
+import { BINDING_SPEC } from "./constants.js";
 import { OpenAPIInvoker, OpenAPISynthesizer } from "./invoker.js";
 
 function dynamicBodyDocument(
@@ -40,7 +40,7 @@ async function joinedInvocation(
   observe: (request: Request) => Promise<void>,
 ): Promise<Record<string, unknown>> {
   const iface = await new OpenAPISynthesizer().synthesizeInterface({
-    sources: [{ bindingSpec: BINDING_SPEC_V5, content: source }],
+    sources: [{ bindingSpec: BINDING_SPEC, content: source }],
   });
   const binding = iface.bindings?.["createItem.openapi"];
   expect(binding?.inputTransform).toBeTypeOf("string");
@@ -60,7 +60,7 @@ async function joinedInvocation(
   return iface;
 }
 
-describe("openbindings.openapi@5 dynamic object carriage", () => {
+describe("openbindings.openapi@1 dynamic object carriage", () => {
   it("keeps an additionalProperties form object independent from a same-named query parameter", async () => {
     const source = dynamicBodyDocument("3.0.4", "application/x-www-form-urlencoded", {
       type: "object",
@@ -111,21 +111,4 @@ describe("openbindings.openapi@5 dynamic object carriage", () => {
     });
   });
 
-  it("keeps revision 4's named-property-only form surface immutable", async () => {
-    const source = dynamicBodyDocument("3.0.4", "application/x-www-form-urlencoded", {
-      type: "object",
-      properties: { fixed: { type: "string" } },
-      additionalProperties: { type: "string" },
-    });
-    const iface = await new OpenAPISynthesizer().synthesizeInterface({
-      sources: [{ bindingSpec: BINDING_SPEC_V4, content: source }],
-    });
-    expect(iface.operations.createItem?.input).toEqual({
-      type: "object",
-      properties: { fixed: { type: "string" }, id: { type: "string" } },
-      additionalProperties: false,
-      required: ["id"],
-    });
-    expect(iface.bindings?.["createItem.openapi"]?.inputTransform).toBeUndefined();
-  });
 });

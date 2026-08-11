@@ -122,6 +122,7 @@ export interface AsyncAPIMessage {
   summary?: string;
   description?: string;
   contentType?: string;
+  schemaFormat?: string;
   payload?: Record<string, unknown>;
   headers?: Record<string, unknown>;
   bindings?: { http?: { statusCode?: number; bindingVersion?: string } };

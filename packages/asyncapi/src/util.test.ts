@@ -88,6 +88,12 @@ describe("parseRef", () => {
       "orders/create~v2",
     );
   });
+
+  it("accepts an edition-native AsyncAPI 2.x operation pointer", () => {
+    expect(parseRef("#/channels/orders~1created/publish")).toBe(
+      "v2:publish:orders/created",
+    );
+  });
 });
 
 describe("parseAsyncAPIDocument", () => {
@@ -136,20 +142,18 @@ describe("parseAsyncAPIDocument", () => {
     );
   });
 
-  // ASYNC-P-01: the `asyncapi` field discriminates the accepted line —
-  // AsyncAPI 2.x documents are out of the supported range and refused
-  // loudly at load, never silently misparsed.
-  it("refuses a 2.x document loudly instead of silently misparsing it", async () => {
+  it("normalizes AsyncAPI 2.x perspective while preserving its native ref", async () => {
     const doc2x = JSON.stringify({
       asyncapi: "2.6.0",
       info: { title: "Legacy", version: "1.0.0" },
+      servers: { broker: { url: "mqtt://broker.example", protocol: "mqtt" } },
       channels: {
-        messages: { subscribe: { message: { payload: { type: "object" } } } },
+        "messages/in": { publish: { message: { payload: { type: "object" } } } },
       },
     });
-    await expect(parseAsyncAPIDocument(undefined, doc2x)).rejects.toThrow(
-      "ASYNC-P-01",
-    );
+    const doc = await parseAsyncAPIDocument(undefined, doc2x);
+    expect(doc.operations?.["v2:publish:messages/in"]?.action).toBe("receive");
+    expect(parseRef("#/channels/messages~1in/publish")).toBe("v2:publish:messages/in");
   });
 
   it("discriminates an unsupported edition before resolving external references", async () => {
@@ -158,9 +162,9 @@ describe("parseAsyncAPIDocument", () => {
       fetches += 1;
       throw new Error("must not fetch");
     }) as typeof globalThis.fetch;
-    const doc2x = {
-      asyncapi: "2.0.0",
-      info: { title: "Legacy external schema", version: "1" },
+    const unsupported = {
+      asyncapi: "3.2.0",
+      info: { title: "Future external schema", version: "1" },
       channels: {},
       components: {
         messages: {
@@ -170,12 +174,12 @@ describe("parseAsyncAPIDocument", () => {
     };
 
     await expect(
-      parseAsyncAPIDocument(undefined, doc2x, undefined, fetchFn),
+      parseAsyncAPIDocument(undefined, unsupported, undefined, fetchFn),
     ).rejects.toThrow("ASYNC-P-01");
     expect(fetches).toBe(0);
   });
 
-  it("accepts exactly the artifact version adopted by revision 1", async () => {
+  it("accepts only the exact editions adopted by the @1 candidate", async () => {
     const doc = await parseAsyncAPIDocument(undefined, validDoc);
     expect(doc.asyncapi).toBe("3.0.0");
     await expect(
@@ -183,9 +187,10 @@ describe("parseAsyncAPIDocument", () => {
     ).rejects.toThrow("ASYNC-P-01");
   });
 
-  // ASYNC-P-01: accepting another edition requires a new binding-specification
-  // identifier, never range inference.
-  it("refuses a 3.1.x document: exactly 3.0.0, never sight-unseen 3.x", async () => {
+  it("accepts 3.1.0 but refuses an unadopted 3.1 patch", async () => {
+    await expect(
+      parseAsyncAPIDocument(undefined, validDoc.replace("3.0.0", "3.1.0")),
+    ).resolves.toBeDefined();
     await expect(
       parseAsyncAPIDocument(undefined, validDoc.replace("3.0.0", "3.1.2")),
     ).rejects.toThrow("ASYNC-P-01");

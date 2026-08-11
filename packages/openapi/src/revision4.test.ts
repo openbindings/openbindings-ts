@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { ERR_PROTOCOL, type InvocationError } from "@openbindings/sdk";
-import { BINDING_SPEC_V3, BINDING_SPEC_V4 } from "./constants.js";
+import { type InvocationError } from "@openbindings/sdk";
+import { BINDING_SPEC } from "./constants.js";
 import { OpenAPIInvoker } from "./invoker.js";
 import { governingResponseMediaMatch } from "./media.js";
 import { convertToInterface } from "./synthesize.js";
@@ -45,14 +45,14 @@ async function invokeResponse(
   return { outputs, error };
 }
 
-describe("openbindings.openapi@4 response carriage", () => {
+describe("openbindings.openapi@1 response carriage", () => {
   it("emits exact OAS 3.0 binary response octets as canonical Base64", async () => {
     const spec = responseDocument("3.0.4", {
       "image/png": { schema: { type: "string", format: "binary" } },
     });
     const result = await invokeResponse(
       spec,
-      BINDING_SPEC_V4,
+      BINDING_SPEC,
       new Response(Uint8Array.from([0, 1, 254, 255]), {
         status: 200,
         headers: { "Content-Type": "image/png" },
@@ -68,7 +68,7 @@ describe("openbindings.openapi@4 response carriage", () => {
       undefined,
       undefined,
       undefined,
-      BINDING_SPEC_V4,
+      BINDING_SPEC,
     );
     expect(iface.operations["getPayload"]?.output).toEqual({
       type: "string",
@@ -80,7 +80,7 @@ describe("openbindings.openapi@4 response carriage", () => {
     const spec = responseDocument("3.1.2", { "image/*": {} });
     const result = await invokeResponse(
       spec,
-      BINDING_SPEC_V4,
+      BINDING_SPEC,
       new Response(Uint8Array.from([222, 173, 190, 239]), {
         status: 200,
         headers: { "Content-Type": "image/png" },
@@ -96,7 +96,7 @@ describe("openbindings.openapi@4 response carriage", () => {
       undefined,
       undefined,
       undefined,
-      BINDING_SPEC_V4,
+      BINDING_SPEC,
     );
     expect(iface.operations["getPayload"]?.output).toEqual({
       type: "string",
@@ -110,7 +110,7 @@ describe("openbindings.openapi@4 response carriage", () => {
     });
     const result = await invokeResponse(
       spec,
-      BINDING_SPEC_V4,
+      BINDING_SPEC,
       new Response(JSON.stringify({ ok: true }), {
         status: 200,
         headers: { "Content-Type": "application/json" },
@@ -118,20 +118,6 @@ describe("openbindings.openapi@4 response carriage", () => {
     );
     expect(result.error).toBeUndefined();
     expect(result.outputs).toEqual([{ ok: true }]);
-  });
-
-  it("keeps revision 3's response-range exclusion immutable", async () => {
-    const spec = responseDocument("3.1.2", { "image/*": {} });
-    const result = await invokeResponse(
-      spec,
-      BINDING_SPEC_V3,
-      new Response(Uint8Array.from([1]), {
-        status: 200,
-        headers: { "Content-Type": "image/png" },
-      }),
-    );
-    expect(result.outputs).toEqual([]);
-    expect(result.error?.code).toBe(ERR_PROTOCOL);
   });
 
   it("ranks exact, type-range, and all-range declarations before parameter count", () => {

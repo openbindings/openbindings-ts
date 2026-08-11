@@ -15,7 +15,7 @@ import {
   successMediaTypes,
   type BodyPlan,
 } from "./media.js";
-import { BINDING_SPEC_V3, profileForBindingSpec } from "./constants.js";
+import { BINDING_SPEC, profileForBindingSpec } from "./constants.js";
 import type { OpenAPIDocument, OpenAPIMediaType, OpenAPIOperation } from "./types.js";
 import type { RoutedInput } from "./params.js";
 
@@ -120,7 +120,7 @@ describe("planRequestBody — deterministic unconfigured selection", () => {
 });
 
 describe("revision-3 media-range carriage existence", () => {
-  const options = { profile: profileForBindingSpec(BINDING_SPEC_V3), openapiVersion: "3.1.2" };
+  const options = { profile: profileForBindingSpec(BINDING_SPEC), openapiVersion: "3.1.2" };
 
   it.each([
     ["application/*", { type: "object", properties: { name: { type: "string" } } }],
@@ -141,7 +141,7 @@ describe("revision-3 media-range carriage existence", () => {
   it("admits OAS 3.0 binary image ranges through a possible configured raw member", () => {
     const plans = planRequestBodies(
       opWithRequestBody({ "image/*": { schema: { type: "string", format: "binary" } } }, true),
-      { profile: profileForBindingSpec(BINDING_SPEC_V3), openapiVersion: "3.0.4" },
+      { profile: profileForBindingSpec(BINDING_SPEC), openapiVersion: "3.0.4" },
     );
     expect(plans).toHaveLength(1);
     expect(plans[0]).toMatchObject({ mediaKey: "image/*", range: true });
@@ -150,7 +150,7 @@ describe("revision-3 media-range carriage existence", () => {
   it("rejects invalid request declaration syntax", () => {
     const op = opWithRequestBody({ "application/json/extra": { schema: { type: "object" } } }, true);
     expect(() => planRequestBodies(op, {
-      profile: profileForBindingSpec(BINDING_SPEC_V3),
+      profile: profileForBindingSpec(BINDING_SPEC),
       openapiVersion: "3.1.2",
     })).toThrow(/outside the families/);
   });
@@ -331,7 +331,7 @@ describe("buildMultipartBody", () => {
       };
       const plan = planRequestBody(
         opWithRequestBody({ "multipart/form-data": media }, true),
-        { profile: profileForBindingSpec(BINDING_SPEC_V3), openapiVersion: "3.0.4" },
+        { profile: profileForBindingSpec(BINDING_SPEC), openapiVersion: "3.0.4" },
       );
       expect(() => buildRequestBody(DOC_30, plan, routedWith({ bodyFields: { file: value } })))
         .toThrow(/invalid canonical base64/);
@@ -348,7 +348,7 @@ describe("buildMultipartBody", () => {
     };
     const plan = planRequestBody(
       opWithRequestBody({ "multipart/form-data": media }, true),
-      { profile: profileForBindingSpec(BINDING_SPEC_V3), openapiVersion: "3.0.3" },
+      { profile: profileForBindingSpec(BINDING_SPEC), openapiVersion: "3.0.3" },
     );
     const wire = buildRequestBody(
       DOC_30,
@@ -371,7 +371,7 @@ describe("buildMultipartBody", () => {
     };
     const plan = planRequestBody(
       opWithRequestBody({ "multipart/form-data": media }, true),
-      { profile: profileForBindingSpec(BINDING_SPEC_V3), openapiVersion: "3.0.4" },
+      { profile: profileForBindingSpec(BINDING_SPEC), openapiVersion: "3.0.4" },
     );
     expect(() => buildRequestBody(DOC_30, plan, routedWith({ bodyFields: { file: value } })))
       .toThrow(/requires a canonical Base64 string/);

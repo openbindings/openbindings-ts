@@ -1,13 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { OpenAPISynthesizer } from "./invoker.js";
-import { LEGACY_BINDING_SPEC } from "./constants.js";
+import { BINDING_SPEC } from "./constants.js";
 
-// A document with one clean operation and two operations that are
-// unrepresentable under revision 1's flattened boundary: a required
-// conditional (oneOf) request body, and a cross-location parameter name
-// collision. The tolerant coverage surface must return a sound partial OBI
-// that binds the clean operation and accounts for both exclusions; the
-// strict surface must keep refusing the whole document.
+// A document with one clean operation and two operations that are genuinely
+// unrepresentable by the complete first candidate: a required multipart
+// scalar body with no OpenAPI-defined carriage, and two header parameters
+// whose case-folded wire identities collide. The tolerant coverage surface
+// must return a sound partial OBI that binds the clean operation and accounts
+// for both exclusions; strict synthesis must refuse the whole document.
 const MIXED_DOC = {
   openapi: "3.0.3",
   info: { title: "mixed", version: "1.0.0" },
@@ -20,12 +20,12 @@ const MIXED_DOC = {
     },
     "/conditional": {
       post: {
-        operationId: "postConditional",
+        operationId: "postUncarriable",
         requestBody: {
           required: true,
           content: {
-            "application/json": {
-              schema: { oneOf: [{ type: "string" }, { type: "object", properties: { a: { type: "string" } } }] },
+            "multipart/form-data": {
+              schema: { type: "string" },
             },
           },
         },
@@ -36,8 +36,8 @@ const MIXED_DOC = {
       get: {
         operationId: "getCollide",
         parameters: [
-          { name: "id", in: "query", schema: { type: "string" } },
-          { name: "id", in: "header", schema: { type: "string" } },
+          { name: "X-ID", in: "header", schema: { type: "string" } },
+          { name: "x-id", in: "header", schema: { type: "string" } },
         ],
         responses: { "200": { description: "ok" } },
       },
@@ -46,7 +46,7 @@ const MIXED_DOC = {
 };
 
 function input() {
-  return { sources: [{ bindingSpec: LEGACY_BINDING_SPEC, content: MIXED_DOC }] };
+  return { sources: [{ bindingSpec: BINDING_SPEC, content: MIXED_DOC }] };
 }
 
 describe("per-operation tolerant coverage synthesis", () => {
@@ -90,7 +90,7 @@ describe("per-operation tolerant coverage synthesis", () => {
 
   it("source inspection filters unrepresentable targets instead of refusing the document", async () => {
     const synth = new OpenAPISynthesizer();
-    const inspection = await synth.inspectSource({ bindingSpec: LEGACY_BINDING_SPEC, content: MIXED_DOC });
+    const inspection = await synth.inspectSource({ bindingSpec: BINDING_SPEC, content: MIXED_DOC });
     expect(inspection.targets.map((t) => t.ref)).toEqual(["#/paths/~1good/get"]);
     expect(inspection.exhaustive).toBe(true);
   });
@@ -103,7 +103,7 @@ describe("per-operation tolerant coverage synthesis", () => {
       paths: { "/conditional": MIXED_DOC.paths["/conditional"] },
     };
     const result = await synth.synthesizeInterfaceWithCoverage({
-      sources: [{ bindingSpec: LEGACY_BINDING_SPEC, content: doc }],
+      sources: [{ bindingSpec: BINDING_SPEC, content: doc }],
     });
     expect(Object.keys(result.interface.operations)).toEqual([]);
     const targets = result.coverage.entries.filter((e) => e.scope === "target");

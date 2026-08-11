@@ -2,13 +2,13 @@ import type { OBInterface, Operation } from "@openbindings/sdk";
 import { MAX_TESTED_VERSION } from "@openbindings/sdk";
 import type { FullType, IntrospectionSchema, TypeRef } from "./introspection.js";
 import { buildTypeMap, rootTypeName } from "./introspection.js";
-import { BINDING_SPEC, DEFAULT_SOURCE_NAME, LEGACY_BINDING_SPEC } from "./constants.js";
+import { BINDING_SPEC, DEFAULT_SOURCE_NAME } from "./constants.js";
 
 /** Convert a GraphQL introspection schema to an OBInterface. */
 export function convertToInterface(
   schema: IntrospectionSchema,
   location?: string,
-  bindingSpec = LEGACY_BINDING_SPEC,
+  bindingSpec = BINDING_SPEC,
 ): OBInterface {
   const source: { bindingSpec: string; location?: string } = { bindingSpec };
   if (location) source.location = location;
@@ -18,12 +18,10 @@ export function convertToInterface(
   const usedKeys = new Map<string, string>();
   const tm = buildTypeMap(schema);
 
-  let rootTypes: Array<{ label: string; typeName: string | null }> = [
+  const rootTypes: Array<{ label: string; typeName: string | null }> = [
     { label: "query", typeName: rootTypeName(schema, "query") },
     { label: "mutation", typeName: rootTypeName(schema, "mutation") },
-    { label: "subscription", typeName: rootTypeName(schema, "subscription") },
   ];
-  if (bindingSpec === BINDING_SPEC) rootTypes = rootTypes.slice(0, 2);
 
   for (const rt of rootTypes) {
     if (!rt.typeName) continue;
@@ -44,9 +42,7 @@ export function convertToInterface(
       if (f.isDeprecated) op.deprecated = true;
 
       op.input = { type: "object" };
-      op.output = bindingSpec === BINDING_SPEC
-        ? graphQLValueSchema(f.type, tm)
-        : graphQLResponseSchema();
+      op.output = graphQLValueSchema(f.type, tm);
 
       operations[opKey] = op;
       bindings[`${opKey}.${DEFAULT_SOURCE_NAME}`] = { operation: opKey, source: DEFAULT_SOURCE_NAME, ref };
@@ -94,21 +90,6 @@ function graphQLNonNullSchema(ref: TypeRef, tm: Map<string, FullType>): Record<s
     default:
       return {};
   }
-}
-
-function graphQLResponseSchema(): Record<string, unknown> {
-  return {
-    type: "object",
-    properties: {
-      data: { type: ["object", "null"] },
-      errors: { type: "array", minItems: 1, items: { type: "object" } },
-      extensions: { type: "object" },
-    },
-    anyOf: [
-      { required: ["data"] },
-      { required: ["errors"] },
-    ],
-  };
 }
 
 // ---------------------------------------------------------------------------

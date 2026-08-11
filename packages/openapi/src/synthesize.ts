@@ -72,7 +72,7 @@ export interface UnrealizableTarget {
  * Loads an OpenAPI document and converts it into an OBInterface with
  * operations and bindings.
  *
- * When `onUnrealizable` is provided, an operation whose revision-1 flattened
+ * When `onUnrealizable` is provided, an operation whose candidate boundary
  * boundary cannot be represented is reported and skipped — no operation, no
  * binding — and synthesis continues (tolerant mode: the coverage and
  * inspection surfaces). When absent, the same condition throws (strict mode:
@@ -149,7 +149,7 @@ export async function convertToInterface(
       const params = effectiveParameters(pathItem, opObj);
       const unflattenable = unflattenableParam(params, profileForBindingSpec(bindingSpec));
       if (unflattenable) {
-        const reason = `parameter ${JSON.stringify(unflattenable)} has no unique revision-1 flattened identity`;
+        const reason = `parameter ${JSON.stringify(unflattenable)} has no unique flattened identity`;
         if (onUnrealizable) {
           onUnrealizable({
             ref,
@@ -165,7 +165,7 @@ export async function convertToInterface(
 
       const unsupportedParameter = unsupportedParameterContent(params, bindingSpec);
       if (unsupportedParameter) {
-        const reason = `parameter ${JSON.stringify(unsupportedParameter)} declares content with no faithful revision-2 carriage`;
+        const reason = `parameter ${JSON.stringify(unsupportedParameter)} declares content with no faithful candidate carriage`;
         if (onUnrealizable) {
           onUnrealizable({
             ref,
@@ -236,7 +236,7 @@ export async function convertToInterface(
                   ? "openapi.media_schema_mismatch"
                   : "openapi.unresolvable_request_body",
               rule: allCollided ? "OAPI-P-03" : "OAPI-P-04",
-              message: `${reason}; the required request body has no faithful revision-1 carriage`,
+              message: `${reason}; the required request body has no faithful candidate carriage`,
             });
             continue;
           }
@@ -878,7 +878,7 @@ function paramToSchema(
 
 /**
  * Returns the first content-form parameter whose single media declaration
- * cannot be serialized by revision 2. Synthesis must not publish an operation
+ * cannot be serialized by the candidate. Synthesis must not publish an operation
  * that the binding is statically guaranteed to refuse when that parameter is
  * used; tolerant synthesis excludes the complete target with durable evidence.
  */
@@ -954,7 +954,7 @@ function buildOutputSchema(
             || (!openapiVersion.startsWith("3.0") && !Object.hasOwn(media, "schema"))
           );
         // Revision 1's builtin non-JSON response lane is text, including
-        // one string per SSE event. Revision 4's artifact-authorized byte
+        // one string per SSE event. The artifact-authorized byte
         // lane uses a protocol-independent canonical Base64 boundary.
         schemas.push(rawBoundary
           ? { type: "string", contentEncoding: "base64" }

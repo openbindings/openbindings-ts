@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { CONTEXT_REQUIRED, ERR_SOURCE_CONFIG_ERROR, ERR_VALIDATION_FAILED, type InvocationError } from "@openbindings/sdk";
-import { BINDING_SPEC_V2, BINDING_SPEC_V3 } from "./constants.js";
+import { BINDING_SPEC } from "./constants.js";
 import { OpenAPIInvoker, OpenAPISynthesizer } from "./invoker.js";
 import { convertToInterface } from "./synthesize.js";
 
@@ -46,7 +46,7 @@ async function invoke(
 ): Promise<{ requests: RequestInit[]; error?: InvocationError }> {
   const captured = captureFetch();
   const call = new OpenAPIInvoker().invokeBinding({
-    source: { bindingSpec: BINDING_SPEC_V3, content: spec },
+    source: { bindingSpec: BINDING_SPEC, content: spec },
     ref: "#/paths/~1payload/put",
     context,
     fetch: captured.fetch,
@@ -67,7 +67,7 @@ async function invokeResponse(
   response: Response,
 ): Promise<{ outputs: unknown[]; error?: InvocationError }> {
   const call = new OpenAPIInvoker().invokeBinding({
-    source: { bindingSpec: BINDING_SPEC_V3, content: spec },
+    source: { bindingSpec: BINDING_SPEC, content: spec },
     ref: "#/paths/~1payload/put",
     fetch: async () => response,
   });
@@ -82,12 +82,12 @@ async function invokeResponse(
   return { outputs, error };
 }
 
-describe("openbindings.openapi@3 request carriage", () => {
+describe("openbindings.openapi@1 request carriage", () => {
   it("projects and invokes a generic OAS 3.0 binary image as exact raw octets", async () => {
     const spec = document("3.0.4", {
       "image/png": { schema: { type: "string", format: "binary", title: "Image bytes" } },
     });
-    const iface = await convertToInterface(undefined, spec, undefined, undefined, undefined, undefined, BINDING_SPEC_V3);
+    const iface = await convertToInterface(undefined, spec, undefined, undefined, undefined, undefined, BINDING_SPEC);
     const input = iface.operations["putPayload"]?.input as Record<string, unknown>;
     expect(input).toEqual({
       type: "object",
@@ -107,7 +107,7 @@ describe("openbindings.openapi@3 request carriage", () => {
 
   it("uses Base64 only for an exact schema-omitted OAS 3.1 non-JSON declaration", async () => {
     const spec = document("3.1.2", { "image/png": {} });
-    const iface = await convertToInterface(undefined, spec, undefined, undefined, undefined, undefined, BINDING_SPEC_V3);
+    const iface = await convertToInterface(undefined, spec, undefined, undefined, undefined, undefined, BINDING_SPEC);
     const input = iface.operations["putPayload"]?.input as Record<string, unknown>;
     expect(input).toEqual({
       type: "object",
@@ -125,7 +125,7 @@ describe("openbindings.openapi@3 request carriage", () => {
     ["3.1.2", {}],
   ])("uses configured image/* raw carriage under OAS %s", async (openapi, media) => {
     const spec = document(openapi, { "image/*": media });
-    const iface = await convertToInterface(undefined, spec, undefined, undefined, undefined, undefined, BINDING_SPEC_V3);
+    const iface = await convertToInterface(undefined, spec, undefined, undefined, undefined, undefined, BINDING_SPEC);
     const input = iface.operations["putPayload"]?.input as Record<string, unknown>;
     expect((input.properties as Record<string, unknown>)["body"]).toEqual({
       ...(openapi.startsWith("3.0") ? { type: "string", format: "binary" } : {}),
@@ -152,7 +152,7 @@ describe("openbindings.openapi@3 request carriage", () => {
   it("exposes required range-only requestMedia through explicit preflight", async () => {
     const spec = document("3.1.2", { "image/*": {} });
     const details = await new OpenAPIInvoker().prepareBinding({
-      source: { bindingSpec: BINDING_SPEC_V3, content: spec },
+      source: { bindingSpec: BINDING_SPEC, content: spec },
       ref: "#/paths/~1payload/put",
     });
     expect(details).toMatchObject({
@@ -173,7 +173,7 @@ describe("openbindings.openapi@3 request carriage", () => {
     ["application/*", { configuration: { requestMedia: "application/json" } }],
   ])("keeps schema-omitted %s on a stable synthetic whole-body route", async (declaration, context) => {
     const spec = document("3.1.2", { [declaration]: {} });
-    const iface = await convertToInterface(undefined, spec, undefined, undefined, undefined, undefined, BINDING_SPEC_V3);
+    const iface = await convertToInterface(undefined, spec, undefined, undefined, undefined, undefined, BINDING_SPEC);
     expect(iface.operations["putPayload"]?.input).toEqual({
       type: "object",
       properties: { body: {} },
@@ -195,7 +195,7 @@ describe("openbindings.openapi@3 request carriage", () => {
       title: "Encoded image",
     };
     const spec = document("3.1.2", { "image/png": { schema } });
-    const iface = await convertToInterface(undefined, spec, undefined, undefined, undefined, undefined, BINDING_SPEC_V3);
+    const iface = await convertToInterface(undefined, spec, undefined, undefined, undefined, undefined, BINDING_SPEC);
     const input = iface.operations["putPayload"]?.input as Record<string, unknown>;
     expect((input.properties as Record<string, unknown>)["body"]).toEqual(schema);
 
@@ -235,7 +235,7 @@ describe("openbindings.openapi@3 request carriage", () => {
       undefined,
       undefined,
       undefined,
-      BINDING_SPEC_V3,
+      BINDING_SPEC,
     )).rejects.toThrow(/conflicting contentEncoding.*base64.*base64url/);
   });
 
@@ -254,7 +254,7 @@ describe("openbindings.openapi@3 request carriage", () => {
       }), { status: 200, headers: { "content-type": "application/json" } });
     };
     const iface = await new OpenAPISynthesizer({ fetch: fetchMock }).synthesizeInterface({
-      sources: [{ bindingSpec: BINDING_SPEC_V3, content: spec }],
+      sources: [{ bindingSpec: BINDING_SPEC, content: spec }],
     });
     const input = iface.operations["putPayload"]?.input as Record<string, unknown>;
     expect((input.properties as Record<string, unknown>)["body"]).toMatchObject({
@@ -284,7 +284,7 @@ describe("openbindings.openapi@3 request carriage", () => {
         },
       },
     });
-    const iface = await convertToInterface(undefined, spec, undefined, undefined, undefined, undefined, BINDING_SPEC_V3);
+    const iface = await convertToInterface(undefined, spec, undefined, undefined, undefined, undefined, BINDING_SPEC);
     const input = iface.operations["putPayload"]?.input as Record<string, unknown>;
     const properties = input.properties as Record<string, Record<string, unknown>>;
     expect(properties["file"]).toMatchObject({ contentEncoding: "base64" });
@@ -304,7 +304,7 @@ describe("openbindings.openapi@3 request carriage", () => {
       "application/json": { schema: shared },
       "multipart/form-data": { schema: shared },
     });
-    const iface = await convertToInterface(undefined, spec, undefined, undefined, undefined, undefined, BINDING_SPEC_V3);
+    const iface = await convertToInterface(undefined, spec, undefined, undefined, undefined, undefined, BINDING_SPEC);
     const input = iface.operations["putPayload"]?.input as Record<string, unknown>;
     const variants = input.anyOf as Array<Record<string, unknown>>;
     const files = variants.map((variant) =>
@@ -315,7 +315,7 @@ describe("openbindings.openapi@3 request carriage", () => {
 
   it.each([true, false])("preserves JSON boolean schema %j as a synthetic whole-body contract", async (schema) => {
     const spec = document("3.1.2", { "application/json": { schema } });
-    const iface = await convertToInterface(undefined, spec, undefined, undefined, undefined, undefined, BINDING_SPEC_V3);
+    const iface = await convertToInterface(undefined, spec, undefined, undefined, undefined, undefined, BINDING_SPEC);
     const input = iface.operations["putPayload"]?.input as Record<string, unknown>;
     expect((input.properties as Record<string, unknown>)["body"]).toBe(schema);
   });
@@ -339,7 +339,7 @@ describe("openbindings.openapi@3 request carriage", () => {
         },
       },
     };
-    const iface = await convertToInterface(undefined, spec, undefined, undefined, undefined, undefined, BINDING_SPEC_V3);
+    const iface = await convertToInterface(undefined, spec, undefined, undefined, undefined, undefined, BINDING_SPEC);
     const input = iface.operations["getBoolean"]?.input as Record<string, unknown>;
     expect((input.properties as Record<string, unknown>)["q"]).toBe(false);
     expect(iface.operations["getBoolean"]?.output).toBe(false);
@@ -357,14 +357,14 @@ describe("openbindings.openapi@3 request carriage", () => {
     });
     expect(nonJSON.requests).toHaveLength(0);
     expect(nonJSON.error?.code).toBe(ERR_VALIDATION_FAILED);
-    const iface = await convertToInterface(undefined, ranged, undefined, undefined, undefined, undefined, BINDING_SPEC_V3);
+    const iface = await convertToInterface(undefined, ranged, undefined, undefined, undefined, undefined, BINDING_SPEC);
     const input = iface.operations["putPayload"]?.input as Record<string, unknown>;
     expect((input.properties as Record<string, unknown>)["body"]).toBe(true);
   });
 
   it("refuses an empty requestMedia consistently instead of treating it as missing context", async () => {
     const spec = document("3.1.2", { "application/*": { schema: { type: "object" } } });
-    const source = { bindingSpec: BINDING_SPEC_V3, content: spec };
+    const source = { bindingSpec: BINDING_SPEC, content: spec };
     const context = { configuration: { requestMedia: "" } };
     expect(await new OpenAPIInvoker().prepareBinding({
       source,
@@ -405,7 +405,7 @@ describe("openbindings.openapi@3 request carriage", () => {
     const spec = document("3.1.2", { "application/*": { schema } });
     const synthesizer = new OpenAPISynthesizer();
     const result = await synthesizer.synthesizeInterfaceWithCoverage({
-      sources: [{ bindingSpec: BINDING_SPEC_V3, content: spec }],
+      sources: [{ bindingSpec: BINDING_SPEC, content: spec }],
     });
     expect(result.interface.operations["putPayload"]?.input).toEqual({
       type: "object",
@@ -433,7 +433,7 @@ describe("openbindings.openapi@3 request carriage", () => {
       "image/*": { schema: { type: "object", properties: { name: { type: "string" } } } },
     }, false);
     const result = await new OpenAPISynthesizer().synthesizeInterfaceWithCoverage({
-      sources: [{ bindingSpec: BINDING_SPEC_V3, content: spec }],
+      sources: [{ bindingSpec: BINDING_SPEC, content: spec }],
     });
     const target = result.coverage.entries.find((entry) => entry.scope === "target");
     const range = result.coverage.entries.find((entry) => entry.scope === "alternative");
@@ -745,7 +745,7 @@ describe("openbindings.openapi@3 request carriage", () => {
   ])("coverage-excludes multipart %s instead of guessing", async (_case, media) => {
     const spec = document("3.1.2", { "multipart/form-data": media }, false);
     const result = await new OpenAPISynthesizer().synthesizeInterfaceWithCoverage({
-      sources: [{ bindingSpec: BINDING_SPEC_V3, content: spec }],
+      sources: [{ bindingSpec: BINDING_SPEC, content: spec }],
     });
     expect(result.coverage.entries).toContainEqual(expect.objectContaining({
       scope: "alternative",
@@ -759,7 +759,7 @@ describe("openbindings.openapi@3 request carriage", () => {
       "application/x-www-form-urlencoded": {},
     }, false);
     const result = await new OpenAPISynthesizer().synthesizeInterfaceWithCoverage({
-      sources: [{ bindingSpec: BINDING_SPEC_V3, content: spec }],
+      sources: [{ bindingSpec: BINDING_SPEC, content: spec }],
     });
     expect(result.coverage.entries).toContainEqual(expect.objectContaining({
       scope: "alternative",
@@ -780,7 +780,7 @@ describe("openbindings.openapi@3 request carriage", () => {
         },
       }, false);
       const result = await new OpenAPISynthesizer().synthesizeInterfaceWithCoverage({
-        sources: [{ bindingSpec: BINDING_SPEC_V3, content: spec }],
+        sources: [{ bindingSpec: BINDING_SPEC, content: spec }],
       });
       expect(result.coverage.entries).toContainEqual(expect.objectContaining({
         scope: "alternative",
@@ -798,7 +798,7 @@ describe("openbindings.openapi@3 request carriage", () => {
   ) => {
     const spec = document("3.1.2", { [declaration]: {} });
     const synthesized = await new OpenAPISynthesizer().synthesizeInterfaceWithCoverage({
-      sources: [{ bindingSpec: BINDING_SPEC_V3, content: spec }],
+      sources: [{ bindingSpec: BINDING_SPEC, content: spec }],
     });
     expect(synthesized.coverage.entries).toContainEqual(expect.objectContaining({
       scope: "alternative",
@@ -1004,22 +1004,7 @@ describe("openbindings.openapi@3 request carriage", () => {
     expect(result.outputs).toEqual([expected]);
   });
 
-  it("keeps the former binary refusal immutable under revision 2", async () => {
-    const spec = document("3.0.4", {
-      "image/png": { schema: { type: "string", format: "binary" } },
-    });
-    await expect(convertToInterface(
-      undefined,
-      spec,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      BINDING_SPEC_V2,
-    )).rejects.toThrow(/outside the families/);
-  });
-
-  it("preserves OAS 3.1 boolean text schemas as whole bodies under revision 2", async () => {
+  it("preserves OAS 3.1 boolean text schemas as whole bodies", async () => {
     const spec = document("3.1.2", { "text/plain": { schema: true } });
     const iface = await convertToInterface(
       undefined,
@@ -1028,7 +1013,7 @@ describe("openbindings.openapi@3 request carriage", () => {
       undefined,
       undefined,
       undefined,
-      BINDING_SPEC_V2,
+      BINDING_SPEC,
     );
     expect(iface.operations["putPayload"]?.input).toEqual({
       type: "object",
@@ -1039,7 +1024,7 @@ describe("openbindings.openapi@3 request carriage", () => {
 
     const captured = captureFetch();
     const call = new OpenAPIInvoker().invokeBinding({
-      source: { bindingSpec: BINDING_SPEC_V2, content: spec },
+      source: { bindingSpec: BINDING_SPEC, content: spec },
       ref: "#/paths/~1payload/put",
       fetch: captured.fetch,
     });

@@ -2,7 +2,7 @@
 // repository's binding-specs/mcp fixtures (MCP-D-01..03) through this
 // package's own offline lanes — pinned-listing validation, endpoint
 // grammar, and ref grammar/resolution — under the subcorpus README's
-// verdict semantics: valid:false means a conformant openbindings.mcp@2
+// verdict semantics: valid:false means a conformant openbindings.mcp@1
 // processor refuses the document's family-scoped material at or before
 // bind time, decidable offline with no network and no live source.
 // Positive location-only fixtures are judged by grammar alone (never
@@ -104,7 +104,7 @@ function judgeDocument(doc: CorpusDocument): string | undefined {
         return e instanceof Error ? e.message : String(e);
       }
       if (entityType !== "tools") {
-        return `openbindings.mcp@2 ref must use tools/<name>, got ${JSON.stringify(b.ref ?? "")}`;
+        return `openbindings.mcp@1 ref must use tools/<name>, got ${JSON.stringify(b.ref ?? "")}`;
       }
       if (pin) {
         try {

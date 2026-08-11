@@ -34,12 +34,12 @@ import { OpenAPIInvoker } from "@openbindings/openapi";
 const invoker = new OperationInvoker([new OpenAPIInvoker()]);
 ```
 
-The invoker declares current `openbindings.openapi@7` and immutable
-`openbindings.openapi@6`/`openbindings.openapi@5`/`openbindings.openapi@4`/`openbindings.openapi@3`/`openbindings.openapi@2`/`openbindings.openapi@1`
-compatibility. All seven
-handle exactly OpenAPI 3.0.0–3.0.4 and 3.1.0–3.1.2 documents, discriminated by
-the artifact's own `openapi` field. The current
-[`openbindings.openapi@7`](https://github.com/openbindings/spec/blob/main/binding-specs/openapi/openbindings.openapi.md)
+The invoker declares the unreleased first `openbindings.openapi@1` candidate.
+No OpenAPI binding specification has been published and there are no
+compatibility revisions. It handles exactly OpenAPI 3.0.0–3.0.4 and
+3.1.0–3.1.2 documents, discriminated by the artifact's own `openapi` field.
+The candidate
+[`openbindings.openapi@1`](https://github.com/openbindings/spec/blob/main/binding-specs/openapi/openbindings.openapi.md)
 document is normative for routed input mapping, OAS serialization,
 request/response media selection and byte carriage, server resolution,
 interaction shape, and
@@ -56,7 +56,7 @@ const invoker = new OpenAPIInvoker();
 
 const call = invoker.invokeBinding({
   source: {
-    bindingSpec: "openbindings.openapi@7",
+    bindingSpec: "openbindings.openapi@1",
     location: "https://api.example.com/openapi.json",
   },
   ref: "#/paths/~1users~1{id}/get",
@@ -117,7 +117,7 @@ const synth = new OpenAPISynthesizer();
 const iface = await synth.synthesizeInterface({
   sources: [
     {
-      bindingSpec: "openbindings.openapi@7",
+      bindingSpec: "openbindings.openapi@1",
       location: "https://api.example.com/openapi.json",
     },
   ],
@@ -236,7 +236,7 @@ scheme-specific credential or transport resolution it requires.
 
 ### Interface synthesis
 
-Deterministic generation of OBI documents is a synthesis concern outside the binding specification (`openbindings.openapi@7` §10); these are this package's conventions, chosen so both reference SDKs emit an identical OBI for the same artifact:
+Deterministic generation of OBI documents is a synthesis concern outside the binding specification (`openbindings.openapi@1` §10); these are this package's conventions, chosen so both reference SDKs emit an identical OBI for the same artifact:
 
 - **Operation keys** come from `operationId` when present, sanitized to the OBI key grammar (non-key characters become `_`, leading/trailing `_` trimmed, a leading non-letter gets an `_` prefix). An `operationId` whose sanitized key is already taken falls through to path+method derivation: template segments (`{id}`) dropped, remaining segments joined with `.`, the lowercased method appended (`/users/{id}` + `GET` → `users.get`), then deduplicated deterministically with `_2`, `_3`, … suffixes.
 - **Iteration order is fixed**: paths alphabetically, methods in the order get, put, post, delete, options, head, patch, trace.
