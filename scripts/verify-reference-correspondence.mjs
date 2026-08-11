@@ -10,7 +10,7 @@ if (matrix.format !== "openbindings.reference-sdk-correspondence@1") throw new E
 
 const expected = new Map([
   ["openbindings.openapi@7", ["openapi", "OpenAPIInvoker", "OpenAPISynthesizer"]],
-  ["openbindings.asyncapi@1", ["asyncapi", "AsyncAPIInvoker", "AsyncAPISynthesizer"]],
+  ["openbindings.asyncapi@2", ["asyncapi", "AsyncAPIInvoker", "AsyncAPISynthesizer"]],
   ["openbindings.mcp@2", ["mcp", "MCPInvoker", "MCPSynthesizer"]],
   ["openbindings.grpc@1", ["grpc", "GrpcInvoker", "GrpcSynthesizer"]],
   ["openbindings.connect@1", ["connect", "ConnectInvoker", "ConnectSynthesizer"]],
