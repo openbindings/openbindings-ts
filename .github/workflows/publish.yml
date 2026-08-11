@@ -55,6 +55,12 @@ jobs:
           cache: pnpm
           cache-dependency-path: openbindings-ts/pnpm-lock.yaml
           registry-url: https://registry.npmjs.org
+      - name: Build standalone artifact clients
+        run: |
+          pnpm --dir ../openapi-client install --frozen-lockfile
+          pnpm --dir ../openapi-client build
+          pnpm --dir ../asyncapi-client install --frozen-lockfile
+          pnpm --dir ../asyncapi-client build
       - run: pnpm install --frozen-lockfile
       - name: Verify annotated tag and package versions
         run: |
