@@ -271,7 +271,7 @@ function unionPayloadSchemas(doc: AsyncAPIDocument, messages: AsyncAPIMessage[])
   if (messages.some((message) => messagePayloadNotConvertible(doc, message))) return {};
   const unique = new Map<string, Record<string, unknown>>();
   for (const message of messages) {
-    const schema = translateSchemaDialect(stripParserExtensions(message.payload!));
+    const schema = translateSchemaDialect(stripParserExtensions(effectivePayload(message).schema!));
     // JSON object member order is not semantic. Use canonical JSON both for
     // de-duplication and anyOf ordering so source spelling cannot make the
     // TypeScript and Go projections disagree.
@@ -281,12 +281,38 @@ function unionPayloadSchemas(doc: AsyncAPIDocument, messages: AsyncAPIMessage[])
   return schemas.length === 1 ? schemas[0] : { anyOf: schemas };
 }
 
+/**
+ * Resolves the schema a message actually declares, across the editions' two
+ * spellings: AsyncAPI 2.x message-level schemaFormat governing payload
+ * directly, versus AsyncAPI 3.x's Multi Format Schema Object
+ * (payload: {schemaFormat, schema}). Discrimination follows the 3.x spec's
+ * own rule — a payload object carrying a string schemaFormat member IS the
+ * wrapper (Go twin: effectivePayload in authoring.go).
+ */
+export function effectivePayload(message: AsyncAPIMessage): {
+  schema: Record<string, unknown> | undefined;
+  schemaFormat: string | undefined;
+} {
+  const payload = message.payload as Record<string, unknown> | undefined;
+  if (payload !== undefined && typeof payload["schemaFormat"] === "string") {
+    const wrapped = payload["schema"];
+    return {
+      schema:
+        wrapped !== null && typeof wrapped === "object" && !Array.isArray(wrapped)
+          ? (wrapped as Record<string, unknown>)
+          : undefined,
+      schemaFormat: payload["schemaFormat"],
+    };
+  }
+  return { schema: payload, schemaFormat: message.schemaFormat };
+}
+
 // The EMISSION predicate: whether the direction must be the unconstrained
 // schema. Whether anything was LOST is messagePayloadLossReason's separate
 // question — an absent payload declares no contract, so the unconstrained
 // schema loses nothing (Go twin: authoring.go).
 export function messagePayloadNotConvertible(doc: AsyncAPIDocument, message: AsyncAPIMessage): boolean {
-  if (message.payload === undefined) return true;
+  if (effectivePayload(message).schema === undefined) return true;
   return messagePayloadLossReason(doc, message) !== undefined;
 }
 
@@ -298,8 +324,12 @@ export function messagePayloadNotConvertible(doc: AsyncAPIDocument, message: Asy
  * bytes the JSON value boundary cannot carry.
  */
 export function messagePayloadLossReason(doc: AsyncAPIDocument, message: AsyncAPIMessage): string | undefined {
-  if (message.payload === undefined) return undefined;
-  if (hasForeignSchemaFormat(message)) return "asyncapi.schema_format_not_convertible";
+  const { schema, schemaFormat } = effectivePayload(message);
+  if (schema === undefined && message.payload === undefined) return undefined;
+  if (hasForeignSchemaFormat(schemaFormat)) return "asyncapi.schema_format_not_convertible";
+  // A wrapper whose schema member is absent declares no contract in a
+  // recognized language.
+  if (schema === undefined) return undefined;
   try {
     supportedMessageContentType(messageEffectiveContentType(doc, message));
     return undefined;
@@ -308,8 +338,8 @@ export function messagePayloadLossReason(doc: AsyncAPIDocument, message: AsyncAP
   }
 }
 
-function hasForeignSchemaFormat(message: AsyncAPIMessage): boolean {
-  const format = message.schemaFormat?.toLowerCase();
+function hasForeignSchemaFormat(declared: string | undefined): boolean {
+  const format = declared?.toLowerCase();
   // application/schema+json (any version parameter) is the official JSON
   // Schema media type; the hyphen-only heuristic misclassified it (corpus:
   // qconn-io declares application/schema+json;version=draft-07).
