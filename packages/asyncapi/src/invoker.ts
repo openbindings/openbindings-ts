@@ -284,8 +284,7 @@ export class AsyncAPISynthesizer implements InterfaceSynthesizer, CoverageSynthe
   /** Returns the binding specifications this synthesizer supports, by exact identifier. */
   bindingSpecs(): BindingSpecInfo[] {
     return [
-      { bindingSpec: BINDING_SPEC, description: "AsyncAPI 3.0 event-driven APIs (reply-preserving revision)" },
-      { bindingSpec: BINDING_SPEC, description: "AsyncAPI 2.0–2.6 and 3.0–3.1 event-driven APIs (first unreleased candidate)" },
+      { bindingSpec: BINDING_SPEC, description: "AsyncAPI 2.0–2.6 and 3.0–3.1 event-driven APIs" },
     ];
   }
 

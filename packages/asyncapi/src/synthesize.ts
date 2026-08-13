@@ -120,7 +120,7 @@ export function bindableOperationEntries(
 }
 
 export interface AuthoringExclusion {
-  status: "excluded" | "invalid";
+  status: "excluded" | "invalid" | "implementation-unsupported";
   code: string;
   rule: string;
   message: string;
@@ -191,6 +191,22 @@ export function operationExclusion(
   }
   const inputMessages = op.action === "receive" ? operationMessages : replyMessages;
   const outputMessages = op.action === "send" ? operationMessages : replyMessages;
+  // Carriage gate: when every caller-input message rides a content type with
+  // no JSON application-value carriage, the runtime refuses before dispatch
+  // (no input codec seam exists). Presenting the operation as invocable would
+  // be a lie, so the target is implementation-unsupported — visible MC2 debt
+  // discharged by a codec extension path (Go twin: operationExclusion).
+  if (
+    inputMessages.length > 0
+    && inputMessages.every(
+      (message) => messagePayloadLossReason(doc, message) === "asyncapi.payload_carriage_unsupported",
+    )
+  ) {
+    return {
+      status: "implementation-unsupported", code: "asyncapi.payload_carriage_unsupported", rule: "ASYNC-P-05",
+      message: "every caller-input message declares media without JSON application-value carriage; invocation would refuse before dispatch until a codec extension path exists",
+    };
+  }
   if (inputMessages.length > 0 && inputMessages.every((message) => message.headers !== undefined)) {
     return {
       status: "excluded", code: "asyncapi.message_headers", rule: "ASYNC-P-03",
@@ -271,7 +287,9 @@ function unionPayloadSchemas(doc: AsyncAPIDocument, messages: AsyncAPIMessage[])
   if (messages.some((message) => messagePayloadNotConvertible(doc, message))) return {};
   const unique = new Map<string, Record<string, unknown>>();
   for (const message of messages) {
-    const schema = translateSchemaDialect(stripParserExtensions(effectivePayload(message).schema!));
+    const { schema: effectiveSchema, schemaFormat } = effectivePayload(message);
+    const stripped = stripParserExtensions(effectiveSchema!);
+    const schema = classifySchemaFormat(schemaFormat) === "translate" ? translateSchemaDialect(stripped) : stripped;
     // JSON object member order is not semantic. Use canonical JSON both for
     // de-duplication and anyOf ordering so source spelling cannot make the
     // TypeScript and Go projections disagree.
@@ -338,17 +356,49 @@ export function messagePayloadLossReason(doc: AsyncAPIDocument, message: AsyncAP
   }
 }
 
+/**
+ * Exact schema-format classification, replacing the substring heuristic
+ * (which accepted bogus formats and applied Draft-07 rules to other
+ * dialects). Pinned set and semantics mirror the Go twin
+ * (classifySchemaFormat in authoring.go): AsyncAPI default formats and
+ * schema+json;version=draft-07 translate; schema+json;version=draft/2020-12
+ * passes through untouched; everything else — Avro, Protobuf, OpenAPI,
+ * unknown or malformed versions — is foreign.
+ */
+export type SchemaFormatDisposition = "translate" | "passthrough" | "foreign";
+
+export function classifySchemaFormat(declared: string | undefined): SchemaFormatDisposition {
+  const trimmed = declared?.trim() ?? "";
+  if (trimmed === "") return "translate";
+  const [rawType, ...params] = trimmed.split(";");
+  const mediaType = rawType!.trim().toLowerCase();
+  if (!/^[a-z0-9][a-z0-9!#$&^_.+-]*\/[a-z0-9][a-z0-9!#$&^_.+-]*$/.test(mediaType)) return "foreign";
+  let version = "";
+  for (const param of params) {
+    const eq = param.indexOf("=");
+    if (eq < 0) return "foreign";
+    const name = param.slice(0, eq).trim().toLowerCase();
+    let value = param.slice(eq + 1).trim();
+    if (value.startsWith('"') && value.endsWith('"') && value.length >= 2) value = value.slice(1, -1);
+    if (name === "version") version = value.toLowerCase();
+  }
+  switch (mediaType) {
+    case "application/vnd.aai.asyncapi":
+    case "application/vnd.aai.asyncapi+json":
+    case "application/vnd.aai.asyncapi+yaml":
+      return "translate";
+    case "application/schema+json":
+    case "application/schema+yaml":
+      if (version === "draft-07") return "translate";
+      if (version === "draft/2020-12") return "passthrough";
+      return "foreign";
+    default:
+      return "foreign";
+  }
+}
+
 function hasForeignSchemaFormat(declared: string | undefined): boolean {
-  const format = declared?.toLowerCase();
-  // application/schema+json (any version parameter) is the official JSON
-  // Schema media type; the hyphen-only heuristic misclassified it (corpus:
-  // qconn-io declares application/schema+json;version=draft-07).
-  return (
-    format !== undefined
-    && !format.includes("asyncapi")
-    && !format.includes("json-schema")
-    && !format.includes("schema+json")
-  );
+  return classifySchemaFormat(declared) === "foreign";
 }
 
 /**

@@ -235,7 +235,22 @@ function messageCoverage(
     // operation invocable through an unconstrained direction, but the
     // emitted OBI has lost a contract bespoke artifact code still knows.
     // That is lossy, never fully represented (Go twin: messageCoverage).
+    // Carriage loss splits off: the runtime refuses that alternative before
+    // dispatch today, so it is implementation-unsupported — never presented
+    // as usable — until the codec extension path exists.
     const lossReason = messagePayloadLossReason(doc, candidate.message!);
+    if (lossReason === "asyncapi.payload_carriage_unsupported") {
+      return {
+        sourceIndex: 0,
+        sourceRef: candidate.sourceRef,
+        scope: "alternative",
+        status: "implementation-unsupported",
+        ...identity,
+        reasonCode: lossReason,
+        rule: "ASYNC-P-05",
+        message: "the effective content type has no JSON application-value carriage; invocation refuses this alternative before dispatch",
+      };
+    }
     if (lossReason !== undefined) {
       return {
         sourceIndex: 0,
@@ -245,10 +260,7 @@ function messageCoverage(
         ...identity,
         reasonCode: lossReason,
         rule: "ASYNC-P-05",
-        message:
-          lossReason === "asyncapi.payload_carriage_unsupported"
-            ? "the effective content type has no JSON application-value carriage; the direction is represented by the unconstrained schema"
-            : "the declared schema format has no faithful JSON Schema conversion; the direction is represented by the unconstrained schema",
+        message: "the declared schema format has no faithful JSON Schema conversion; the direction is represented by the unconstrained schema",
       };
     }
     return {
