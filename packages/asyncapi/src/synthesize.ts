@@ -12,7 +12,8 @@ import {
   DEFAULT_SOURCE_NAME,
 } from "./constants.js";
 import { codePointCompare, operationRef, sanitizeKey, uniqueKey } from "./util.js";
-import { governingMessages } from "./content.js";
+import { governingMessages, messageEffectiveContentType, supportedMessageContentType } from "./content.js";
+import { translateSchemaDialect } from "./translate.js";
 import { effectiveServers } from "./target.js";
 
 // eslint-disable-next-line @typescript-eslint/require-await -- the synthesizer contract is Promise-returning; this format synthesizes synchronously
@@ -246,25 +247,31 @@ export function requiredPropertiesMayBeStrings(schema: Record<string, unknown> |
   return true;
 }
 
-function operationPayloadSchema(_doc: AsyncAPIDocument, op: AsyncAPIOperation, input: boolean): Record<string, unknown> | undefined {
+function operationPayloadSchema(doc: AsyncAPIDocument, op: AsyncAPIOperation, input: boolean): Record<string, unknown> | undefined {
   const channel = op.channel!;
   const governed = governingMessages(op, channel);
   const messages = input ? governed.filter((message) => message.headers === undefined) : governed;
-  return unionPayloadSchemas(messages);
+  return unionPayloadSchemas(doc, messages);
 }
 
-function replyPayloadSchema(_doc: AsyncAPIDocument, reply: AsyncAPIOperationReply): Record<string, unknown> | undefined {
+function replyPayloadSchema(doc: AsyncAPIDocument, reply: AsyncAPIOperationReply): Record<string, unknown> | undefined {
   const messages = (reply.messages?.length ? reply.messages : Object.values(reply.channel?.messages ?? {}))
     .filter((message) => message.headers === undefined);
-  return unionPayloadSchemas(messages);
+  return unionPayloadSchemas(doc, messages);
 }
 
-function unionPayloadSchemas(messages: AsyncAPIMessage[]): Record<string, unknown> | undefined {
+// Each governed payload enters an OBI position only under dialect
+// translation (translate.ts); a message whose declared schemaFormat or
+// effective content type identifies a non-JSON-Schema representation cannot
+// contribute a faithful schema, so the direction is represented by the
+// unconstrained schema per the binding specification's §9.2 floor.
+// Declaration-driven only — never payload sniffing.
+function unionPayloadSchemas(doc: AsyncAPIDocument, messages: AsyncAPIMessage[]): Record<string, unknown> | undefined {
   if (messages.length === 0) return undefined;
-  if (messages.some((message) => message.payload === undefined || hasForeignSchemaFormat(message))) return {};
+  if (messages.some((message) => messagePayloadNotConvertible(doc, message))) return {};
   const unique = new Map<string, Record<string, unknown>>();
   for (const message of messages) {
-    const schema = stripParserExtensions(message.payload!);
+    const schema = translateSchemaDialect(stripParserExtensions(message.payload!));
     // JSON object member order is not semantic. Use canonical JSON both for
     // de-duplication and anyOf ordering so source spelling cannot make the
     // TypeScript and Go projections disagree.
@@ -272,6 +279,16 @@ function unionPayloadSchemas(messages: AsyncAPIMessage[]): Record<string, unknow
   }
   const schemas = [...unique.entries()].sort(([a], [b]) => codePointCompare(a, b)).map(([, schema]) => schema);
   return schemas.length === 1 ? schemas[0] : { anyOf: schemas };
+}
+
+function messagePayloadNotConvertible(doc: AsyncAPIDocument, message: AsyncAPIMessage): boolean {
+  if (message.payload === undefined || hasForeignSchemaFormat(message)) return true;
+  try {
+    supportedMessageContentType(messageEffectiveContentType(doc, message));
+    return false;
+  } catch {
+    return true;
+  }
 }
 
 function hasForeignSchemaFormat(message: AsyncAPIMessage): boolean {
