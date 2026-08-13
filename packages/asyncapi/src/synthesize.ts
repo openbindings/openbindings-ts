@@ -1,5 +1,6 @@
 import type { OBInterface, Operation, Source } from "@openbindings/sdk";
-import { MAX_TESTED_VERSION, canonicalize } from "@openbindings/sdk";
+import { MAX_TESTED_VERSION, canonicalize, validateInterface } from "@openbindings/sdk";
+import { decircularizeSchema, decycleOperationSchema } from "./decycle.js";
 import type {
   AsyncAPIChannel,
   AsyncAPIDocument,
@@ -35,7 +36,10 @@ export async function convertToInterface(
   const iface: OBInterface = {
     openbindings: MAX_TESTED_VERSION,
     name: info.title || undefined,
-    version: info.version,
+    // OBI version is optional but non-empty when present (minLength 1); an
+    // artifact declaring an empty version projects to no version field, the
+    // same emission Go's omitempty produces.
+    version: info.version || undefined,
     description: info.description || undefined,
     operations: {},
     bindings: {},
@@ -62,36 +66,13 @@ export async function convertToInterface(
 
     // Schema direction follows the complementary perspective (ASYNC-P-02):
     // the artifact describes the application, the invocation is the
-    // counterparty.
-    const action = asyncOp.action;
-    switch (action) {
-      case "send":
-        {
-          // The application sends; invoking subscribes — the operation's
-          // messages are the invoker's OUTPUT.
-          const payload = operationPayloadSchema(doc, asyncOp, false);
-          if (payload) obiOp.output = payload;
-          if (asyncOp.reply) {
-            const replyPayload = replyPayloadSchema(doc, asyncOp.reply);
-            if (replyPayload) obiOp.input = replyPayload;
-          }
-        }
-        break;
-      case "receive":
-        {
-          // The application receives; invoking publishes — the operation's
-          // messages are the invoker's INPUT, and a declared reply is what
-          // the publish's response decodes to.
-          const inputPayload = operationPayloadSchema(doc, asyncOp, true);
-          if (inputPayload) obiOp.input = inputPayload;
-          const reply = asyncOp.reply;
-          if (reply) {
-            const outputPayload = replyPayloadSchema(doc, reply);
-            if (outputPayload) obiOp.output = outputPayload;
-          }
-        }
-        break;
-    }
+    // counterparty. Cyclic-reference hoisting runs on each direction so
+    // recursion the artifact declared survives the projection ($defs,
+    // decycle.ts).
+    const { input, output } = operationBoundarySchemas(doc, asyncOp);
+    const opPointer = `#/operations/${escapePointerSegment(opKey)}`;
+    if (input) obiOp.input = decycleOperationSchema(input, doc, `${opPointer}/input`);
+    if (output) obiOp.output = decycleOperationSchema(output, doc, `${opPointer}/output`);
 
     iface.operations[opKey] = obiOp;
 
@@ -219,7 +200,7 @@ export function operationExclusion(
       message: "a possible caller-output message declares application headers the first candidate cannot carry at the ordinary value boundary",
     };
   }
-  return undefined;
+  return operationSchemaDefect(doc, op);
 }
 
 export function messageBindable(
@@ -263,6 +244,74 @@ export function requiredPropertiesMayBeStrings(schema: Record<string, unknown> |
   return true;
 }
 
+/**
+ * Derives both directions' operation-boundary schemas under the
+ * complementary caller perspective (ASYNC-P-02): a send operation's messages
+ * are the invoker's output, a receive operation's the invoker's input, and a
+ * declared reply is the opposite direction (Go twin: operationBoundarySchemas).
+ */
+function operationBoundarySchemas(
+  doc: AsyncAPIDocument,
+  op: AsyncAPIOperation,
+): { input?: Record<string, unknown>; output?: Record<string, unknown> } {
+  switch (op.action) {
+    case "send":
+      return {
+        output: operationPayloadSchema(doc, op, false),
+        input: op.reply ? replyPayloadSchema(doc, op.reply) : undefined,
+      };
+    case "receive":
+      return {
+        input: operationPayloadSchema(doc, op, true),
+        output: op.reply ? replyPayloadSchema(doc, op.reply) : undefined,
+      };
+    default:
+      return {};
+  }
+}
+
+/**
+ * The §9.2 confinement gate (Go twin: operationSchemaDefect): a payload
+ * declaration that projects to an ill-formed OBI schema — invalid under its
+ * own declared dialect, or a reference the artifact leaves dangling —
+ * excludes exactly this operation, never its siblings and never the
+ * artifact. The check validates a single-operation probe interface with the
+ * core validator so the judgment is the same one the emitted document would
+ * face (OBI-D-16/D-17).
+ */
+function operationSchemaDefect(
+  doc: AsyncAPIDocument,
+  op: AsyncAPIOperation,
+): AuthoringExclusion | undefined {
+  const { input, output } = operationBoundarySchemas(doc, op);
+  if (!input && !output) return undefined;
+  const probeOp: Operation = {};
+  if (input) probeOp.input = decycleOperationSchema(input, doc, "#/operations/probe/input");
+  if (output) probeOp.output = decycleOperationSchema(output, doc, "#/operations/probe/output");
+  const probe: OBInterface = {
+    openbindings: MAX_TESTED_VERSION,
+    name: "probe",
+    version: "0.0.0",
+    operations: { probe: probeOp },
+  };
+  try {
+    validateInterface(probe);
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    return {
+      status: "invalid",
+      code: "asyncapi.payload_schema_invalid",
+      rule: "ASYNC-P-05",
+      message: `the payload declaration does not project to a well-formed OBI schema: ${message}`,
+    };
+  }
+  return undefined;
+}
+
+function escapePointerSegment(segment: string): string {
+  return segment.replaceAll("~", "~0").replaceAll("/", "~1");
+}
+
 function operationPayloadSchema(doc: AsyncAPIDocument, op: AsyncAPIOperation, input: boolean): Record<string, unknown> | undefined {
   const channel = op.channel!;
   const governed = governingMessages(op, channel);
@@ -288,7 +337,12 @@ function unionPayloadSchemas(doc: AsyncAPIDocument, messages: AsyncAPIMessage[])
   const unique = new Map<string, Record<string, unknown>>();
   for (const message of messages) {
     const { schema: effectiveSchema, schemaFormat } = effectivePayload(message);
-    const stripped = stripParserExtensions(effectiveSchema!);
+    // Cut object-graph cycles into $ref form before any recursive walk —
+    // translation and serialization would otherwise recurse forever on a
+    // payload the reference pipeline terminated by sharing (decycle.ts).
+    // Decircularize FIRST: the shallow strip copy would break the root's
+    // identity with its components entry and move the cut point.
+    const stripped = stripParserExtensions(decircularizeSchema(effectiveSchema!, doc));
     const schema = classifySchemaFormat(schemaFormat) === "translate" ? translateSchemaDialect(stripped) : stripped;
     // JSON object member order is not semantic. Use canonical JSON both for
     // de-duplication and anyOf ordering so source spelling cannot make the

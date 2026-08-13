@@ -96,9 +96,21 @@ function translateObject(input: Record<string, unknown>): Record<string, unknown
       continue;
     }
 
+    if (key === "prefixItems") {
+      // Draft 07 does not define prefixItems, so the author's dialect
+      // ignored it. Carrying an empty array into 2020-12 would turn an
+      // inert annotation into an ill-formed keyword (2020-12 requires a
+      // non-empty array); dropping preserves the declared semantics
+      // exactly. Non-empty arrays carry through with members translated.
+      if (!Array.isArray(value) || value.length === 0) continue;
+      out[key] = value.map(translateNode);
+      continue;
+    }
+
     if (key === "items") {
       if (Array.isArray(value)) {
-        if (!Object.hasOwn(input, "prefixItems")) {
+        const authored = input["prefixItems"];
+        if (!Array.isArray(authored) || authored.length === 0) {
           out["prefixItems"] = value.map(translateNode);
         }
         const rest = input["additionalItems"];
