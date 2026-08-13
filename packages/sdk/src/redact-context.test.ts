@@ -44,6 +44,7 @@ describe("redactContext", () => {
         case "basic":
           return { username: "visible-user", password: sentinel };
         case "apiKeys":
+        case "credentials":
           return { stripe: sentinel, twilio: sentinel + "-b" };
         default:
           return sentinel;

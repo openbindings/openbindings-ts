@@ -219,9 +219,9 @@ correctness, and `close()` never rejects.
 
 Client-streaming and bidirectional callers own `close()` (and drive input and
 output from separate async contexts); lifecycle is observable via `closed`,
-and termination via `cancel()`. Optional binding-native evidence is available
-only through the explicitly named `diagnostics` view; correct ordinary
-operation behavior must not depend on it. Missing runtime context surfaces as a
+and termination via `cancel()`. Binding-native evidence remains below the
+abstract invocation boundary in artifact runtimes, logs, and protocol tooling.
+Missing runtime context surfaces as a
 `CONTEXT_REQUIRED` terminal error raised before any side effect, resolved by
 the operation invoker's `contextResolver` when one is configured.
 
@@ -297,7 +297,10 @@ hint: via `scopeContext` it returns only the fields the satisfied
 requirement-alternative names. It does not forward unrelated headers, cookies,
 environment values, metadata, configuration, or credentials from the stored
 record; any of those can be sensitive. Context the caller explicitly supplied
-for the invocation is preserved separately.
+for the invocation is preserved separately. Because this resolver is backed by
+a reusable store, it declines every alternative unless all of its requirements
+explicitly carry `durable: true`; omission means one-shot and cannot authorize
+stored-context release or persistence.
 
 ```typescript
 import { storeContextResolver } from "@openbindings/sdk";

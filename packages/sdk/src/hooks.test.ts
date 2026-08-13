@@ -75,11 +75,11 @@ describe("the decline chain", () => {
 });
 
 describe("failure channels", () => {
-  it("a thrown InvocationError passes through with its code and tier provenance", async () => {
+  it("a thrown InvocationError passes through with its code and portable data only", async () => {
     const h = new InvokeHooks(
       {
         decode: () => {
-          throw new InvocationError(ERR_STREAM_ERROR, "frame error");
+          throw new InvocationError(ERR_STREAM_ERROR);
         },
       },
       {},
@@ -87,7 +87,7 @@ describe("failure channels", () => {
     const err = await h.decodeOutput(site, raw, null).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(InvocationError);
     expect((err as InvocationError).code).toBe(ERR_STREAM_ERROR);
-    expect((err as InvocationError).diagnostics).toMatchObject({ decidedBy: "per-invocation hook" });
+    expect(Object.hasOwn(err as object, "diagnostics")).toBe(false);
   });
 
   it("a thrown plain error is a deliberate terminal with the axis's native code", async () => {

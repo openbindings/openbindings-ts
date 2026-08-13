@@ -7,7 +7,6 @@ import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import type { InvocationError } from "@openbindings/sdk";
 import { BINDING_SPEC, ConnectInvoker } from "./index.js";
 
 interface CorpusFixture {
@@ -48,6 +47,7 @@ async function judge(document: CorpusDocument): Promise<string | undefined> {
     if (source.bindingSpec !== BINDING_SPEC) continue;
     for (const binding of Object.values(document.bindings ?? {})) {
       if (binding.source !== sourceName) continue;
+      let dispatched = false;
       const call = new ConnectInvoker({ fullDuplex: true }).invokeBinding({
         source: {
           bindingSpec: BINDING_SPEC,
@@ -60,7 +60,10 @@ async function judge(document: CorpusDocument): Promise<string | undefined> {
           source: sourceName,
           ...(Object.hasOwn(binding, "ref") ? { ref: binding.ref } : {}),
         },
-        fetch: async () => { throw new Error(accepted); },
+        fetch: async () => {
+          dispatched = true;
+          throw new Error(accepted);
+        },
       });
       await call.write({}).catch(() => {});
       await call.close().catch(() => {});
@@ -71,8 +74,7 @@ async function judge(document: CorpusDocument): Promise<string | undefined> {
         }
         return "Connect invocation completed without reaching the sentinel fetch";
       } catch (error: unknown) {
-        const message = (error as InvocationError).message ?? String(error);
-        if (!message.includes(accepted)) return message;
+        if (!dispatched) return String(error);
       }
     }
   }

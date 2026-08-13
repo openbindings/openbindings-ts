@@ -165,16 +165,10 @@ export async function exhaustPages<P extends { nextCursor?: string }>(
     // A repeated cursor is the common non-terminating bug; refuse immediately
     // rather than loop forever.
     if (next !== undefined && next === cursor) {
-      throw new InvocationError(
-        ERR_PROTOCOL,
-        `MCP server did not terminate pagination: nextCursor repeated (${next}) (MCP-P-02)`,
-      );
+      throw new InvocationError(ERR_PROTOCOL);
     }
     if (++pages > MAX_LIST_PAGES) {
-      throw new InvocationError(
-        ERR_PROTOCOL,
-        `MCP server did not terminate pagination: exceeded ${MAX_LIST_PAGES} pages (MCP-P-02)`,
-      );
+      throw new InvocationError(ERR_PROTOCOL);
     }
     cursor = next;
   } while (cursor !== undefined);
@@ -255,63 +249,47 @@ export function resolveRef(
   remainder: string,
   bindingSpec = BINDING_SPEC,
 ): TargetKind {
-  const where = l.pinned ? "pinned listing" : "server listing";
-  const ref = `${entityType}/${remainder}`;
   const count = (ids: string[]): number => ids.filter((id) => id === remainder).length;
-  const notFound = (what: string): InvocationError =>
-    new InvocationError(ERR_REF_NOT_FOUND, `MCP ref ${JSON.stringify(ref)} matches no ${what} in the ${where}`);
-  const ambiguous = (what: string, n: number): InvocationError =>
-    new InvocationError(
-      ERR_REF_NOT_FOUND,
-      `MCP ref ${JSON.stringify(ref)} is ambiguous: ${n} ${what}s in the ${where} share that identity; an ambiguous ref is unresolvable`,
-    );
+  const notFound = (): InvocationError => new InvocationError(ERR_REF_NOT_FOUND);
+  const ambiguous = (): InvocationError => new InvocationError(ERR_REF_NOT_FOUND);
 
   switch (entityType) {
     case "tools": {
       const n = count(l.tools);
       if (n === 1) {
         if ((l.requiredTaskTools ?? []).includes(remainder)) {
-          throw new InvocationError(
-            ERR_REF_NOT_FOUND,
-            `MCP ref ${JSON.stringify(ref)} names a tool that requires task augmentation, which ${bindingSpec} excludes`,
-          );
+          throw new InvocationError(ERR_REF_NOT_FOUND);
         }
         if (bindingSpec === BINDING_SPEC && l.toolOutputSchemas?.[remainder] === undefined) {
-          throw new InvocationError(
-            ERR_REF_NOT_FOUND,
-            `MCP tool ${JSON.stringify(remainder)} has no outputSchema application contract and is not bindable through ${BINDING_SPEC} (MCP-P-04)`,
-          );
+          throw new InvocationError(ERR_REF_NOT_FOUND);
         }
         return "tool";
       }
-      if (n > 1) throw ambiguous("tool", n);
-      throw notFound("tool");
+      if (n > 1) throw ambiguous();
+      throw notFound();
     }
     case "prompts": {
-      if (bindingSpec === BINDING_SPEC) throw new InvocationError(ERR_REF_NOT_FOUND, "MCP prompts have no application output schema and are excluded by openbindings.mcp@1 (MCP-P-04)");
+      if (bindingSpec === BINDING_SPEC) throw new InvocationError(ERR_REF_NOT_FOUND);
       const n = count(l.prompts);
       if (n === 1) return "prompt";
-      if (n > 1) throw ambiguous("prompt", n);
-      throw notFound("prompt");
+      if (n > 1) throw ambiguous();
+      throw notFound();
     }
     case "resources": {
-      if (bindingSpec === BINDING_SPEC) throw new InvocationError(ERR_REF_NOT_FOUND, "MCP resources have no application output schema and are excluded by openbindings.mcp@1 (MCP-P-04)");
+      if (bindingSpec === BINDING_SPEC) throw new InvocationError(ERR_REF_NOT_FOUND);
       const n = count(l.resources);
       if (n === 1) return "staticResource";
-      if (n > 1) throw ambiguous("resource", n);
-      throw notFound("resource");
+      if (n > 1) throw ambiguous();
+      throw notFound();
     }
     case "resourceTemplates": {
-      if (bindingSpec === BINDING_SPEC) throw new InvocationError(ERR_REF_NOT_FOUND, "MCP resource templates have no application output schema and are excluded by openbindings.mcp@1 (MCP-P-04)");
+      if (bindingSpec === BINDING_SPEC) throw new InvocationError(ERR_REF_NOT_FOUND);
       const t = count(l.templates);
       if (t === 1) return "templateResource";
-      if (t > 1) throw ambiguous("resource template", t);
-      throw notFound("resource template");
+      if (t > 1) throw ambiguous();
+      throw notFound();
     }
     default:
-      throw new InvocationError(
-        ERR_REF_NOT_FOUND,
-        `MCP ref ${JSON.stringify(ref)} names an unknown entity ${JSON.stringify(entityType)} (expected tools, resources, resourceTemplates, or prompts)`,
-      );
+      throw new InvocationError(ERR_REF_NOT_FOUND);
   }
 }

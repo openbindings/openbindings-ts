@@ -80,19 +80,18 @@ describe("openbindings.mcp@1 invocation", () => {
     await call.write({});
     await expect(call.closed).rejects.toMatchObject({
       code: ERR_EXECUTION_FAILED,
-      message: "tool-authored failure",
+      data: { value: "not-success" },
     });
   });
 
   it.each([
-    ["missing structuredContent", { content: [] }, /no structuredContent/],
-    ["nonconforming structuredContent", { content: [], structuredContent: { value: 7 } }, /does not satisfy/],
-  ])("refuses %s as unsuccessful completion", async (_name, result, message) => {
+    ["missing structuredContent", { content: [] }],
+    ["nonconforming structuredContent", { content: [], structuredContent: { value: 7 } }],
+  ])("refuses %s as unsuccessful completion", async (_name, result) => {
     const server = mcpServer(() => ({ result }));
     const call = new MCPInvoker().invokeBinding({ source: sourceFor("probe"), ref: "tools/probe", fetch: server.fn });
     await call.write({});
     await expect(call.closed).rejects.toMatchObject({ code: ERR_RESPONSE_ERROR });
-    await expect(call.closed).rejects.toThrow(message);
   });
 
   it("never solicits protocol-native progress in the first candidate", async () => {

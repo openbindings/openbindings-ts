@@ -34,7 +34,7 @@ import {
   ERR_RUNTIME,
   ERR_SCHEMA_UNRESOLVED,
   ERR_TRANSFORM_ERROR,
-  ERR_VALIDATION_FAILED,
+  ERR_OPERATION_VALIDATION_FAILED,
 } from "./errcodes.js";
 
 // ---------------------------------------------------------------------------
@@ -97,7 +97,7 @@ class MockBindingInvoker implements BindingInvoker {
         inv.fireError(
           err instanceof InvocationError
             ? err
-            : new InvocationError(ERR_RUNTIME, err instanceof Error ? err.message : String(err)),
+            : new InvocationError(ERR_RUNTIME),
         );
       }),
     );
@@ -113,25 +113,13 @@ class MockBindingInvoker implements BindingInvoker {
       case "ping": {
         // No-input: close input immediately so the caller never has to.
         void h.closeInput();
-        h.setHeader({ "x-mock": ["ping"] });
         if (this.opts.nativeFailure) {
           h.fireError(
-            new InvocationError(
-              "ERR_TIMEOUT",
-              "HTTP 504 Gateway Timeout",
-              undefined,
-              {
-                status: 504,
-                httpResponse: {
-                  body: { base64: "Z2F0ZXdheSB0aW1lb3V0", byteLength: 15 },
-                },
-              },
-            ),
+            new InvocationError("EXAMPLE_BINDING_FAILURE"),
           );
           return;
         }
         await h.emitOutput({ ok: true });
-        h.setTrailer({ "x-mock-trailer": ["done"] });
         h.closeOutput();
         return;
       }
@@ -140,23 +128,23 @@ class MockBindingInvoker implements BindingInvoker {
         // "read ≠ consumed" case) check context.
         const first = await readFirst(h.inputs());
         if (first === undefined) {
-          h.fireError(new InvocationError(ERR_MISSING_INPUT, "getUser requires input"));
+          h.fireError(new InvocationError(ERR_MISSING_INPUT));
           return;
         }
         reads.push(first);
         if (this.opts.challengeAlways ||
             (this.opts.requireBearer && !args.context?.["bearerToken"])) {
-          h.fireError(contextRequiredError("bearer token required", BEARER_DETAILS));
+          h.fireError(contextRequiredError(BEARER_DETAILS));
           return;
         }
         if (this.opts.requireServerConfig) {
           const cfg = args.context?.["configuration"] as Record<string, unknown> | undefined;
           if (!cfg?.["server"]) {
             h.fireError(
-              contextRequiredError("server address required", {
+              contextRequiredError({
                 target: "https://api.example.com",
                 alternatives: [
-                  { requirements: [configValueRequirement("server", "url", "supply a connection URL")] },
+                  { requirements: [configValueRequirement("server", "/url", "supply a connection URL")] },
                 ],
               }),
             );
@@ -192,7 +180,7 @@ class MockBindingInvoker implements BindingInvoker {
         // operation layer must surface, not retry.
         void h.closeInput();
         await h.emitOutput({ id: "ord_1", status: "created" });
-        h.fireError(contextRequiredError("token expired mid-stream", BEARER_DETAILS));
+        h.fireError(contextRequiredError(BEARER_DETAILS));
         return;
       }
       case "streamBadSecond": {
@@ -237,7 +225,7 @@ class MockBindingInvoker implements BindingInvoker {
           for await (const chunk of h.inputs()) {
             reads.push(chunk);
           }
-          h.fireError(contextRequiredError("bearer required", BEARER_DETAILS));
+          h.fireError(contextRequiredError(BEARER_DETAILS));
           return;
         }
         for await (const chunk of h.inputs()) {
@@ -248,7 +236,7 @@ class MockBindingInvoker implements BindingInvoker {
         return;
       }
       default:
-        h.fireError(new InvocationError(ERR_RUNTIME, `unknown ref: ${args.ref}`));
+        h.fireError(new InvocationError(ERR_RUNTIME));
     }
   }
 }
@@ -535,8 +523,8 @@ describe("OBI-T-07 — input validation", () => {
     const mock = new MockBindingInvoker();
     const op = makeInvoker(mock);
     const call = op.invoke(testInterface(), operationSignature("getUser"));
-    await expect(call.write({ id: 42 })).rejects.toMatchObject({ code: ERR_VALIDATION_FAILED });
-    await expect(call.closed).rejects.toMatchObject({ code: ERR_VALIDATION_FAILED });
+    await expect(call.write({ id: 42 })).rejects.toMatchObject({ code: ERR_OPERATION_VALIDATION_FAILED });
+    await expect(call.closed).rejects.toMatchObject({ code: ERR_OPERATION_VALIDATION_FAILED });
     expect(mock.reads.flat()).toEqual([]);
   });
 
@@ -551,7 +539,7 @@ describe("OBI-T-07 — input validation", () => {
     const op = makeInvoker();
     const call = op.invoke(testInterface(), operationSignature("getUser"));
     await expect(call.write({ id: "u1", extra: true })).rejects.toMatchObject({
-      code: ERR_VALIDATION_FAILED,
+      code: ERR_OPERATION_VALIDATION_FAILED,
     });
   });
 
@@ -579,7 +567,7 @@ describe("OBI-T-07 — input validation", () => {
     iface2.operations.getUser.input = { type: "string", pattern: "^[^@]+@[^@]+$" };
     const op2 = makeInvoker();
     const call2 = op2.invoke(iface2, operationSignature("getUser"));
-    await expect(call2.write("not-an-email")).rejects.toMatchObject({ code: ERR_VALIDATION_FAILED });
+    await expect(call2.write("not-an-email")).rejects.toMatchObject({ code: ERR_OPERATION_VALIDATION_FAILED });
   });
 
   it("skips validation when the operation declares no input schema", async () => {
@@ -634,7 +622,7 @@ describe("OBI-T-08 — output validation", () => {
       caught = err;
     }
     expect(seen).toEqual([]);
-    expect(caught).toMatchObject({ code: ERR_VALIDATION_FAILED });
+    expect(caught).toMatchObject({ code: ERR_OPERATION_VALIDATION_FAILED });
   });
 
   it("applies per item for streaming: valid prefix delivered, then terminal [SS]", async () => {
@@ -648,7 +636,7 @@ describe("OBI-T-08 — output validation", () => {
       caught = err;
     }
     expect(seen).toEqual([{ n: 1 }]);
-    expect(caught).toMatchObject({ code: ERR_VALIDATION_FAILED });
+    expect(caught).toMatchObject({ code: ERR_OPERATION_VALIDATION_FAILED });
   });
 
   it("validates AFTER the output transform", async () => {
@@ -665,7 +653,7 @@ describe("OBI-T-08 — output validation", () => {
     }
     // The transform broke even the first (originally valid) item.
     expect(seen).toEqual([]);
-    expect(caught).toMatchObject({ code: ERR_VALIDATION_FAILED });
+    expect(caught).toMatchObject({ code: ERR_OPERATION_VALIDATION_FAILED });
   });
 
   it("skips validation when the operation declares no output schema", async () => {
@@ -724,7 +712,7 @@ describe("OBI-T-16 claim semantics", () => {
       caught = err;
     }
     expect(seen).toEqual([{ n: 1 }]);
-    expect(caught).toMatchObject({ code: ERR_VALIDATION_FAILED });
+    expect(caught).toMatchObject({ code: ERR_OPERATION_VALIDATION_FAILED });
   });
 
   it("an unresolvable output schema graph is ERR_SCHEMA_UNRESOLVED, never partial validation", async () => {
@@ -768,7 +756,7 @@ describe("CONTEXT_REQUIRED", () => {
     await call.write({ id: "u1" });
     await expect(call.closed).rejects.toMatchObject({
       code: CONTEXT_REQUIRED,
-      details: BEARER_DETAILS,
+      data: BEARER_DETAILS,
     });
   });
 
@@ -838,8 +826,8 @@ describe("CONTEXT_REQUIRED", () => {
     const mock = new MockBindingInvoker();
     const op = makeInvoker(mock);
     const call = op.invoke(testInterface(), operationSignature("getUser"));
-    await expect(call.write({ id: 42 })).rejects.toMatchObject({ code: ERR_VALIDATION_FAILED });
-    await expect(call.closed).rejects.toMatchObject({ code: ERR_VALIDATION_FAILED });
+    await expect(call.write({ id: 42 })).rejects.toMatchObject({ code: ERR_OPERATION_VALIDATION_FAILED });
+    await expect(call.closed).rejects.toMatchObject({ code: ERR_OPERATION_VALIDATION_FAILED });
     // Give teardown propagation a few macrotasks.
     await new Promise((r) => setTimeout(r, 20));
     expect(mock.signals).toHaveLength(1);
@@ -852,6 +840,30 @@ describe("CONTEXT_REQUIRED", () => {
     const call = op.invoke(testInterface(), operationSignature("getUser"));
     await call.write({ id: "u1" });
     await expect(call.closed).rejects.toMatchObject({ code: CONTEXT_REQUIRED });
+    expect(mock.attempts).toBe(1);
+  });
+
+  it("surfaces resolver failures as local runtime errors", async () => {
+    const mock = new MockBindingInvoker({ requireBearer: true });
+    const op = makeInvoker(mock, {
+      contextResolver: async () => { throw new Error("credential store unavailable"); },
+    });
+    const call = op.invoke(testInterface(), operationSignature("getUser"));
+    await call.write({ id: "u1" });
+    await expect(call.closed).rejects.toMatchObject({ code: "ERR_RUNTIME" });
+    expect(mock.attempts).toBe(1);
+  });
+
+  it("does not retry when resolution makes no structural context change", async () => {
+    const mock = new MockBindingInvoker({ challengeAlways: true });
+    const resolver = vi.fn(async () => ({ bearerToken: "same" }));
+    const op = makeInvoker(mock, { contextResolver: resolver });
+    const call = op.invoke(testInterface(), operationSignature("getUser"), {
+      context: { bearerToken: "same" },
+    });
+    await call.write({ id: "u1" });
+    await expect(call.closed).rejects.toMatchObject({ code: CONTEXT_REQUIRED });
+    expect(resolver).toHaveBeenCalledTimes(1);
     expect(mock.attempts).toBe(1);
   });
 
@@ -908,33 +920,41 @@ describe("CONTEXT_REQUIRED", () => {
     await expect(call.closed).rejects.toMatchObject({ code: CONTEXT_REQUIRED });
     expect(mock.attempts).toBe(0);
   });
+
+  it("rejects malformed preflight data before calling the resolver", async () => {
+    const mock = new MockBindingInvoker();
+    mock.prepareBinding = async () => ({
+      target: "https://api.example.com",
+      alternatives: [{ requirements: [] }],
+    });
+    const resolver = vi.fn(async () => ({ bearerToken: "must-not-run" }));
+    const op = makeInvoker(mock, { contextResolver: resolver });
+    const call = op.invoke(testInterface(), operationSignature("getUser"));
+
+    await expect(call.closed).rejects.toMatchObject({ code: ERR_RUNTIME });
+    expect(resolver).not.toHaveBeenCalled();
+    expect(mock.attempts).toBe(0);
+  });
 });
 
 // ---------------------------------------------------------------------------
-// Metadata pass-through
+// Abstract-boundary leak resistance
 // ---------------------------------------------------------------------------
 
-describe("metadata pass-through", () => {
-  it("relays optional binding-native diagnostics without making them portable semantics", async () => {
+describe("abstract-boundary leak resistance", () => {
+  it("does not relay binding-native failure evidence", async () => {
     const op = makeInvoker(new MockBindingInvoker({ nativeFailure: true }));
     const call = op.invoke(testInterface(), operationSignature("ping"));
-    await expect(call.closed).rejects.toMatchObject({
-      code: "ERR_TIMEOUT",
-      diagnostics: {
-        status: 504,
-        httpResponse: {
-          body: { base64: "Z2F0ZXdheSB0aW1lb3V0", byteLength: 15 },
-        },
-      },
-    });
+    const error = await call.closed.catch((caught: unknown) => caught) as InvocationError;
+    expect(error).toMatchObject({ code: "EXAMPLE_BINDING_FAILURE" });
+    expect(Object.hasOwn(error, "diagnostics")).toBe(false);
   });
 
-  it("forwards binding header and trailer to the caller handle", async () => {
+  it("does not expose a native metadata handle", async () => {
     const op = makeInvoker();
     const call = op.invoke(testInterface(), operationSignature("ping"));
     expect(await collect(call.outputs)).toEqual([{ ok: true }]);
-    await expect(call.diagnostics.leading).resolves.toEqual({ "x-mock": ["ping"] });
-    expect(call.diagnostics.trailing()).toEqual({ "x-mock-trailer": ["done"] });
+    expect(Object.hasOwn(call, "diagnostics")).toBe(false);
   });
 });
 
@@ -1035,7 +1055,7 @@ describe("selection override (context.configuration.selection)", () => {
       context: { configuration: { selection: ["getUser.bad"] } },
     });
     await call.write({ id: "u1" });
-    await expect(collect(call.outputs)).rejects.toMatchObject({ code: ERR_VALIDATION_FAILED });
+    await expect(collect(call.outputs)).rejects.toMatchObject({ code: ERR_OPERATION_VALIDATION_FAILED });
   });
 
   it("skips undefined and wrong-operation keys; sole-candidate inference applies when none is invocable", async () => {

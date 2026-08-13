@@ -123,24 +123,14 @@ const TIER_PER_INVOCATION = "per-invocation hook";
 const TIER_INVOKER_LEVEL = "invoker-level hook";
 
 /** Wraps a hook's thrown error per the seam's three failure channels. */
-function hookTerminal(tier: string, nativeCode: string, err: unknown): InvocationError {
+function hookTerminal(_tier: string, nativeCode: string, err: unknown): InvocationError {
   if (err instanceof InvocationError) {
-    // Deliberate passthrough: the hook chose its own code. Stamp tier
-    // provenance without clobbering an explicit decidedBy.
-    const d = err.diagnostics;
-    if (d && typeof d === "object" && !Array.isArray(d)) {
-      const m = d as Record<string, unknown>;
-      if (!("decidedBy" in m)) m.decidedBy = tier;
-      return err;
-    }
-    return new InvocationError(err.code, err.message, err.details, { decidedBy: tier });
+    // Deliberate passthrough: the hook chose its own code and portable data.
+    // Tier provenance is implementation evidence and does not cross the
+    // abstract invocation boundary.
+    return new InvocationError(err.code, err.data);
   }
-  return new InvocationError(
-    nativeCode,
-    `${tier}: ${err instanceof Error ? err.message : String(err)}`,
-    undefined,
-    { decidedBy: tier },
-  );
+  return new InvocationError(nativeCode);
 }
 
 /**
@@ -305,17 +295,11 @@ async function runBuiltinDecode(
   builtin: OutputDecoder | null,
 ): Promise<unknown> {
   if (!builtin) {
-    throw new InvocationError(
-      ERR_RUNTIME,
-      `openbindings: no decoder for format "${site.bindingSpec}" (axis not consulted per its matrix row) and every hook declined`,
-    );
+    throw new InvocationError(ERR_RUNTIME);
   }
   const v = await builtin(site, raw);
   if (v === USE_DEFAULT) {
-    throw new InvocationError(
-      ERR_RUNTIME,
-      "openbindings: format builtin decoder declined; builtins must never return USE_DEFAULT (the chain ends there)",
-    );
+    throw new InvocationError(ERR_RUNTIME);
   }
   return v;
 }
@@ -326,17 +310,11 @@ async function runBuiltinClassify(
   builtin: ResultClassifier | null,
 ): Promise<boolean> {
   if (!builtin) {
-    throw new InvocationError(
-      ERR_RUNTIME,
-      `openbindings: no classifier for format "${site.bindingSpec}" (axis not consulted per its matrix row) and every hook declined`,
-    );
+    throw new InvocationError(ERR_RUNTIME);
   }
   const v = await builtin(site, raw);
   if (v === USE_DEFAULT) {
-    throw new InvocationError(
-      ERR_RUNTIME,
-      "openbindings: format builtin classifier declined; builtins must never return USE_DEFAULT",
-    );
+    throw new InvocationError(ERR_RUNTIME);
   }
   return v;
 }

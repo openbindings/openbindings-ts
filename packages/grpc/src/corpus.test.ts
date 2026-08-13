@@ -7,7 +7,6 @@ import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import type { InvocationError } from "@openbindings/sdk";
 import {
   BINDING_SPEC,
   GrpcInvoker,
@@ -48,22 +47,6 @@ if (!available && process.env.OB_CORPUS_REQUIRED) {
   throw new Error("gRPC binding-spec corpus is required but unavailable; set OB_SPEC_CORPUS");
 }
 
-const runtime: GrpcRuntime = {
-  async resolveMethod(args) {
-    if (args.content !== undefined) {
-      const schema = loadProtobufSchema(args.content);
-      const service = schema.lookupService(args.service);
-      if (!service.methods[args.method]) {
-        throw new Error(`method ${args.service}/${args.method} not found in embedded schema`);
-      }
-    }
-    throw new Error(accepted);
-  },
-  openCall() {
-    throw new Error("corpus adapter must never open a gRPC call");
-  },
-};
-
 async function judge(document: CorpusDocument): Promise<string | undefined> {
   for (const [sourceName, source] of Object.entries(document.sources ?? {})) {
     if (source.bindingSpec !== BINDING_SPEC) continue;
@@ -71,6 +54,23 @@ async function judge(document: CorpusDocument): Promise<string | undefined> {
       if (binding.source !== sourceName) continue;
       const location = source.location;
       const explicitTransport = typeof location === "string" && /^(?:grpc|grpcs):\/\//u.test(location);
+      let resolved = false;
+      const runtime: GrpcRuntime = {
+        async resolveMethod(args) {
+          if (args.content !== undefined) {
+            const schema = loadProtobufSchema(args.content);
+            const service = schema.lookupService(args.service);
+            if (!service.methods[args.method]) {
+              throw new Error(`method ${args.service}/${args.method} not found in embedded schema`);
+            }
+          }
+          resolved = true;
+          throw new Error(accepted);
+        },
+        openCall() {
+          throw new Error("corpus adapter must never open a gRPC call");
+        },
+      };
       const call = new GrpcInvoker({ runtime }).invokeBinding({
         source: {
           bindingSpec: BINDING_SPEC,
@@ -95,8 +95,7 @@ async function judge(document: CorpusDocument): Promise<string | undefined> {
         }
         return "gRPC invocation completed without reaching sentinel resolution";
       } catch (error: unknown) {
-        const message = (error as InvocationError).message ?? String(error);
-        if (!message.includes(accepted)) return message;
+        if (!resolved) return String(error);
       }
     }
   }

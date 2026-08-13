@@ -118,14 +118,11 @@ async function runScenario(
     ...(joined ? { joinedSynthesis: true } : {}),
     ...(dispatch ? { dispatch } : {}),
   };
-  data.trailer = call.diagnostics.trailing();
   if (!terminal) return { disposition: "complete", phase: "completion", data };
   if (scenario.id.startsWith("USAGE-FI-")) {
     data.error = {
       code: terminal.code,
-      message: terminal.message,
-      ...(terminal.details !== undefined ? { details: terminal.details } : {}),
-      ...(terminal.diagnostics !== undefined ? { diagnostics: terminal.diagnostics } : {}),
+      ...(Object.hasOwn(terminal, "data") ? { data: terminal.data } : {}),
     };
     return { disposition: "error", phase: "completion", data };
   }
@@ -133,7 +130,7 @@ async function runScenario(
     disposition: terminal.code === CONTEXT_REQUIRED ? "context-required" : "refusal",
     phase: terminal.code === ERR_SOURCE_LOAD_FAILED
       ? "load"
-      : terminal.message.includes("omits bin")
+      : ["USAGE-PS-02", "USAGE-PS-03"].includes(scenario.id)
         ? "resolution"
         : "pre-dispatch",
     data,

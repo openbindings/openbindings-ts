@@ -136,7 +136,7 @@ cmd "beta" {
       executor: async () => { throw new Error("ambiguous ref must not dispatch"); },
     }).invokeBinding({ source, ref: "x" });
     await invocation.close();
-    await expect(single(invocation.outputs)).rejects.toThrow(/matches 2 sibling commands/);
+    await expect(single(invocation.outputs)).rejects.toMatchObject({ code: "ERR_INVALID_REF" });
   });
 
   it("does not count navigation-only groups as interactions and still covers descendants", async () => {
@@ -230,11 +230,11 @@ flag "--anonymous"
     const executor = async () => ({ exitCode: 0 });
     const missingIf = new UsageInvoker({ executor }).invokeBinding({ source: { bindingSpec: BINDING_SPEC, content }, ref: "" });
     await missingIf.write({ dir: "tmp", anonymous: true });
-    await expect(single(missingIf.outputs)).rejects.toThrow(/file is required because dir is present/);
+    await expect(single(missingIf.outputs)).rejects.toMatchObject({ code: "ERR_VALIDATION_FAILED" });
 
     const missingUnless = new UsageInvoker({ executor }).invokeBinding({ source: { bindingSpec: BINDING_SPEC, content }, ref: "" });
     await missingUnless.close();
-    await expect(single(missingUnless.outputs)).rejects.toThrow(/identity is required unless/);
+    await expect(single(missingUnless.outputs)).rejects.toMatchObject({ code: "ERR_VALIDATION_FAILED" });
   });
 
   it("does not close a dynamic choice set in the synthesized schema", async () => {
@@ -251,9 +251,7 @@ flag "--environment" { arg "<environment>" { choices "dev" env="DEPLOY_ENVS" } }
       executor: async () => ({ exitCode: 0, stdout: new Uint8Array([0xff]) }),
     }).invokeBinding({ source: { bindingSpec: BINDING_SPEC, content: "bin \"tool\"" }, ref: "" });
     await invalid.close();
-    await expect(single(invalid.outputs)).rejects.toThrow(
-      /Invocation result could not be decoded/,
-    );
+    await expect(single(invalid.outputs)).rejects.toMatchObject({ code: "ERR_RESPONSE_ERROR" });
 
     let dispatched: ProcessRequest | undefined;
     const binary = new UsageInvoker({

@@ -23,7 +23,6 @@ import {
   ERR_EXPECTED_SINGLE,
   ERR_INPUT_CLOSED,
   ERR_INVOCATION_CLOSED,
-  ERR_TIMEOUT,
 } from "./errcodes.js";
 import type { InvocationErrorCode } from "./errcodes.js";
 
@@ -32,81 +31,107 @@ import type { InvocationErrorCode } from "./errcodes.js";
  * (not a plain shape) so it carries a stack trace and supports `instanceof`.
  *
  * The terminal error frame is the portable unsuccessful-completion signal.
- * `details` carries portable data defined by an interface-owned code
- * (currently CONTEXT_REQUIRED and validation failures), or an opaque JSON
- * failure value identified as application-authored by the governing binding
- * rules. `diagnostics` is an optional expert escape hatch for selected-binding
- * or implementation evidence; ordinary operation behavior must not depend on
- * it.
+ * `data`, when present, carries portable JSON defined by the authority that
+ * owns `code`, or an opaque application-authored failure value admitted by the
+ * governing binding rules. Protocol and implementation evidence never belongs
+ * on this abstract record. The inherited Error.message is local presentation
+ * only and serializes neither on invoker frames nor through JSON.stringify.
  */
 export class InvocationError extends Error {
   readonly code: InvocationErrorCode | (string & {});
-  readonly details?: unknown;
-  readonly diagnostics?: unknown;
+  declare readonly data?: unknown;
 
   constructor(
     code: InvocationErrorCode | (string & {}),
-    message: string,
-    details?: unknown,
-    diagnostics?: unknown,
+    data?: unknown,
   ) {
-    // A CONTEXT_REQUIRED challenge is actionable only through its details; an
-    // error string that hides the target and the requirement families strands
-    // whoever sees it in a log. Formats write the prose, the challenge writes
-    // the facts (mirrors the Go SDK's InvocationError.Error()).
-    let rendered = message || code;
-    if (code === CONTEXT_REQUIRED) {
-      const summary = contextRequirementSummary(details);
-      if (summary) rendered = `${rendered} (${summary})`;
+    if (typeof code !== "string" || code.length === 0) {
+      throw new TypeError("InvocationError code must be a nonempty string");
     }
-    super(rendered);
-    this.name = "InvocationError";
+    const normalized = data === undefined ? undefined : normalizePortableInvocationData(data);
+    if (data !== undefined && normalized === INVALID_PORTABLE_DATA) {
+      throw new TypeError("InvocationError data must be a JSON-domain value");
+    }
+    if (code === CONTEXT_REQUIRED && !isContextRequiredDetails(normalized)) {
+      throw new TypeError("CONTEXT_REQUIRED data must be a valid ContextRequiredDetails object");
+    }
+    super(code);
+    Object.defineProperty(this, "name", { value: "InvocationError", configurable: true });
     this.code = code;
-    if (details !== undefined) this.details = details;
-    if (diagnostics !== undefined) this.diagnostics = diagnostics;
+    if (data !== undefined) {
+      Object.defineProperty(this, "data", {
+        value: normalized,
+        enumerable: true,
+        configurable: false,
+        writable: false,
+      });
+    }
   }
 }
 
-/**
- * True when an abort `reason` denotes a lifetime DEADLINE rather than a manual
- * cancel. `AbortSignal.timeout()` aborts with a `DOMException` named
- * `"TimeoutError"` (WHATWG); a manual `controller.abort()` / handle `cancel()`
- * does not. Duck-typed on the reason's `name` so it holds across runtimes and
- * polyfills, not only where the global `DOMException` constructor is present.
- */
-function isTimeoutReason(reason: unknown): boolean {
-  return (
-    typeof reason === "object" &&
-    reason !== null &&
-    (reason as { name?: unknown }).name === "TimeoutError"
-  );
+/** True when a value can cross an invoker frame without native-type coercion. */
+export function isPortableInvocationData(value: unknown): boolean {
+  return normalizePortableInvocationData(value) !== INVALID_PORTABLE_DATA;
+}
+
+const INVALID_PORTABLE_DATA = Symbol("invalid portable invocation data");
+
+function normalizePortableInvocationData(value: unknown): unknown {
+  if (!portableJSONValue(value, new Set<object>())) return INVALID_PORTABLE_DATA;
+  // Validation above excludes accessors, custom prototypes, cycles, holes,
+  // hidden fields, symbols, and non-finite numbers. A JSON round-trip then
+  // gives in-process callers the same value that framed callers observe
+  // (including normalization such as -0 to 0).
+  return deepFreezeJSON(JSON.parse(JSON.stringify(value)) as unknown);
+}
+
+function deepFreezeJSON(value: unknown): unknown {
+  if (value && typeof value === "object") {
+    for (const child of Object.values(value)) deepFreezeJSON(child);
+    Object.freeze(value);
+  }
+  return value;
+}
+
+function portableJSONValue(value: unknown, ancestors: Set<object>): boolean {
+  if (value === null || typeof value === "string" || typeof value === "boolean") return true;
+  if (typeof value === "number") return Number.isFinite(value);
+  if (typeof value !== "object") return false;
+  if (ancestors.has(value)) return false;
+  ancestors.add(value);
+  try {
+    if (Array.isArray(value)) {
+      if (Object.keys(value).length !== value.length) return false;
+      if (Object.getOwnPropertyNames(value).length !== value.length + 1) return false;
+      if (Object.getOwnPropertySymbols(value).length > 0) return false;
+      return value.every((item) => portableJSONValue(item, ancestors));
+    }
+    const prototype = Reflect.getPrototypeOf(value);
+    if (prototype !== Object.prototype && prototype !== null) return false;
+    if (Object.getOwnPropertySymbols(value).length > 0) return false;
+    const keys = Object.keys(value);
+    if (Object.getOwnPropertyNames(value).length !== keys.length) return false;
+    for (const key of keys) {
+      const descriptor = Object.getOwnPropertyDescriptor(value, key);
+      if (!descriptor || !("value" in descriptor) || !descriptor.enumerable) return false;
+      if (!portableJSONValue(descriptor.value, ancestors)) return false;
+    }
+    return true;
+  } finally {
+    ancestors.delete(value);
+  }
+}
+
+/** Map every caller-owned abort into the invocation interface's one code. */
+function abortToTerminal(_reason: unknown): InvocationError {
+  return new InvocationError(ERR_CANCELLED);
 }
 
 /**
- * Map an abort into its terminal error, mirroring the Go SDK's `ctx.Err()`
- * branch. A deadline (`AbortSignal.timeout()`) is distinct from a
- * caller-initiated `cancel()`. Neither code implies cross-protocol retry
- * policy.
- */
-function abortToTerminal(reason: unknown): InvocationError {
-  return isTimeoutReason(reason)
-    ? new InvocationError(ERR_TIMEOUT, "invocation deadline exceeded")
-    : new InvocationError(ERR_CANCELLED, "invocation cancelled");
-}
-
-/**
- * Multi-valued binding-native metadata. It is exposed only through the
- * explicitly named diagnostic view and is never part of an operation value.
+ * Multi-valued binding-native metadata used inside artifact-specific hooks.
+ * It is not exposed by the abstract invocation handle.
  */
 export type Metadata = Record<string, string[]>;
-
-/** Optional expert evidence for one in-process invocation. */
-export interface InvocationDiagnostics {
-  /** Binding-native leading metadata, if the selected binding has any. */
-  readonly leading: Promise<Metadata>;
-  /** Binding-native trailing metadata after termination. */
-  trailing(): Metadata;
-}
 
 // ---------------------------------------------------------------------------
 // Context negotiation shapes (the openbindings.binding-invoker interface)
@@ -124,14 +149,15 @@ export interface ContextRequirement {
    * `securitySchemes` key, or the AsyncAPI `components.securitySchemes` key a
    * `$ref` resolves through). Distinguishes two requirements of the same
    * `type` within one alternative — two ANDed API keys are otherwise
-   * indistinguishable — and keys scheme-scoped credential lookup (see
-   * `apiKeys` on {@link ContextStore}/`BindingContext`). Absent when the
+   * indistinguishable — and keys scheme-scoped lookup in
+   * `BindingContext.credentials` (with historical `apiKeys` support for API
+   * keys). Absent when the
    * artifact declares the scheme inline with no addressable name.
    */
   name?: string;
   /**
-   * Whether resolved context MAY be persisted and reused. Defaults to true;
-   * `durable: false` context MUST be re-satisfied per call. The contract
+   * Whether resolved context MAY be persisted and reused. Defaults to false;
+   * only `durable: true` permits persistence. The contract
    * prescribes no store or key derivation.
    */
   durable?: boolean;
@@ -145,7 +171,7 @@ export interface ContextAlternative {
 }
 
 /**
- * The details payload of a `CONTEXT_REQUIRED` terminal error, per the
+ * The data payload of a `CONTEXT_REQUIRED` terminal error, per the
  * `openbindings.binding-invoker` interface. `alternatives` is disjunctive:
  * satisfying any one alternative suffices.
  */
@@ -161,10 +187,9 @@ export interface ContextRequiredDetails {
 
 /** Constructs the canonical CONTEXT_REQUIRED terminal error. */
 export function contextRequiredError(
-  message: string,
-  details: ContextRequiredDetails,
+  data: ContextRequiredDetails,
 ): InvocationError {
-  return new InvocationError(CONTEXT_REQUIRED, message, details);
+  return new InvocationError(CONTEXT_REQUIRED, data);
 }
 
 /**
@@ -172,41 +197,78 @@ export function contextRequiredError(
  * family for a configuration value a binding needs but the artifact
  * does not supply (a server variable with no default, a channel address a
  * service generates at runtime). `point` names the binding-specification
- * configuration point ("server", "address", …); `key` names the specific
- * value within it (a server-variable name, or "address" for a whole channel
- * address); `choices` carries values declared by the artifact, while the
+ * configuration point ("server", "address", …); `path` is a JSON Pointer
+ * relative to that point, with the empty pointer addressing the whole point;
+ * `choices` carries values declared by the artifact, while the
  * governing binding specification decides whether that list is closed or
- * advisory. `durable` defaults to true, permitting but not requiring reuse;
- * pass `false` for a value that must be fresh per invocation. The resolved
- * value is carried in the `configuration` context field
- * under `point`; its shape there is the invoker's own, so this requirement
- * names what is needed, not the resolved structure.
+ * advisory. `durable` defaults to false; pass `true` only when reuse is
+ * permitted. For example, `/variables/region` addresses
+ * `configuration[point].variables.region` and `/value` addresses a member
+ * literally named `value`.
  */
 export function configValueRequirement(
   point: string,
-  key: string,
+  path: string,
   description: string,
   choices?: string[],
   durable?: boolean,
 ): ContextRequirement {
-  const req: ContextRequirement = { type: "config.value", point, key, description };
+  const req: ContextRequirement = { type: "config.value", point, path, description };
   if (choices && choices.length > 0) req.choices = choices;
   if (durable !== undefined) req.durable = durable;
   return req;
 }
 
-/** Narrows a terminal error to a CONTEXT_REQUIRED challenge with usable details. */
+/** Narrows a terminal error to a CONTEXT_REQUIRED challenge with usable data. */
 export function isContextRequired(
   err: unknown,
-): err is InvocationError & { details: ContextRequiredDetails } {
-  if (!(err instanceof InvocationError) || err.code !== CONTEXT_REQUIRED) return false;
-  const d = err.details as ContextRequiredDetails | undefined;
-  return (
-    !!d &&
-    typeof d === "object" &&
-    typeof d.target === "string" &&
-    Array.isArray(d.alternatives)
-  );
+): err is InvocationError & { data: ContextRequiredDetails } {
+  return err instanceof InvocationError
+    && err.code === CONTEXT_REQUIRED
+    && isContextRequiredDetails(err.data);
+}
+
+/** Validates the complete portable CONTEXT_REQUIRED data shape. */
+export function isContextRequiredDetails(value: unknown): value is ContextRequiredDetails {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const details = value as Record<string, unknown>;
+  if (Object.keys(details).some((key) => key !== "target" && key !== "alternatives")) return false;
+  if (typeof details["target"] !== "string") return false;
+  const alternatives = details["alternatives"];
+  if (!Array.isArray(alternatives) || alternatives.length === 0) return false;
+  return alternatives.every((candidate) => {
+    if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) return false;
+    const alternative = candidate as Record<string, unknown>;
+    if (Object.keys(alternative).some((key) => key !== "requirements")) return false;
+    const requirements = alternative["requirements"];
+    if (!Array.isArray(requirements) || requirements.length === 0) return false;
+    return requirements.every((raw) => {
+      if (!raw || typeof raw !== "object" || Array.isArray(raw)) return false;
+      const req = raw as Record<string, unknown>;
+      if (typeof req["type"] !== "string" || req["type"].length === 0) return false;
+      if (
+        "name" in req
+        && (typeof req["name"] !== "string" || req["name"].length === 0)
+      ) return false;
+      if ("description" in req && typeof req["description"] !== "string") return false;
+      if ("durable" in req && typeof req["durable"] !== "boolean") return false;
+      if (req["type"] === "config.value") {
+        if (typeof req["point"] !== "string" || req["point"].length === 0) return false;
+        if (typeof req["path"] !== "string" || !validConfigurationPointer(req["path"])) return false;
+        if (
+          "choices" in req
+          && (!Array.isArray(req["choices"]) || !req["choices"].every((v) => typeof v === "string"))
+        ) return false;
+      }
+      return true;
+    });
+  });
+}
+
+function validConfigurationPointer(path: string): boolean {
+  return path === "" || (path.startsWith("/") && path.split("/").slice(1).every(
+    (token) => !/(?:~(?![01]))/.test(token),
+  ));
 }
 
 /**
@@ -224,11 +286,11 @@ export const REQUIREMENT_FIELDS: Record<string, string> = {
 /**
  * Renders `target: <t>; satisfied by: auth.bearer (context field "bearerToken"),
  * or ...` for a CONTEXT_REQUIRED challenge's alternatives. Returns "" when
- * `details` is not a usable ContextRequiredDetails. Mirrors the Go SDK's
- * contextRequirementSummary; used by InvocationError to append the facts.
+ * `data` is not a usable ContextRequiredDetails. This is a local presentation
+ * helper; its text is not part of the interoperable error record.
  */
-export function contextRequirementSummary(details: unknown): string {
-  const d = details as ContextRequiredDetails | undefined;
+export function contextRequirementSummary(data: unknown): string {
+  const d = data as ContextRequiredDetails | undefined;
   if (!d || typeof d !== "object" || !Array.isArray(d.alternatives)) return "";
   const alts: string[] = [];
   for (const alt of d.alternatives) {
@@ -334,11 +396,6 @@ export interface Invocation<I = unknown, O = unknown> {
    */
   readonly inputClosed: Promise<void>;
 
-  /**
-   * Explicit expert escape hatch for binding-native evidence. Correct
-   * ordinary operation behavior MUST NOT depend on this view.
-   */
-  readonly diagnostics: InvocationDiagnostics;
 }
 
 // ---------------------------------------------------------------------------
@@ -406,11 +463,6 @@ export interface BindingHandle<I = unknown, O = unknown> {
    */
   readonly signal: AbortSignal;
 
-  /** Sets leading metadata; must precede the first `emitOutput`/`closeOutput`. */
-  setHeader(md: Metadata): void;
-
-  /** Sets trailing metadata; must precede `closeOutput`/`fireError`. */
-  setTrailer(md: Metadata): void;
 }
 
 // ---------------------------------------------------------------------------
@@ -449,7 +501,7 @@ export interface InvocationImplOptions<I> {
   /**
    * Input-validation hook (OBI-T-16 claim semantics): validates a caller input before it is enqueued. A
    * returned error is terminal AND rejects the offending `write` with the
-   * same `InvocationError` (the binding never sees the message). Used by
+   * same `InvocationError` (the binding never sees the rejected input value). Used by
    * the operation-layer invoker; bindings and direct binding-invoker
    * callers normally leave it unset.
    */
@@ -481,14 +533,6 @@ export class InvocationImpl<I = unknown, O = unknown>
   implements Invocation<I, O>, BindingHandle<I, O>
 {
   readonly closed: Promise<void>;
-  readonly header: Promise<Metadata>;
-
-  get diagnostics(): InvocationDiagnostics {
-    return {
-      leading: this.header,
-      trailing: () => this.trailer(),
-    };
-  }
   readonly inputClosed: Promise<void>;
 
   private readonly controller = new AbortController();
@@ -507,13 +551,8 @@ export class InvocationImpl<I = unknown, O = unknown>
   private state: "open" | "closed" | "errored" = "open";
   private terminalError: InvocationError | undefined;
 
-  private headerMd: Metadata | undefined;
-  private headerSettled = false;
-  private trailerMd: Metadata | undefined;
-
   private resolveClosed!: () => void;
   private rejectClosed!: (e: InvocationError) => void;
-  private resolveHeader!: (md: Metadata) => void;
   private resolveInputClosed!: () => void;
 
   constructor(opts: InvocationImplOptions<I> = {}) {
@@ -530,10 +569,6 @@ export class InvocationImpl<I = unknown, O = unknown>
       this.resolveInputClosed = res;
     });
 
-    this.header = new Promise<Metadata>((res) => {
-      this.resolveHeader = res;
-    });
-
     if (opts.signal) {
       // Forward an externally-supplied abort to the internal controller so
       // user-cancel and handle-cancel converge on one signal.
@@ -547,8 +582,8 @@ export class InvocationImpl<I = unknown, O = unknown>
             // before it aborts the controller, so every signal listener observes
             // settled state (the documented terminal-state invariant). Aborting
             // here, ahead of fireError, would fire the signal mid-transition.
-            // A deadline (AbortSignal.timeout) is ERR_TIMEOUT, a manual cancel
-            // is ERR_CANCELLED — distinguished by the abort reason.
+            // The interface intentionally treats every caller-owned abort,
+            // including AbortSignal.timeout(), as ERR_CANCELLED.
             this.fireError(abortToTerminal(opts.signal!.reason));
             // Propagate the external reason onto the (already-aborted) internal
             // controller; abort is idempotent so this does not re-fire the signal.
@@ -614,11 +649,11 @@ export class InvocationImpl<I = unknown, O = unknown>
     if (this.state !== "open") {
       throw (
         this.terminalError ??
-        new InvocationError(ERR_INVOCATION_CLOSED, "invocation is closed")
+        new InvocationError(ERR_INVOCATION_CLOSED)
       );
     }
     if (this.inputSideClosed) {
-      throw new InvocationError(ERR_INPUT_CLOSED, "input is closed");
+      throw new InvocationError(ERR_INPUT_CLOSED);
     }
   }
 
@@ -636,7 +671,7 @@ export class InvocationImpl<I = unknown, O = unknown>
     while (this.inputProducerWaiters.length > 0) {
       this.inputProducerWaiters
         .shift()!
-        .reject(new InvocationError(ERR_INPUT_CLOSED, "input is closed"));
+        .reject(new InvocationError(ERR_INPUT_CLOSED));
     }
   }
 
@@ -649,7 +684,7 @@ export class InvocationImpl<I = unknown, O = unknown>
     // controller last so signal listeners observe settled state (the terminal
     // -state invariant shared by closeOutput/fireError). A pre-abort here would
     // fire the signal mid-transition; matches the Go SDK's Cancel == FireError.
-    this.fireError(new InvocationError(ERR_CANCELLED, "invocation cancelled"));
+    this.fireError(new InvocationError(ERR_CANCELLED));
   }
 
   get outputs(): AsyncIterable<O> {
@@ -660,7 +695,7 @@ export class InvocationImpl<I = unknown, O = unknown>
         // at the acquisition site (not a later read) is deliberate — a
         // second consumer is a programming bug.
         if (this.outputsConsumed) {
-          throw new InvocationError(ERR_ALREADY_CONSUMED, "outputs already consumed");
+          throw new InvocationError(ERR_ALREADY_CONSUMED);
         }
         this.outputsConsumed = true;
         return {
@@ -710,15 +745,6 @@ export class InvocationImpl<I = unknown, O = unknown>
     return r;
   }
 
-  trailer(): Metadata {
-    if (this.state === "open") {
-      throw new Error(
-        "openbindings: trailer() is valid only after the invocation has terminated",
-      );
-    }
-    return this.trailerMd ?? {};
-  }
-
   // ----- Binding-facing -----
 
   inputs(): AsyncIterable<I> {
@@ -753,10 +779,7 @@ export class InvocationImpl<I = unknown, O = unknown>
               // binding spawning two read loops): fail loudly instead of
               // racing the buffer.
               reject(
-                new InvocationError(
-                  ERR_ALREADY_CONSUMED,
-                  "concurrent inputs() readers on one invocation",
-                ),
+                new InvocationError(ERR_ALREADY_CONSUMED),
               );
               return;
             }
@@ -774,12 +797,9 @@ export class InvocationImpl<I = unknown, O = unknown>
     if (this.state !== "open") {
       throw (
         this.terminalError ??
-        new InvocationError(ERR_INVOCATION_CLOSED, "invocation is closed")
+        new InvocationError(ERR_INVOCATION_CLOSED)
       );
     }
-    // Header settles with the first output if the binding never set it.
-    this.settleHeader();
-
     const waiter = this.outputWaiters.shift();
     if (waiter) {
       waiter({ value: output, done: false });
@@ -801,15 +821,13 @@ export class InvocationImpl<I = unknown, O = unknown>
     this.state = "closed";
     this.inputSideClosed = true;
     this.resolveInputClosed();
-    this.settleHeader();
-
     while (this.outputWaiters.length > 0) {
       this.outputWaiters.shift()!({ value: undefined, done: true });
     }
     // An emit parked at close is a binding bug ("terminate exactly once"),
     // but it must not strand: reject it.
     const closedErr = () =>
-      new InvocationError(ERR_INVOCATION_CLOSED, "invocation is closed");
+      new InvocationError(ERR_INVOCATION_CLOSED);
     while (this.outputProducerWaiters.length > 0) {
       this.outputProducerWaiters.shift()!.reject(closedErr());
     }
@@ -833,8 +851,6 @@ export class InvocationImpl<I = unknown, O = unknown>
     this.terminalError = error;
     this.inputSideClosed = true;
     this.resolveInputClosed();
-    this.settleHeader();
-
     // Drain order: parked output consumers resolve `done` and re-surface
     // the terminal on their next-state check (queued values, when present,
     // were already ahead of any parked consumer by the buffer invariant);
@@ -862,34 +878,6 @@ export class InvocationImpl<I = unknown, O = unknown>
     this.controller.abort();
   }
 
-  setHeader(md: Metadata): void {
-    if (this.headerSettled) {
-      throw new Error(
-        "openbindings: setHeader must precede the first emitOutput/closeOutput",
-      );
-    }
-    this.headerMd = md;
-    this.settleHeader();
-  }
-
-  setTrailer(md: Metadata): void {
-    if (this.state !== "open") {
-      // Terminal state is reachable at any time via caller/upstream
-      // cancellation, so a binding may legally set trailers on an async task
-      // after the invocation has already settled. Per the documented contract
-      // ("late sets are dropped"), this is a no-op rather than a throw —
-      // throwing here would surface a benign cancellation race as a crash,
-      // and diverge from the Go SDK's SetTrailer.
-      return;
-    }
-    this.trailerMd = md;
-  }
-
-  private settleHeader(): void {
-    if (this.headerSettled) return;
-    this.headerSettled = true;
-    this.resolveHeader(this.headerMd ?? {});
-  }
 }
 
 // ---------------------------------------------------------------------------
@@ -905,7 +893,7 @@ export class InvocationImpl<I = unknown, O = unknown>
  * ("run it unary"): a short-circuit tears down a live invocation, so use it
  * only when confident the selected binding yields one output. It consumes
  * the sequence (single-consumer, acquire-once) and returns the payload
- * only; metadata is read from the handle you still hold.
+ * only.
  *
  * A terminal error after the first output surfaces as that error, not as a
  * false "got more".
@@ -915,12 +903,12 @@ export async function single<O>(outputs: AsyncIterable<O>): Promise<O> {
   const it = outputs[Symbol.asyncIterator]();
   const first = await it.next();
   if (first.done) {
-    throw new InvocationError(ERR_EXPECTED_SINGLE, "expected one output, got none");
+    throw new InvocationError(ERR_EXPECTED_SINGLE);
   }
   const second = await it.next();
   if (!second.done) {
     await it.return?.(); // abandon -> cancel
-    throw new InvocationError(ERR_EXPECTED_SINGLE, "expected one output, got more");
+    throw new InvocationError(ERR_EXPECTED_SINGLE);
   }
   return first.value;
 }

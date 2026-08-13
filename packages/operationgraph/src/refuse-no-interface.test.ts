@@ -48,7 +48,7 @@ describe("operation-graph direct binding without an interface (C3f)", () => {
     }
     expect(terminal, "expected a pre-execution refusal").toBeDefined();
     expect(terminal!.code).toBe("ERR_VALIDATION_FAILED");
-    expect(String(terminal!.message)).toContain("OG-V-11");
+    expect(Object.hasOwn(terminal!, "data")).toBe(false);
   });
 
   it("runs a pure pass-through graph without an interface", async () => {

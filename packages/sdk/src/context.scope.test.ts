@@ -85,6 +85,29 @@ describe("scopeContext", () => {
     });
   });
 
+  it("admits only selected entries from the general named credential map", () => {
+    const stored = {
+      credentials: {
+        bearer: "token",
+        basic: { username: "u", password: "p" },
+        unrelated: "secret",
+      },
+    };
+    const details: ContextRequiredDetails = {
+      target: "https://api.example.com",
+      alternatives: [{ requirements: [
+        { type: "auth.bearer", name: "bearer" },
+        { type: "auth.basic", name: "basic" },
+      ] }],
+    };
+    expect(scopeContext(stored, details)).toEqual({
+      credentials: {
+        bearer: "token",
+        basic: { username: "u", password: "p" },
+      },
+    });
+  });
+
   it("falls back to the flat apiKey when the requirement carries no name", () => {
     const stored = { apiKeys: { headerKey: "k1" }, apiKey: "flat" };
     const details: ContextRequiredDetails = {
@@ -105,11 +128,26 @@ describe("scopeContext", () => {
     const details: ContextRequiredDetails = {
       target: "https://api.example.com",
       alternatives: [{
-        requirements: [{ type: "config.value", point: "server", key: "url" }],
+        requirements: [{ type: "config.value", point: "server", path: "/url" }],
       }],
     };
     expect(scopeContext(stored, details)).toEqual({
       configuration: { server: { url: "https://api.example.com" } },
+    });
+  });
+
+  it("admits a whole config.value point when path is empty", () => {
+    const stored = {
+      configuration: { address: "orders/{id}", decode: "json" },
+    };
+    const details: ContextRequiredDetails = {
+      target: "x",
+      alternatives: [{ requirements: [
+        { type: "config.value", point: "address", path: "" },
+      ] }],
+    };
+    expect(scopeContext(stored, details)).toEqual({
+      configuration: { address: "orders/{id}" },
     });
   });
 });

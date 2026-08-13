@@ -49,7 +49,7 @@ for await (const event of call.outputs) {
   console.log(event);
 }
 // Terminal failures throw from the iteration as InvocationError: an exit
-// node with error:true (code ERR_OPERATION_GRAPH_EXIT, details = the event),
+// node with error:true (code ERR_OPERATION_GRAPH_EXIT, data = the event),
 // or an unhandled terminal error on an operation conduit, surfaced verbatim.
 ```
 

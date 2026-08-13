@@ -104,14 +104,11 @@ async function runScenario(scenario: ProcessorScenario, joined = false): Promise
       terminal = error as InvocationError;
     }
     const data: Record<string, unknown> = { outputs, dispatches, ...(joined ? { joinedSynthesis: true } : {}) };
-    data.trailer = invocation.diagnostics.trailing();
     if (dispatches[0]) data.dispatch = dispatches[0];
     if (!terminal) return { disposition: "complete", phase: "completion", data };
     data.error = {
       code: terminal.code,
-      message: terminal.message,
-      ...(terminal.details !== undefined ? { details: terminal.details } : {}),
-      ...(terminal.diagnostics !== undefined ? { diagnostics: terminal.diagnostics } : {}),
+      ...(Object.hasOwn(terminal, "data") ? { data: terminal.data } : {}),
     };
     const phase: ProcessorObservation["phase"] = scenario.id === "ASYNC-PS-01"
       ? "load"

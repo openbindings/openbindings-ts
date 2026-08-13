@@ -4,8 +4,6 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { parse, type Document, type Node as KDLNode } from "@bgotink/kdl";
-export { usageFailureEvidence } from "./failure.js";
-export type { UsageFailureEvidence, UsageProcessBytes } from "./failure.js";
 import {
   InvocationError,
   InvocationImpl,
@@ -145,7 +143,7 @@ export class UsageInvoker implements BindingInvoker {
     queueMicrotask(() => void this.#run(args, invocation).catch((error: unknown) => {
       invocation.fireError(error instanceof InvocationError
         ? error
-        : new InvocationError(ERR_RUNTIME, error instanceof Error ? error.message : String(error)));
+        : new InvocationError(ERR_RUNTIME));
     }));
     return invocation as Invocation<I, O>;
   }
@@ -155,14 +153,11 @@ export class UsageInvoker implements BindingInvoker {
     try {
       descriptor = parseDescriptor(await this.#loadArtifact(args));
     } catch (error: unknown) {
-      invocation.fireError(new InvocationError(ERR_SOURCE_LOAD_FAILED, message(error)));
+      invocation.fireError(new InvocationError(ERR_SOURCE_LOAD_FAILED));
       return;
     }
     if (!descriptor.bin) {
-      invocation.fireError(new InvocationError(
-        ERR_SOURCE_CONFIG_ERROR,
-        "usage descriptor omits bin; name and configuration.target cannot create artifact target identity",
-      ));
+      invocation.fireError(new InvocationError(ERR_SOURCE_CONFIG_ERROR));
       return;
     }
 
@@ -171,15 +166,12 @@ export class UsageInvoker implements BindingInvoker {
     try {
       ({ command, selectedPath } = resolveCommand(descriptor.root, args.ref));
     } catch (error: unknown) {
-      invocation.fireError(new InvocationError(ERR_INVALID_REF, message(error)));
+      invocation.fireError(new InvocationError(ERR_INVALID_REF));
       return;
     }
 
     if (contextApiKey(args.context)) {
-      invocation.fireError(contextRequiredError(
-        "usage has no artifact-declared carriage for a generic credential",
-        { target: descriptor.bin, alternatives: [{ requirements: [{ type: "auth.apiKey", description: "name an environment-variable carriage" }] }] },
-      ));
+      invocation.fireError(contextRequiredError({ target: descriptor.bin, alternatives: [{ requirements: [{ type: "auth.apiKey", description: "name an environment-variable carriage" }] }] }));
       return;
     }
 
@@ -190,7 +182,7 @@ export class UsageInvoker implements BindingInvoker {
       void invocation.closeInput();
       if (first !== undefined) {
       if (!isRecord(first)) {
-        invocation.fireError(new InvocationError(ERR_VALIDATION_FAILED, "usage input must be an object"));
+        invocation.fireError(new InvocationError(ERR_VALIDATION_FAILED));
         return;
       }
       input = first;
@@ -209,7 +201,7 @@ export class UsageInvoker implements BindingInvoker {
         invocation.signal,
       );
     } catch (error: unknown) {
-      invocation.fireError(new InvocationError(ERR_VALIDATION_FAILED, message(error)));
+      invocation.fireError(new InvocationError(ERR_VALIDATION_FAILED));
       return;
     }
 
@@ -217,7 +209,7 @@ export class UsageInvoker implements BindingInvoker {
     try {
       result = await this.#executor(planned.request);
     } catch (error: unknown) {
-      if (!invocation.signal.aborted) invocation.fireError(new InvocationError(ERR_RUNTIME, message(error)));
+      if (!invocation.signal.aborted) invocation.fireError(new InvocationError(ERR_RUNTIME));
       return;
     } finally {
       await planned?.cleanup();
@@ -225,16 +217,11 @@ export class UsageInvoker implements BindingInvoker {
     const cfg = contextConfiguration(args.context);
     const classifier = typeof cfg["classify"] === "string" ? this.#classifiers[cfg["classify"]] : undefined;
     if (typeof cfg["classify"] === "string" && !classifier) {
-      invocation.fireError(new InvocationError(ERR_SOURCE_CONFIG_ERROR, `unknown classify configuration ${JSON.stringify(cfg["classify"])}`));
+      invocation.fireError(new InvocationError(ERR_SOURCE_CONFIG_ERROR));
       return;
     }
     if (!(classifier ? classifier(result) : result.exitCode === 0)) {
-      invocation.fireError(new InvocationError(
-        ERR_EXECUTION_FAILED,
-        "Invocation completed unsuccessfully",
-        undefined,
-        usageProcessDetails(result),
-      ));
+      invocation.fireError(new InvocationError(ERR_EXECUTION_FAILED));
       return;
     }
     let output: unknown;
@@ -244,15 +231,9 @@ export class UsageInvoker implements BindingInvoker {
       if (typeof cfg["decode"] === "string" && !decoder) throw new Error(`unknown decode configuration ${JSON.stringify(cfg["decode"])}`);
       output = decoder ? decoder(bytes) : stripTrailingLineEndings(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
     } catch {
-      invocation.fireError(new InvocationError(
-        ERR_RESPONSE_ERROR,
-        "Invocation result could not be decoded",
-        undefined,
-        usageProcessDetails(result),
-      ));
+      invocation.fireError(new InvocationError(ERR_RESPONSE_ERROR));
       return;
     }
-    invocation.setTrailer(usageProcessTrailer(result));
     await invocation.emitOutput(output);
     invocation.closeOutput();
   }

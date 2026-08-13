@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import {
   CONTEXT_REQUIRED,
   ERR_SOURCE_LOAD_FAILED,
+  ERR_OPERATION_VALIDATION_FAILED,
   ERR_VALIDATION_FAILED,
   matchProcessorObservation,
   OperationInvoker,
@@ -131,21 +132,18 @@ async function runScenario(scenario: ProcessorScenario, joined = false): Promise
     ...(dispatch ? { dispatch } : {}),
     ...(joined ? { joinedSynthesis: true } : {}),
   };
-  data.trailer = call.diagnostics.trailing();
   if (inputOpenAtFirstOutput !== undefined) data.trace = { outputs: [{ inputOpen: inputOpenAtFirstOutput }] };
   if (!terminal) return { disposition: "complete", phase: "completion", data };
   data.error = {
     code: terminal.code,
-    message: terminal.message,
-    ...(terminal.details !== undefined ? { details: terminal.details } : {}),
-    ...(terminal.diagnostics !== undefined ? { diagnostics: terminal.diagnostics } : {}),
+    ...(Object.hasOwn(terminal, "data") ? { data: terminal.data } : {}),
   };
   const disposition = terminal.code === CONTEXT_REQUIRED
     ? "context-required"
     : dispatch ? "error" : scenario.id === "GRPC-PS-01" ? "error" : "refusal";
   const phase: ProcessorObservation["phase"] = scenario.id === "GRPC-PS-01"
     ? "resolution"
-    : terminal.code === ERR_VALIDATION_FAILED && dispatch
+    : (terminal.code === ERR_OPERATION_VALIDATION_FAILED || terminal.code === ERR_VALIDATION_FAILED) && dispatch
       ? "dispatch"
       : dispatch
         ? "completion"

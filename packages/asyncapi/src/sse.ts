@@ -42,7 +42,6 @@ import {
   type OutputDecoder,
   type RawResult,
 } from "@openbindings/sdk";
-import { errorMessage } from "./util.js";
 
 /**
  * Bounds buffered not-yet-terminated line length to prevent runaway memory
@@ -106,7 +105,7 @@ export async function streamSSE(
       // A decode error mid-stream is terminal; already-emitted outputs
       // stand (drain-before-terminal).
       h.fireError(
-        e instanceof InvocationError ? e : new InvocationError(ERR_RESPONSE_ERROR, errorMessage(e)),
+        e instanceof InvocationError ? e : new InvocationError(ERR_RESPONSE_ERROR),
       );
       return false;
     }
@@ -132,7 +131,7 @@ export async function streamSSE(
     eventBytes += byteLength.encode(line).length + 1; // +1 for the newline
     if (eventBytes > maxEventBytes) {
       h.fireError(
-        new InvocationError(ERR_RESPONSE_ERROR, `SSE event exceeds ${maxEventBytes} byte limit`),
+        new InvocationError(ERR_RESPONSE_ERROR),
       );
       return false;
     }
@@ -232,12 +231,12 @@ export async function streamSSE(
       let chunk: ReadableStreamReadResult<Uint8Array>;
       try {
         chunk = await reader.read();
-      } catch (e: unknown) {
+      } catch {
         if (h.signal.aborted) return;
         // Abnormal termination is a failure outcome; output values already
         // emitted stand, and the incomplete pending event is DISCARDED —
         // never flushed (WHATWG; Go parity).
-        h.fireError(new InvocationError(ERR_STREAM_ERROR, errorMessage(e)));
+        h.fireError(new InvocationError(ERR_STREAM_ERROR));
         return;
       }
       if (chunk.done) break;
@@ -251,7 +250,7 @@ export async function streamSSE(
       if (buffer.length > SSE_MAX_LINE_BYTES) {
         await reader.cancel().catch(() => {});
         h.fireError(
-          new InvocationError(ERR_STREAM_ERROR, `SSE line exceeds ${SSE_MAX_LINE_BYTES} byte limit`),
+          new InvocationError(ERR_STREAM_ERROR),
         );
         return;
       }

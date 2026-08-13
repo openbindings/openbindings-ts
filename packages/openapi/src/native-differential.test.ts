@@ -12,7 +12,6 @@ import {
   type ProcessorScenario,
   type ProcessorScenarioFile,
 } from "@openbindings/sdk";
-import { openAPIFailureEvidence } from "./failure.js";
 import { OpenAPIInvoker, OpenAPISynthesizer } from "./invoker.js";
 
 const corpusRoot = process.env.OB_SPEC_CORPUS ?? resolve(
@@ -100,15 +99,8 @@ describe("OpenAPI native-client differential", () => {
 
         expect(terminal).toBeDefined();
         expect(outputs).toEqual([]);
-        const evidence = openAPIFailureEvidence(terminal);
-        expect(evidence).not.toBeNull();
-        expect(evidence?.httpResponse.status).toBe(nativeResponse.status);
-        expect(Array.from(evidence?.httpResponse.body ?? [])).toEqual(Array.from(nativeBody));
-        for (const name of Object.keys(peerHeaders(peer))) {
-          expect(evidence?.httpResponse.headers[name.toLowerCase()]).toEqual([
-            nativeResponse.headers.get(name),
-          ]);
-        }
+        expect(terminal?.code).toBe("ERR_EXECUTION_FAILED");
+        expect(Object.hasOwn(terminal as object, "diagnostics")).toBe(false);
       } finally {
         await close(server);
       }

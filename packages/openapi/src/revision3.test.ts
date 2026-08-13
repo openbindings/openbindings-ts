@@ -144,7 +144,7 @@ describe("openbindings.openapi@1 request carriage", () => {
     const result = await invoke(spec, { body: "AAH+/w==" });
     expect(result.requests).toHaveLength(0);
     expect(result.error?.code).toBe(CONTEXT_REQUIRED);
-    expect(result.error?.details).toMatchObject({
+    expect(result.error?.data).toMatchObject({
       alternatives: [{ requirements: [{ type: "config.value", point: "requestMedia" }] }],
     });
   });

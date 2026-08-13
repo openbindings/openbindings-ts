@@ -11,6 +11,7 @@ import {
   ERR_EXECUTION_FAILED,
   type ContextStore,
   type ContextRequiredDetails,
+  type InvocationError,
   type OBInterface,
 } from "@openbindings/sdk";
 import { OpenAPIInvoker, OpenAPISynthesizer } from "./invoker.js";
@@ -201,7 +202,7 @@ describe("BEC Integration (real HTTP)", () => {
 
     await expect(call.closed).rejects.toMatchObject({
       code: CONTEXT_REQUIRED,
-      details: {
+      data: {
         target: targetURL(),
         alternatives: [{ requirements: [{ type: "auth.bearer" }] }],
       },
@@ -247,7 +248,7 @@ describe("BEC Integration (real HTTP)", () => {
     expect(resolves).toBe(0);
   });
 
-  it("keeps credential rejection structural while retaining HTTP evidence diagnostically", async () => {
+  it("keeps credential rejection structural without exposing HTTP evidence", async () => {
     const store = new MemoryStore();
     await store.set(contextKey(), { bearerToken: "wrong-token" });
 
@@ -257,11 +258,10 @@ describe("BEC Integration (real HTTP)", () => {
     const iface = await fetchIface();
 
     const call = opInvoker.invoke(iface, operationSignature("listItems"));
-    await expect(call.closed).rejects.toMatchObject({
-      code: ERR_EXECUTION_FAILED,
-      details: undefined,
-      diagnostics: { httpResponse: { status: 401 } },
-    });
+    const error = await call.closed.catch((caught: unknown) => caught) as InvocationError;
+    expect(error.code).toBe(ERR_EXECUTION_FAILED);
+    expect(Object.hasOwn(error, "data")).toBe(false);
+    expect(Object.hasOwn(error, "diagnostics")).toBe(false);
   });
 
   it("isolated stores do not share credentials", async () => {

@@ -114,11 +114,16 @@ export class AsyncQueue<T> {
 
 /**
  * The in-graph `error` value for a failure originating in an inner
- * invocation: the inner terminal error surfaced verbatim. An
- * InvocationError's code is its routable identity.
+ * invocation: the inner abstract terminal record surfaced verbatim as a
+ * JSON-domain value. This preserves optional data, including explicit null,
+ * without carrying the local Error instance or stack into the graph.
  */
 function errValue(err: unknown): unknown {
-  if (err instanceof InvocationError) return err.code;
+  if (err instanceof InvocationError) {
+    return Object.hasOwn(err, "data")
+      ? { code: err.code, data: err.data }
+      : { code: err.code };
+  }
   return err instanceof Error ? err.message : String(err);
 }
 
@@ -370,11 +375,7 @@ export class Engine {
     if (!node?.onError || ev.errorDepth >= MAX_ERROR_DEPTH) {
       this.exitFlag = true;
       this.handle.fireError(
-        new InvocationError(
-          ERR_OPERATION_GRAPH_EXIT,
-          `unhandled per-event failure at node "${nodeKey}"`,
-          errorEvent,
-        ),
+        new InvocationError(ERR_OPERATION_GRAPH_EXIT, errorEvent),
       );
       this.abortController.abort();
       return;
@@ -434,7 +435,7 @@ export class Engine {
     if (++this.eventCount > MAX_EVENTS) {
       this.exitFlag = true;
       this.handle.fireError(
-        new InvocationError(ERR_EVENT_LIMIT_EXCEEDED, `exceeded maximum event count (${MAX_EVENTS})`),
+        new InvocationError(ERR_EVENT_LIMIT_EXCEEDED),
       );
       this.abortController.abort();
       return;
@@ -458,7 +459,7 @@ export class Engine {
         this.exitFlag = true;
         if (node.error === true) {
           this.handle.fireError(
-            new InvocationError(ERR_OPERATION_GRAPH_EXIT, "operation graph exit", ev.data),
+            new InvocationError(ERR_OPERATION_GRAPH_EXIT, ev.data),
           );
         } else {
           try {
@@ -596,12 +597,9 @@ export class Engine {
           let ie =
             err instanceof InvocationError
               ? err
-              : new InvocationError(ERR_CANCELLED, err instanceof Error ? err.message : String(err));
+              : new InvocationError(ERR_CANCELLED);
           if (c.timedOut) {
-            ie = new InvocationError(
-              TIMEOUT_EXCEEDED,
-              `operation "${node.operation}" exceeded its ${node.timeout}ms budget`,
-            );
+            ie = new InvocationError(TIMEOUT_EXCEEDED);
           } else if (ie.code === ERR_CANCELLED && this.abortController.signal.aborted) {
             return; // the graph itself is tearing down
           }

@@ -1,11 +1,6 @@
 import * as grpc from "@grpc/grpc-js";
 import * as protobuf from "protobufjs";
 
-export {
-  grpcFailureEvidence,
-  type GrpcFailureEvidence,
-  type GrpcStatusDetailEvidence,
-} from "./failure.js";
 import descriptor from "protobufjs/ext/descriptor/index.js";
 import apiJSON from "protobufjs/google/protobuf/api.json" with { type: "json" };
 import descriptorJSON from "protobufjs/google/protobuf/descriptor.json" with { type: "json" };
@@ -22,20 +17,16 @@ import {
   contextConfiguration,
   contextHeaders,
   contextRequiredError,
-  ERR_AUTH_REQUIRED,
   ERR_CANCELLED,
   ERR_CONNECT_FAILED,
   ERR_EXECUTION_FAILED,
   ERR_INVALID_REF,
-  ERR_PERMISSION_DENIED,
   ERR_PROTOCOL,
   ERR_REF_NOT_FOUND,
   ERR_RUNTIME,
   ERR_SOURCE_CONFIG_ERROR,
   ERR_SOURCE_LOAD_FAILED,
   ERR_STREAM_ERROR,
-  ERR_TIMEOUT,
-  ERR_UNAVAILABLE,
   ERR_VALIDATION_FAILED,
   type BindingInvocationArgs,
   type BindingInvoker,
@@ -112,7 +103,7 @@ export class GrpcInvoker implements BindingInvoker {
     queueMicrotask(() => void this.#run(args, invocation).catch((error: unknown) => {
       invocation.fireError(error instanceof InvocationError
         ? error
-        : new InvocationError(ERR_RUNTIME, message(error)));
+        : new InvocationError(ERR_RUNTIME));
     }));
     return invocation as Invocation<I, O>;
   }
@@ -123,7 +114,7 @@ export class GrpcInvoker implements BindingInvoker {
     try {
       ({ service, method: methodName } = parseRef(args.ref));
     } catch (error: unknown) {
-      invocation.fireError(new InvocationError(ERR_INVALID_REF, message(error)));
+      invocation.fireError(new InvocationError(ERR_INVALID_REF));
       return;
     }
     let target: string;
@@ -131,7 +122,7 @@ export class GrpcInvoker implements BindingInvoker {
     try {
       ({ target, transport } = resolveTarget(args));
     } catch (error: unknown) {
-      invocation.fireError(new InvocationError(ERR_SOURCE_CONFIG_ERROR, message(error)));
+      invocation.fireError(new InvocationError(ERR_SOURCE_CONFIG_ERROR));
       return;
     }
     let metadata: Record<string, string>;
@@ -139,12 +130,12 @@ export class GrpcInvoker implements BindingInvoker {
       metadata = resolveMetadata(args.context);
     } catch (error: unknown) {
       if (error instanceof UnplacedCredential) {
-        invocation.fireError(contextRequiredError(error.message, {
+        invocation.fireError(contextRequiredError({
           target,
           alternatives: [{ requirements: [{ type: "auth.apiKey", description: "supply an explicitly named gRPC metadata field" }] }],
         }));
       } else {
-        invocation.fireError(new InvocationError(ERR_SOURCE_CONFIG_ERROR, message(error)));
+        invocation.fireError(new InvocationError(ERR_SOURCE_CONFIG_ERROR));
       }
       return;
     }
@@ -159,7 +150,7 @@ export class GrpcInvoker implements BindingInvoker {
         invocation.fireError(grpcInvocationError(error, ERR_SOURCE_LOAD_FAILED));
       } else {
         const code = message(error).includes("not found") ? ERR_REF_NOT_FOUND : ERR_SOURCE_LOAD_FAILED;
-        invocation.fireError(new InvocationError(code, message(error)));
+        invocation.fireError(new InvocationError(code));
       }
       return;
     }
@@ -178,7 +169,7 @@ export class GrpcInvoker implements BindingInvoker {
         method.validateInput(value);
         encoded = method.encode(value);
       } catch (error: unknown) {
-        invocation.fireError(new InvocationError(ERR_VALIDATION_FAILED, message(error)));
+        invocation.fireError(new InvocationError(ERR_VALIDATION_FAILED));
         return;
       }
       const call = this.#runtime.openCall({ target, transport, method, metadata, signal: invocation.signal });
@@ -200,7 +191,7 @@ export class GrpcInvoker implements BindingInvoker {
           await call.send(method.encode(value));
         } catch (error: unknown) {
           call.cancel();
-          throw new InvocationError(ERR_VALIDATION_FAILED, message(error));
+          throw new InvocationError(ERR_VALIDATION_FAILED);
         }
       }
       await call.closeInput();
@@ -220,7 +211,7 @@ export class GrpcInvoker implements BindingInvoker {
         : grpcInvocationError(error, ERR_STREAM_ERROR));
       call.cancel();
     });
-    const header = call.header.then((value) => invocation.setHeader(value)).catch(() => {});
+    const header = call.header.catch(() => ({}));
     try {
       for await (const bytes of call.responses) {
         await invocation.emitOutput(method.decode(bytes));
@@ -229,13 +220,11 @@ export class GrpcInvoker implements BindingInvoker {
       await sender;
       await header;
       const trailer = await call.trailer.catch(() => ({}));
-      invocation.setTrailer(trailer);
       invocation.closeOutput();
     } catch (error: unknown) {
       await sender;
       await call.done.catch(() => {});
       const trailer = await call.trailer.catch(() => ({}));
-      invocation.setTrailer(trailer);
       if (!invocation.signal.aborted) invocation.fireError(grpcInvocationError(error, ERR_STREAM_ERROR));
     }
   }
@@ -780,8 +769,8 @@ async function firstInput(iterable: AsyncIterable<unknown>): Promise<unknown | u
 
 function grpcInvocationError(error: unknown, fallbackCode: string): InvocationError {
   const nativeCode = grpcCode(error);
-  if (nativeCode === undefined) return new InvocationError(fallbackCode, message(error));
-  return new InvocationError(ERR_EXECUTION_FAILED, message(error), undefined, grpcDetails(error));
+  if (nativeCode === undefined) return new InvocationError(fallbackCode);
+  return new InvocationError(ERR_EXECUTION_FAILED);
 }
 
 function grpcDetails(error: unknown): Record<string, unknown> | undefined {

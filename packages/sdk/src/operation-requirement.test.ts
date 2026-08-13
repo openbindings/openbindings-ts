@@ -113,8 +113,8 @@ class LocalBindingInvoker implements BindingInvoker {
       } catch (error: unknown) {
         invocation.fireError(
           error instanceof Error
-            ? new InvocationError("ERR_RUNTIME", error.message)
-            : new InvocationError("ERR_RUNTIME", String(error)),
+            ? new InvocationError("ERR_RUNTIME")
+            : new InvocationError("ERR_RUNTIME"),
         );
       }
     });

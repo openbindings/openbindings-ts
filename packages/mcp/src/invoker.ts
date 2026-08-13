@@ -94,7 +94,7 @@ export class MCPInvoker implements BindingInvoker {
         inv.fireError(
           err instanceof InvocationError
             ? err
-            : new InvocationError(ERR_RUNTIME, err instanceof Error ? err.message : String(err)),
+            : new InvocationError(ERR_RUNTIME),
         );
       });
     });

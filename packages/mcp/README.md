@@ -44,7 +44,8 @@ MCP `content`, `_meta`, `isError`, progress notifications, JSON-RPC fields,
 HTTP fields, and session facts never become ordinary operation values. A tool
 error, transport or JSON-RPC failure, or missing/nonconforming
 `structuredContent` completes unsuccessfully. Native evidence may be retained
-only through the explicit diagnostics view.
+inside the MCP runtime or native protocol tooling below the OpenBindings
+bridge; it has no ordinary abstract invocation representation.
 
 Tools without `outputSchema`, required-task tools, resources, resource
 templates, and prompts are coverage exclusions. Their MCP-native result

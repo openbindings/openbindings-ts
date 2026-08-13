@@ -59,10 +59,11 @@ interface MockResponse {
   whenInputs?: unknown[];
   emit?: unknown[];
   fail?: string;
+  failData?: unknown;
 }
 
 interface MockOp {
-  onOpen?: { emit?: unknown[]; fail?: string };
+  onOpen?: { emit?: unknown[]; fail?: string; failData?: unknown };
   closesAfter?: number;
   responses: MockResponse[];
 }
@@ -149,21 +150,20 @@ class MockBindingInvoker {
     const inv = new InvocationImpl<unknown, unknown>({ signal: args.signal });
     const op = this.ops[opKey];
     if (!op) {
-      inv.fireError(new InvocationError("ERR_NO_MOCK", `fixture has no mock for operation "${opKey}"`));
+      inv.fireError(new InvocationError("ERR_NO_MOCK"));
       return inv as Invocation<I, O>;
     }
     // The controlled no-input mock closes from below as part of invocation
     // opening, before the caller can race a write. This is the direct-binding
     // behavior OG-EX-42 asks the graph wrapper to preserve.
     if (op.closesAfter === 0) void inv.closeInput();
-    void this.serve(inv, op, opKey);
+    void this.serve(inv, op);
     return inv as Invocation<I, O>;
   }
 
   private async serve(
     handle: BindingHandle<unknown, unknown>,
     op: MockOp,
-    opKey: string,
   ): Promise<void> {
     if (op.onOpen?.emit) {
       try {
@@ -173,7 +173,11 @@ class MockBindingInvoker {
       }
     }
     if (op.onOpen?.fail !== undefined) {
-      handle.fireError(new InvocationError(op.onOpen.fail, op.onOpen.fail));
+      handle.fireError(
+        Object.hasOwn(op.onOpen, "failData")
+          ? new InvocationError(op.onOpen.fail, op.onOpen.failData)
+          : new InvocationError(op.onOpen.fail),
+      );
       return;
     }
 
@@ -194,7 +198,7 @@ class MockBindingInvoker {
     const resp = matchResponse(op, writes);
     if (!resp) {
       handle.fireError(
-        new InvocationError("ERR_NO_MOCK", `no mocked response for "${opKey}" writes ${canon(writes)}`),
+        new InvocationError("ERR_NO_MOCK"),
       );
       return;
     }
@@ -209,7 +213,11 @@ class MockBindingInvoker {
       }
     }
     if (resp.fail !== undefined) {
-      handle.fireError(new InvocationError(resp.fail, resp.fail));
+      handle.fireError(
+        Object.hasOwn(resp, "failData")
+          ? new InvocationError(resp.fail, resp.failData)
+          : new InvocationError(resp.fail),
+      );
       return;
     }
     handle.closeOutput();
@@ -358,14 +366,16 @@ describe.skipIf(!dir)("conformance corpus: execution", () => {
       if (fx.expected.error) {
         expect(terminal, `expected terminal error, completed normally with ${canon(outputs)}`).toBeDefined();
         const detail = fx.expected.errorDetail;
-        if (typeof detail === "string") {
-          // An unhandled conduit terminal error: the graph surfaces the
-          // inner terminal error itself; its code is its identity.
-          expect(terminal!.code).toBe(detail);
+        if (isAbstractTerminalRecord(detail)) {
+          // An unhandled conduit terminal error preserves the complete
+          // abstract record, including absent versus explicit-null data.
+          expect(terminal!.code).toBe(detail.code);
+          expect(Object.hasOwn(terminal!, "data")).toBe(Object.hasOwn(detail, "data"));
+          if (Object.hasOwn(detail, "data")) expect(canon(terminal!.data)).toBe(canon(detail.data));
         } else {
           // An exit node with error:true: the event is the error detail.
           expect(terminal!.code).toBe(ERR_OPERATION_GRAPH_EXIT);
-          expect(canon(terminal!.details)).toBe(canon(detail));
+          expect(canon(terminal!.data)).toBe(canon(detail));
         }
       } else {
         expect(
@@ -388,6 +398,13 @@ describe.skipIf(!dir)("conformance corpus: execution", () => {
     });
   }
 });
+
+function isAbstractTerminalRecord(value: unknown): value is { code: string; data?: unknown } {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const record = value as Record<string, unknown>;
+  return typeof record.code === "string"
+    && Object.keys(record).every((key) => key === "code" || key === "data");
+}
 
 // ---------------------------------------------------------------------------
 // Validation fixtures

@@ -19,6 +19,7 @@ import {
   InvocationImpl,
   contextRequiredError,
   isContextRequired,
+  isContextRequiredDetails,
 } from "./invocation.js";
 import {
   BindingNotFoundError,
@@ -38,7 +39,7 @@ import {
   ERR_INPUT_CLOSED,
   ERR_RUNTIME,
   ERR_TRANSFORM_ERROR,
-  ERR_VALIDATION_FAILED,
+  ERR_OPERATION_VALIDATION_FAILED,
 } from "./errcodes.js";
 import { compileOperationSchema, safeValidate, type CompiledSchema } from "./schema-validation.js";
 import {
@@ -47,8 +48,6 @@ import {
   type InvokeSite,
   type OutputDecoder,
   type ResultClassifier,
-  assumptionWarning,
-  floorStamped,
   newInvokeHooks,
 } from "./hooks.js";
 
@@ -59,18 +58,6 @@ import {
  * looping.
  */
 const MAX_CONTEXT_ROUNDS = 3;
-
-function operationInvokerDiagnostics(
-  bindingKey: string,
-  extra: Record<string, unknown> = {},
-): Record<string, unknown> {
-  return {
-    operationInvoker: {
-      bindingKey,
-      ...Object.fromEntries(Object.entries(extra).filter(([, value]) => value !== undefined && value !== "")),
-    },
-  };
-}
 
 export interface OperationInvokerOptions {
   bindingSelector?: BindingSelector;
@@ -113,7 +100,7 @@ export interface OperationInvokerOptions {
  * Between the caller and the binding it enforces the operation contract:
  * (validation carries the core's claim semantics, OBI-T-16: complete
  * statically reachable schema graph, `format` as annotation, per value; a
- * mismatch is ERR_VALIDATION_FAILED, an unresolvable governing graph is
+ * mismatch is ERR_OPERATION_VALIDATION_FAILED, an unresolvable governing graph is
  * ERR_SCHEMA_UNRESOLVED, never partial validation):
  *   - every caller input validates against the operation's input schema
  *     BEFORE the input transform; a failure is terminal and rejects the
@@ -438,12 +425,7 @@ export class OperationInvoker {
     const evaluator = this.transformEvaluator;
     if ((binding.inputTransform || binding.outputTransform) && !evaluator) {
       callerInv.fireError(
-        new InvocationError(
-          ERR_TRANSFORM_ERROR,
-          "openbindings: no transform evaluator is configured",
-          undefined,
-          operationInvokerDiagnostics(bindingKey),
-        ),
+        new InvocationError(ERR_TRANSFORM_ERROR),
       );
       return;
     }
@@ -457,14 +439,9 @@ export class OperationInvoker {
     if (op.output != null) {
       try {
         outputValidator = compileOperationSchema(iface, binding.operation, "output");
-      } catch (err) {
+      } catch {
         callerInv.fireError(
-          new InvocationError(
-            ERR_SCHEMA_UNRESOLVED,
-            `openbindings: output schema graph for operation ${JSON.stringify(binding.operation)} could not be established: ${(err as Error).message}`,
-            undefined,
-            operationInvokerDiagnostics(bindingKey),
-          ),
+          new InvocationError(ERR_SCHEMA_UNRESOLVED),
         );
         return;
       }
@@ -489,7 +466,7 @@ export class OperationInvoker {
         ...(site ? { site } : {}),
       });
 
-    const mergeResolved = (resolved: Record<string, unknown>): void => {
+    const mergeResolved = (resolved: Record<string, unknown>): boolean => {
       const next: Record<string, unknown> = { ...(context ?? {}), ...resolved };
       // The binding-invoker contract retries with the *augmented* context, not
       // a replaced one. Top-level credential fields are leaf values, so an
@@ -503,9 +480,22 @@ export class OperationInvoker {
       const plain = (v: unknown): v is Record<string, unknown> =>
         typeof v === "object" && v !== null && !Array.isArray(v);
       if (plain(ec) && plain(rc)) {
-        next["configuration"] = { ...ec, ...rc };
+        const configuration: Record<string, unknown> = { ...ec };
+        for (const [point, value] of Object.entries(rc)) {
+          configuration[point] = plain(configuration[point]) && plain(value)
+            ? { ...configuration[point], ...value }
+            : value;
+        }
+        next["configuration"] = configuration;
       }
+      for (const field of ["credentials", "apiKeys"] as const) {
+        const existing = (context ?? {})[field];
+        const incoming = resolved[field];
+        if (plain(existing) && plain(incoming)) next[field] = { ...existing, ...incoming };
+      }
+      const changed = !contextValuesEqual(context ?? {}, next);
       context = next;
+      return changed;
     };
 
     // Preflight (binding-invoker interface `prepareBinding`): collapse
@@ -514,14 +504,21 @@ export class OperationInvoker {
     try {
       const details = await this.invoker.prepareBinding(bindingArgs());
       if (details) {
+        if (!isContextRequiredDetails(details)) {
+          callerInv.fireError(new InvocationError(ERR_RUNTIME));
+          return;
+        }
         const resolvedCtx = this.contextResolver ? await this.contextResolver(details) : null;
         if (!resolvedCtx) {
           callerInv.fireError(
-            contextRequiredError("openbindings: binding requires context", details),
+            contextRequiredError(details),
           );
           return;
         }
-        mergeResolved(resolvedCtx);
+        if (!mergeResolved(resolvedCtx)) {
+          callerInv.fireError(contextRequiredError(details));
+          return;
+        }
       }
     } catch (err) {
       callerInv.fireError(wireError(err));
@@ -596,15 +593,10 @@ export class OperationInvoker {
           if (binding.inputTransform) {
             try {
               v = await applyTransformRef(evaluator!, iface.transforms, binding.inputTransform, v);
-            } catch (e) {
+            } catch {
               await inner.cancel();
               callerInv.fireError(
-                new InvocationError(
-                  ERR_TRANSFORM_ERROR,
-                  `openbindings: input transform failed: ${e instanceof Error ? e.message : String(e)}`,
-                  undefined,
-                  operationInvokerDiagnostics(bindingKey),
-                ),
+                new InvocationError(ERR_TRANSFORM_ERROR),
               );
               return;
             }
@@ -632,13 +624,6 @@ export class OperationInvoker {
 
     // ----- attempt loop -----
 
-    let headerForwarded = false;
-    const forwardHeader = async (inner: Invocation<unknown, unknown>): Promise<void> => {
-      if (headerForwarded) return;
-      headerForwarded = true;
-      callerInv.setHeader(await inner.diagnostics.leading);
-    };
-
     let rounds = 0;
     for (;;) {
       let inner: Invocation<unknown, unknown>;
@@ -664,14 +649,9 @@ export class OperationInvoker {
           if (binding.outputTransform) {
             try {
               data = await applyTransformRef(evaluator!, iface.transforms, binding.outputTransform, data);
-            } catch (e) {
+            } catch {
               await inner.cancel();
-              surface = new InvocationError(
-                ERR_TRANSFORM_ERROR,
-                `openbindings: output transform failed: ${e instanceof Error ? e.message : String(e)}`,
-                undefined,
-                operationInvokerDiagnostics(bindingKey),
-              );
+              surface = new InvocationError(ERR_TRANSFORM_ERROR);
               break;
             }
           }
@@ -681,25 +661,10 @@ export class OperationInvoker {
             const r = safeValidate(outputValidator, data);
             if (!r.valid) {
               await inner.cancel();
-              let msg = `openbindings: output validation failed for operation ${JSON.stringify(binding.operation)}: ${r.errors.join("; ")}`;
-              // Contract-decided teaching remains application-schema advice.
-              // Decode provenance is binding/implementation evidence and
-              // therefore rides only the explicit diagnostics lane.
-              const tier = hooks?.decodeDecidedBy() ?? "";
-              if (floorStamped(op.output) && tier === "hook") {
-                msg +=
-                  " — the synthesized schema still declares the floor's string; elect the real output schema (a stored output-schema election on the operation)";
-              }
-              surface = new InvocationError(
-                ERR_VALIDATION_FAILED,
-                msg,
-                { failures: r.failures },
-                operationInvokerDiagnostics(bindingKey, { decodeDecidedBy: tier }),
-              );
+              surface = new InvocationError(ERR_OPERATION_VALIDATION_FAILED);
               break;
             }
           }
-          await forwardHeader(inner);
           try {
             await callerInv.emitOutput(data as O);
           } catch {
@@ -718,12 +683,12 @@ export class OperationInvoker {
           this.contextResolver &&
           rounds < MAX_CONTEXT_ROUNDS
         ) {
-          const resolvedCtx = await this.contextResolver(invErr.details);
-          if (resolvedCtx) {
-            mergeResolved(resolvedCtx);
-            retry = true;
-          } else {
-            surface = invErr;
+          try {
+            const resolvedCtx = await this.contextResolver(invErr.data);
+            if (resolvedCtx && mergeResolved(resolvedCtx)) retry = true;
+            else surface = invErr;
+          } catch {
+            surface = new InvocationError(ERR_RUNTIME);
           }
         } else {
           surface = invErr;
@@ -741,26 +706,6 @@ export class OperationInvoker {
         continue;
       }
 
-      // Metadata forwarding races a concurrent caller-side terminal (cancel):
-      // setHeader/setTrailer throw on a settled handle. Guard explicitly —
-      // when the caller handle already terminated there is nothing to forward
-      // and nothing left to report.
-      try {
-        await forwardHeader(inner);
-        const t = terminalTrailer(inner) ?? {};
-        // Per the conventions record's recommended built-in defaults
-        // (spec/binding-specs/README.md): the unvalidated-assumption warning
-        // rides the trailer on SUCCESS only (failures carry tier-precise
-        // provenance already), keyed on the format's own decode stamp —
-        // only an assumption lane can trigger it.
-        if (!surface) {
-          const w = assumptionWarning(t["x-ob-decode"]?.[0] ?? "", op.output);
-          if (w) t["x-ob-warning"] = [...(t["x-ob-warning"] ?? []), w];
-        }
-        if (Object.keys(t).length > 0) callerInv.setTrailer(t);
-      } catch {
-        // Caller handle already terminal; metadata can no longer land.
-      }
       if (surface) {
         callerInv.fireError(surface);
       } else {
@@ -792,7 +737,7 @@ export class OperationInvoker {
  * Builds the write-validation hook for an operation, compiling lazily on
  * first write. Validation carries the core's claim semantics (OBI-T-16):
  * the complete statically reachable schema graph, `format` as annotation,
- * applied per value — a mismatch is ERR_VALIDATION_FAILED; a graph that
+ * applied per value — a mismatch is ERR_OPERATION_VALIDATION_FAILED; a graph that
  * cannot be established is ERR_SCHEMA_UNRESOLVED, never partial validation.
  */
 function makeInputValidator(
@@ -809,49 +754,53 @@ function makeInputValidator(
       compiled = true;
       try {
         validator = compileOperationSchema(iface, operationName, "input");
-      } catch (err) {
-        compileError = new InvocationError(
-          ERR_SCHEMA_UNRESOLVED,
-          `openbindings: input schema graph for "${operationName}" could not be established: ${(err as Error).message}`,
-        );
+      } catch {
+        compileError = new InvocationError(ERR_SCHEMA_UNRESOLVED);
       }
     }
     if (compileError) return compileError;
     const r = safeValidate(validator!, input);
     if (!r.valid) {
-      return new InvocationError(
-        ERR_VALIDATION_FAILED,
-        `openbindings: input validation failed for "${operationName}": ${r.errors.join("; ")}`,
-        { failures: r.failures },
-      );
+      return new InvocationError(ERR_OPERATION_VALIDATION_FAILED);
     }
     return null;
   };
 }
 
-/** Reads the inner invocation's trailer, tolerating a non-terminal handle. */
-function terminalTrailer(inner: Invocation<unknown, unknown>): Record<string, string[]> | null {
-  try {
-    const t = inner.diagnostics.trailing();
-    return Object.keys(t).length > 0 ? t : null;
-  } catch {
-    return null;
-  }
-}
-
 function asInvocationError(err: unknown): InvocationError {
   if (err instanceof InvocationError) return err;
-  return new InvocationError(
-    ERR_RUNTIME,
-    err instanceof Error ? err.message : String(err),
-  );
+  return new InvocationError(ERR_RUNTIME);
+}
+
+/** JSON-domain structural comparison used only to suppress identical context retries. */
+function contextValuesEqual(left: unknown, right: unknown): boolean {
+  const canonical = (value: unknown, seen: Set<object>): unknown => {
+    if (!value || typeof value !== "object") return value;
+    if (seen.has(value)) throw new TypeError("cyclic context");
+    seen.add(value);
+    try {
+      if (Array.isArray(value)) return value.map((entry) => canonical(entry, seen));
+      return Object.fromEntries(
+        Object.entries(value as Record<string, unknown>)
+          .sort(([a], [b]) => a.localeCompare(b))
+          .map(([key, entry]) => [key, canonical(entry, seen)]),
+      );
+    } finally {
+      seen.delete(value);
+    }
+  };
+  try {
+    return JSON.stringify(canonical(left, new Set())) === JSON.stringify(canonical(right, new Set()));
+  } catch {
+    return Object.is(left, right);
+  }
 }
 
 /** Converts wiring errors (no invoker for format) raised mid-run into terminal invocation errors. */
 function wireError(err: unknown): InvocationError {
   if (err instanceof InvocationError) return err;
   if (err instanceof Error && err.name === "NoInvokerError") {
-    return new InvocationError(ERR_BINDING_NOT_FOUND, err.message);
+    return new InvocationError(ERR_BINDING_NOT_FOUND);
   }
   return asInvocationError(err);
 }

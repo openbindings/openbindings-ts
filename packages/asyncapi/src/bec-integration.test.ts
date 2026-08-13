@@ -1,6 +1,6 @@
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from "node:http";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { single, CONTEXT_REQUIRED, type OBInterface } from "@openbindings/sdk";
+import { single, CONTEXT_REQUIRED, type InvocationError, type OBInterface } from "@openbindings/sdk";
 import { AsyncAPIInvoker, AsyncAPISynthesizer } from "./invoker.js";
 import { BINDING_SPEC } from "./constants.js";
 
@@ -180,7 +180,7 @@ describe("AsyncAPI binding invoker (real HTTP)", () => {
 
     await expect(call.closed).rejects.toMatchObject({
       code: CONTEXT_REQUIRED,
-      details: {
+      data: {
         target: `http://127.0.0.1:${port}`,
         // R2.a ruling: name is the components.securitySchemes key the
         // operation's $ref resolves through.
@@ -206,23 +206,17 @@ describe("AsyncAPI binding invoker (real HTTP)", () => {
     const out = await single(call.outputs);
     expect(out).toEqual({ echo: { text: "hello" } });
     await call.closed;
-
-    const header = await call.diagnostics.leading;
-    expect(header["content-type"]).toEqual(["application/json"]);
   });
 
-  it("keeps a server 401 structural while retaining status and body diagnostically", async () => {
+  it("keeps a server 401 structural without exposing native evidence", async () => {
     const invoker = new AsyncAPIInvoker();
     const call = invoker.invokeBinding({ source: source(), ref: "#/operations/sendOpenMessage" });
 
     await call.write({ text: "hi" });
-    // Diagnostics carry the raw capture (never an ordinary error detail or
-    // decoded operation value).
-    await expect(call.closed).rejects.toMatchObject({
-      code: "ERR_EXECUTION_FAILED",
-      details: undefined,
-      diagnostics: { status: 401, body: JSON.stringify({ error: "unauthorized" }) },
-    });
+    const error = await call.closed.catch((caught: unknown) => caught) as InvocationError;
+    expect(error.code).toBe("ERR_EXECUTION_FAILED");
+    expect(Object.hasOwn(error, "data")).toBe(false);
+    expect(Object.hasOwn(error, "diagnostics")).toBe(false);
   });
 
   it("fires ERR_MISSING_INPUT when input closes without a message on send", async () => {

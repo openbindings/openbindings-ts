@@ -99,7 +99,6 @@ describe("AsyncAPI readResponseText cap (C6f)", () => {
     await call.write({ text: "hi" });
     await expect(call.closed).rejects.toMatchObject({
       code: "ERR_RESPONSE_ERROR",
-      message: expect.stringContaining("response exceeds 1024 byte limit"),
     });
   });
 });

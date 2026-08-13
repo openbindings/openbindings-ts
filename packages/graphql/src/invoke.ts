@@ -1,4 +1,3 @@
-import type { Metadata } from "@openbindings/sdk";
 import {
   DEFAULT_MAX_DELIVERY_UNIT_BYTES,
   ERR_CONNECT_FAILED,
@@ -6,7 +5,6 @@ import {
   ERR_RESPONSE_ERROR,
   ERR_STREAM_ERROR,
   InvocationError,
-  httpErrorCode,
 } from "@openbindings/sdk";
 import type { Field, IntrospectionSchema } from "./introspection.js";
 import { rootTypeName, INTROSPECTION_QUERY } from "./introspection.js";
@@ -83,16 +81,8 @@ export function resolveField(schema: IntrospectionSchema, rootType: string, fiel
 
 type GraphQLResponse = Record<string, unknown>;
 
-/** Multi-valued invocation metadata from a fetch Headers object. */
-function metadataFromHeaders(h: Headers): Metadata {
-  const md: Metadata = {};
-  h.forEach((value, key) => { md[key] = [value]; });
-  return md;
-}
-
 interface GraphQLHTTPResult {
   body: GraphQLResponse;
-  headers: Metadata;
   mediaType: string;
 }
 
@@ -129,9 +119,9 @@ async function readResponseBytes(resp: Response, maxBytes: number): Promise<Uint
 }
 
 /**
- * Send a GraphQL query over HTTP POST. Non-2xx statuses throw an
- * InvocationError coded via httpErrorCode with `{ status, body }` details;
- * network and parse failures propagate as-is. The body is read under the
+ * Send a GraphQL query over HTTP POST. Non-2xx statuses fail with an abstract
+ * invocation code; status, body, and other native evidence remain below the
+ * OpenBindings bridge. Network and parse failures propagate as-is. The body is read under the
  * delivery-unit bound BEFORE the status check (Go parity: the cap applies
  * to every response, success or failure alike). An unbounded GraphQL
  * response (a single overlarge field, a runaway introspection dump) must
@@ -170,75 +160,25 @@ async function doGraphQLHTTP(
   const text = new TextDecoder().decode(responseBytes);
   const mediaType = (resp.headers.get("content-type") ?? "").split(";", 1)[0]!.trim().toLowerCase();
   if (mediaType !== "application/graphql-response+json" && mediaType !== "application/json") {
-    throw graphQLHTTPFailure(
-      resp,
-      responseBytes,
-      ERR_RESPONSE_ERROR,
-      `unsupported GraphQL response media type ${JSON.stringify(mediaType)}`,
-      mediaType,
-    );
+    throw graphQLHTTPFailure(ERR_RESPONSE_ERROR);
   }
   if (mediaType === "application/json" && !resp.ok) {
-    throw graphQLHTTPFailure(
-      resp,
-      responseBytes,
-      httpErrorCode(resp.status),
-      "Invocation completed unsuccessfully",
-      mediaType,
-    );
+    throw graphQLHTTPFailure(ERR_EXECUTION_FAILED);
   }
   let respBody: unknown;
   try {
     respBody = JSON.parse(text);
-  } catch (e: unknown) {
-    throw graphQLHTTPFailure(
-      resp,
-      responseBytes,
-      ERR_RESPONSE_ERROR,
-      `parse GraphQL response: ${e instanceof Error ? e.message : String(e)}`,
-      mediaType,
-    );
+  } catch {
+    throw graphQLHTTPFailure(ERR_RESPONSE_ERROR);
   }
   if (!wellFormedGraphQLResponse(respBody)) {
-    throw graphQLHTTPFailure(
-      resp,
-      responseBytes,
-      ERR_RESPONSE_ERROR,
-      "response is not a well-formed GraphQL response envelope",
-      mediaType,
-    );
+    throw graphQLHTTPFailure(ERR_RESPONSE_ERROR);
   }
-  return { body: respBody, headers: metadataFromHeaders(resp.headers), mediaType };
+  return { body: respBody, mediaType };
 }
 
-function graphQLHTTPFailure(
-  response: Response,
-  body: Uint8Array,
-  code: string,
-  message: string,
-  mediaType: string,
-): InvocationError {
-  return new InvocationError(code, message, undefined, {
-    status: response.status,
-    body: new TextDecoder().decode(body),
-    httpResponse: {
-      status: response.status,
-      statusText: response.statusText,
-      ...(response.url ? { url: response.url } : {}),
-      headers: metadataFromHeaders(response.headers),
-      body: capturedBytes(body),
-    },
-    graphql: { mediaType },
-  });
-}
-
-function capturedBytes(bytes: Uint8Array): { base64: string; byteLength: number } {
-  let binary = "";
-  const chunkSize = 0x8000;
-  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
-    binary += String.fromCharCode(...bytes.subarray(offset, offset + chunkSize));
-  }
-  return { base64: btoa(binary), byteLength: bytes.byteLength };
+function graphQLHTTPFailure(code: string): InvocationError {
+  return new InvocationError(code);
 }
 
 export function wellFormedGraphQLResponse(value: unknown): value is GraphQLResponse {
@@ -269,10 +209,9 @@ export function wellFormedGraphQLResponse(value: unknown): value is GraphQLRespo
   return true;
 }
 
-/** Result of a unary GraphQL invocation: the complete envelope plus response headers. */
+/** Result of a unary GraphQL invocation: the complete response envelope. */
 export interface GraphQLInvokeResult {
   response: GraphQLResponse;
-  headers: Metadata;
   mediaType: string;
 }
 
@@ -295,9 +234,9 @@ export async function invokeGraphQL(
     res = await doGraphQLHTTP(url, query, operationName, variables, headers, fetchFn, signal, maxResponseBytes);
   } catch (e: unknown) {
     if (e instanceof InvocationError) throw e;
-    throw new InvocationError(ERR_RESPONSE_ERROR, e instanceof Error ? e.message : String(e));
+    throw new InvocationError(ERR_RESPONSE_ERROR);
   }
-  return { response: res.body, headers: res.headers, mediaType: res.mediaType };
+  return { response: res.body, mediaType: res.mediaType };
 }
 
 /**
@@ -377,8 +316,8 @@ export async function* subscribeGraphQL(
       }
       ws = new WebSocket(target, "graphql-transport-ws");
     }
-  } catch (e: unknown) {
-    throw new InvocationError(ERR_CONNECT_FAILED, `WebSocket create failed: ${e instanceof Error ? e.message : String(e)}`);
+  } catch {
+    throw new InvocationError(ERR_CONNECT_FAILED);
   }
 
   // One event queue for the whole session, handshake included: protocol
@@ -414,14 +353,14 @@ export async function* subscribeGraphQL(
     // — same bound, same error identity, platform enforcement point.
     const raw = String(ev.data);
     if (byteEncoder.encode(raw).length > maxUnitBytes) {
-      finish({ error: new InvocationError(ERR_STREAM_ERROR, `WebSocket message exceeds ${maxUnitBytes} byte limit`) });
+      finish({ error: new InvocationError(ERR_STREAM_ERROR) });
       return;
     }
     let msg: { type: string; payload?: unknown };
     try {
       msg = JSON.parse(raw) as { type: string; payload?: unknown };
-    } catch (e: unknown) {
-      finish({ error: new InvocationError(ERR_RESPONSE_ERROR, `parse ws message: ${e instanceof Error ? e.message : String(e)}`) });
+    } catch {
+      finish({ error: new InvocationError(ERR_RESPONSE_ERROR) });
       return;
     }
 
@@ -433,7 +372,7 @@ export async function* subscribeGraphQL(
         if (variables !== undefined) payload.variables = variables;
         ws.send(JSON.stringify({ id: "1", type: "subscribe", payload }));
       } else {
-        finish({ error: new InvocationError(ERR_CONNECT_FAILED, `expected connection_ack, got ${msg.type}`) });
+        finish({ error: new InvocationError(ERR_CONNECT_FAILED) });
       }
       return;
     }
@@ -442,16 +381,13 @@ export async function* subscribeGraphQL(
       case "next": {
         const p = msg.payload;
         if (!wellFormedGraphQLResponse(p)) {
-          finish({ error: new InvocationError(ERR_RESPONSE_ERROR, "next payload is not a well-formed GraphQL response envelope") });
+          finish({ error: new InvocationError(ERR_RESPONSE_ERROR) });
         } else if (queue.length >= MAX_QUEUED_EVENTS) {
           // The consumer is not draining; fail the stream rather than
           // buffer without bound, and stop the inflow at the socket.
           queue.length = 0;
           finish({
-            error: new InvocationError(
-              ERR_STREAM_ERROR,
-              `backpressure overflow: more than ${MAX_QUEUED_EVENTS} undelivered subscription events`,
-            ),
+            error: new InvocationError(ERR_STREAM_ERROR),
           });
           if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
             ws.close();
@@ -462,16 +398,7 @@ export async function* subscribeGraphQL(
         break;
       }
       case "error": {
-        const errors = Array.isArray(msg.payload) ? (msg.payload as Array<{ message: string }>) : undefined;
-        finish({ error: new InvocationError(
-          ERR_EXECUTION_FAILED,
-          errors?.[0]?.message ?? String(msg.payload),
-          undefined,
-          {
-            ...(errors ? { errors } : {}),
-            graphqlTransportWs: { type: "error", payload: msg.payload },
-          },
-        ) });
+        finish({ error: new InvocationError(ERR_EXECUTION_FAILED) });
         break;
       }
       case "complete":
@@ -483,27 +410,19 @@ export async function* subscribeGraphQL(
   ws.onerror = () => {
     finish({
       error: acked
-        ? new InvocationError(ERR_STREAM_ERROR, "WebSocket error")
-        : new InvocationError(ERR_CONNECT_FAILED, "WebSocket connect failed"),
+        ? new InvocationError(ERR_STREAM_ERROR)
+        : new InvocationError(ERR_CONNECT_FAILED),
     });
   };
 
-  ws.onclose = (event) => {
+  ws.onclose = () => {
     // graphql-transport-ws semantics: a clean end is signalled by a
     // `complete` frame (which already finished the sequence and makes this
     // a no-op). A post-ack close without one is an abnormal termination —
     // surfacing it as clean completion would mask server crashes.
-    const details = {
-      graphqlTransportWs: {
-        type: "close",
-        code: event.code,
-        reason: event.reason,
-        wasClean: event.wasClean,
-      },
-    };
     finish({ error: acked
-      ? new InvocationError(ERR_STREAM_ERROR, "WebSocket closed before subscription complete", undefined, details)
-      : new InvocationError(ERR_CONNECT_FAILED, "WebSocket closed during handshake", undefined, details) });
+      ? new InvocationError(ERR_STREAM_ERROR)
+      : new InvocationError(ERR_CONNECT_FAILED) });
   };
 
   const onAbort = () => {

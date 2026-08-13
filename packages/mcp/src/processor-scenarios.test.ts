@@ -88,25 +88,16 @@ async function runScenario(
   else if (Object.keys(wire.listingRequests).length > 0) data.listingRequests = wire.listingRequests;
   if (wire.dispatch) data.dispatch = wire.dispatch;
   if (wire.redirectDispatch) data.redirectDispatch = wire.redirectDispatch;
-  data.trailer = invocation.diagnostics.trailing();
   if (!terminal) return { disposition: "complete", phase: "completion", data };
   data.error = {
     code: terminal.code,
-    message: terminal.message,
-    ...(terminal.details !== undefined ? { details: terminal.details } : {}),
-    ...(terminal.diagnostics !== undefined ? { diagnostics: terminal.diagnostics } : {}),
+    ...(Object.hasOwn(terminal, "data") ? { data: terminal.data } : {}),
   };
   if (terminal.code === CONTEXT_REQUIRED) return { disposition: "context-required", phase: "pre-dispatch", data };
   if (scenario.id.startsWith("MCP-FI-")) {
-    const diagnostics = isRecord(terminal.diagnostics) ? terminal.diagnostics : {};
-    const mcp = isRecord(diagnostics.mcp) ? diagnostics.mcp : {};
     return {
       disposition: "error",
-      phase: Object.hasOwn(mcp, "result")
-        ? "completion"
-        : Object.hasOwn(diagnostics, "httpResponse") || Object.hasOwn(mcp, "jsonrpcError")
-          ? "response"
-          : "completion",
+      phase: scenario.id === "MCP-FI-02" ? "completion" : "response",
       data,
     };
   }

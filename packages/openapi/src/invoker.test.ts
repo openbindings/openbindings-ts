@@ -13,9 +13,11 @@ import {
   ERR_SOURCE_CONFIG_ERROR,
   ERR_SOURCE_LOAD_FAILED,
   ERR_VALIDATION_FAILED,
+  InvocationError,
   USE_DEFAULT,
   newInvokeHooks,
 } from "@openbindings/sdk";
+import { OpenAPIEngine, OpenAPIExecutionError } from "@openbindings/openapi-client/engine";
 import { OpenAPIInvoker } from "./invoker.js";
 
 // ---------------------------------------------------------------------------
@@ -530,7 +532,7 @@ describe("invokeBinding — pre-dispatch failures", () => {
     // base URL — a config.value CONTEXT_REQUIRED, not a terminal error.
     await expect(call.closed).rejects.toMatchObject({
       code: "CONTEXT_REQUIRED",
-      details: { alternatives: [{ requirements: [{ type: "config.value", point: "server", key: "url" }] }] },
+      data: { alternatives: [{ requirements: [{ type: "config.value", point: "server", path: "/url" }] }] },
     });
     expect(requests).toHaveLength(0);
   });
@@ -552,29 +554,99 @@ describe("invokeBinding — pre-dispatch failures", () => {
     const call = new OpenAPIInvoker().invokeBinding({ source: SOURCE, ref: REF_PING, fetch });
 
     const error = await call.closed.catch((caught: unknown) => caught);
-    expect(error).toMatchObject({
-      code: ERR_CONNECT_FAILED,
-      message: "Invocation could not reach its target",
-      diagnostics: {
-        openapiClient: { code: ERR_CONNECT_FAILED, message: "fetch failed" },
-      },
-    });
-    expect((error as Error).message).not.toMatch(/fetch|http|openapi/i);
+    expect(error).toMatchObject({ code: ERR_CONNECT_FAILED });
+    expect((error as Error).message).toBe(ERR_CONNECT_FAILED);
+    expect(JSON.parse(JSON.stringify(error))).toEqual({ code: ERR_CONNECT_FAILED });
+    expect(Object.hasOwn(error as object, "diagnostics")).toBe(false);
   });
 });
 
 describe("invokeBinding — responses", () => {
-  it("reports unsuccessful HTTP completion and retains native status and body only as diagnostics", async () => {
-    const { fetch } = mockFetch(() => jsonResponse({ error: "not found" }, 404));
-    const call = new OpenAPIInvoker().invokeBinding({ source: SOURCE, ref: REF_PING, fetch });
+  it("preserves declaration-selected JSON failure values exactly", async () => {
+    for (const value of [{ error: "not found" }, ["missing"], "missing", 0, false, null]) {
+      const { fetch } = mockFetch(() => jsonResponse(value, 404));
+      const call = new OpenAPIInvoker().invokeBinding({ source: SOURCE, ref: REF_PING, fetch });
+      const error = await call.closed.catch((caught: unknown) => caught);
+      expect(JSON.parse(JSON.stringify(error))).toEqual({
+        code: ERR_EXECUTION_FAILED,
+        data: value,
+      });
+    }
+  });
 
-    // Diagnostics carry the RAW capture (never a decoded operation value —
-    // the content-independence de-sniff removed failure-path parsing too).
+  it("preserves a declared JSON value when a consumer classifies 2xx as failure", async () => {
+    const hooks = newInvokeHooks({ classify: () => false }, {});
+    const { fetch } = mockFetch(() => jsonResponse({ accepted: false }, 200));
+    const call = new OpenAPIInvoker().invokeBinding({
+      source: SOURCE,
+      ref: REF_PING,
+      fetch,
+      hooks,
+    });
     await expect(call.closed).rejects.toMatchObject({
       code: ERR_EXECUTION_FAILED,
-      details: undefined,
-      diagnostics: { status: 404, body: JSON.stringify({ error: "not found" }) },
+      data: { accepted: false },
     });
+  });
+
+  it("preserves deliberate abstract hook failures but drops generic engine details", async () => {
+    const deliberate = newInvokeHooks({
+      decode: () => {
+        throw new InvocationError("APPLICATION_REJECTED", { reason: "policy" });
+      },
+    }, {});
+    const { fetch } = mockFetch(() => jsonResponse({ pong: true }));
+    const authoredCall = new OpenAPIInvoker().invokeBinding({
+      source: SOURCE,
+      ref: REF_PING,
+      fetch,
+      hooks: deliberate,
+    });
+    await expect(authoredCall.closed).rejects.toMatchObject({
+      code: "APPLICATION_REJECTED",
+      data: { reason: "policy" },
+    });
+
+    const engine = {
+      prepare: async () => {
+        throw new OpenAPIExecutionError("NATIVE_FAILURE", "native", {
+          details: { status: 599 },
+          evidence: { transport: "example" },
+        });
+      },
+    } as unknown as OpenAPIEngine;
+    const nativeCall = new OpenAPIInvoker({ engine }).invokeBinding({
+      source: SOURCE,
+      ref: REF_PING,
+    });
+    const error = await nativeCall.closed.catch((caught: unknown) => caught);
+    expect(JSON.parse(JSON.stringify(error))).toEqual({ code: "NATIVE_FAILURE" });
+  });
+
+  it("settles with ERR_RUNTIME when an engine marks a non-JSON value portable", async () => {
+    const engine = {
+      prepare: async () => {
+        throw new OpenAPIExecutionError("APPLICATION_FAILURE", "application failure", {
+          details: new Uint8Array([1, 2, 3]),
+          evidence: { openapi: { declared: true, governingMedia: "application/json" } },
+        });
+      },
+    } as unknown as OpenAPIEngine;
+    const call = new OpenAPIInvoker({ engine }).invokeBinding({
+      source: SOURCE,
+      ref: REF_PING,
+    });
+
+    await expect(call.closed).rejects.toMatchObject({ code: "ERR_RUNTIME" });
+  });
+
+  it("omits data when a failure representation is not a JSON value", async () => {
+    const { fetch } = mockFetch(
+      () => new Response("missing", { status: 404, headers: { "Content-Type": "text/plain" } }),
+    );
+    const call = new OpenAPIInvoker().invokeBinding({ source: SOURCE, ref: REF_PING, fetch });
+    const error = await call.closed.catch((caught: unknown) => caught);
+    expect(JSON.parse(JSON.stringify(error))).toEqual({ code: ERR_EXECUTION_FAILED });
   });
 
   it("does not compile HTTP 401 and 403 into portable failure codes", async () => {
@@ -583,12 +655,12 @@ describe("invokeBinding — responses", () => {
     const { fetch: f401 } = mockFetch(() => jsonResponse({}, 401));
     await expect(
       inv.invokeBinding({ source: SOURCE, ref: REF_PING, fetch: f401 }).closed,
-    ).rejects.toMatchObject({ code: ERR_EXECUTION_FAILED, details: undefined, diagnostics: { status: 401 } });
+    ).rejects.toMatchObject({ code: ERR_EXECUTION_FAILED, data: {} });
 
     const { fetch: f403 } = mockFetch(() => jsonResponse({}, 403));
     await expect(
       inv.invokeBinding({ source: SOURCE, ref: REF_PING, fetch: f403 }).closed,
-    ).rejects.toMatchObject({ code: ERR_EXECUTION_FAILED, details: undefined, diagnostics: { status: 403 } });
+    ).rejects.toMatchObject({ code: ERR_EXECUTION_FAILED, data: {} });
   });
 
   it("consults consumer hooks through the seam (decode + classify)", async () => {
@@ -612,8 +684,7 @@ describe("invokeBinding — responses", () => {
     expect(out).toEqual({ missing: true, note: "no such pet" });
     await call.closed;
 
-    // the conventions record success stamps name what decided each axis.
-    expect(call.diagnostics.trailing()).toMatchObject({ "x-ob-decode": ["hook"], "x-ob-classify": ["hook"] });
+    expect(Object.hasOwn(call as object, "diagnostics")).toBe(false);
   });
 
   it("a declared-JSON body that fails to parse is loud, never a silent string", async () => {
@@ -622,17 +693,9 @@ describe("invokeBinding — responses", () => {
     );
     const call = new OpenAPIInvoker().invokeBinding({ source: SOURCE, ref: REF_PING, fetch });
     const error = await call.closed.catch((caught: unknown) => caught);
-    expect(error).toMatchObject({
-      code: ERR_RESPONSE_ERROR,
-      message: "Invocation result could not be processed",
-      diagnostics: {
-        openapiClient: {
-          code: ERR_RESPONSE_ERROR,
-          message: expect.stringContaining("valid JSON"),
-        },
-      },
-    });
-    expect((error as Error).message).not.toMatch(/response|content-type|json|http|openapi/i);
+    expect(error).toMatchObject({ code: ERR_RESPONSE_ERROR });
+    expect((error as Error).message).toBe(ERR_RESPONSE_ERROR);
+    expect(JSON.parse(JSON.stringify(error))).toEqual({ code: ERR_RESPONSE_ERROR });
   });
 
   it("an undeclared lane decodes as text — the header decides, never the bytes", async () => {
@@ -645,17 +708,15 @@ describe("invokeBinding — responses", () => {
     const out = await single(call.outputs);
     expect(out).toBe(JSON.stringify({ ok: true }));
     await call.closed;
-    expect(call.diagnostics.trailing()).toMatchObject({ "x-ob-decode": ["header/content-type"], "x-ob-classify": ["assumption/2xx"] });
+    expect(Object.hasOwn(call as object, "diagnostics")).toBe(false);
   });
 
-  it("exposes response headers as leading metadata", async () => {
+  it("does not expose response headers through the abstract invocation", async () => {
     const { fetch } = mockFetch(() => jsonResponse({ ok: true }, 200, { "X-Request-Id": "r1" }));
     const call = new OpenAPIInvoker().invokeBinding({ source: SOURCE, ref: REF_PING, fetch });
 
-    const md = await call.diagnostics.leading;
-    expect(md["x-request-id"]).toEqual(["r1"]);
-    expect(md["content-type"]).toEqual(["application/json"]);
     await expect(single(call.outputs)).resolves.toEqual({ ok: true });
+    expect(Object.hasOwn(call as object, "diagnostics")).toBe(false);
   });
 
   it("emits a non-JSON body as a string", async () => {
@@ -690,18 +751,13 @@ describe("invokeBinding — responses", () => {
     const { fetch } = mockFetch(() => new Response(stream, { status: 200 }));
     const call = new OpenAPIInvoker().invokeBinding({ source: SOURCE, ref: REF_PING, fetch });
 
-    await expect(call.closed).rejects.toMatchObject({
-      code: ERR_RESPONSE_ERROR,
-      message: "Invocation result could not be processed",
-      diagnostics: { openapiClient: { message: expect.stringContaining("byte limit") } },
-    });
+    await expect(call.closed).rejects.toMatchObject({ code: ERR_RESPONSE_ERROR });
     expect(bodyCancelled).toBe(true);
   });
 
   it("honors a caller-tuned delivery-unit bound with the unchanged error identity", async () => {
     // The ruled knob (sdk-review ruling 4(a), 2026-07-20): a tiny
-    // args.maxDeliveryUnitBytes trips the same abstract error identity. The
-    // concrete byte-bound explanation remains available as native evidence.
+    // args.maxDeliveryUnitBytes trips the same abstract error identity.
     const { fetch } = mockFetch(
       () => new Response("x".repeat(4096), { status: 200, headers: { "Content-Type": "text/plain" } }),
     );
@@ -712,15 +768,7 @@ describe("invokeBinding — responses", () => {
       maxDeliveryUnitBytes: 1024,
     });
 
-    await expect(call.closed).rejects.toMatchObject({
-      code: ERR_RESPONSE_ERROR,
-      message: "Invocation result could not be processed",
-      diagnostics: {
-        openapiClient: {
-          message: expect.stringContaining("response exceeds 1024 byte limit"),
-        },
-      },
-    });
+    await expect(call.closed).rejects.toMatchObject({ code: ERR_RESPONSE_ERROR });
   });
 
   it("aborts the in-flight request and terminates ERR_CANCELLED on cancel", async () => {
@@ -862,11 +910,9 @@ describe("invokeBinding — SSE responses", () => {
     const { fetch } = mockFetch(() => sseResponse(["data: nope\n\n"], { status: 500 }));
     const call = new OpenAPIInvoker().invokeBinding({ source: SSE_SOURCE, ref: REF_EVENTS, fetch });
 
-    await expect(call.closed).rejects.toMatchObject({
-      code: ERR_EXECUTION_FAILED,
-      details: undefined,
-      diagnostics: { status: 500 },
-    });
+    const error = await call.closed.catch((caught: unknown) => caught) as InvocationError;
+    expect(error.code).toBe(ERR_EXECUTION_FAILED);
+    expect(Object.hasOwn(error, "data")).toBe(false);
   });
 
   it("a 2xx JSON (non-SSE) response on a streaming-capable operation stays unary (framing selects)", async () => {
@@ -905,7 +951,7 @@ describe("invokeBinding — context negotiation", () => {
 
     await expect(call.closed).rejects.toMatchObject({
       code: CONTEXT_REQUIRED,
-      details: {
+      data: {
         target: "https://api.example.com",
         // R2.a ruling: the requirement carries `name`, the securitySchemes key.
         alternatives: [{ requirements: [{ type: "auth.bearer", name: "bearerAuth" }] }],
@@ -925,6 +971,19 @@ describe("invokeBinding — context negotiation", () => {
 
     await expect(single(call.outputs)).resolves.toEqual({ ok: true });
     expect(requests[0]?.headers.get("Authorization")).toBe("Bearer tok_123");
+  });
+
+  it("applies a bearer token from the artifact scheme's named credential entry", async () => {
+    const { fetch, requests } = mockFetch(() => jsonResponse({ ok: true }));
+    const call = new OpenAPIInvoker().invokeBinding({
+      source: authSource(BEARER),
+      ref: REF_DATA,
+      context: { credentials: { bearerAuth: "tok_named" } },
+      fetch,
+    });
+
+    await expect(single(call.outputs)).resolves.toEqual({ ok: true });
+    expect(requests[0]?.headers.get("Authorization")).toBe("Bearer tok_named");
   });
 
   it("applies basic credentials from context", async () => {
@@ -958,7 +1017,7 @@ describe("invokeBinding — context negotiation", () => {
 
     await expect(call.closed).rejects.toMatchObject({
       code: CONTEXT_REQUIRED,
-      details: { alternatives: [{ requirements: [{ type: "auth.basic", name: "basicAuth" }] }] },
+      data: { alternatives: [{ requirements: [{ type: "auth.basic", name: "basicAuth" }] }] },
     });
   });
 
@@ -991,7 +1050,7 @@ describe("invokeBinding — context negotiation", () => {
       code: CONTEXT_REQUIRED,
       // "key" (the securitySchemes key) is the requirement's name, NOT
       // "X-API-Key" (the scheme's own wire-placement name field).
-      details: { alternatives: [{ requirements: [{ type: "auth.apiKey", name: "key" }] }] },
+      data: { alternatives: [{ requirements: [{ type: "auth.apiKey", name: "key" }] }] },
     });
   });
 
@@ -1014,7 +1073,7 @@ describe("invokeBinding — context negotiation", () => {
       inv.invokeBinding({ source: authSource(spec), ref: REF_DATA, fetch: f1 }).closed,
     ).rejects.toMatchObject({
       code: CONTEXT_REQUIRED,
-      details: {
+      data: {
         alternatives: [
           {
             requirements: [
@@ -1100,7 +1159,7 @@ describe("invokeBinding — context negotiation", () => {
       inv.invokeBinding({ source: authSource(spec), ref: REF_DATA, fetch: f1 }).closed,
     ).rejects.toMatchObject({
       code: CONTEXT_REQUIRED,
-      details: {
+      data: {
         alternatives: [
           {
             requirements: [
@@ -1150,7 +1209,7 @@ describe("invokeBinding — context negotiation", () => {
       new OpenAPIInvoker().invokeBinding({ source: authSource(spec), ref: REF_DATA, fetch }).closed,
     ).rejects.toMatchObject({
       code: CONTEXT_REQUIRED,
-      details: {
+      data: {
         alternatives: [
           {
             requirements: [
@@ -1183,7 +1242,7 @@ describe("invokeBinding — context negotiation", () => {
     await expect(
       new OpenAPIInvoker().invokeBinding({ source: authSource(spec), ref: REF_DATA, fetch }).closed,
     ).rejects.toMatchObject({
-      details: {
+      data: {
         alternatives: [
           {
             requirements: [
@@ -1216,8 +1275,8 @@ describe("invokeBinding — context negotiation", () => {
       .invokeBinding({ source: authSource(spec), ref: REF_DATA, fetch })
       .closed.catch((e: unknown) => e);
     const req = (
-      err as { details: { alternatives: Array<{ requirements: Array<Record<string, unknown>> }> } }
-    ).details.alternatives[0]?.requirements[0];
+      err as { data: { alternatives: Array<{ requirements: Array<Record<string, unknown>> }> } }
+    ).data.alternatives[0]?.requirements[0];
     expect(req).toBeDefined();
     expect(req).not.toHaveProperty("grantType");
   });
@@ -1239,7 +1298,7 @@ describe("invokeBinding — context negotiation", () => {
       inv.invokeBinding({ source: authSource(spec), ref: REF_DATA, fetch: f1 }).closed,
     ).rejects.toMatchObject({
       code: CONTEXT_REQUIRED,
-      details: { alternatives: [{ requirements: [{ type: "auth.oauth2" }] }] },
+      data: { alternatives: [{ requirements: [{ type: "auth.oauth2" }] }] },
     });
     expect(r1).toHaveLength(0);
 
@@ -1278,7 +1337,7 @@ describe("invokeBinding — context negotiation", () => {
       new OpenAPIInvoker().invokeBinding({ source: authSource(spec), ref: REF_DATA, fetch }).closed,
     ).rejects.toMatchObject({
       code: CONTEXT_REQUIRED,
-      details: {
+      data: {
         alternatives: [
           {
             requirements: [
@@ -1323,7 +1382,7 @@ describe("invokeBinding — context negotiation", () => {
       new OpenAPIInvoker().invokeBinding({ source: authSource(spec), ref: REF_DATA, fetch }).closed,
     ).rejects.toMatchObject({
       code: CONTEXT_REQUIRED,
-      details: {
+      data: {
         alternatives: [
           {
             requirements: [
@@ -1373,7 +1432,7 @@ describe("invokeBinding — context negotiation", () => {
       new OpenAPIInvoker().invokeBinding({ source: authSource(spec), ref: REF_DATA, fetch }).closed,
     ).rejects.toMatchObject({
       code: CONTEXT_REQUIRED,
-      details: {
+      data: {
         alternatives: [
           {
             requirements: [
@@ -1436,7 +1495,7 @@ describe("invokeBinding — context negotiation", () => {
       inv.invokeBinding({ source: authSource(spec), ref: REF_DATA, fetch: f1 }).closed,
     ).rejects.toMatchObject({
       code: CONTEXT_REQUIRED,
-      details: {
+      data: {
         alternatives: [
           { requirements: [{ type: "auth.bearer" }] },
           { requirements: [{ type: "auth.apiKey" }] },
@@ -1498,7 +1557,7 @@ describe("invokeBinding — context negotiation", () => {
       }).closed,
     ).rejects.toMatchObject({
       code: CONTEXT_REQUIRED,
-      details: {
+      data: {
         alternatives: [
           { requirements: [{ type: "auth.bearer" }, { type: "auth.apiKey" }] },
         ],
@@ -1536,9 +1595,6 @@ describe("invokeBinding — context negotiation", () => {
 
     await expect(call.closed).rejects.toMatchObject({
       code: ERR_VALIDATION_FAILED,
-      diagnostics: {
-        openapiClient: { message: expect.stringContaining("two credentials collide") },
-      },
     });
     expect(requests).toHaveLength(0);
   });
@@ -1600,7 +1656,7 @@ describe("invokeBinding — context negotiation", () => {
       }).closed,
     ).rejects.toMatchObject({
       code: CONTEXT_REQUIRED,
-      details: {
+      data: {
         alternatives: [{ requirements: [{ type: "auth.http.digest", name: "digestAuth" }] }],
       },
     });
@@ -1652,7 +1708,7 @@ describe("invokeBinding — context negotiation", () => {
       new OpenAPIInvoker().invokeBinding({ source: authSource(spec), ref: REF_DATA, fetch }).closed,
     ).rejects.toMatchObject({
       code: CONTEXT_REQUIRED,
-      details: { alternatives: [{ requirements: [{ type: "auth.mutualTLS", name: "mtls" }] }] },
+      data: { alternatives: [{ requirements: [{ type: "auth.mutualTLS", name: "mtls" }] }] },
     });
     expect(requests).toHaveLength(0);
   });
@@ -1668,7 +1724,7 @@ describe("invokeBinding — context negotiation", () => {
     await expect(
       new OpenAPIInvoker().invokeBinding({ source: authSource(spec), ref: REF_DATA, fetch }).closed,
     ).rejects.toMatchObject({
-      details: {
+      data: {
         alternatives: [
           {
             requirements: [
@@ -1712,7 +1768,7 @@ describe("invokeBinding — context negotiation", () => {
       new OpenAPIInvoker().invokeBinding({ source: authSource(spec), ref: REF_DATA, fetch }).closed,
     ).rejects.toMatchObject({
       code: CONTEXT_REQUIRED,
-      details: {
+      data: {
         alternatives: [
           { requirements: [{ type: "auth.http.digest", name: "digestAuth" }] },
           { requirements: [{ type: "auth.mutualTLS", name: "mtls" }] },
@@ -1733,7 +1789,6 @@ describe("invokeBinding — context negotiation", () => {
 
     await expect(call.closed).rejects.toMatchObject({
       code: ERR_SOURCE_CONFIG_ERROR,
-      diagnostics: { openapiClient: { message: expect.stringContaining("missingAuth") } },
     });
     expect(requests).toHaveLength(0);
   });
@@ -1753,7 +1808,6 @@ describe("invokeBinding — context negotiation", () => {
 
     await expect(call.closed).rejects.toMatchObject({
       code: ERR_SOURCE_CONFIG_ERROR,
-      diagnostics: { openapiClient: { message: expect.stringContaining("missingAuth") } },
     });
     expect(requests).toHaveLength(0);
   });
@@ -1799,7 +1853,6 @@ describe("invokeBinding — context negotiation", () => {
 
       await expect(call.closed).rejects.toMatchObject({
         code: ERR_SOURCE_CONFIG_ERROR,
-        diagnostics: { openapiClient: { message: expect.stringContaining("OAPI-P-10") } },
       });
       expect(requests).toHaveLength(0);
     });
@@ -1821,7 +1874,6 @@ describe("invokeBinding — context negotiation", () => {
 
     await expect(call.closed).rejects.toMatchObject({
       code: ERR_SOURCE_CONFIG_ERROR,
-      diagnostics: { openapiClient: { message: expect.stringContaining("OAPI-P-10") } },
     });
     expect(requests).toHaveLength(0);
   });
@@ -1840,7 +1892,6 @@ describe("invokeBinding — context negotiation", () => {
 
     await expect(call.closed).rejects.toMatchObject({
       code: ERR_VALIDATION_FAILED,
-      diagnostics: { openapiClient: { message: expect.stringContaining("OAPI-P-10") } },
     });
     expect(requests).toHaveLength(0);
   });
@@ -1865,7 +1916,6 @@ describe("invokeBinding — context negotiation", () => {
 
     await expect(call.closed).rejects.toMatchObject({
       code: ERR_VALIDATION_FAILED,
-      diagnostics: { openapiClient: { message: expect.stringContaining("OAPI-P-10") } },
     });
     expect(requests).toHaveLength(0);
   });
@@ -1888,7 +1938,6 @@ describe("invokeBinding — context negotiation", () => {
 
     await expect(call.closed).rejects.toMatchObject({
       code: ERR_VALIDATION_FAILED,
-      diagnostics: { openapiClient: { message: expect.stringContaining("OAPI-P-10") } },
     });
     expect(requests).toHaveLength(0);
   });
@@ -1931,7 +1980,7 @@ describe("prepareBinding", () => {
 
     expect(details).toEqual({
       target: "https://api.example.com",
-      alternatives: [{ requirements: [{ type: "auth.bearer", name: "bearerAuth" }] }],
+      alternatives: [{ requirements: [{ type: "auth.bearer", name: "bearerAuth", durable: true }] }],
     });
   });
 

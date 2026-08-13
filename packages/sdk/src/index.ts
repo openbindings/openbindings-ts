@@ -25,6 +25,8 @@ export {
   InvocationImpl,
   single,
   contextRequiredError,
+  isContextRequiredDetails,
+  isPortableInvocationData,
   configValueRequirement,
   isContextRequired,
 } from "./invocation.js";
@@ -65,9 +67,13 @@ export type {
 } from "./context.js";
 export {
   contextBearerToken,
+  contextBearerTokenFor,
+  contextNamedCredential,
   contextApiKey,
   contextApiKeyFor,
   contextBasicAuth,
+  contextBasicAuthFor,
+  contextAccessTokenFor,
   contextString,
   contextHeaders,
   contextCookies,
@@ -211,7 +217,6 @@ export type {
 export {
   CONTEXT_REQUIRED,
   ERR_ALREADY_CONSUMED,
-  ERR_AUTH_REQUIRED,
   ERR_BINDING_NOT_FOUND,
   ERR_BINDING_SELECTION_REQUIRED,
   ERR_CANCELLED,
@@ -219,6 +224,7 @@ export {
   ERR_EVENT_LIMIT_EXCEEDED,
   ERR_EXECUTION_FAILED,
   ERR_EXPECTED_SINGLE,
+  ERR_FRAME_PROTOCOL,
   ERR_INPUT_CLOSED,
   ERR_INVALID_REF,
   ERR_INVOCATION_CLOSED,
@@ -226,7 +232,7 @@ export {
   ERR_MISSING_INPUT,
   ERR_OPERATION_GRAPH_EXIT,
   ERR_OPERATION_NOT_FOUND,
-  ERR_PERMISSION_DENIED,
+  ERR_OPERATION_VALIDATION_FAILED,
   ERR_PROTOCOL,
   ERR_REF_NOT_FOUND,
   ERR_RESPONSE_ERROR,
@@ -235,7 +241,6 @@ export {
   ERR_SOURCE_LOAD_FAILED,
   ERR_STREAM_ERROR,
   ERR_TIMEOUT,
-  ERR_UNAVAILABLE,
   ERR_TOO_MANY_INPUTS,
   ERR_TRANSFORM_ERROR,
   ERR_TRANSPORT_CLOSED,
@@ -243,7 +248,6 @@ export {
   ERR_SCHEMA_UNRESOLVED,
   ERR_TYPE_MISMATCH,
   ERR_VALIDATION_FAILED,
-  httpErrorCode,
 } from "./errcodes.js";
 export type { InvocationErrorCode } from "./errcodes.js";
 

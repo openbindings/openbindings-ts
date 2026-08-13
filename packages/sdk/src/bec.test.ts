@@ -8,9 +8,12 @@ import {
   normalizeContextKey,
   normalizeEndpoint,
   contextBearerToken,
+  contextBearerTokenFor,
   contextApiKey,
   contextApiKeyFor,
   contextBasicAuth,
+  contextBasicAuthFor,
+  contextAccessTokenFor,
   contextString,
   contextSatisfies,
   storeContextResolver,
@@ -208,6 +211,24 @@ describe("well-known context helpers", () => {
     expect(contextBasicAuth({})).toBeNull();
     expect(contextString({}, "custom")).toBe("");
   });
+
+  it("resolves every standard auth family through the general named credential map", () => {
+    const named = {
+      credentials: {
+        bearer: "bearer-named",
+        key: "key-named",
+        basic: { username: "named-user", password: "named-pass" },
+        oauth: { accessToken: "access-named", refreshToken: "refresh-named" },
+      },
+    };
+    expect(contextBearerTokenFor(named, "bearer")).toBe("bearer-named");
+    expect(contextApiKeyFor(named, "key")).toBe("key-named");
+    expect(contextBasicAuthFor(named, "basic")).toEqual({
+      username: "named-user",
+      password: "named-pass",
+    });
+    expect(contextAccessTokenFor(named, "oauth")).toBe("access-named");
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -251,8 +272,8 @@ describe("contextApiKeyFor", () => {
 const BEARER_OR_APIKEY: ContextRequiredDetails = {
   target: "https://api.example.com/v1/users",
   alternatives: [
-    { requirements: [{ type: "auth.bearer" }] },
-    { requirements: [{ type: "auth.apiKey" }] },
+    { requirements: [{ type: "auth.bearer", durable: true }] },
+    { requirements: [{ type: "auth.apiKey", durable: true }] },
   ],
 };
 
@@ -262,6 +283,20 @@ describe("contextSatisfies", () => {
     expect(contextSatisfies({ apiKey: "k" }, BEARER_OR_APIKEY)).toBe(true);
   });
 
+  it("does not apply one flat credential to ambiguous named OR alternatives", () => {
+    const details: ContextRequiredDetails = {
+      target: "https://api.example.com",
+      alternatives: [
+        { requirements: [{ type: "auth.bearer", name: "schemeA" }] },
+        { requirements: [{ type: "auth.bearer", name: "schemeB" }] },
+      ],
+    };
+    expect(contextSatisfies({ bearerToken: "ambiguous" }, details)).toBe(false);
+    expect(
+      contextSatisfies({ credentials: { schemeB: "specific" } }, details),
+    ).toBe(true);
+  });
+
   it("requires every requirement within an alternative (conjunctive)", () => {
     const details: ContextRequiredDetails = {
       target: "k",
@@ -269,7 +304,7 @@ describe("contextSatisfies", () => {
         {
           requirements: [
             { type: "auth.basic" },
-            { type: "config.value", point: "server", key: "url" },
+            { type: "config.value", point: "server", path: "/url" },
           ],
         },
       ],
@@ -298,6 +333,29 @@ describe("contextSatisfies", () => {
         alternatives: [{ requirements: [{ type: "auth.oauth2" }] }],
       }),
     ).toBe(true);
+  });
+
+  it("requires distinct named credentials for repeated standard families in one alternative", () => {
+    const details: ContextRequiredDetails = {
+      target: "k",
+      alternatives: [{ requirements: [
+        { type: "auth.bearer", name: "first" },
+        { type: "auth.bearer", name: "second" },
+      ] }],
+    };
+    expect(contextSatisfies({ bearerToken: "one-token" }, details)).toBe(false);
+    expect(contextSatisfies({ credentials: { first: "one", second: "two" } }, details)).toBe(true);
+  });
+
+  it("interprets an empty config.value path as the whole configuration point", () => {
+    const details: ContextRequiredDetails = {
+      target: "k",
+      alternatives: [{ requirements: [
+        { type: "config.value", point: "address", path: "" },
+      ] }],
+    };
+    expect(contextSatisfies({ configuration: { address: "orders/{id}" } }, details)).toBe(true);
+    expect(contextSatisfies({ configuration: { address: { value: "orders/{id}" } } }, details)).toBe(true);
   });
 
   // R2.d ruling: two ANDed auth.apiKey requirements are distinguished by
@@ -374,6 +432,72 @@ describe("storeContextResolver", () => {
     await expect(resolve(BEARER_OR_APIKEY)).resolves.toBeNull();
   });
 
+  it.each([undefined, false])(
+    "does not reuse stored context when durable is %s",
+    async (durable) => {
+      const store = new MemoryStore();
+      await store.set("api.example.com", { bearerToken: "stored-tok" });
+      const resolve = storeContextResolver(store);
+      const details: ContextRequiredDetails = {
+        target: "https://api.example.com/v1",
+        alternatives: [
+          {
+            requirements: [
+              {
+                type: "auth.bearer",
+                ...(durable === undefined ? {} : { durable }),
+              },
+            ],
+          },
+        ],
+      };
+      await expect(resolve(details)).resolves.toBeNull();
+    },
+  );
+
+  it("selects only a wholly durable alternative", async () => {
+    const store = new MemoryStore();
+    await store.set("api.example.com", {
+      bearerToken: "must-not-reuse",
+      apiKey: "reusable",
+    });
+    const resolve = storeContextResolver(store);
+    const details: ContextRequiredDetails = {
+      target: "https://api.example.com/v1",
+      alternatives: [
+        { requirements: [{ type: "auth.bearer", durable: false }] },
+        { requirements: [{ type: "auth.apiKey", durable: true }] },
+      ],
+    };
+    await expect(resolve(details)).resolves.toEqual({ apiKey: "reusable" });
+  });
+
+  it("does not partially reuse a mixed-durability AND-set", async () => {
+    const store = new MemoryStore();
+    await store.set("api.example.com", {
+      bearerToken: "stored",
+      configuration: { approval: { value: "yes" } },
+    });
+    const resolve = storeContextResolver(store);
+    const details: ContextRequiredDetails = {
+      target: "https://api.example.com/v1",
+      alternatives: [
+        {
+          requirements: [
+            { type: "auth.bearer", durable: true },
+            {
+              type: "config.value",
+              durable: false,
+              point: "approval",
+              path: "",
+            },
+          ],
+        },
+      ],
+    };
+    await expect(resolve(details)).resolves.toBeNull();
+  });
+
   // Integration-flavored proof: a credential stored under a target written
   // WITHOUT the scheme's default port must be found when the challenge
   // target is written WITH it (and vice versa), through the actual
@@ -389,7 +513,7 @@ describe("storeContextResolver", () => {
     const resolve = storeContextResolver(store);
     const details: ContextRequiredDetails = {
       target: "https://api.example.com:443/v1/users",
-      alternatives: [{ requirements: [{ type: "auth.bearer" }] }],
+      alternatives: [{ requirements: [{ type: "auth.bearer", durable: true }] }],
     };
     await expect(resolve(details)).resolves.toEqual({ bearerToken: "stored-tok" });
   });
@@ -404,7 +528,7 @@ describe("storeContextResolver", () => {
     const resolve = storeContextResolver(store);
     const details: ContextRequiredDetails = {
       target: "https://api.example.com/v1/users",
-      alternatives: [{ requirements: [{ type: "auth.bearer" }] }],
+      alternatives: [{ requirements: [{ type: "auth.bearer", durable: true }] }],
     };
     await expect(resolve(details)).resolves.toEqual({ bearerToken: "stored-tok" });
   });

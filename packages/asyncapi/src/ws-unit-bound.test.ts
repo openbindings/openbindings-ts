@@ -79,7 +79,7 @@ describe("WS delivery-unit bound", { timeout: 15_000 }, () => {
       expect(vals).toEqual([]);
       expect(err).toBeInstanceOf(Error);
       expect((err as { code?: string }).code).toBe("ERR_STREAM_ERROR");
-      expect((err as Error).message).toBe(`WebSocket message exceeds ${bound} byte limit`);
+      expect(Object.hasOwn(err as object, "data")).toBe(false);
     } finally {
       invoker.close();
       wss.close();

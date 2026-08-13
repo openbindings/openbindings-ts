@@ -15,10 +15,9 @@ import {
   contextRequiredError,
   contextConfiguration,
   compileExampleSchema,
-  httpErrorCode,
+  ERR_EXECUTION_FAILED,
   ERR_CANCELLED,
   ERR_CONNECT_FAILED,
-  ERR_EXECUTION_FAILED,
   ERR_INVALID_REF,
   ERR_REF_NOT_FOUND,
   ERR_RESPONSE_ERROR,
@@ -27,7 +26,6 @@ import {
   ERR_VALIDATION_FAILED,
   type BindingHandle,
   type BindingInvocationArgs,
-  type Metadata,
 } from "@openbindings/sdk";
 import { BINDING_SPEC, CLIENT_NAME, CLIENT_VERSION } from "./constants.js";
 import { liveListing, parsePinnedListing, resolveRef, type Listing, type TargetKind } from "./listing.js";
@@ -103,16 +101,10 @@ export function validateEndpoint(location: string | undefined): asserts location
   }
 }
 
-/** Names a JSON value's kind for refusal messages (the Go side prints %T). */
-function typeName(v: unknown): string {
-  if (v === null) return "null";
-  if (Array.isArray(v)) return "array";
-  return typeof v;
-}
-
 /**
- * Maps a thrown error to an InvocationError. JSON-RPC errors carry the MCP
- * error code/data in details; HTTP-status errors map via httpErrorCode;
+ * Maps a thrown error to an InvocationError. JSON-RPC application data may
+ * cross as opaque failure data; HTTP-status errors use the generic abstract
+ * execution-failure code;
  * anything else falls back to the phase's code (ERR_CONNECT_FAILED during
  * the initialize handshake, ERR_SOURCE_LOAD_FAILED during live listing,
  * ERR_EXECUTION_FAILED during dispatch).
@@ -124,73 +116,18 @@ function mapError(
 ): InvocationError {
   if (e instanceof InvocationError) return e;
   if (signal.aborted) {
-    return new InvocationError(ERR_CANCELLED, "invocation cancelled");
+    return new InvocationError(ERR_CANCELLED);
   }
-  const msg = e instanceof Error ? e.message : String(e);
   if (e instanceof McpError) {
-    const prefix = `MCP error ${e.code}: `;
-    const nativeMessage = msg.startsWith(prefix) ? msg.slice(prefix.length) : msg;
-    return new InvocationError(
-      ERR_EXECUTION_FAILED,
-      nativeMessage || "Invocation completed unsuccessfully",
-      undefined,
-      {
-      code: e.code,
-      ...(e.data !== undefined ? { data: e.data } : {}),
-      mcp: { jsonrpcError: {
-        code: e.code,
-        message: nativeMessage,
-        ...(e.data !== undefined ? { data: e.data } : {}),
-      } },
-      },
-    );
+    const data = (e as McpError & { data?: unknown }).data;
+    return data !== undefined
+      ? new InvocationError(ERR_EXECUTION_FAILED, data)
+      : new InvocationError(ERR_EXECUTION_FAILED);
   }
   if (e instanceof StreamableHTTPError && typeof e.code === "number" && e.code > 0) {
-    return new InvocationError(httpErrorCode(e.code), "Invocation completed unsuccessfully", undefined, {
-      status: e.code,
-    });
+    return new InvocationError(ERR_EXECUTION_FAILED);
   }
-  return new InvocationError(fallback, msg);
-}
-
-/** Adds exact HTTP evidence when dispatch reached the Streamable HTTP lane. */
-async function mapErrorWithResponse(
-  e: unknown,
-  signal: AbortSignal,
-  fallback: string,
-  response: Response | undefined,
-): Promise<InvocationError> {
-  const mapped = mapError(e, signal, fallback);
-  if (!response) return mapped;
-  const prior = mapped.diagnostics !== null && typeof mapped.diagnostics === "object"
-    ? mapped.diagnostics as Record<string, unknown>
-    : {};
-  return new InvocationError(mapped.code, mapped.message, mapped.details, {
-    ...prior,
-    httpResponse: await capturedHTTPResponse(response),
-  });
-}
-
-async function capturedHTTPResponse(response: Response): Promise<Record<string, unknown>> {
-  const bytes = new Uint8Array(await response.arrayBuffer());
-  const headers: Metadata = {};
-  response.headers.forEach((value, name) => { (headers[name] ??= []).push(value); });
-  return {
-    status: response.status,
-    statusText: response.statusText,
-    ...(response.url ? { url: response.url } : {}),
-    headers,
-    body: capturedBytes(bytes),
-  };
-}
-
-function capturedBytes(bytes: Uint8Array): { base64: string; byteLength: number } {
-  let binary = "";
-  const chunkSize = 0x8000;
-  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
-    binary += String.fromCharCode(...bytes.subarray(offset, offset + chunkSize));
-  }
-  return { base64: btoa(binary), byteLength: bytes.byteLength };
+  return new InvocationError(fallback);
 }
 
 /** Validates the transport credential placement before initialize side effects. */
@@ -200,16 +137,13 @@ function validateCredentialHeaders(
 ): InvocationError | null {
   const context = args.context;
   if (contextApiKey(context) || contextBasicAuth(context)) {
-    return contextRequiredError(
-      "generic credential has no named MCP HTTP-header destination",
-      {
+    return contextRequiredError({
         target: location,
         alternatives: [{ requirements: [{
           type: "auth.apiKey",
           description: "supply the credential through an explicitly named HTTP header",
         }] }],
-      },
-    );
+      });
   }
 
   const headers = contextHeaders(context);
@@ -227,32 +161,20 @@ function validateCredentialHeaders(
   for (const name of Object.keys(headers)) {
     const lower = name.toLowerCase();
     if (contextBearerToken(context) && lower === "authorization") {
-      return new InvocationError(
-        ERR_SOURCE_CONFIG_ERROR,
-        "bearerToken and an explicit Authorization header target the same MCP credential destination",
-      );
+      return new InvocationError(ERR_SOURCE_CONFIG_ERROR);
     }
     if (reserved.has(lower)) {
-      return new InvocationError(
-        ERR_SOURCE_CONFIG_ERROR,
-        `credential header ${JSON.stringify(name)} collides with a processor-owned MCP transport or session field`,
-      );
+      return new InvocationError(ERR_SOURCE_CONFIG_ERROR);
     }
     const prior = seen.get(lower);
     if (prior !== undefined) {
-      return new InvocationError(
-        ERR_SOURCE_CONFIG_ERROR,
-        `credential headers ${JSON.stringify(prior)} and ${JSON.stringify(name)} have the same case-insensitive destination`,
-      );
+      return new InvocationError(ERR_SOURCE_CONFIG_ERROR);
     }
     seen.set(lower, name);
   }
 
   if (Object.keys(contextCookies(context)).length > 0 && seen.has("cookie")) {
-    return new InvocationError(
-      ERR_SOURCE_CONFIG_ERROR,
-      "configured Cookie header collides with structured cookie credentials",
-    );
+    return new InvocationError(ERR_SOURCE_CONFIG_ERROR);
   }
   return null;
 }
@@ -283,19 +205,16 @@ export async function runMCPBinding(
 ): Promise<void> {
   // --- Pre-dispatch validation: no network I/O has happened yet. ---
   if (args.source.bindingSpec !== BINDING_SPEC) {
-    inv.fireError(new InvocationError(
-      ERR_SOURCE_CONFIG_ERROR,
-      `MCP invoker supports exact binding specification ${JSON.stringify(BINDING_SPEC)}, got ${JSON.stringify(args.source.bindingSpec)}`,
-    ));
+    inv.fireError(new InvocationError(ERR_SOURCE_CONFIG_ERROR));
     return;
   }
   let entityType: string;
   let name: string;
   try {
     ({ entityType, name } = parseRef(args.ref));
-  } catch (e: unknown) {
+  } catch {
     inv.fireError(
-      new InvocationError(ERR_INVALID_REF, e instanceof Error ? e.message : String(e)),
+      new InvocationError(ERR_INVALID_REF),
     );
     return;
   }
@@ -304,9 +223,9 @@ export async function runMCPBinding(
   try {
     validateEndpoint(args.source.location);
     location = args.source.location;
-  } catch (e: unknown) {
+  } catch {
     inv.fireError(
-      new InvocationError(ERR_SOURCE_CONFIG_ERROR, e instanceof Error ? e.message : String(e)),
+      new InvocationError(ERR_SOURCE_CONFIG_ERROR),
     );
     return;
   }
@@ -318,9 +237,9 @@ export async function runMCPBinding(
   if (args.source.content !== undefined) {
     try {
       pin = parsePinnedListing(args.source.content);
-    } catch (e: unknown) {
+    } catch {
       inv.fireError(
-        new InvocationError(ERR_SOURCE_LOAD_FAILED, e instanceof Error ? e.message : String(e)),
+        new InvocationError(ERR_SOURCE_LOAD_FAILED),
       );
       return;
     }
@@ -376,10 +295,7 @@ export async function runMCPBinding(
         if (entityType === "tools") {
           if (first === null || typeof first !== "object" || Array.isArray(first)) {
             inv.fireError(
-              new InvocationError(
-                ERR_VALIDATION_FAILED,
-                `MCP tool input must be an object when supplied, got ${typeName(first)}`,
-              ),
+              new InvocationError(ERR_VALIDATION_FAILED),
             );
             return;
           }
@@ -411,25 +327,13 @@ export async function runMCPBinding(
   const authHeaders = buildMCPHeaders(args.context);
   const baseFetch = args.fetch ?? globalThis.fetch;
 
-  // Capture HTTP response headers from POSTs (initialize, the list calls,
-  // then the entity call) so the latest capture at first-emit time is the
-  // call's response.
-  let responseHeaders: Metadata = {};
-  let responseCapture: Response | undefined;
+  // Preserve MCP request semantics across redirects; native response evidence
+  // remains inside the MCP transport below the OpenBindings bridge.
   const captureFetch = async (url: string | URL, init?: RequestInit): Promise<Response> => {
     // Streamable HTTP POST and GET have different MCP meanings. Ordinary
     // user-agent redirect behavior is therefore unsafe (notably 303 POST ->
     // GET); surface the response so the protocol layer classifies it.
-    const response = await baseFetch(url, { ...init, redirect: "manual" });
-    if (init?.method === "POST") {
-      const md: Metadata = {};
-      response.headers.forEach((value, key) => {
-        (md[key] ??= []).push(value);
-      });
-      responseHeaders = md;
-      responseCapture = response.clone();
-    }
-    return response;
+    return await baseFetch(url, { ...init, redirect: "manual" });
   };
 
   // NAMED EXCLUSION (delivery-unit bound, 2026-07-20 ruling): response
@@ -445,8 +349,7 @@ export async function runMCPBinding(
   try {
     await client.connect(transport, { signal: inv.signal });
   } catch (e: unknown) {
-    inv.setHeader(responseHeaders);
-    inv.fireError(await mapErrorWithResponse(e, inv.signal, ERR_CONNECT_FAILED, responseCapture));
+    inv.fireError(mapError(e, inv.signal, ERR_CONNECT_FAILED));
     return;
   }
 
@@ -454,21 +357,10 @@ export async function runMCPBinding(
   // binding specification has evaluated exactly one, so gate the negotiated
   // revision before any listing or entity request.
   if (transport.protocolVersion !== "2025-11-25") {
-    inv.fireError(new InvocationError(
-      ERR_SOURCE_LOAD_FAILED,
-      `negotiated MCP protocol revision ${JSON.stringify(transport.protocolVersion)} is outside ${args.source.bindingSpec}'s accepted envelope (2025-11-25)`,
-    ));
+    inv.fireError(new InvocationError(ERR_SOURCE_LOAD_FAILED));
     try { await client.close(); } catch { /* ignore close errors */ }
     return;
   }
-
-  // setHeader must precede the first emit and may only happen once.
-  let headerSet = false;
-  const setHeaderOnce = (): void => {
-    if (headerSet) return;
-    headerSet = true;
-    inv.setHeader(responseHeaders);
-  };
 
   try {
     // --- Live resolution (no pin): the capability-gated, pagination-
@@ -480,8 +372,7 @@ export async function runMCPBinding(
       try {
         listing = await liveListing(client, entityType, inv.signal);
       } catch (e: unknown) {
-        setHeaderOnce();
-        inv.fireError(await mapErrorWithResponse(e, inv.signal, ERR_SOURCE_LOAD_FAILED, responseCapture));
+        inv.fireError(mapError(e, inv.signal, ERR_SOURCE_LOAD_FAILED));
         return;
       }
       kind = resolveRef(listing, entityType, name, args.source.bindingSpec); // throws ERR_REF_NOT_FOUND
@@ -499,10 +390,7 @@ export async function runMCPBinding(
         // it. A later write is rejected by the closed input side.
         await inv.closeInput();
         for await (const _value of inv.inputs()) {
-          throw new InvocationError(
-            ERR_VALIDATION_FAILED,
-            "MCP static-resource bindings take no input value",
-          );
+          throw new InvocationError(ERR_VALIDATION_FAILED);
         }
       } else {
         targetURI = await expandTemplateInput(inv, name, noInput);
@@ -515,19 +403,18 @@ export async function runMCPBinding(
         const solicit = args.source.bindingSpec === BINDING_SPEC
           ? false
           : resolveSolicit(args.context, opts?.solicitProgress);
-        await runTool(client, name, toolArgs, solicit, args.source.bindingSpec, applicationOutputSchema, inv, setHeaderOnce);
+        await runTool(client, name, toolArgs, solicit, args.source.bindingSpec, applicationOutputSchema, inv);
         break;
       }
       case "prompt":
-        await runPrompt(client, name, promptArgs, inv, setHeaderOnce);
+        await runPrompt(client, name, promptArgs, inv);
         break;
       default: // static resource, or a template expanded to targetURI
-        await runResource(client, targetURI, inv, setHeaderOnce);
+        await runResource(client, targetURI, inv);
         break;
     }
   } catch (e: unknown) {
-    setHeaderOnce();
-    inv.fireError(await mapErrorWithResponse(e, inv.signal, ERR_EXECUTION_FAILED, responseCapture));
+    inv.fireError(mapError(e, inv.signal, ERR_EXECUTION_FAILED));
   } finally {
     try { await client.close(); } catch { /* ignore close errors */ }
   }
@@ -557,18 +444,12 @@ function resolveSolicit(bindCtx: Record<string, unknown> | undefined, consumer: 
  */
 function promptArguments(v: unknown): Record<string, string> {
   if (v === null || typeof v !== "object" || Array.isArray(v)) {
-    throw new InvocationError(
-      ERR_VALIDATION_FAILED,
-      `MCP prompt input must be an object when supplied, got ${typeName(v)}`,
-    );
+    throw new InvocationError(ERR_VALIDATION_FAILED);
   }
   const out: Record<string, string> = {};
   for (const [k, val] of Object.entries(v)) {
     if (typeof val !== "string") {
-      throw new InvocationError(
-        ERR_VALIDATION_FAILED,
-        `MCP prompt argument ${JSON.stringify(k)} must be a string, got ${typeName(val)} (prompt arguments are string-typed and are never coerced)`,
-      );
+      throw new InvocationError(ERR_VALIDATION_FAILED);
     }
     out[k] = val;
   }
@@ -593,11 +474,8 @@ async function expandTemplateInput(
   let tmpl: UriTemplate;
   try {
     tmpl = new UriTemplate(template);
-  } catch (e: unknown) {
-    throw new InvocationError(
-      ERR_SOURCE_LOAD_FAILED,
-      `MCP listing declares resource template ${JSON.stringify(template)}, which is not a valid RFC 6570 URI template: ${e instanceof Error ? e.message : String(e)}`,
-    );
+  } catch {
+    throw new InvocationError(ERR_SOURCE_LOAD_FAILED);
   }
 
   let first: unknown;
@@ -616,28 +494,19 @@ async function expandTemplateInput(
   const values: Record<string, string | string[] | Record<string, string>> = {};
   if (supplied) {
     if (first === null || typeof first !== "object" || Array.isArray(first)) {
-      throw new InvocationError(
-        ERR_VALIDATION_FAILED,
-        `MCP resource-template input must be an object of template variables when supplied, got ${typeName(first)}`,
-      );
+      throw new InvocationError(ERR_VALIDATION_FAILED);
     }
     const declared = new Set(tmpl.variableNames);
     for (const [k, v] of Object.entries(first)) {
       if (!declared.has(k)) {
-        throw new InvocationError(
-          ERR_VALIDATION_FAILED,
-          `MCP resource-template input names variable ${JSON.stringify(k)}, which template ${JSON.stringify(template)} does not declare`,
-        );
+        throw new InvocationError(ERR_VALIDATION_FAILED);
       }
       const stringMap = v !== null
         && typeof v === "object"
         && !Array.isArray(v)
         && Object.values(v as Record<string, unknown>).every((item) => typeof item === "string");
       if (typeof v !== "string" && !(Array.isArray(v) && v.every((item) => typeof item === "string")) && !stringMap) {
-        throw new InvocationError(
-          ERR_VALIDATION_FAILED,
-          `MCP resource-template variable ${JSON.stringify(k)} must be a string, string array, or string map, got ${typeName(v)} (template values are never coerced)`,
-        );
+        throw new InvocationError(ERR_VALIDATION_FAILED);
       }
       values[k] = v as string | string[] | Record<string, string>;
     }
@@ -645,11 +514,8 @@ async function expandTemplateInput(
 
   try {
     return expandRFC6570(template, values);
-  } catch (e: unknown) {
-    throw new InvocationError(
-      ERR_VALIDATION_FAILED,
-      `RFC 6570 expansion of template ${JSON.stringify(template)} failed: ${e instanceof Error ? e.message : String(e)}`,
-    );
+  } catch {
+    throw new InvocationError(ERR_VALIDATION_FAILED);
   }
 }
 
@@ -748,7 +614,6 @@ async function runTool(
   bindingSpec: string,
   applicationOutputSchema: unknown,
   inv: BindingHandle<unknown, unknown>,
-  setHeaderOnce: () => void,
 ): Promise<void> {
   // A supplied input maps whole and verbatim; an absent input omits the
   // arguments member ENTIRELY (§9.1) — never arguments: {}. The TS MCP SDK
@@ -764,7 +629,7 @@ async function runTool(
     // attaches _meta.progressToken only when an onprogress handler is
     // registered, so not registering one IS the wire-level off switch.
     const result = await client.callTool(params, undefined, { signal: inv.signal });
-    await emitToolResult(result, toolName, bindingSpec, applicationOutputSchema, inv, setHeaderOnce);
+    await emitToolResult(result, toolName, bindingSpec, applicationOutputSchema, inv);
     return;
   }
 
@@ -794,7 +659,6 @@ async function runTool(
         progressChain = progressChain
           .then(() => {
             if (progressTerminated) return;
-            setHeaderOnce();
             return inv.emitOutput(progress);
           })
           .catch(() => {
@@ -810,13 +674,13 @@ async function runTool(
   resultArrived = true;
   await progressChain;
 
-  await emitToolResult(result, toolName, bindingSpec, applicationOutputSchema, inv, setHeaderOnce);
+  await emitToolResult(result, toolName, bindingSpec, applicationOutputSchema, inv);
 }
 
 /**
  * Classifies and emits a completed tools/call result: an isError result is
- * a failure outcome whatever its content (§9.4, MCP-P-06); every other
- * completed result decodes per §9.3 and terminates the stream.
+ * a failure outcome whatever its content (§9.3, MCP-P-06); every other
+ * completed result decodes per §9.2 and terminates the stream.
  */
 async function emitToolResult(
   result: Awaited<ReturnType<Client["callTool"]>>,
@@ -824,44 +688,28 @@ async function emitToolResult(
   bindingSpec: string,
   applicationOutputSchema: unknown,
   inv: BindingHandle<unknown, unknown>,
-  setHeaderOnce: () => void,
 ): Promise<void> {
   if (result.isError) {
     // Application-level tool failure (CallToolResult.isError). The server
-    // replied normally; classification is protocol-native (§9.4).
-    const msg = extractContent(result.content);
-    throw new InvocationError(
-      ERR_EXECUTION_FAILED,
-      msg || `MCP tool ${JSON.stringify(toolName)} reported an error`,
-      undefined,
-      { mcpResult: result, mcp: { result } },
-    );
+    // replied normally; classification is protocol-native (§9.3). Its
+    // structuredContent member, when present, is the application-authored
+    // failure value and crosses unchanged as abstract error data.
+    throw Object.hasOwn(result, "structuredContent")
+      ? new InvocationError(ERR_EXECUTION_FAILED, result.structuredContent)
+      : new InvocationError(ERR_EXECUTION_FAILED);
   }
 
   let output: unknown = result;
   if (bindingSpec === BINDING_SPEC) {
     if (result.structuredContent === undefined) {
-      throw new InvocationError(
-        ERR_RESPONSE_ERROR,
-        `MCP tool ${JSON.stringify(toolName)} declared outputSchema but returned no structuredContent application value`,
-        undefined,
-        { mcp: { result } },
-      );
+      throw new InvocationError(ERR_RESPONSE_ERROR);
     }
     const validation = compileExampleSchema(applicationOutputSchema, undefined).validate(result.structuredContent);
     if (!validation.valid) {
-      const first = validation.failures[0];
-      throw new InvocationError(
-        ERR_RESPONSE_ERROR,
-        `MCP tool ${JSON.stringify(toolName)} returned structuredContent that does not satisfy its outputSchema${first ? `: ${first.path ? `${first.path}: ` : ""}${first.message}` : ""}`,
-        undefined,
-        { mcp: { result } },
-      );
+      throw new InvocationError(ERR_RESPONSE_ERROR);
     }
     output = result.structuredContent;
   }
-  setHeaderOnce();
-  inv.setTrailer({ "x-ob-decode": ["protocol/result"], "x-ob-classify": ["protocol/isError"] });
   await inv.emitOutput(output);
   inv.closeOutput();
 }
@@ -882,12 +730,9 @@ async function runResource(
   client: Client,
   uri: string,
   inv: BindingHandle<unknown, unknown>,
-  setHeaderOnce: () => void,
 ): Promise<void> {
   const result = await client.readResource({ uri }, { signal: inv.signal });
 
-  setHeaderOnce();
-  inv.setTrailer({ "x-ob-decode": ["protocol/result"] });
   await inv.emitOutput(result);
   inv.closeOutput();
 }
@@ -898,7 +743,6 @@ async function runPrompt(
   promptName: string,
   promptArgs: Record<string, string> | undefined,
   inv: BindingHandle<unknown, unknown>,
-  setHeaderOnce: () => void,
 ): Promise<void> {
   // An absent input omits the arguments member entirely (§9.1); a supplied
   // one was validated string-typed before dispatch (MCP-P-03).
@@ -907,18 +751,8 @@ async function runPrompt(
 
   const result = await client.getPrompt(params, { signal: inv.signal });
 
-  setHeaderOnce();
   await inv.emitOutput(result);
   inv.closeOutput();
-}
-
-/** Extract text from MCP content array for error messages. */
-function extractContent(content: unknown): string {
-  if (!Array.isArray(content)) return String(content);
-  return content
-    .map((c: { type?: string; text?: string }) => c.text ?? "")
-    .filter(Boolean)
-    .join("\n");
 }
 
 /**

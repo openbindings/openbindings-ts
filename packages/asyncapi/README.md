@@ -11,7 +11,7 @@ no older compatibility meaning for `@1`.
 The layering is deliberate:
 
 - this package owns OBI source/ref validation, invocation-frame bridging,
-  protocol-independent errors and diagnostics, synthesis, and coverage;
+  protocol-independent unsuccessful completion, synthesis, and coverage;
 - the standalone runtime owns AsyncAPI loading, normalization, target and
   message resolution, security interpretation, and execution;
 - protocol drivers own concrete transport and nested AsyncAPI protocol-binding
@@ -75,13 +75,24 @@ operation and protocol driver; they are not written into the OBI document.
 
 Ordinary inputs and outputs are message payload application values. AsyncAPI
 message envelopes, protocol-binding objects, headers, status, framing, and
-transport facts do not become operation fields or ordinary values. Native
-evidence may be retained only through the explicit diagnostics surface.
+transport facts do not become operation fields, ordinary values, or abstract
+failure data. Artifact runtimes, native clients, logs, and traces may retain
+native evidence below this boundary.
 
 Message headers are currently an explicit abstraction-boundary exclusion.
 JSON-family and UTF-8 text payloads have built-in value carriage; binary and
 codec-specific payloads require a faithful value mapping and are otherwise
 excluded rather than guessed.
+
+For AsyncAPI 3 WebSocket operations with an authored `reply`, the standalone
+runtime keeps the invocation full-duplex: closing caller input does not end the
+reply lane, replies remain ordered, and completion follows the peer's clean
+close or cancellation. Static same-endpoint and distinct-endpoint reply
+channels are supported without exposing WebSocket facts as operation values.
+Reply addresses derived from application headers or payload runtime
+expressions, and reply routes that change server or protocol, are rejected
+before dispatch until the artifact supplies enough interoperable carriage or a
+qualified protocol driver owns that behavior.
 
 ## Protocol drivers
 
@@ -143,10 +154,15 @@ side-effect-free check when the artifact is inline or already cached.
 ## Qualification
 
 The Go and TypeScript adapters produce exactly equal OBI and exhaustive
-coverage results for all 247 independently adjudicated valid artifacts in the
-sealed 250-repository AsyncAPI corpus. The sole raw parser mismatch is an
-invalid external YAML document and is retained outside the supported-artifact
-denominator rather than normalized with corpus-specific behavior.
+coverage results for all 247 independently adjudicated valid artifacts in a
+250-repository AsyncAPI qualification corpus of independently sourced GitHub
+artifacts. The corpus is an internal OpenBindings qualification asset and is
+not redistributed; its sealed 63-repository holdout is committed by SHA-256
+`ad9a78e13914a343f1e7dc37a7de22b749e0fbbbceba1995b17a83c59663a3da`, and the
+distilled qualification report is published with the OpenBindings
+specification. The sole raw parser mismatch is an invalid external YAML
+document and is retained outside the supported-artifact denominator rather
+than normalized with corpus-specific behavior.
 
 ## License
 

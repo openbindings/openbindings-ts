@@ -136,14 +136,12 @@ try {
   for await (const item of call.outputs) console.log(item);
 } catch (err) {
   if (isContextRequired(err)) {
-    // A negotiation signal, not a failure: err.details names the target and
-    // which context fields satisfy it, and err.message already carries that
-    // summary. Resolve context and retry.
-    console.error(err.message);
+    // A negotiation signal: err.data names the target and which context
+    // fields satisfy it. Resolve context and retry.
+    console.error(err.data);
   } else if (err instanceof InvocationError) {
-    // Unsuccessful completion. Do not infer retry or protocol meaning from
-    // an open implementation code; selected-binding evidence, when enabled,
-    // is available only at err.diagnostics.
+    // Unsuccessful completion. The abstract record is exactly code plus
+    // optional data; do not infer retry or protocol meaning from an open code.
     throw err;
   } else {
     throw err;
@@ -152,11 +150,16 @@ try {
 ```
 
 `InvocationError.code` is typed `InvocationErrorCode | (string & {})`: the canonical codes autocomplete while a third-party invoker's own code still type-checks.
+The interoperable record has no `message`, `details`, or `diagnostics` member.
+The inherited JavaScript `Error.message` is process-local presentation only;
+it is not serialized or part of cross-implementation behavior. Native binding
+evidence belongs in the standalone artifact client, logs, traces, or protocol
+tooling, not on the abstract invocation.
 
 Two idioms worth knowing:
 
 - **No-input operations** — call `close()`, or nothing at all (a binding that needs no input dispatches without one).
-- **Operations that require input** — forgetting to `write()` parks the binding until cancellation (`cancel()` or an aborted `AbortSignal`), whose terminal error diagnoses the never-written input. Calling `close()` with no prior `write()` fails fast with `ERR_MISSING_INPUT` naming the missing parameter.
+- **Operations that require input** — forgetting to `write()` parks the binding until cancellation (`cancel()` or an aborted `AbortSignal`). Calling `close()` with no prior `write()` fails fast with `ERR_MISSING_INPUT`.
 
 Client-streaming and bidirectional callers own `close()` (and drive `write()` and `outputs` concurrently); `cancel()` tears the invocation down. `close()` is idempotent and never rejects.
 

@@ -43,12 +43,9 @@ gRPC metadata. Generic credentials without a named carriage raise
 
 Response messages remain outputs even when their fields look error-shaped. A
 non-OK final gRPC status terminates the invocation without retracting earlier
-messages. Its numeric code, message, and rich `google.protobuf.Any` detail
-payloads are preserved only as optional terminal diagnostics and exposed by
-`grpcFailureEvidence(error)`; local SDK and ProtoJSON validation failures do
-not invent gRPC evidence. Leading and trailing metadata are available through
-the explicit `diagnostics` view, retaining values in order with binary `-bin`
-values represented as base64 strings. They are not operation values.
+messages. Its numeric code, description, rich `google.protobuf.Any` details,
+and leading/trailing metadata remain below the abstract invocation boundary;
+they do not become operation values or failure data.
 
 The binding specification is normative; this README describes the package
 surface and declared implementation coverage.

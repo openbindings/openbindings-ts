@@ -119,7 +119,6 @@ describe("GraphQLInvoker HTTP", () => {
       operationName: "Viewer",
       variables: { id: "u-1", unused: 7, _query: "ordinary variable" },
     });
-    await expect(invocation.diagnostics.leading).resolves.toMatchObject({ "x-request-id": ["req-1"] });
   });
 
   it("omits variables when caller input is absent", async () => {
@@ -162,7 +161,7 @@ describe("GraphQLInvoker HTTP", () => {
     const fetchFn = vi.fn();
     const invoker = new GraphQLInvoker();
     await expect(invoker.prepareBinding({ source, ref: "query/viewer" })).resolves.toMatchObject({
-      alternatives: [{ requirements: [{ type: "config.value", point: "document" }] }],
+      alternatives: [{ requirements: [{ type: "config.value", point: "document", path: "" }] }],
     });
     const invocation = invoker.invokeBinding({ source: { bindingSpec: BINDING_SPEC, location: endpoint }, ref: "query/viewer", fetch: fetchFn });
     await expect(invocation.closed).rejects.toMatchObject({ code: CONTEXT_REQUIRED });

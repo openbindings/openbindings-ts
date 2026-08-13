@@ -4,6 +4,23 @@
 
 ### Changed
 
+- **Invocation failures now use the minimal abstract record `{code,data?}`.**
+  Portable `message`, `details`, and `diagnostics` members were removed;
+  `data` is JSON-domain data defined by the code-owning rule or opaque
+  application-authored failure data admitted by the governing binding
+  specification, with absent data distinct from explicit JSON null.
+  `CONTEXT_REQUIRED` retains its closed OR-of-AND challenge in `data` and is
+  validated before resolution. Frame and operation-schema mechanics now use
+  the collision-resistant owned codes `ERR_FRAME_PROTOCOL` and
+  `ERR_OPERATION_VALIDATION_FAILED`; binding-specific `ERR_PROTOCOL` and
+  `ERR_VALIDATION_FAILED` remain open identifiers. Caller aborts, including
+  `AbortSignal.timeout()`, uniformly produce `ERR_CANCELLED`; native timeout
+  evidence remains below the bridge. `config.value` now addresses nested
+  configuration through a relative JSON Pointer `path`, durable context is
+  reused only when every requirement of the selected alternative explicitly
+  permits it, and named credentials remain scheme-scoped. The Core OBI
+  document model is unchanged.
+
 - **OpenAPI invocation is now exposed as a standalone document-driven client.**
   `@openbindings/openapi-client` invokes a directly selected OpenAPI 3.0/3.1
   operation without an OBI document, while `@openbindings/openapi` is the thin
@@ -126,7 +143,8 @@
   `structuredContent`, and admit solicited progress; resource operations
   describe complete `ReadResourceResult` values. Live embedding retains the
   pagination-exhausted listing, discovery gates the negotiated revision,
-  native `isError` results retain the MCP payload in error details, and
+  native `isError` results retain the application-authored MCP payload as
+  `InvocationError.data`, and
   `bearerToken` uses the declared `Authorization: Bearer` carrier.
 
 - **Portable synthesis conformance now proves refusal as well as successful
@@ -236,18 +254,6 @@
   boundary). Exports maps carry per-condition `types` (`.d.cts` for
   `require`), and every package is `sideEffects: false`.
 
-- **A mid-stream deadline is now classified `ERR_TIMEOUT` (transient / effects:
-  possible), deterministically and uniformly across formats, rather than
-  `ERR_CANCELLED` — restoring the retry-safety signal.** An explicit caller
-  cancel remains `ERR_CANCELLED`. The invocation handle now distinguishes an
-  `AbortSignal.timeout()` abort (whose reason is a `DOMException` named
-  `"TimeoutError"`) from a manual `cancel()`/abort: a timeout-reason abort fires
-  `ERR_TIMEOUT` (a deadline may fire after outputs have flowed, so retry-safety
-  is "may have executed"), any other abort fires `ERR_CANCELLED`. This mirrors
-  the Go SDK's `ctx.Err()` branch (`DeadlineExceeded` → `ERR_TIMEOUT`,
-  `Canceled` → `ERR_CANCELLED`) for cross-SDK parity of code, category, and
-  effects.
-
 - **`isSupportedVersion` now answers OBI-T-04 acceptance (patch-lenient within a
   supported minor line), matching `validateInterface`/`parseDocument`;
   previously it was the strict tested-range check.** A 0.2.0 SDK now returns
@@ -328,8 +334,8 @@
   Hooks see an `InvokeSite` and a `RawResult`; failures carry tier provenance.
   `snapshotHooks` exposes the both-tier snapshot to direct binding-layer
   callers (`args.hooks`); `withRuntime` carries the hook fields. Success
-  stamps (`x-ob-decode`/`x-ob-classify`) and the unvalidated-assumption
-  warning (`x-ob-warning`) ride invocation metadata.
+  Decode/classify provenance and unvalidated-assumption warnings remain below
+  the abstract invocation boundary as binding-interpretation evidence.
 
 - **BREAKING: content-independent decode/classify in the openapi and asyncapi
   invokers (de-sniffed).** openapi now decodes by the response's Content-Type
@@ -340,8 +346,8 @@
   `contentType`, and no longer unwraps `{error}`/`{data}` convention envelopes
   in the builtin (attach an `outputDecoder` for convention lanes). The
   `maybeJSON` helper (payload sniffing) is REMOVED from the package surface —
-  `isJSONContentType` (header framing) replaces it; error details carry the
-  raw capture, never a parsed value.
+  `isJSONContentType` (header framing) replaces it. Raw captures remain below
+  the abstract invocation boundary and never become failure data.
 
 - **Operations are invoked through signatures.** Added `OperationSignature<I, O>`
   (an inert `{ key }` carrying its input/output types as a phantom brand,
@@ -359,20 +365,20 @@
   and `OperationInvoker.invoke` return an `Invocation<I, O>` synchronously instead
   of an `AsyncIterable<InvocationOutput>`: the caller writes input messages
   (`write`/`close`), consumes `outputs` (a standard single-consumer
-  `AsyncIterable<O>`), and observes lifecycle via `closed`, `header`, `trailer()`,
-  and `cancel()`. One call shape serves unary, server-streaming, client-streaming,
+  `AsyncIterable<O>`), and observes lifecycle via `closed` and `cancel()`. One
+  call shape serves unary, server-streaming, client-streaming,
   and bidirectional bindings; cardinality lives in the binding, never in the
   signature. Bindings implement the push-side `BindingHandle` (`inputs()`,
-  `closeInput`, `emitOutput`, `closeOutput`, `fireError`, `signal`,
-  `setHeader`/`setTrailer`) over the shared `InvocationImpl`, which owns bounded
+  `closeInput`, `emitOutput`, `closeOutput`, `fireError`, `signal`) over the
+  shared `InvocationImpl`, which owns bounded
   buffers with block-on-full backpressure in both directions, lossless in-order
   exactly-once delivery, drain-before-terminal ordering, and acquire-once output
   consumption (`ERR_ALREADY_CONSUMED`). The one blessed terminal is the free
   function `single(outputs)` — strict, short-circuiting "exactly one"
   (`ERR_EXPECTED_SINGLE`). The `InvocationOutput` envelope and its
   `status`/`durationMs` fields are gone: outputs are bare values of the
-  operation's output type; transport facts surface via `header` metadata and
-  error `details`.
+  operation's output type. Unsuccessful completion is exactly `code` plus
+  optional `data`; transport facts remain below the abstract boundary.
   - `BindingInvocationInput` → `BindingInvocationArgs` (`{source, ref, binding?,
     context?, interface?, inputSchema?, signal?, fetch?}`; no `input`, no
     `security`, no `store`, no `callbacks`); `OperationInvocationInput` is
@@ -395,7 +401,7 @@
   Consumers switching on `code` values must update.
 
 - **Authentication is negotiated context, not a document field.** Bindings that
-  need missing runtime context terminate with `CONTEXT_REQUIRED` (details:
+  need missing runtime context terminate with `CONTEXT_REQUIRED` (data:
   `ContextRequiredDetails` — `key` + disjunctive `alternatives` over conjunctive
   `requirements`, families `auth.bearer`/`auth.apiKey`/`auth.basic`/`auth.oauth2`)
   BEFORE any observable side effect. The operation invoker resolves challenges
@@ -507,8 +513,8 @@
   `TypeError: Cannot read properties of null (reading 'message')`, stranding
   the invocation with no settled error until the socket happened to close.
   The frame now surfaces as the same `ERR_EXECUTION_FAILED` a well-formed
-  errors array gets, with an empty message and the raw `errors` carried in
-  the error details (Go parity: a `null` element unmarshals to the zero
+  errors array gets. The malformed native envelope remains below the abstract
+  invocation boundary (Go parity: a `null` element unmarshals to the zero
   `graphqlError`). Red-proven in the subscription suite.
 
 - **`@openbindings/openapi`: a typeless request-body schema rides the
@@ -640,9 +646,9 @@
   library's connection-level `SetReadLimit`), so each message's byte size is
   checked against the resolved bound before decode; a language-platform
   idiom, not a behavioral divergence: same bound, same `ERR_STREAM_ERROR`.
-  Overflow error identity is unchanged per lane (`ERR_RESPONSE_ERROR`,
-  graphql's `ERR_EXECUTION_FAILED`, WS `ERR_STREAM_ERROR`); only the value in
-  the message is now dynamic. Named exclusion: `@openbindings/mcp` delegates
+  Overflow error code is unchanged per lane (`ERR_RESPONSE_ERROR`,
+  graphql's `ERR_EXECUTION_FAILED`, WS `ERR_STREAM_ERROR`). Named exclusion:
+  `@openbindings/mcp` delegates
   response reading to the official MCP SDK, which exposes no read-limit seam
   — the bound is not enforced on that lane (see the package README);
   operationgraph's 8 MiB graph-document guard is an artifact-fetch bound, not

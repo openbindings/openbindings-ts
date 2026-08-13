@@ -65,10 +65,11 @@ describe("AsyncAPI unary-publish classification (§9.4)", () => {
     const call = invoker.invokeBinding({ source: source(), ref: "#/operations/sendOpenMessage" });
 
     await call.write({ text: "hi" });
-    await expect(call.closed).rejects.toMatchObject({
-      code: "ERR_EXECUTION_FAILED",
-      details: undefined,
-      diagnostics: { status: 302 },
-    });
+    const error = await call.closed.catch((caught: unknown) => caught) as {
+      code?: string;
+      data?: unknown;
+    };
+    expect(error.code).toBe("ERR_EXECUTION_FAILED");
+    expect(Object.hasOwn(error, "data")).toBe(false);
   });
 });

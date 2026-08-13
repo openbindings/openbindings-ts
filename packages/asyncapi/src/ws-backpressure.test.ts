@@ -105,7 +105,7 @@ describe("WS receive backpressure", { timeout: 30_000 }, () => {
         const { vals, err } = await drainOutputs(call);
         expect(err).toBeInstanceOf(Error);
         expect((err as { code?: string }).code).toBe("ERR_STREAM_ERROR");
-        expect((err as Error).message).toBe(`backpressure overflow: more than ${bound} undelivered frames`);
+        expect(Object.hasOwn(err as object, "data")).toBe(false);
         // Drain-before-terminal: some already-buffered frames were delivered
         // ahead of the terminal error, but never everything the flood sent —
         // some frames were genuinely dropped by the overflow.
@@ -126,9 +126,8 @@ describe("WS receive backpressure", { timeout: 30_000 }, () => {
       const { wss, port } = await startServer();
       // Below one full TCP segment's worth of frames (~1448B): a single
       // synchronous dispatch burst trips the budget deterministically.
-      const byteBudget = 1024;
       // ~54 bytes of JSON per frame; 200 frames is comfortably more than
-      // byteBudget in total while each individual frame is far under it
+      // the 1024-byte budget in total while each individual frame is far under it
       // (an accumulation trip, not a single-oversized-frame trip).
       const frameCount = 200;
       const payload = "x".repeat(32);
@@ -160,7 +159,7 @@ describe("WS receive backpressure", { timeout: 30_000 }, () => {
         const { vals, err } = await drainOutputs(call);
         expect(err).toBeInstanceOf(Error);
         expect((err as { code?: string }).code).toBe("ERR_STREAM_ERROR");
-        expect((err as Error).message).toBe(`backpressure overflow: more than ${byteBudget} undelivered bytes`);
+        expect(Object.hasOwn(err as object, "data")).toBe(false);
         expect(vals.length).toBeGreaterThan(0);
       } finally {
         invoker.close();
@@ -213,7 +212,7 @@ describe("WS receive backpressure", { timeout: 30_000 }, () => {
         // terminal after draining what it had buffered.
         const slowResult = await drainOutputs(slow);
         expect((slowResult.err as { code?: string })?.code).toBe("ERR_STREAM_ERROR");
-        expect((slowResult.err as Error).message).toBe("backpressure overflow: more than 64 undelivered frames");
+        expect(Object.hasOwn(slowResult.err as object, "data")).toBe(false);
         expect(slowResult.vals.length).toBeGreaterThan(0);
         expect(slowResult.vals.length).toBeLessThan(total);
       } finally {

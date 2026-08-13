@@ -137,21 +137,18 @@ async function runScenario(scenario: ProcessorScenario, joined = false): Promise
     };
   }
   const data: Record<string, unknown> = { outputs, introspectionRequests, ...(joined ? { joinedSynthesis: true } : {}) };
-  data.trailer = invocation.diagnostics.trailing();
   if (dispatch) data.dispatch = dispatch;
-  if (terminal?.code === CONTEXT_REQUIRED) data.context = terminal.details;
+  if (terminal?.code === CONTEXT_REQUIRED) data.context = terminal.data;
   if (!terminal) return { disposition: "complete", phase: "completion", data };
   data.error = {
     code: terminal.code,
-    message: terminal.message,
-    ...(terminal.details !== undefined ? { details: terminal.details } : {}),
-    ...(terminal.diagnostics !== undefined ? { diagnostics: terminal.diagnostics } : {}),
+    ...(Object.hasOwn(terminal, "data") ? { data: terminal.data } : {}),
   };
   if (terminal.code === CONTEXT_REQUIRED) return { disposition: "context-required", phase: "pre-dispatch", data };
   if (!dispatch) return { disposition: "refusal", phase: "pre-dispatch", data };
   return {
     disposition: "error",
-    phase: scenario.id === "GQL-PS-07" || outputs.length === 0 && hasGraphQLResponseEvidence(terminal.diagnostics)
+    phase: scenario.id === "GQL-PS-07" || outputs.length === 0
       ? "response"
       : "completion",
     data,
@@ -162,12 +159,6 @@ function operationForRef(iface: OBInterface, ref: string): string {
   const match = Object.values(iface.bindings ?? {}).find((binding) => binding.ref === ref);
   if (!match) throw new Error(`synthesized GraphQL interface has no binding for ${JSON.stringify(ref)}`);
   return match.operation;
-}
-
-function hasGraphQLResponseEvidence(value: unknown): boolean {
-  if (!isRecord(value)) return false;
-  if (Object.hasOwn(value, "httpResponse")) return true;
-  return isRecord(value.graphql) && Object.hasOwn(value.graphql, "response");
 }
 
 async function collectOutputs(invocation: Invocation<unknown, unknown>): Promise<{

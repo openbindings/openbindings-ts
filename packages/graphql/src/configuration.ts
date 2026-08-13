@@ -242,7 +242,7 @@ export function configurationRequirement(target: string, point: string, descript
   return {
     target,
     alternatives: [{
-      requirements: [{ type: "config.value", point, key: "value", description }],
+      requirements: [{ type: "config.value", point, path: "", description }],
     }],
   };
 }

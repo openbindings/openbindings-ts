@@ -2,6 +2,7 @@ import {
   MultipleSourcesError,
   InvocationError,
   InvocationImpl,
+  isContextRequiredDetails,
   finalizeSynthesis,
   finalizeSynthesisCoverage,
   synthesisSkeleton,
@@ -24,6 +25,7 @@ import {
   OPENAPI_USE_DEFAULT,
   OpenAPIEngine,
   OpenAPIExecutionError,
+  openAPIPortableFailureData,
   type OpenAPIExecution,
   type OpenAPIExecutionHooks,
   type OpenAPIEngineSecurityHandler,
@@ -164,13 +166,10 @@ async function bridgeExecution<I, O>(
   })();
 
   const output = (async () => {
-    const leading = await execution.diagnostics.leading;
-    outer.setHeader(cloneMetadata(leading));
     for await (const event of execution.events) {
       await outer.emitOutput(event.value);
     }
     await execution.completed;
-    outer.setTrailer(cloneMetadata(execution.diagnostics.trailing()));
     outer.closeOutput();
   })();
 
@@ -234,107 +233,48 @@ function adaptHooks(args: BindingInvocationArgs): OpenAPIExecutionHooks | undefi
 }
 
 function toSDKError(error: unknown): InvocationError {
+  try {
+    return mapSDKError(error);
+  } catch {
+    // A malformed standalone-runtime portable marker is an implementation
+    // failure at this bridge. It must still settle the abstract invocation.
+    return new InvocationError("ERR_RUNTIME");
+  }
+}
+
+function mapSDKError(error: unknown): InvocationError {
   if (error instanceof InvocationError) {
-    return new InvocationError(
-      error.code,
-      abstractAdapterErrorMessage(error.code),
-      error.details,
-      adapterDiagnostics(error.diagnostics, error.code, error.message),
-    );
+    return new InvocationError(error.code, error.data);
   }
   if (error instanceof OpenAPIExecutionError) {
+    const authored = sdkInvocationCause(error);
+    if (authored) return new InvocationError(authored.code, authored.data);
     const code = error.code === "SOURCE_LOAD_FAILED" ? "ERR_SOURCE_LOAD_FAILED"
       : error.code === "INVALID_OPERATION_REF" ? "ERR_INVALID_REF"
       : error.code === "OPERATION_NOT_FOUND" ? "ERR_REF_NOT_FOUND"
       : error.code === "INVALID_DOCUMENT" ? "ERR_SOURCE_CONFIG_ERROR"
       : error.code === "RUNTIME_ERROR" || error.code === "EXECUTION_COMPLETED_BEFORE_READY" ? "ERR_RUNTIME"
       : error.code;
-    return new InvocationError(
-      code,
-      abstractAdapterErrorMessage(code),
-      error.details,
-      adapterDiagnostics(error.evidence, error.code, error.message),
-    );
+    if (code === "CONTEXT_REQUIRED" && isContextRequiredDetails(error.details)) {
+      return new InvocationError(code, error.details);
+    }
+    const failure = openAPIPortableFailureData(error);
+    return failure.present
+      ? new InvocationError(code, failure.value)
+      : new InvocationError(code);
   }
-  const nativeMessage = error instanceof Error ? error.message : String(error);
-  return new InvocationError(
-    "ERR_RUNTIME",
-    abstractAdapterErrorMessage("ERR_RUNTIME"),
-    undefined,
-    adapterDiagnostics(undefined, "RUNTIME_ERROR", nativeMessage),
-  );
+  return new InvocationError("ERR_RUNTIME");
 }
 
-function abstractAdapterErrorMessage(code: string): string {
-  switch (code) {
-    case "CONTEXT_REQUIRED":
-      return "Additional invocation context is required";
-    case "ERR_CANCELLED":
-      return "Invocation cancelled";
-    case "ERR_ALREADY_CONSUMED":
-      return "Invocation output is already being consumed";
-    case "ERR_EXPECTED_SINGLE":
-      return "Invocation did not produce exactly one output";
-    case "ERR_INPUT_CLOSED":
-      return "Invocation input is closed";
-    case "ERR_INVOCATION_CLOSED":
-      return "Invocation is closed";
-    case "ERR_MISSING_INPUT":
-      return "Invocation input is required";
-    case "ERR_TOO_MANY_INPUTS":
-      return "Invocation received too many inputs";
-    case "ERR_TRANSPORT_CLOSED":
-      return "Invocation transport closed before completion";
-    case "ERR_AUTH_REQUIRED":
-      return "Invocation requires valid authentication";
-    case "ERR_PERMISSION_DENIED":
-      return "Invocation is not permitted";
-    case "ERR_INVALID_REF":
-      return "Invocation target reference is invalid";
-    case "ERR_REF_NOT_FOUND":
-      return "Invocation target was not found";
-    case "ERR_SOURCE_LOAD_FAILED":
-      return "Invocation source could not be loaded";
-    case "ERR_SOURCE_CONFIG_ERROR":
-      return "Invocation target is not actionable";
-    case "ERR_CONNECT_FAILED":
-      return "Invocation could not reach its target";
-    case "ERR_EXECUTION_FAILED":
-      return "Invocation completed unsuccessfully";
-    case "ERR_RESPONSE_ERROR":
-      return "Invocation result could not be processed";
-    case "ERR_STREAM_ERROR":
-      return "Invocation stream completed unsuccessfully";
-    case "ERR_TIMEOUT":
-      return "Invocation timed out";
-    case "ERR_UNAVAILABLE":
-      return "Invocation target is unavailable";
-    case "ERR_VALIDATION_FAILED":
-      return "Invocation value is invalid";
-    case "ERR_PROTOCOL":
-      return "Invocation produced an invalid interaction";
-    case "ERR_RUNTIME":
-      return "Binding implementation failed";
-    default:
-      return "Binding implementation failed";
+function sdkInvocationCause(error: unknown): InvocationError | null {
+  const seen = new Set<unknown>();
+  let current: unknown = error;
+  while (current instanceof Error && !seen.has(current)) {
+    if (current instanceof InvocationError) return current;
+    seen.add(current);
+    current = current.cause;
   }
-}
-
-function adapterDiagnostics(
-  evidence: unknown,
-  code: string,
-  message: string,
-): Record<string, unknown> {
-  const native = { code, message };
-  if (isRecord(evidence)) return { ...evidence, openapiClient: native };
-  return {
-    ...(evidence !== undefined ? { nativeEvidence: evidence } : {}),
-    openapiClient: native,
-  };
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
+  return null;
 }
 
 function toEngineError(error: unknown): OpenAPIExecutionError {
@@ -342,8 +282,7 @@ function toEngineError(error: unknown): OpenAPIExecutionError {
   if (error instanceof InvocationError) {
     return new OpenAPIExecutionError(error.code, error.message, {
       cause: error,
-      details: error.details,
-      evidence: error.diagnostics,
+      details: error.data,
     });
   }
   return new OpenAPIExecutionError(

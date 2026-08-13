@@ -19,7 +19,6 @@ import {
   ERR_EXPECTED_SINGLE,
   ERR_INPUT_CLOSED,
   ERR_INVOCATION_CLOSED,
-  ERR_TIMEOUT,
   ERR_VALIDATION_FAILED,
 } from "./errcodes.js";
 
@@ -52,7 +51,7 @@ describe("lifecycle & ordering", () => {
     const inv = new InvocationImpl<never, number>();
     void inv.emitOutput(1);
     void inv.emitOutput(2);
-    inv.fireError(new InvocationError("ERR_STREAM_ERROR", "boom"));
+    inv.fireError(new InvocationError("ERR_STREAM_ERROR"));
 
     const seen: number[] = [];
     let caught: unknown;
@@ -77,20 +76,20 @@ describe("lifecycle & ordering", () => {
   it("terminal is sticky and single: double-fire and post-close transitions are no-ops", async () => {
     const inv = new InvocationImpl<never, never>();
     inv.closeOutput();
-    inv.fireError(new InvocationError("ERR_RUNTIME", "late")); // no-op
+    inv.fireError(new InvocationError("ERR_RUNTIME")); // no-op
     await inv.cancel(); // no-op
     await expect(inv.closed).resolves.toBeUndefined();
 
     const inv2 = new InvocationImpl<never, never>();
-    inv2.fireError(new InvocationError("ERR_RUNTIME", "first"));
-    inv2.fireError(new InvocationError("ERR_RUNTIME", "second")); // no-op
+    inv2.fireError(new InvocationError("ERR_RUNTIME"));
+    inv2.fireError(new InvocationError("ERR_RUNTIME")); // no-op
     inv2.closeOutput(); // no-op
-    await expect(inv2.closed).rejects.toThrow("first");
+    await expect(inv2.closed).rejects.toMatchObject({ code: "ERR_RUNTIME" });
   });
 
   it("cancel() after a real terminal error does not overwrite it (load-bearing for single)", async () => {
     const inv = new InvocationImpl<never, never>();
-    const real = new InvocationError("ERR_EXECUTION_FAILED", "real failure");
+    const real = new InvocationError("ERR_EXECUTION_FAILED");
     inv.fireError(real);
     await inv.cancel();
     await expect(inv.closed).rejects.toBe(real);
@@ -138,7 +137,6 @@ describe("single", () => {
     inv.closeOutput();
     await expect(single(inv.outputs)).rejects.toMatchObject({
       code: ERR_EXPECTED_SINGLE,
-      message: expect.stringContaining("got none"),
     });
   });
 
@@ -150,7 +148,6 @@ describe("single", () => {
     const p = single(inv.outputs);
     await expect(p).rejects.toMatchObject({
       code: ERR_EXPECTED_SINGLE,
-      message: expect.stringContaining("got more"),
     });
     // Abandoning the sequence cancelled the invocation: the binding's
     // signal aborted and the handle is terminal.
@@ -161,7 +158,7 @@ describe("single", () => {
   it("surfaces a terminal error after the first output, not a false 'got more' [SS]", async () => {
     const inv = new InvocationImpl<never, number>();
     await inv.emitOutput(1);
-    inv.fireError(new InvocationError("ERR_STREAM_ERROR", "mid-stream death"));
+    inv.fireError(new InvocationError("ERR_STREAM_ERROR"));
     await expect(single(inv.outputs)).rejects.toMatchObject({ code: "ERR_STREAM_ERROR" });
   });
 });
@@ -197,7 +194,7 @@ describe("backpressure (bounded-block)", () => {
     const inv = new InvocationImpl<never, number>();
     for (let i = 0; i < OUTPUT_BUFFER_CAPACITY; i++) await inv.emitOutput(i);
     const parked = inv.emitOutput(99);
-    inv.fireError(new InvocationError("ERR_STREAM_ERROR", "died while parked"));
+    inv.fireError(new InvocationError("ERR_STREAM_ERROR"));
     await expect(parked).rejects.toMatchObject({ code: "ERR_STREAM_ERROR" });
   });
 
@@ -225,7 +222,7 @@ describe("backpressure (bounded-block)", () => {
     const inv = new InvocationImpl<number, never>();
     await inv.write(1);
     const parked = inv.write(2);
-    inv.fireError(new InvocationError("ERR_RUNTIME", "terminal while write parked"));
+    inv.fireError(new InvocationError("ERR_RUNTIME"));
     await expect(parked).rejects.toMatchObject({ code: "ERR_RUNTIME" });
   });
 
@@ -266,7 +263,7 @@ describe("input side", () => {
     const inv = new InvocationImpl<string, never>();
     const it = inv.inputs()[Symbol.asyncIterator]();
     const parked = it.next();
-    inv.fireError(new InvocationError("ERR_RUNTIME", "terminal"));
+    inv.fireError(new InvocationError("ERR_RUNTIME"));
     await expect(parked).rejects.toMatchObject({ code: "ERR_RUNTIME" });
   });
 
@@ -292,7 +289,7 @@ describe("input side", () => {
 
   it("write after terminal rejects with the terminal error", async () => {
     const inv = new InvocationImpl<string, never>();
-    const term = new InvocationError("ERR_RUNTIME", "done for");
+    const term = new InvocationError("ERR_RUNTIME");
     inv.fireError(term);
     await expect(inv.write("x")).rejects.toBe(term);
   });
@@ -300,7 +297,7 @@ describe("input side", () => {
 
 describe("OBI-T-07 validation hook", () => {
   it("an invalid write rejects AND the invocation terminates with the same error (dual signal)", async () => {
-    const t07 = new InvocationError(ERR_VALIDATION_FAILED, "input validation failed");
+    const t07 = new InvocationError(ERR_VALIDATION_FAILED);
     const inv = new InvocationImpl<number, never>({
       validateInput: (v) => (v < 0 ? t07 : null),
     });
@@ -319,7 +316,7 @@ describe("cancellation & close", () => {
     // down binding work; the signal is the binding's only lifecycle channel.
     const errored = new InvocationImpl<never, never>();
     expect(errored.signal.aborted).toBe(false);
-    errored.fireError(new InvocationError("ERR_RUNTIME", "terminal"));
+    errored.fireError(new InvocationError("ERR_RUNTIME"));
     expect(errored.signal.aborted).toBe(true);
 
     const closed = new InvocationImpl<never, never>();
@@ -367,7 +364,7 @@ describe("cancellation & close", () => {
 
     // The listener also unregisters on the error terminal.
     const errored = new InvocationImpl<never, number>({ signal: shared.signal });
-    errored.fireError(new InvocationError("ERR_RUNTIME", "boom"));
+    errored.fireError(new InvocationError("ERR_RUNTIME"));
     expect(getEventListeners(shared.signal, "abort").length).toBe(0);
 
     // And a live external abort still reaches a not-yet-terminal invocation.
@@ -378,9 +375,9 @@ describe("cancellation & close", () => {
     expect(getEventListeners(shared.signal, "abort").length).toBe(0);
   });
 
-  // --- Deadline vs. cancel terminal codes (parity with Go invocation_test.go) ---
+  // --- Caller-owned deadlines and cancellation share one abstract code ---
 
-  it("a mid-stream lifetime deadline is ERR_TIMEOUT; emitted outputs stand [SS]", async () => {
+  it("a mid-stream lifetime deadline is ERR_CANCELLED; emitted outputs stand [SS]", async () => {
     const inv = new InvocationImpl<never, number>({ signal: AbortSignal.timeout(15) });
     await inv.emitOutput(1);
     await inv.emitOutput(2);
@@ -395,16 +392,16 @@ describe("cancellation & close", () => {
     expect(seen).toEqual([1, 2]); // previously-emitted outputs stand
     const ie = caught as InvocationError;
     expect(ie).toBeInstanceOf(InvocationError);
-    expect(ie.code).toBe(ERR_TIMEOUT);
+    expect(ie.code).toBe(ERR_CANCELLED);
   });
 
-  it("a pre-fired timeout signal yields an immediately-terminal ERR_TIMEOUT handle", async () => {
+  it("a pre-fired timeout signal yields an immediately-terminal ERR_CANCELLED handle", async () => {
     const signal = AbortSignal.timeout(0);
     await new Promise((r) => setTimeout(r, 5)); // let the deadline fire
     expect(signal.aborted).toBe(true);
     const inv = new InvocationImpl<never, never>({ signal });
     await expect(inv.closed).rejects.toMatchObject({
-      code: ERR_TIMEOUT,
+      code: ERR_CANCELLED,
     });
   });
 
@@ -438,61 +435,6 @@ describe("cancellation & close", () => {
   });
 });
 
-describe("metadata", () => {
-  it("header resolves with binding-set metadata before the first output [SS, U]", async () => {
-    const inv = new InvocationImpl<never, string>();
-    inv.setHeader({ "content-type": ["application/json"] });
-    await inv.emitOutput("x");
-    await expect(inv.diagnostics.leading).resolves.toEqual({ "content-type": ["application/json"] });
-  });
-
-  it("header resolves empty with the first output when the binding sets none", async () => {
-    const inv = new InvocationImpl<never, string>();
-    await inv.emitOutput("x");
-    await expect(inv.diagnostics.leading).resolves.toEqual({});
-  });
-
-  it("header resolves (empty) on terminal with no outputs", async () => {
-    const inv = new InvocationImpl<never, never>();
-    inv.fireError(new InvocationError("ERR_RUNTIME", "early death"));
-    await expect(inv.diagnostics.leading).resolves.toEqual({});
-  });
-
-  it("trailer is valid only after termination", async () => {
-    const inv = new InvocationImpl<never, string>();
-    inv.setTrailer({ "grpc-status": ["0"] });
-    expect(() => inv.diagnostics.trailing()).toThrow(/after the invocation has terminated/);
-    inv.closeOutput();
-    expect(inv.diagnostics.trailing()).toEqual({ "grpc-status": ["0"] });
-  });
-
-  it("setHeader after the first output is a loud binding bug", async () => {
-    const inv = new InvocationImpl<never, string>();
-    await inv.emitOutput("x");
-    expect(() => inv.setHeader({ late: ["true"] })).toThrow(/must precede/);
-  });
-
-  it("setTrailer after terminal is dropped silently (late sets are dropped)", () => {
-    // Terminal state is reachable at any time via a cancellation race, so a
-    // late setTrailer is a no-op rather than a throw — matching the documented
-    // "late sets are dropped" contract and the Go SDK's SetTrailer.
-    const inv = new InvocationImpl<never, never>();
-    inv.closeOutput();
-    expect(() => inv.setTrailer({ late: ["true"] })).not.toThrow();
-    expect(inv.diagnostics.trailing()).toEqual({}); // the late set did not land
-  });
-
-  it("after a single short-circuit, header (if set) is valid and trailer reflects the cancelled call", async () => {
-    const inv = new InvocationImpl<never, number>();
-    inv.setHeader({ "x-stream": ["yes"] });
-    await inv.emitOutput(1);
-    await inv.emitOutput(2);
-    await expect(single(inv.outputs)).rejects.toMatchObject({ code: ERR_EXPECTED_SINGLE });
-    await expect(inv.diagnostics.leading).resolves.toEqual({ "x-stream": ["yes"] });
-    expect(inv.diagnostics.trailing()).toEqual({}); // binding never terminated normally
-  });
-});
-
 describe("bidi & drive", () => {
   it("separate-context drive succeeds with buffers smaller than the message count [BD]", async () => {
     const inv = new InvocationImpl<number, number>();
@@ -523,7 +465,7 @@ describe("bidi & drive", () => {
   it("CONTEXT_REQUIRED is just a terminal code on the handle", async () => {
     const inv = new InvocationImpl<never, never>();
     inv.fireError(
-      new InvocationError(CONTEXT_REQUIRED, "bearer token required", {
+      new InvocationError(CONTEXT_REQUIRED, {
         target: "https://api.example.com",
         alternatives: [{ requirements: [{ type: "auth.bearer" }] }],
       }),
@@ -532,28 +474,86 @@ describe("bidi & drive", () => {
   });
 });
 
-describe("InvocationError CONTEXT_REQUIRED rendering", () => {
-  it("appends the target and satisfying context field to the message (mirrors Go Error())", () => {
-    const err = new InvocationError(CONTEXT_REQUIRED, "OpenAPI operation requires authentication context", {
+describe("InvocationError portable record", () => {
+  it("keeps presentation local while preserving CONTEXT_REQUIRED data", () => {
+    const err = new InvocationError(CONTEXT_REQUIRED, {
       target: "https://api.example.com",
       alternatives: [
         { requirements: [{ type: "auth.bearer" }] },
         { requirements: [{ type: "auth.apiKey" }] },
       ],
     });
-    expect(err.message).toBe(
-      'OpenAPI operation requires authentication context (target: https://api.example.com; ' +
-        'satisfied by: auth.bearer (context field "bearerToken"), or auth.apiKey (context field "apiKey"))',
-    );
+    expect(err.message).toBe(CONTEXT_REQUIRED);
+    expect(err.data).toMatchObject({ target: "https://api.example.com" });
+    expect(JSON.parse(JSON.stringify(err))).toEqual({
+      code: CONTEXT_REQUIRED,
+      data: err.data,
+    });
   });
 
-  it("leaves non-CONTEXT_REQUIRED messages untouched", () => {
-    const err = new InvocationError(ERR_VALIDATION_FAILED, "output validation failed", { failures: [] });
-    expect(err.message).toBe("output validation failed");
+  it("distinguishes absent data from an explicit JSON null", () => {
+    const absent = new InvocationError(ERR_VALIDATION_FAILED);
+    const explicitNull = new InvocationError(ERR_VALIDATION_FAILED, null);
+    expect(Object.hasOwn(absent, "data")).toBe(false);
+    expect(Object.hasOwn(explicitNull, "data")).toBe(true);
+    expect(JSON.parse(JSON.stringify(absent))).toEqual({
+      code: ERR_VALIDATION_FAILED,
+    });
+    expect(JSON.parse(JSON.stringify(explicitNull))).toEqual({
+      code: ERR_VALIDATION_FAILED,
+      data: null,
+    });
   });
 
-  it("does not append when details carry no target and no alternatives", () => {
-    const err = new InvocationError(CONTEXT_REQUIRED, "context required", { target: "", alternatives: [] });
-    expect(err.message).toBe("context required");
+  it("does not promote valid data into the inherited local message", () => {
+    const err = new InvocationError(CONTEXT_REQUIRED, {
+      target: "",
+      alternatives: [{ requirements: [{ type: "auth.bearer" }] }],
+    });
+    expect(err.message).toBe(CONTEXT_REQUIRED);
+  });
+
+  it("rejects malformed CONTEXT_REQUIRED data and empty codes", () => {
+    expect(() => new InvocationError(CONTEXT_REQUIRED, { target: "", alternatives: [] })).toThrow(TypeError);
+    expect(() => new InvocationError(CONTEXT_REQUIRED, {
+      target: "",
+      alternatives: [{ requirements: [{ type: "auth.bearer", name: "" }] }],
+    })).toThrow(TypeError);
+    expect(() => new InvocationError("")).toThrow(TypeError);
+  });
+
+  it("rejects non-JSON data without coercing native values", () => {
+    const cyclic: Record<string, unknown> = {};
+    cyclic["self"] = cyclic;
+    const sparse: unknown[] = Array(2);
+    sparse[1] = "sparse";
+    for (const value of [
+      Number.NaN,
+      Number.POSITIVE_INFINITY,
+      1n,
+      undefined,
+      new Uint8Array([1, 2]),
+      new Date(),
+      { missing: undefined },
+      sparse,
+      cyclic,
+    ]) {
+      if (value === undefined) continue; // undefined selects the absent-data constructor form.
+      expect(() => new InvocationError(ERR_VALIDATION_FAILED, value)).toThrow(TypeError);
+    }
+  });
+
+  it("rejects hidden data and exposes a frozen wire-equivalent value", () => {
+    const hidden = { public: true };
+    Object.defineProperty(hidden, "nativeStatus", { value: 599 });
+    expect(() => new InvocationError("APPLICATION_FAILURE", hidden)).toThrow(TypeError);
+
+    const authored = { nested: { accepted: false }, numeric: -0 };
+    const error = new InvocationError("APPLICATION_FAILURE", authored);
+    authored.nested.accepted = true;
+    expect(error.data).toEqual({ nested: { accepted: false }, numeric: 0 });
+    expect(Object.isFrozen(error.data)).toBe(true);
+    expect(Object.isFrozen((error.data as { nested: object }).nested)).toBe(true);
+    expect(JSON.parse(JSON.stringify(error)).data).toEqual(error.data);
   });
 });

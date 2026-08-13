@@ -110,10 +110,10 @@ function codeOf(err: Error | undefined): string | undefined {
 }
 
 /** Narrows a CONTEXT_REQUIRED terminal to its single config.value requirement. */
-function configReq(err: Error | undefined): { type: string; point?: string; key?: string; durable?: boolean } {
-  const details = (err as { details?: { alternatives?: { requirements?: unknown[] }[] } } | undefined)?.details;
+function configReq(err: Error | undefined): { type: string; point?: string; path?: string; durable?: boolean } {
+  const details = (err as { data?: { alternatives?: { requirements?: unknown[] }[] } } | undefined)?.data;
   const req = details?.alternatives?.[0]?.requirements?.[0] as
-    | { type: string; point?: string; key?: string; durable?: boolean }
+    | { type: string; point?: string; path?: string; durable?: boolean }
     | undefined;
   if (!req || req.type !== "config.value") {
     throw new Error(`expected a config.value requirement, got ${JSON.stringify(req)}`);
@@ -321,7 +321,7 @@ describe("server variables and pathname assembly (ASYNC-P-04)", () => {
       // CONTEXT_REQUIRED, not a terminal ERR_SOURCE_CONFIG_ERROR.
       expect(codeOf(r.err)).toBe("CONTEXT_REQUIRED");
       expect(configReq(r.err).point).toBe("server");
-      expect(configReq(r.err).key).toBe("version");
+      expect(configReq(r.err).path).toBe("/variables/version");
       expect(srv.requests()).toBe(before);
 
       // The same undefaulted variable IS satisfiable by supply — AsyncAPI
@@ -447,10 +447,10 @@ describe("effective server set (ASYNC-P-04)", () => {
 
     const invoker = new AsyncAPIInvoker();
     try {
-      const refused: Array<{ cfg: unknown; teach: string }> = [
-        { cfg: "test", teach: "must be an object" },
-        { cfg: { name: "test" }, teach: 'member "name" is not pinned' },
-        { cfg: {}, teach: 'carries none of "key", "variables", or "url"' },
+      const refused: Array<{ cfg: unknown }> = [
+        { cfg: "test" },
+        { cfg: { name: "test" } },
+        { cfg: {} },
       ];
       for (const tc of refused) {
         const before = srv.requests();
@@ -458,11 +458,7 @@ describe("effective server set (ASYNC-P-04)", () => {
           configuration: { server: tc.cfg },
         });
         expect(codeOf(r.err)).toBe("ERR_SOURCE_CONFIG_ERROR");
-        expect(String(r.err)).toContain(
-          '{"key": "<server-name>"?',
-        );
-        expect(String(r.err)).toContain(tc.teach);
-        expect(String(r.err)).toContain('"url": "<connection-url>"?');
+        expect(Object.hasOwn(r.err as object, "data")).toBe(false);
         expect(srv.requests()).toBe(before);
       }
 

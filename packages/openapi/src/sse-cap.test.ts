@@ -120,14 +120,9 @@ describe("SSE size cap is per-event, not cumulative", () => {
       maxDeliveryUnitBytes: 1024,
     });
 
-    await expect(call.closed).rejects.toMatchObject({
-      code: "ERR_RESPONSE_ERROR",
-      message: "Invocation result could not be processed",
-      diagnostics: {
-        openapiClient: {
-          message: expect.stringContaining("SSE event exceeds 1024 byte limit"),
-        },
-      },
-    });
+    const error = await call.closed.catch((caught: unknown) => caught) as { code?: string };
+    expect(error.code).toBe("ERR_RESPONSE_ERROR");
+    expect(Object.hasOwn(error, "data")).toBe(false);
+    expect(Object.hasOwn(error, "diagnostics")).toBe(false);
   });
 });

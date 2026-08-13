@@ -31,7 +31,7 @@ describe("openbindings.mcp@1 listing resolution", () => {
     ["resource", listing({ resources: ["app://x"] }), "resources", "app://x", /excluded/],
     ["resource template", listing({ templates: ["app://{id}"] }), "resourceTemplates", "app://{id}", /excluded/],
     ["prompt", listing({ prompts: ["review"] }), "prompts", "review", /excluded/],
-  ])("refuses %s", (_name, inventory, family, identity, message) => {
+  ])("refuses %s", (_name, inventory, family, identity) => {
     let thrown: InvocationError | undefined;
     try {
       resolveRef(inventory, family, identity);
@@ -39,7 +39,6 @@ describe("openbindings.mcp@1 listing resolution", () => {
       thrown = error as InvocationError;
     }
     expect(thrown).toMatchObject({ code: ERR_REF_NOT_FOUND });
-    expect(thrown?.message).toMatch(message);
   });
 });
 

@@ -134,19 +134,15 @@ async function runScenario(scenario: ProcessorScenario, joined = false): Promise
     peer: { endStreamCount: peerEndStreamCount },
     ...(joined ? { joinedSynthesis: true } : {}),
   };
-  data.trailer = invocation.diagnostics.trailing();
   if (dispatches[0]) data.dispatch = dispatches[0];
   if (!terminal) return { disposition: "complete", phase: "completion", data };
   data.error = {
     code: terminal.code,
-    message: terminal.message,
-    ...(terminal.details !== undefined ? { details: terminal.details } : {}),
-    ...(terminal.diagnostics !== undefined ? { diagnostics: terminal.diagnostics } : {}),
+    ...(Object.hasOwn(terminal, "data") ? { data: terminal.data } : {}),
   };
   if (terminal.code === CONTEXT_REQUIRED) return { disposition: "context-required", phase: "pre-dispatch", data };
   if (dispatches.length === 0) return { disposition: "refusal", phase: "pre-dispatch", data };
-  const responsePhase = ["CONN-PS-02", "CONN-PS-09", "CONN-PS-13", "CONN-PS-15"].includes(scenario.id)
-    || isRecord(terminal.diagnostics) && Object.hasOwn(terminal.diagnostics, "httpResponse");
+  const responsePhase = ["CONN-PS-02", "CONN-PS-09", "CONN-PS-13", "CONN-PS-15", "CONN-FI-02"].includes(scenario.id);
   return { disposition: "error", phase: responsePhase ? "response" : "completion", data };
 }
 

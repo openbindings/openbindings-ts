@@ -74,37 +74,20 @@ immediately — don't `write`. Error outcomes terminate the handle:
 try {
   await call.closed;
 } catch (err) {
-  console.error(err.code, err.message); // protocol-independent failure presentation
+  console.error(err.code, err.data); // protocol-independent failure record
 }
 ```
 
 An unsuccessful HTTP response is a failure completion, not an operation
-output. Ordinary error code/message handling does not require knowing that the
-selected binding used HTTP. `openAPIFailureEvidence(err)` is the explicit
-diagnostic escape hatch that recovers the native status, headers,
-final URL/status text where the Fetch runtime exposes them, exact response
-bytes, and the OpenAPI Response Object key/media that governed the response:
-
-```typescript
-import { openAPIFailureEvidence } from "@openbindings/openapi";
-
-try {
-  await call.closed;
-} catch (err) {
-  const evidence = openAPIFailureEvidence(err);
-  if (evidence) {
-    console.error(evidence.httpResponse.status, evidence.openapi.responseKey);
-    // evidence.httpResponse.body is the exact Uint8Array when captured.
-  }
-}
-```
-
-An absent `body` is distinct from an exact empty `Uint8Array`. Non-2xx SSE
-responses use the same bounded exact-byte capture as unary failures.
+output. A declared, selected, faithfully decoded JSON failure representation
+is preserved exactly as optional `err.data`, including explicit JSON null.
+Native status, headers, response bytes, and declaration-match evidence remain
+available to standalone OpenAPI-runtime consumers below the adapter boundary;
+they do not cross the OpenBindings invocation surface.
 
 When an operation requires credentials the document declares but the context
 lacks, the invocation terminates with `CONTEXT_REQUIRED` before any request
-is dispatched; the error's details carry the requirement alternatives derived
+is dispatched; the error's data carry the requirement alternatives derived
 from the spec's `securitySchemes`. `prepareBinding(args)` runs the same
 derivation as a side-effect-free preflight (it never fetches the source
 document; it uses inline content or a previously cached document).
@@ -144,7 +127,7 @@ result as `content`, while browsers and Workers keep the same package graph.
 4. Derives auth requirements from the operation's (or document's) `security` and challenges `CONTEXT_REQUIRED` when the context can't satisfy them — before any request is dispatched
 5. Reads the input message from the handle and routes parameters and finite named body properties per OAPI-P-03; explicitly dynamic objects and declaration-complex exact JSON bodies remain one complete application value below a protocol-neutral field and use a binding-private whole-body route. Parameters serialize per the OAS style/explode rules (OAPI-P-02), and the configured `requestMedia` candidate or any faithfully supported declared candidate governs body carriage (OAPI-P-04).
 6. Selects one complete, satisfiable Security Requirement alternative and applies only that alternative's credentials with the artifact-declared placement, refusing credential/parameter and processor-owned-channel collisions before dispatch (OAPI-P-09/P-10)
-7. Makes the HTTP request; the governing success declaration and actual concrete media select unary or server-streaming framing (OAPI-P-06); classifies the outcome (success iff status is 2xx, OAPI-P-08); then emits strict JSON, charset-aware text/SSE, or canonical Base64 for artifact-authorized raw bytes (OAPI-P-07). Native headers/status/body evidence and hook provenance are available only through explicit diagnostics and never become operation values.
+7. Makes the HTTP request; the governing success declaration and actual concrete media select unary or server-streaming framing (OAPI-P-06); classifies the outcome (success iff status is 2xx, OAPI-P-08); then emits strict JSON, charset-aware text/SSE, or canonical Base64 for artifact-authorized raw bytes (OAPI-P-07). Native headers/status/body evidence and hook provenance remain below the OpenBindings boundary and never become operation values or failure data.
 
 ### Server selection
 
@@ -173,9 +156,9 @@ The legacy `metadata.baseURL` override still works, below the configuration poin
 HTTP leaves wire questions the OpenAPI document does not settle: which bytes-to-value rule to apply and whether a given response counts as success. This format **consults the consumer hooks seam** for both:
 
 - **Decode** — the builtin rule is chosen from the response `Content-Type` header; an `outputDecoder` hook may override it.
-- **Classify** — the builtin verdict is HTTP status (2xx success; declared `responses` refine failure details, never classification); a `resultClassifier` hook may reclassify (a 200 envelope carrying an application error, say).
+- **Classify** — the builtin verdict is HTTP status (2xx success; declared `responses` may admit an application-authored JSON failure value as `InvocationError.data`, but never change classification); a `resultClassifier` hook may reclassify (a 200 envelope carrying an application error, say).
 
-Hooks are configured per invocation (`InvokeOptions`) or invoker-level (`OperationInvokerOptions`); a hook declines to the next tier by returning `USE_DEFAULT`. Each invocation records how each axis was decided in its explicit diagnostic trailing metadata (`x-ob-decode`: `header/content-type` or `hook`; `x-ob-classify`: `assumption/2xx` or `hook`).
+Hooks are configured per invocation (`InvokeOptions`) or invoker-level (`OperationInvokerOptions`); a hook declines to the next tier by returning `USE_DEFAULT`. Hook decisions remain below the abstract invocation boundary and do not add protocol provenance to operation outputs or errors.
 
 ### Credential application
 

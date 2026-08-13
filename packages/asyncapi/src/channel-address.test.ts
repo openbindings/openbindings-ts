@@ -67,8 +67,8 @@ describe("channel without address", () => {
     // non-durable), not a terminal ERR_SOURCE_CONFIG_ERROR.
     await expect(call.closed).rejects.toMatchObject({
       code: "CONTEXT_REQUIRED",
-      details: {
-        alternatives: [{ requirements: [{ type: "config.value", point: "address", durable: false }] }],
+      data: {
+        alternatives: [{ requirements: [{ type: "config.value", point: "address", path: "", durable: false }] }],
       },
     });
     expect(requests).toBe(0);

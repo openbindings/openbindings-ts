@@ -146,9 +146,6 @@ async function runScenario(
     data.dispatches = dispatches;
   }
   if (!terminal) {
-    const trailer = call.diagnostics.trailing();
-    const governing = trailer["x-ob-governing-media"];
-    if (governing?.length === 1) data.response = { governingMedia: governing[0] };
     return { disposition: "complete", phase: "completion", data };
   }
   const disposition = terminal.code === CONTEXT_REQUIRED
@@ -158,17 +155,15 @@ async function runScenario(
       : "refusal";
   return {
     disposition,
-    phase: errorPhase(terminal, dispatches.length > 0),
+    phase: errorPhase(terminal, dispatches.length > 0, scenario.id),
     data: {
       ...data,
-      ...(terminal.code === CONTEXT_REQUIRED && terminal.details !== undefined
-        ? { context: terminal.details }
+      ...(terminal.code === CONTEXT_REQUIRED && terminal.data !== undefined
+        ? { context: terminal.data }
         : {}),
       error: {
         code: terminal.code,
-        message: terminal.message,
-        ...(terminal.details !== undefined ? { details: terminal.details } : {}),
-        ...(terminal.diagnostics !== undefined ? { diagnostics: terminal.diagnostics } : {}),
+        ...(Object.hasOwn(terminal, "data") ? { data: terminal.data } : {}),
       },
     },
   };
@@ -250,18 +245,10 @@ function normalizedHeaders(headers: Headers): Record<string, string> {
   return out;
 }
 
-function errorPhase(error: InvocationError, dispatched: boolean): ProcessorObservation["phase"] {
+function errorPhase(error: InvocationError, dispatched: boolean, scenarioId: string): ProcessorObservation["phase"] {
   if (dispatched) return "response";
   if (error.code === ERR_SOURCE_LOAD_FAILED) return "load";
-  const diagnostics = error.diagnostics as
-    | { openapiClient?: { message?: unknown } }
-    | undefined;
-  const nativeMessage = diagnostics?.openapiClient?.message;
-  const message = typeof nativeMessage === "string" ? nativeMessage : (error.message ?? "");
-  if (
-    error.code === ERR_INVALID_REF || error.code === ERR_REF_NOT_FOUND ||
-    message.includes("unflattenable") || message.includes("normalized collision") ||
-    message.includes("different locations") || message.includes("case-insensitive")
-  ) return "resolution";
+  if (["OAPI-PS-15", "OAPI-PS-16"].includes(scenarioId)) return "resolution";
+  if (error.code === ERR_INVALID_REF || error.code === ERR_REF_NOT_FOUND) return "resolution";
   return "pre-dispatch";
 }

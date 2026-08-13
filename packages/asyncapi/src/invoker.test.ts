@@ -1,10 +1,80 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { CONTEXT_REQUIRED, single } from "@openbindings/sdk";
+import { CONTEXT_REQUIRED, InvocationError, single } from "@openbindings/sdk";
+import { AsyncAPIEngine, AsyncAPIExecutionError } from "@openbindings/asyncapi-client/engine";
 import { AsyncAPIInvoker, AsyncAPISynthesizer } from "./invoker.js";
 import { BINDING_SPEC, DEFAULT_SOURCE_NAME } from "./constants.js";
 
 afterEach(() => {
   vi.unstubAllGlobals();
+});
+
+describe("AsyncAPI standalone-runtime error bridge", () => {
+  it("does not promote protocol-driver details into abstract error data", async () => {
+    const engine = {
+      prepare: async () => {
+        throw new AsyncAPIExecutionError("DRIVER_FAILED", "native failure", {
+          details: { reasonCode: 7 },
+          evidence: { protocol: "example" },
+        });
+      },
+      close: () => undefined,
+    } as unknown as AsyncAPIEngine;
+    const call = new AsyncAPIInvoker(engine).invokeBinding({
+      source: { bindingSpec: BINDING_SPEC, content: {} },
+      ref: "#/operations/example",
+    });
+
+    try {
+      await single(call.outputs);
+      expect.fail("expected unsuccessful completion");
+    } catch (error: unknown) {
+      expect(error).toBeInstanceOf(InvocationError);
+      expect(error).toMatchObject({ code: "DRIVER_FAILED" });
+      expect(Object.hasOwn(error as object, "data")).toBe(false);
+    }
+  });
+
+  it("preserves only explicitly portable driver values, including null", async () => {
+    for (const value of [{ reason: "rejected" }, null]) {
+      const engine = {
+        prepare: async () => {
+          throw new AsyncAPIExecutionError("APPLICATION_FAILURE", "application failure", {
+            details: value,
+            detailsPresent: true,
+          });
+        },
+        close: () => undefined,
+      } as unknown as AsyncAPIEngine;
+      const call = new AsyncAPIInvoker(engine).invokeBinding({
+        source: { bindingSpec: BINDING_SPEC, content: {} },
+        ref: "#/operations/example",
+      });
+
+      const error = await call.closed.catch((caught: unknown) => caught);
+      expect(JSON.parse(JSON.stringify(error))).toEqual({
+        code: "APPLICATION_FAILURE",
+        data: value,
+      });
+    }
+  });
+
+  it("settles with ERR_RUNTIME when a driver marks a non-JSON value portable", async () => {
+    const engine = {
+      prepare: async () => {
+        throw new AsyncAPIExecutionError("APPLICATION_FAILURE", "application failure", {
+          details: new Uint8Array([1, 2, 3]),
+          detailsPresent: true,
+        });
+      },
+      close: () => undefined,
+    } as unknown as AsyncAPIEngine;
+    const call = new AsyncAPIInvoker(engine).invokeBinding({
+      source: { bindingSpec: BINDING_SPEC, content: {} },
+      ref: "#/operations/example",
+    });
+
+    await expect(call.closed).rejects.toMatchObject({ code: "ERR_RUNTIME" });
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -446,7 +516,7 @@ describe("context requirements — unmapped schemes surfaced (R2.c ruling)", () 
     await call.write({});
     await expect(call.closed).rejects.toMatchObject({
       code: CONTEXT_REQUIRED,
-      details: {
+      data: {
         alternatives: [
           { requirements: [{ type: "auth.http.digest" }] },
           { requirements: [{ type: "auth.X509" }] },
@@ -529,6 +599,13 @@ describe("context requirements — conjunctive server + operation security (ASYN
       context: { bearerToken: "t", apiKeys: { key: "k-1" } },
     });
     expect(both).toBeNull();
+
+    const named = await new AsyncAPIInvoker().prepareBinding({
+      source: { bindingSpec: BINDING_SPEC, content: spec },
+      ref: "#/operations/publish",
+      context: { credentials: { bearer: "t", key: "k-1" } },
+    });
+    expect(named).toBeNull();
   });
 
   it("a scheme declared on both levels is one requirement, not a duplicated conjunct", async () => {

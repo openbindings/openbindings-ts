@@ -17,6 +17,7 @@ import {
   InvocationError,
   InvocationImpl,
   MultipleSourcesError,
+  isContextRequiredDetails,
   finalizeSynthesis,
   finalizeSynthesisCoverage,
   synthesisSkeleton,
@@ -152,10 +153,8 @@ async function bridgeExecution<I, O>(
     }
   })();
   const output = (async () => {
-    outer.setHeader(cloneMetadata(await execution.diagnostics.leading));
     for await (const event of execution.events) await outer.emitOutput(event.value);
     await execution.completed;
-    outer.setTrailer(cloneMetadata(execution.diagnostics.trailing()));
     outer.closeOutput();
   })();
   try {
@@ -205,15 +204,32 @@ function adaptHooks(args: BindingInvocationArgs): AsyncAPIExecutionHooks | undef
 }
 
 function toSDKError(error: unknown): InvocationError {
+  try {
+    return mapSDKError(error);
+  } catch {
+    // Third-party drivers are an extension point. A malformed portability
+    // marker must terminate safely instead of stranding the outer handle.
+    return new InvocationError("ERR_RUNTIME");
+  }
+}
+
+function mapSDKError(error: unknown): InvocationError {
   if (error instanceof InvocationError) return error;
   if (error instanceof AsyncAPIExecutionError) {
+    const authored = sdkInvocationCause(error);
+    if (authored) return new InvocationError(authored.code, authored.data);
     const code = error.code === "SOURCE_LOAD_FAILED" ? "ERR_SOURCE_LOAD_FAILED"
       : error.code === "INVALID_OPERATION_REF" ? "ERR_INVALID_REF"
       : error.code === "OPERATION_NOT_FOUND" ? "ERR_REF_NOT_FOUND"
       : error.code;
-    return new InvocationError(code, error.message, error.details, error.evidence);
+    if (code === "CONTEXT_REQUIRED" && isContextRequiredDetails(error.details)) {
+      return new InvocationError(code, error.details);
+    }
+    const portable = portableAsyncAPIData(error);
+    if (portable.present) return new InvocationError(code, portable.value);
+    return new InvocationError(code);
   }
-  return new InvocationError("ERR_RUNTIME", errorMessage(error));
+  return new InvocationError("ERR_RUNTIME");
 }
 
 function toEngineError(error: unknown): AsyncAPIExecutionError {
@@ -221,11 +237,38 @@ function toEngineError(error: unknown): AsyncAPIExecutionError {
   if (error instanceof InvocationError) {
     return new AsyncAPIExecutionError(error.code, error.message, {
       cause: error,
-      details: error.details,
-      evidence: error.diagnostics,
+      ...(Object.hasOwn(error, "data")
+        ? { details: error.data, detailsPresent: true }
+        : {}),
     });
   }
   return new AsyncAPIExecutionError("ERR_RUNTIME", errorMessage(error), { cause: error });
+}
+
+function sdkInvocationCause(error: unknown): InvocationError | null {
+  const seen = new Set<unknown>();
+  let current: unknown = error;
+  while (current instanceof Error && !seen.has(current)) {
+    if (current instanceof InvocationError) return current;
+    seen.add(current);
+    current = current.cause;
+  }
+  return null;
+}
+
+function portableAsyncAPIData(
+  error: unknown,
+): { present: false } | { present: true; value: unknown } {
+  const seen = new Set<unknown>();
+  let current: unknown = error;
+  while (current instanceof Error && !seen.has(current)) {
+    seen.add(current);
+    if (current instanceof AsyncAPIExecutionError && current.detailsPresent) {
+      return { present: true, value: current.details };
+    }
+    current = current.cause;
+  }
+  return { present: false };
 }
 
 function cloneMetadata(metadata: Record<string, string[]>): Record<string, string[]> {

@@ -31,7 +31,6 @@ import {
   type SourceInspector,
 } from "@openbindings/sdk";
 import { BINDING_SPEC, DEFAULT_SOURCE_NAME } from "./constants.js";
-import { graphQLFailureEvidence } from "./failure.js";
 import {
   introspect,
   invokeGraphQL,
@@ -45,7 +44,6 @@ import { buildTypeMap, rootTypeName } from "./introspection.js";
 import { convertToInterface, resolveKey, sanitizeKey, codePointCompare } from "./synthesize.js";
 import {
   configurationRequirement,
-  emptyMetadata,
   httpHeaders,
   readConfiguration,
   validateHTTPLocation,
@@ -54,10 +52,6 @@ import {
   type GraphQLWebSocketFactory,
 } from "./configuration.js";
 import { parseExecutableDocument } from "./document.js";
-
-function errMsg(e: unknown): string {
-  return e instanceof Error ? e.message : String(e);
-}
 
 /** Reads the first input while preserving absent versus present-undefined. */
 async function readFirst<T>(it: AsyncIterable<T>): Promise<{ present: boolean; value?: T }> {
@@ -90,7 +84,7 @@ export class GraphQLInvoker implements BindingInvoker {
         inv.fireError(
           err instanceof InvocationError
             ? err
-            : new InvocationError(ERR_RUNTIME, errMsg(err)),
+            : new InvocationError(ERR_RUNTIME),
         );
       });
     });
@@ -102,63 +96,51 @@ export class GraphQLInvoker implements BindingInvoker {
     let rootType: string, fieldName: string;
     try {
       ({ rootType, fieldName } = parseRef(args.ref));
-    } catch (e: unknown) {
-      throw new InvocationError(ERR_INVALID_REF, errMsg(e));
+    } catch {
+      throw new InvocationError(ERR_INVALID_REF);
     }
     if (args.source.bindingSpec !== BINDING_SPEC) {
-      throw new InvocationError(
-        ERR_SOURCE_CONFIG_ERROR,
-        `GraphQL invoker supports exact binding specification ${JSON.stringify(BINDING_SPEC)}, got ${JSON.stringify(args.source.bindingSpec)}`,
-      );
+      throw new InvocationError(ERR_SOURCE_CONFIG_ERROR);
     }
     if (rootType === "subscription") {
-      throw new InvocationError(ERR_INVALID_REF, `GraphQL subscriptions are outside the candidate binding specification ${JSON.stringify(args.ref)} (GQL-P-04)`);
+      throw new InvocationError(ERR_INVALID_REF);
     }
 
     let url: string;
     try {
       url = validateHTTPLocation(args.source.location);
-    } catch (e: unknown) {
-      throw new InvocationError(ERR_SOURCE_CONFIG_ERROR, errMsg(e));
+    } catch {
+      throw new InvocationError(ERR_SOURCE_CONFIG_ERROR);
     }
 
     let configuration;
     try {
       configuration = readConfiguration(args.context);
-    } catch (e: unknown) {
-      throw new InvocationError(ERR_SOURCE_CONFIG_ERROR, errMsg(e));
+    } catch {
+      throw new InvocationError(ERR_SOURCE_CONFIG_ERROR);
     }
     if (!configuration.document) {
-      throw contextRequiredError(
-        "GraphQL invocation requires an executable document",
-        configurationRequirement(url, "document", "supply the exact GraphQL executable document and optional operationName"),
-      );
+      throw contextRequiredError(configurationRequirement(url, "document", "supply the exact GraphQL executable document and optional operationName"));
     }
     if (rootType === "subscription" && !configuration.subscriptionTarget) {
-      throw contextRequiredError(
-        "GraphQL subscription requires a WebSocket target",
-        configurationRequirement(url, "subscriptionTarget", "supply an absolute ws or wss GraphQL subscription target"),
-      );
+      throw contextRequiredError(configurationRequirement(url, "subscriptionTarget", "supply an absolute ws or wss GraphQL subscription target"));
     }
     let document;
     try {
       document = parseExecutableDocument(configuration.document.source);
-    } catch (e: unknown) {
-      throw new InvocationError(ERR_SOURCE_CONFIG_ERROR, `parse configuration.document: ${errMsg(e)}`);
+    } catch {
+      throw new InvocationError(ERR_SOURCE_CONFIG_ERROR);
     }
     let headers: Record<string, string>;
     let wsHeaders: Record<string, string> = {};
     try {
       headers = httpHeaders(configuration, args.context);
       if (rootType === "subscription") wsHeaders = websocketHeaders(configuration);
-    } catch (e: unknown) {
-      throw new InvocationError(ERR_SOURCE_CONFIG_ERROR, errMsg(e));
+    } catch {
+      throw new InvocationError(ERR_SOURCE_CONFIG_ERROR);
     }
     if (rootType === "subscription" && Object.keys(wsHeaders).length > 0 && !this.webSocketFactory) {
-      throw new InvocationError(
-        ERR_SOURCE_CONFIG_ERROR,
-        "configuration.protocolFields websocket headers or cookies require a GraphQLWebSocketFactory that can carry WebSocket upgrade headers",
-      );
+      throw new InvocationError(ERR_SOURCE_CONFIG_ERROR);
     }
     const fetchFn = args.fetch ?? fetch;
     // One resolved delivery-unit bound for every body this invocation reads
@@ -170,21 +152,21 @@ export class GraphQLInvoker implements BindingInvoker {
     if (args.source.content !== undefined) {
       try {
         schema = parseIntrospectionContent(args.source.content);
-      } catch (e: unknown) {
-        throw new InvocationError(ERR_SOURCE_LOAD_FAILED, `parse inline GraphQL content: ${errMsg(e)}`);
+      } catch {
+        throw new InvocationError(ERR_SOURCE_LOAD_FAILED);
       }
     } else {
       try {
         schema = await this.cachedIntrospect(url, headers, fetchFn, inv.signal, maxResponseBytes);
-      } catch (e: unknown) {
+      } catch {
         if (inv.signal.aborted) return;
-        throw new InvocationError(ERR_SOURCE_LOAD_FAILED, errMsg(e));
+        throw new InvocationError(ERR_SOURCE_LOAD_FAILED);
       }
     }
     try {
       resolveField(schema, rootType, fieldName);
-    } catch (e: unknown) {
-      throw new InvocationError(ERR_REF_NOT_FOUND, errMsg(e));
+    } catch {
+      throw new InvocationError(ERR_REF_NOT_FOUND);
     }
 
     let variables: Record<string, unknown> | undefined;
@@ -192,7 +174,7 @@ export class GraphQLInvoker implements BindingInvoker {
       const input = await readFirst(inv.inputs());
       if (input.present) {
         if (input.value === null || typeof input.value !== "object" || Array.isArray(input.value)) {
-          throw new InvocationError(ERR_VALIDATION_FAILED, "GraphQL caller input must be one JSON object used wholesale as variables");
+          throw new InvocationError(ERR_VALIDATION_FAILED);
         }
         variables = input.value as Record<string, unknown>;
       }
@@ -208,21 +190,14 @@ export class GraphQLInvoker implements BindingInvoker {
         variables,
         schema,
       );
-    } catch (e: unknown) {
-      throw new InvocationError(
-        ERR_SOURCE_CONFIG_ERROR,
-        `configured document does not denote binding ref ${JSON.stringify(args.ref)}: ${errMsg(e)}`,
-      );
+    } catch {
+      throw new InvocationError(ERR_SOURCE_CONFIG_ERROR);
     }
 
     // Subscriptions stream over WebSocket.
     if (rootType === "subscription") {
-      // The graphql-transport-ws upgrade exposes no HTTP response headers
-      // (the browser WebSocket API hides them), so there is no leading
-      // metadata to surface. Settle the header to empty up front — before
-      // the first emit — so a caller awaiting `header` resolves at
-      // subscription start rather than blocking until the first event.
-      inv.setHeader(emptyMetadata());
+      // graphql-transport-ws native upgrade evidence remains below the
+      // abstract invocation boundary.
       for await (const ev of subscribeGraphQL(
         configuration.subscriptionTarget!,
         configuration.document,
@@ -243,26 +218,17 @@ export class GraphQLInvoker implements BindingInvoker {
     }
 
     // Queries and mutations dispatch one HTTP POST.
-    let invoked: Awaited<ReturnType<typeof invokeGraphQL>>;
-    try {
-      invoked = await invokeGraphQL(
-        url,
-        configuration.document.source,
-        configuration.document.operationName,
-        variables,
-        headers,
-        fetchFn,
-        inv.signal,
-        maxResponseBytes,
-      );
-    } catch (error: unknown) {
-      const evidence = graphQLFailureEvidence(error);
-      if (evidence?.httpResponse) inv.setHeader(evidence.httpResponse.headers);
-      throw error;
-    }
-    const { response, headers: responseHeaders } = invoked;
-    inv.setHeader(responseHeaders);
-    await emitProjectedGraphQLResult(inv, response, responseKey, invoked.mediaType);
+    const invoked = await invokeGraphQL(
+      url,
+      configuration.document.source,
+      configuration.document.operationName,
+      variables,
+      headers,
+      fetchFn,
+      inv.signal,
+      maxResponseBytes,
+    );
+    await emitProjectedGraphQLResult(inv, invoked.response, responseKey);
   }
 
   /** Side-effect-free configuration preflight. */
@@ -475,7 +441,6 @@ async function emitProjectedGraphQLResult(
   inv: InvocationImpl<unknown, unknown>,
   response: Record<string, unknown>,
   responseKey: string,
-  mediaType: string,
 ): Promise<void> {
   const data = response.data !== null && typeof response.data === "object" && !Array.isArray(response.data)
     ? response.data as Record<string, unknown>
@@ -483,32 +448,12 @@ async function emitProjectedGraphQLResult(
   const present = data !== undefined && Object.hasOwn(data, responseKey);
   if (present) await inv.emitOutput(data[responseKey]);
   if (Object.hasOwn(response, "errors")) {
-    inv.fireError(new InvocationError(
-      ERR_EXECUTION_FAILED,
-      graphQLErrorMessage(response),
-      undefined,
-      { graphql: { response, mediaType } },
-    ));
+    inv.fireError(new InvocationError(ERR_EXECUTION_FAILED));
     return;
   }
   if (!present) {
-    inv.fireError(new InvocationError(
-      ERR_RESPONSE_ERROR,
-      `GraphQL response data does not contain selected response key ${JSON.stringify(responseKey)}`,
-      undefined,
-      { graphql: { response, mediaType } },
-    ));
+    inv.fireError(new InvocationError(ERR_RESPONSE_ERROR));
     return;
   }
   inv.closeOutput();
-}
-
-function graphQLErrorMessage(response: Record<string, unknown>): string {
-  const errors: unknown[] = Array.isArray(response.errors) ? response.errors : [];
-  const first: unknown = errors[0];
-  if (first !== null && typeof first === "object" && !Array.isArray(first)) {
-    const message = (first as Record<string, unknown>).message;
-    if (typeof message === "string" && message) return message;
-  }
-  return "GraphQL execution completed unsuccessfully";
 }

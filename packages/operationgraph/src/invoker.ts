@@ -81,8 +81,8 @@ export class OperationGraphInvoker implements BindingInvoker {
     let doc: unknown;
     try {
       doc = await this.loadDocument(args.source.location, args.source.content, args.fetch, args.signal);
-    } catch (err) {
-      inv.fireError(new InvocationError(ERR_SOURCE_LOAD_FAILED, (err as Error).message));
+    } catch {
+      inv.fireError(new InvocationError(ERR_SOURCE_LOAD_FAILED));
       return;
     }
 
@@ -93,9 +93,9 @@ export class OperationGraphInvoker implements BindingInvoker {
       graph = graphFromValue(resolveRef(doc, args.ref));
     } catch (err) {
       if (err instanceof RefError) {
-        inv.fireError(new InvocationError(err.invalid ? ERR_INVALID_REF : ERR_REF_NOT_FOUND, err.message));
+        inv.fireError(new InvocationError(err.invalid ? ERR_INVALID_REF : ERR_REF_NOT_FOUND));
       } else {
-        inv.fireError(new InvocationError(ERR_VALIDATION_FAILED, `ref "${args.ref}": ${(err as Error).message}`));
+        inv.fireError(new InvocationError(ERR_VALIDATION_FAILED));
       }
       return;
     }
@@ -107,7 +107,7 @@ export class OperationGraphInvoker implements BindingInvoker {
     if (typeof version === "string" && SEMVER_RE.test(version)) {
       const refusal = checkVersion(version);
       if (refusal) {
-        inv.fireError(new InvocationError(ERR_UNSUPPORTED_FORMAT_VERSION, refusal));
+        inv.fireError(new InvocationError(ERR_UNSUPPORTED_FORMAT_VERSION));
         return;
       }
     }
@@ -125,8 +125,8 @@ export class OperationGraphInvoker implements BindingInvoker {
       : new Set();
     try {
       validate(graph, opKeys);
-    } catch (err) {
-      inv.fireError(new InvocationError(ERR_VALIDATION_FAILED, (err as Error).message));
+    } catch {
+      inv.fireError(new InvocationError(ERR_VALIDATION_FAILED));
       return;
     }
 
@@ -266,5 +266,5 @@ function utf8ByteLength(s: string): number {
 
 function asInvocationError(err: unknown): InvocationError {
   if (err instanceof InvocationError) return err;
-  return new InvocationError(ERR_RUNTIME, err instanceof Error ? err.message : String(err));
+  return new InvocationError(ERR_RUNTIME);
 }
