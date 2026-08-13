@@ -359,6 +359,54 @@ describe("AsyncAPI synthesis coverage", () => {
     ]));
   });
 
+  it("gives a reply declared by reference the same coverage identity as an inline reply", async () => {
+    // A Reply Object may be a Reference Object into components.replies. The
+    // reply's declared message pointer must survive that spelling, or coverage
+    // cites a bare message name for the referenced form and the full pointer for
+    // the inline one, disagreeing with itself and with the Go SDK.
+    const content = {
+      asyncapi: "3.0.0",
+      info: { title: "Referenced reply", version: "1" },
+      servers: { ws: { host: "api.example", protocol: "wss" } },
+      channels: {
+        events: {
+          address: "/events",
+          messages: { event: { payload: { type: "object" } } },
+        },
+        commands: {
+          address: "/commands",
+          messages: { command: { name: "command", payload: { type: "string" } } },
+        },
+      },
+      components: {
+        replies: {
+          commandReply: { messages: [{ $ref: "#/channels/commands/messages/command" }] },
+        },
+      },
+      operations: {
+        subscribe: {
+          action: "send",
+          channel: { $ref: "#/channels/events" },
+          messages: [{ $ref: "#/channels/events/messages/event" }],
+          reply: { $ref: "#/components/replies/commandReply" },
+        },
+      },
+    };
+
+    const current = await new AsyncAPISynthesizer().synthesizeInterfaceWithCoverage({
+      sources: [{ bindingSpec: BINDING_SPEC, content }],
+    });
+    expect(current.interface.operations["subscribe"]).toMatchObject({
+      input: { type: "string" },
+      output: { type: "object" },
+    });
+    expect(current.coverage.entries).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        sourceRef: "#/operations/subscribe#reply-message[0]=#/channels/commands/messages/command",
+      }),
+    ]));
+  });
+
   it("accounts for message alternatives and declared protocol cells", async () => {
     const content = {
       asyncapi: "3.0.0",
