@@ -20,6 +20,7 @@ import { governingMessages } from "./content.js";
 import {
   type AuthoringExclusion,
   messageBindable,
+  messagePayloadLossReason,
   operationExclusion,
 } from "./synthesize.js";
 import { defaultServer, effectiveServers } from "./target.js";
@@ -230,6 +231,26 @@ function messageCoverage(
     };
   }
   if (identity) {
+    // The §9.2 floor: a declared non-JSON-Schema representation keeps the
+    // operation invocable through an unconstrained direction, but the
+    // emitted OBI has lost a contract bespoke artifact code still knows.
+    // That is lossy, never fully represented (Go twin: messageCoverage).
+    const lossReason = messagePayloadLossReason(doc, candidate.message!);
+    if (lossReason !== undefined) {
+      return {
+        sourceIndex: 0,
+        sourceRef: candidate.sourceRef,
+        scope: "alternative",
+        status: "lossy",
+        ...identity,
+        reasonCode: lossReason,
+        rule: "ASYNC-P-05",
+        message:
+          lossReason === "asyncapi.payload_carriage_unsupported"
+            ? "the effective content type has no JSON application-value carriage; the direction is represented by the unconstrained schema"
+            : "the declared schema format has no faithful JSON Schema conversion; the direction is represented by the unconstrained schema",
+      };
+    }
     return {
       sourceIndex: 0,
       sourceRef: candidate.sourceRef,

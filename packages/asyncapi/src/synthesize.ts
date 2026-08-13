@@ -281,19 +281,44 @@ function unionPayloadSchemas(doc: AsyncAPIDocument, messages: AsyncAPIMessage[])
   return schemas.length === 1 ? schemas[0] : { anyOf: schemas };
 }
 
-function messagePayloadNotConvertible(doc: AsyncAPIDocument, message: AsyncAPIMessage): boolean {
-  if (message.payload === undefined || hasForeignSchemaFormat(message)) return true;
+// The EMISSION predicate: whether the direction must be the unconstrained
+// schema. Whether anything was LOST is messagePayloadLossReason's separate
+// question — an absent payload declares no contract, so the unconstrained
+// schema loses nothing (Go twin: authoring.go).
+export function messagePayloadNotConvertible(doc: AsyncAPIDocument, message: AsyncAPIMessage): boolean {
+  if (message.payload === undefined) return true;
+  return messagePayloadLossReason(doc, message) !== undefined;
+}
+
+/**
+ * Names the lossy-coverage reason when the floored direction discards an
+ * author-declared contract, or undefined when nothing is lost. The two
+ * causes carry different authority and remediation, so they account under
+ * distinct codes: a foreign schema language versus a content type whose
+ * bytes the JSON value boundary cannot carry.
+ */
+export function messagePayloadLossReason(doc: AsyncAPIDocument, message: AsyncAPIMessage): string | undefined {
+  if (message.payload === undefined) return undefined;
+  if (hasForeignSchemaFormat(message)) return "asyncapi.schema_format_not_convertible";
   try {
     supportedMessageContentType(messageEffectiveContentType(doc, message));
-    return false;
+    return undefined;
   } catch {
-    return true;
+    return "asyncapi.payload_carriage_unsupported";
   }
 }
 
 function hasForeignSchemaFormat(message: AsyncAPIMessage): boolean {
   const format = message.schemaFormat?.toLowerCase();
-  return format !== undefined && !format.includes("asyncapi") && !format.includes("json-schema");
+  // application/schema+json (any version parameter) is the official JSON
+  // Schema media type; the hyphen-only heuristic misclassified it (corpus:
+  // qconn-io declares application/schema+json;version=draft-07).
+  return (
+    format !== undefined
+    && !format.includes("asyncapi")
+    && !format.includes("json-schema")
+    && !format.includes("schema+json")
+  );
 }
 
 /**
