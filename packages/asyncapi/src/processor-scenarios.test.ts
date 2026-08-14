@@ -48,7 +48,11 @@ async function runScenario(scenario: ProcessorScenario, joined = false): Promise
   const fetchImpl: typeof fetch = async (input, init) => {
     const headers: Record<string, string> = {};
     new Headers(init?.headers).forEach((value, name) => { headers[name.toLowerCase()] = value; });
-    const rawBody = typeof init?.body === "string" ? init.body : "";
+    const rawBody = typeof init?.body === "string"
+      ? init.body
+      : init?.body instanceof Uint8Array
+        ? new TextDecoder("utf-8", { fatal: false }).decode(init.body)
+        : "";
     let body: unknown = rawBody;
     if (rawBody !== "") {
       try { body = JSON.parse(rawBody); } catch { /* preserve text */ }

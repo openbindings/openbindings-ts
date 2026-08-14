@@ -13,7 +13,7 @@ import {
   DEFAULT_SOURCE_NAME,
 } from "./constants.js";
 import { codePointCompare, operationRef, sanitizeKey, uniqueKey } from "./util.js";
-import { governingMessages, messageEffectiveContentType, supportedMessageContentType } from "./content.js";
+import { governingMessages, isJSONMediaType, messageEffectiveContentType, parseMedia, supportedMessageContentType } from "./content.js";
 import { translateSchemaDialect } from "./translate.js";
 import { effectiveServers } from "./target.js";
 
@@ -170,22 +170,6 @@ export function operationExclusion(
   }
   const inputMessages = op.action === "receive" ? operationMessages : replyMessages;
   const outputMessages = op.action === "send" ? operationMessages : replyMessages;
-  // Carriage gate: when every caller-input message rides a content type with
-  // no JSON application-value carriage, the runtime refuses before dispatch
-  // (no input codec seam exists). Presenting the operation as invocable would
-  // be a lie, so the target is implementation-unsupported — visible MC2 debt
-  // discharged by a codec extension path (Go twin: operationExclusion).
-  if (
-    inputMessages.length > 0
-    && inputMessages.every(
-      (message) => messagePayloadLossReason(doc, message) === "asyncapi.payload_carriage_unsupported",
-    )
-  ) {
-    return {
-      status: "implementation-unsupported", code: "asyncapi.payload_carriage_unsupported", rule: "ASYNC-P-05",
-      message: "every caller-input message declares media without JSON application-value carriage; invocation would refuse before dispatch until a codec extension path exists",
-    };
-  }
   if (inputMessages.length > 0 && inputMessages.every((message) => message.headers !== undefined)) {
     return {
       status: "excluded", code: "asyncapi.message_headers", rule: "ASYNC-P-03",
@@ -335,13 +319,20 @@ function unionPayloadSchemas(doc: AsyncAPIDocument, messages: AsyncAPIMessage[])
   const unique = new Map<string, Record<string, unknown>>();
   for (const message of messages) {
     const { schema: effectiveSchema, schemaFormat } = effectivePayload(message);
-    // Cut object-graph cycles into $ref form before any recursive walk —
-    // translation and serialization would otherwise recurse forever on a
-    // payload the reference pipeline terminated by sharing (decycle.ts).
-    // Decircularize FIRST: the shallow strip copy would break the root's
-    // identity with its components entry and move the cut point.
-    const stripped = stripParserExtensions(decircularizeSchema(effectiveSchema!, doc));
-    const schema = classifySchemaFormat(schemaFormat) === "translate" ? translateSchemaDialect(stripped) : stripped;
+    let schema: Record<string, unknown>;
+    if (messageCarriage(doc, message) === "bytes") {
+      // The byte boundary: exact octets as the canonical Base64 string,
+      // regardless of any declared (inexpressible) payload contract.
+      schema = base64BoundarySchema();
+    } else {
+      // Cut object-graph cycles into $ref form before any recursive walk —
+      // translation and serialization would otherwise recurse forever on a
+      // payload the reference pipeline terminated by sharing (decycle.ts).
+      // Decircularize FIRST: the shallow strip copy would break the root's
+      // identity with its components entry and move the cut point.
+      const stripped = stripParserExtensions(decircularizeSchema(effectiveSchema!, doc));
+      schema = classifySchemaFormat(schemaFormat) === "translate" ? translateSchemaDialect(stripped) : stripped;
+    }
     // JSON object member order is not semantic. Use canonical JSON both for
     // de-duplication and anyOf ordering so source spelling cannot make the
     // TypeScript and Go projections disagree.
@@ -382,8 +373,51 @@ export function effectivePayload(message: AsyncAPIMessage): {
 // question — an absent payload declares no contract, so the unconstrained
 // schema loses nothing (Go twin: authoring.go).
 export function messagePayloadNotConvertible(doc: AsyncAPIDocument, message: AsyncAPIMessage): boolean {
+  // Byte carriage is never unconstrained: the direction is represented by
+  // the canonical Base64 boundary schema (unionPayloadSchemas emits it).
+  if (messageCarriage(doc, message) === "bytes") return false;
   if (effectivePayload(message).schema === undefined) return true;
   return messagePayloadLossReason(doc, message) !== undefined;
+}
+
+/**
+ * Classifies the effective content type's application-value carriage: JSON
+ * family and text ride the ordinary value boundary; any other syntactically
+ * valid media type is the artifact-authorized byte rule (canonical Base64
+ * boundary); a malformed declaration is invalid (Go twin: messageCarriage).
+ */
+export function messageCarriage(doc: AsyncAPIDocument, message: AsyncAPIMessage): "json" | "text" | "bytes" | "invalid" {
+  return contentTypeCarriage(messageEffectiveContentType(doc, message));
+}
+
+export function contentTypeCarriage(contentType: string): "json" | "text" | "bytes" | "invalid" {
+  if (contentType.trim() === "") return "json";
+  let parsed;
+  try {
+    parsed = parseMedia(contentType);
+  } catch {
+    return "invalid";
+  }
+  const textual = isJSONMediaType(parsed.type) || parsed.type.startsWith("text/");
+  if (textual) {
+    const charset = parsed.parameters.get("charset")?.trim().toLowerCase();
+    if (charset && charset !== "utf-8" && charset !== "utf8") return "invalid";
+    return parsed.type.startsWith("text/") ? "text" : "json";
+  }
+  return "bytes";
+}
+
+/**
+ * The byte rule's boundary contract: the caller's JSON string is canonical
+ * RFC 4648 §4 Base64 of the exact octets.
+ */
+export function base64BoundarySchema(): Record<string, unknown> {
+  return { type: "string", contentEncoding: "base64" };
+}
+
+function schemaEqualsBoundary(schema: Record<string, unknown>, disposition: SchemaFormatDisposition): boolean {
+  const carried = disposition === "translate" ? translateSchemaDialect(schema) : schema;
+  return canonicalize(carried) === canonicalize(base64BoundarySchema());
 }
 
 /**
@@ -396,16 +430,21 @@ export function messagePayloadNotConvertible(doc: AsyncAPIDocument, message: Asy
 export function messagePayloadLossReason(doc: AsyncAPIDocument, message: AsyncAPIMessage): string | undefined {
   const { schema, schemaFormat } = effectivePayload(message);
   if (schema === undefined && message.payload === undefined) return undefined;
-  if (hasForeignSchemaFormat(schemaFormat)) return "asyncapi.schema_format_not_convertible";
-  // A wrapper whose schema member is absent declares no contract in a
-  // recognized language.
-  if (schema === undefined) return undefined;
-  try {
-    supportedMessageContentType(messageEffectiveContentType(doc, message));
-    return undefined;
-  } catch {
-    return "asyncapi.payload_carriage_unsupported";
+  if (messageCarriage(doc, message) === "bytes") {
+    // The byte boundary (§9.2, ruled 2026-08-13): declared binary media
+    // carries exact octets as the canonical Base64 boundary string. With no
+    // declared payload contract — or one that IS the boundary schema —
+    // nothing is lost. Any other declared contract is not expressible at
+    // that boundary, so the direction is lossy; consumer codec hooks are
+    // the enrichment path (Go twin: messagePayloadLossReason).
+    if (!hasForeignSchemaFormat(schemaFormat)) {
+      if (schema === undefined) return undefined;
+      if (schemaEqualsBoundary(schema, classifySchemaFormat(schemaFormat))) return undefined;
+    }
+    return "asyncapi.payload_byte_carriage";
   }
+  if (hasForeignSchemaFormat(schemaFormat)) return "asyncapi.schema_format_not_convertible";
+  return undefined;
 }
 
 /**

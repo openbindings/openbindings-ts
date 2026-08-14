@@ -280,7 +280,7 @@ function requiredLane(context: Record<string, unknown> | undefined, point: "enco
 }
 
 interface ParsedMedia { type: string; parameters: Map<string, string>; identity: string }
-function parseMedia(value: string): ParsedMedia {
+export function parseMedia(value: string): ParsedMedia {
   const parts = value.split(";");
   const type = (parts.shift() ?? "").trim().toLowerCase();
   if (!type.includes("/")) throw new Error(`invalid media type ${JSON.stringify(value)}`);
@@ -359,6 +359,6 @@ export function isTextContentType(contentType: string): boolean {
  * structured-suffix type; absent/unparseable → NOT JSON. Never sniffed.
  * Operates on a normalized type.
  */
-function isJSONMediaType(normalized: string): boolean {
+export function isJSONMediaType(normalized: string): boolean {
   return normalized === "application/json" || normalized.endsWith("+json");
 }

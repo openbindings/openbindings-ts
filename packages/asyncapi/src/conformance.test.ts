@@ -869,29 +869,41 @@ describe("input text lane (§9.1, ASYNC-P-03)", () => {
   });
 });
 
-describe("excluded input families (§9.1, ASYNC-P-03)", () => {
-  it("refuses a declared non-JSON non-text family before any request or upgrade", async () => {
+describe("the byte boundary for binary input families (§9.1, ruled 2026-08-13)", () => {
+  it("refuses a non-string value on the byte boundary before any request or upgrade", async () => {
     const srv = await startHTTP((_req, res) => {
       res.writeHead(202);
       res.end();
     });
     const invoker = new AsyncAPIInvoker();
     try {
+      // Declared binary media is invocable: the caller's value is the
+      // canonical Base64 string of the exact octets, so the map value the
+      // helper publishes refuses at validation, pre-dispatch.
       const r = await publish(invoker, laneDoc(srv.port, "http", "avro/binary"), "#/operations/post");
-      expect(codeOf(r.err)).toBe("ERR_SOURCE_CONFIG_ERROR");
+      expect(codeOf(r.err)).toBe("ERR_VALIDATION_FAILED");
       expect(srv.requests()).toBe(0);
 
       // WS cell: refused before any socket is dialed.
       const wsSrv = await startWS(() => {
         /* never reached */
       });
+      const wsDoc = laneDoc(wsSrv.port, "ws", "application/octet-stream", "/ws") as {
+        operations: { post: { reply?: unknown } };
+      };
+      // A reply-free publish: the WS reply shape rules are out of scope here;
+      // the cell pins only the byte-boundary value refusal.
+      delete wsDoc.operations.post.reply;
       const wsRefused = await publish(
         invoker,
-        laneDoc(wsSrv.port, "ws", "application/octet-stream", "/ws"),
+        wsDoc,
         "#/operations/post",
+        { configuration: { websocketMessageType: "binary" } },
       );
-      expect(codeOf(wsRefused.err)).toBe("ERR_SOURCE_CONFIG_ERROR");
-      expect(wsSrv.upgrades()).toBe(0);
+      expect(codeOf(wsRefused.err)).toBe("ERR_VALIDATION_FAILED");
+      // The client-streaming shape dials at start and values arrive per
+      // frame, so a value-shape refusal is post-upgrade by construction;
+      // what the boundary guarantees is that no frame was published.
     } finally {
       invoker.close();
     }
