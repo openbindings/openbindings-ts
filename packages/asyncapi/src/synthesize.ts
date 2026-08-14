@@ -398,6 +398,10 @@ export function contentTypeCarriage(contentType: string): "json" | "text" | "byt
   } catch {
     return "invalid";
   }
+  // A media type is type/subtype; a bare token ("json" — a wild-corpus
+  // spelling) is malformed, and guessing its intent would be payload-blind
+  // sniffing by another name (Go twin: contentTypeCarriage).
+  if (!parsed.type.includes("/")) return "invalid";
   const textual = isJSONMediaType(parsed.type) || parsed.type.startsWith("text/");
   if (textual) {
     const charset = parsed.parameters.get("charset")?.trim().toLowerCase();
