@@ -7,7 +7,7 @@ import { classifySchemaFormat } from "./synthesize.js";
 // Twin of Go TestClassifySchemaFormat (authoring_test.go): the pinned
 // disposition set for declared schema formats.
 describe("classifySchemaFormat", () => {
-  const cases: Array<[string | undefined, "translate" | "passthrough" | "foreign"]> = [
+  const cases: Array<[string | undefined, "translate" | "passthrough" | "avro" | "foreign"]> = [
     // Absent or blank: the artifact's default (Draft-07-superset) governs.
     [undefined, "translate"],
     ["", "translate"],
@@ -25,8 +25,12 @@ describe("classifySchemaFormat", () => {
     // Unknown or absent JSON Schema version: no translation rules to apply.
     ["application/schema+json", "foreign"],
     ["application/schema+json;version=draft-04", "foreign"],
+    // The named Avro correspondence (ruled 2026-08-14): 1.x editions.
+    ["application/vnd.apache.avro;version=1.9.0", "avro"],
+    ["application/vnd.apache.avro+json;version=1.11.1", "avro"],
+    ["application/vnd.apache.avro", "avro"],
+    ["application/vnd.apache.avro;version=2.0.0", "foreign"],
     // Foreign languages the substring heuristic previously mishandled.
-    ["application/vnd.apache.avro;version=1.9.0", "foreign"],
     ["application/vnd.google.protobuf;version=2", "foreign"],
     ["application/vnd.oai.openapi;version=3.0.0", "foreign"],
     ["application/raml+yaml;version=1.0", "foreign"],

@@ -1,6 +1,7 @@
 import type { OBInterface, Operation, Source } from "@openbindings/sdk";
 import { MAX_TESTED_VERSION, canonicalize, validateInterface } from "@openbindings/sdk";
 import { decircularizeSchema, decycleOperationSchema } from "./decycle.js";
+import { deriveAvroSchema } from "./avro.js";
 import type {
   AsyncAPIChannel,
   AsyncAPIDocument,
@@ -320,10 +321,26 @@ function unionPayloadSchemas(doc: AsyncAPIDocument, messages: AsyncAPIMessage[])
   for (const message of messages) {
     const { schema: effectiveSchema, schemaFormat } = effectivePayload(message);
     let schema: Record<string, unknown>;
-    if (messageCarriage(doc, message) === "bytes") {
+    const derivedAvro = classifySchemaFormat(schemaFormat) === "avro" ? deriveAvroSchema(effectiveSchema) : undefined;
+    if (classifySchemaFormat(schemaFormat) === "avro") {
+      // The named Avro correspondence: logical values under Avro's own JSON
+      // Encoding. A declaration that does not parse as an Avro schema falls
+      // to the byte rule as an inexpressible contract.
+      if (derivedAvro !== undefined) {
+        schema = derivedAvro;
+      } else if (messageCarriage(doc, message) === "bytes") {
+        schema = base64BoundarySchema();
+        schema["description"] = lossyBoundaryDescription(messageEffectiveContentType(doc, message));
+      } else {
+        schema = {};
+      }
+    } else if (messageCarriage(doc, message) === "bytes") {
       // The byte boundary: exact octets as the canonical Base64 string,
       // regardless of any declared (inexpressible) payload contract.
       schema = base64BoundarySchema();
+      schema["description"] = messagePayloadLossReason(doc, message) === "asyncapi.payload_byte_carriage"
+        ? lossyBoundaryDescription(messageEffectiveContentType(doc, message))
+        : boundaryDescription(messageEffectiveContentType(doc, message));
     } else {
       // Cut object-graph cycles into $ref form before any recursive walk —
       // translation and serialization would otherwise recurse forever on a
@@ -374,8 +391,11 @@ export function effectivePayload(message: AsyncAPIMessage): {
 // schema loses nothing (Go twin: authoring.go).
 export function messagePayloadNotConvertible(doc: AsyncAPIDocument, message: AsyncAPIMessage): boolean {
   // Byte carriage is never unconstrained: the direction is represented by
-  // the canonical Base64 boundary schema (unionPayloadSchemas emits it).
+  // the canonical Base64 boundary schema (unionPayloadSchemas emits it) —
+  // and an Avro-declared direction by its derived logical schema or the
+  // boundary schema, likewise never unconstrained.
   if (messageCarriage(doc, message) === "bytes") return false;
+  if (classifySchemaFormat(effectivePayload(message).schemaFormat) === "avro") return false;
   if (effectivePayload(message).schema === undefined) return true;
   return messagePayloadLossReason(doc, message) !== undefined;
 }
@@ -419,6 +439,16 @@ export function base64BoundarySchema(): Record<string, unknown> {
   return { type: "string", contentEncoding: "base64" };
 }
 
+/** The §9.2-pinned boundary descriptions: the loss is stated in the emitted
+ *  schema itself, not only in synthesis coverage (Go twin). */
+export function boundaryDescription(media: string): string {
+  return `Canonical RFC 4648 §4 Base64 of the exact ${media} payload octets.`;
+}
+
+export function lossyBoundaryDescription(media: string): string {
+  return `${boundaryDescription(media)} The artifact declares a payload contract this boundary cannot express; a codec is required to produce valid payloads.`;
+}
+
 function schemaEqualsBoundary(schema: Record<string, unknown>, disposition: SchemaFormatDisposition): boolean {
   const carried = disposition === "translate" ? translateSchemaDialect(schema) : schema;
   return canonicalize(carried) === canonicalize(base64BoundarySchema());
@@ -434,6 +464,14 @@ function schemaEqualsBoundary(schema: Record<string, unknown>, disposition: Sche
 export function messagePayloadLossReason(doc: AsyncAPIDocument, message: AsyncAPIMessage): string | undefined {
   const { schema, schemaFormat } = effectivePayload(message);
   if (schema === undefined && message.payload === undefined) return undefined;
+  if (classifySchemaFormat(schemaFormat) === "avro") {
+    // The named correspondence (ruled 2026-08-14): a derivable Avro
+    // contract crosses as logical values — nothing lost. An underivable
+    // declaration is an inexpressible contract under the byte rule.
+    if (deriveAvroSchema(schema) !== undefined) return undefined;
+    if (messageCarriage(doc, message) === "bytes") return "asyncapi.payload_byte_carriage";
+    return "asyncapi.schema_format_not_convertible";
+  }
   if (messageCarriage(doc, message) === "bytes") {
     // The byte boundary (§9.2, ruled 2026-08-13): declared binary media
     // carries exact octets as the canonical Base64 boundary string. With no
@@ -460,7 +498,7 @@ export function messagePayloadLossReason(doc: AsyncAPIDocument, message: AsyncAP
  * passes through untouched; everything else — Avro, Protobuf, OpenAPI,
  * unknown or malformed versions — is foreign.
  */
-export type SchemaFormatDisposition = "translate" | "passthrough" | "foreign";
+export type SchemaFormatDisposition = "translate" | "passthrough" | "avro" | "foreign";
 
 export function classifySchemaFormat(declared: string | undefined): SchemaFormatDisposition {
   const trimmed = declared?.trim() ?? "";
@@ -482,6 +520,12 @@ export function classifySchemaFormat(declared: string | undefined): SchemaFormat
     case "application/vnd.aai.asyncapi+json":
     case "application/vnd.aai.asyncapi+yaml":
       return "translate";
+    case "application/vnd.apache.avro":
+    case "application/vnd.apache.avro+json":
+    case "application/vnd.apache.avro+yaml":
+      // The named Avro correspondence (§9.2): 1.x editions only.
+      if (version === "" || version.startsWith("1.")) return "avro";
+      return "foreign";
     case "application/schema+json":
     case "application/schema+yaml":
       if (version === "draft-07") return "translate";

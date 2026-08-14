@@ -190,11 +190,21 @@ function decycleNode(node: unknown, state: DecycleState): unknown {
   if (!isObject(node)) return node;
   const ref = node["$ref"];
   if (typeof ref === "string" && ref.startsWith("#/")) {
-    const name = materialize(ref, state);
-    if (name !== undefined) {
-      node["$ref"] = `${state.refBase}/$defs/${escapeDefsPointerSegment(name)}`;
+    // A derivation-emitted local ref ("#/$defs/<name>", the Avro
+    // correspondence's named-type spelling) rebases onto the operation
+    // schema's own pointer; artifact refs materialize as before. The walk
+    // then continues into sibling members: 2020-12 evaluates keywords
+    // beside $ref, and the derived root is exactly {$ref, $defs} —
+    // returning here would leave every ref inside that $defs unrebased
+    // (dangling in the emitted document).
+    if (ref.startsWith("#/$defs/")) {
+      node["$ref"] = state.refBase + ref.slice(1);
+    } else {
+      const name = materialize(ref, state);
+      if (name !== undefined) {
+        node["$ref"] = `${state.refBase}/$defs/${escapeDefsPointerSegment(name)}`;
+      }
     }
-    return node;
   }
   for (const [key, value] of Object.entries(node)) {
     if (SCHEMA_MAP_CONTAINER_KEYS.has(key) && isObject(value)) {

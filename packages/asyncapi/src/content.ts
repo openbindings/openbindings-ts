@@ -140,13 +140,16 @@ export function decodeContentType(
   for (const message of msgs) {
     validateMessageBindingVersion(message);
     if (message.headers !== undefined) throw new Error("output message declares headers, which the candidate application-value boundary cannot carry");
+    avroMediaGuard(message, messageEffectiveContentType(doc, message));
     supportedMessageContentType(messageEffectiveContentType(doc, message));
   }
   const types = completeEffectiveTypes(doc, msgs);
   if (types.length > 1) throw new Error("output messages declare conflicting effective content types");
   const only = types[0] ?? "";
   if (only !== "") return only;
-  return requiredLane(context, "decode");
+  const lane = requiredLane(context, "decode");
+  for (const message of msgs) avroMediaGuard(message, lane);
+  return lane;
 }
 
 /**
@@ -185,9 +188,11 @@ export function resolveInputCodec(
   const t = types[0] ?? "";
   if (t === "") {
     const lane = requiredLane(context, "encode");
+    avroMediaGuard(msgs[0]!, lane);
     return { json: lane === "application/json", contentType: lane === "application/json" ? "application/json" : "text/plain; charset=utf-8" };
   }
   const effective = messageEffectiveContentType(doc, msgs[0]!);
+  avroMediaGuard(msgs[0]!, effective);
   supportedMessageContentType(effective);
   if (isJSONMediaType(t)) return { json: true, contentType: effective };
   if (isTextContentType(t)) return { json: false, contentType: effective };
@@ -219,6 +224,44 @@ export function supportedMessageContentType(contentType: string): void {
   }
 }
 
+/**
+ * Refuses the unqualified-codec case of the named Avro correspondence
+ * (§9.2): a message whose payload declares an on-list Avro schema format
+ * with effective media outside the JSON family, whose wire is the Avro
+ * BINARY encoding. This build has not qualified an Avro binary codec, so
+ * the direction refuses before dispatch, exactly as an unqualified protocol
+ * driver does — it never rides the text lane and never invents a byte
+ * convention (the synthesized schema is the logical one). A JSON-family
+ * media needs no extra codec: the ordinary JSON lane is the Avro-JSON wire.
+ * The on-list test mirrors classifySchemaFormat's Avro rule (synthesize.ts
+ * imports this module, so the classifier cannot be imported here).
+ */
+export function avroMediaGuard(message: AsyncAPIMessage, effectiveContentType: string): void {
+  if (effectiveContentType === "" || isJSONMediaType(normalizeMediaType(effectiveContentType))) return;
+  const payload = message.payload as Record<string, unknown> | undefined;
+  const format = payload?.["schemaFormat"];
+  if (typeof format !== "string" || format.trim() === "") return;
+  let parsed: ParsedMedia;
+  try {
+    parsed = parseMedia(format);
+  } catch {
+    return;
+  }
+  switch (parsed.type) {
+    case "application/vnd.apache.avro":
+    case "application/vnd.apache.avro+json":
+    case "application/vnd.apache.avro+yaml":
+      break;
+    default:
+      return;
+  }
+  const version = parsed.parameters.get("version") ?? "";
+  if (version !== "" && !version.startsWith("1.")) return;
+  throw new Error(
+    `the governing message declares the Avro correspondence with media ${JSON.stringify(effectiveContentType)}, whose wire is the Avro binary encoding; this build has no qualified Avro binary codec`,
+  );
+}
+
 /** Selects the reply declaration governing a non-empty HTTP response. */
 export function resolveReplyContentType(
   doc: AsyncAPIDocument,
@@ -235,6 +278,7 @@ export function resolveReplyContentType(
   for (const message of candidates) {
     validateMessageBindingVersion(message);
     if (message.headers !== undefined) throw new Error("selected reply message declares headers, which the candidate application-value boundary cannot carry");
+    avroMediaGuard(message, messageEffectiveContentType(doc, message));
     supportedMessageContentType(messageEffectiveContentType(doc, message));
   }
 
