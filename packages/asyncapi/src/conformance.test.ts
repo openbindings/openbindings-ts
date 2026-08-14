@@ -179,17 +179,22 @@ describe("address parameters (ASYNC-P-04)", () => {
     });
     const invoker = new AsyncAPIInvoker();
     try {
+      // The routed envelope (§9.2, ruled 2026-08-14): the parameterized
+      // channel's input carries the payload under "payload"; the address
+      // parameters here keep riding the configuration pre-fill (Go twin:
+      // TestAddressParameterExpansion).
+      const envelope = { payload: { m: 1 } };
       // Supplied roomId + defaulted lane.
       let r = await publish(invoker, paramDoc(srv.port), "#/operations/post", {
         configuration: { address: { parameters: { roomId: "general" } } },
-      });
+      }, envelope);
       expect(r.err).toBeUndefined();
       expect(srv.lastPath()).toBe("/rooms/general/main");
 
       // A supplied value overrides a declared default.
       r = await publish(invoker, paramDoc(srv.port), "#/operations/post", {
         configuration: { address: { parameters: { roomId: "ops", lane: "audit" } } },
-      });
+      }, envelope);
       expect(r.err).toBeUndefined();
       expect(srv.lastPath()).toBe("/rooms/ops/audit");
 
@@ -197,7 +202,7 @@ describe("address parameters (ASYNC-P-04)", () => {
       // missing address parameter is a config.value CONTEXT_REQUIRED, not a
       // terminal ERR_SOURCE_CONFIG_ERROR.
       const before = srv.requests();
-      r = await publish(invoker, paramDoc(srv.port), "#/operations/post");
+      r = await publish(invoker, paramDoc(srv.port), "#/operations/post", undefined, envelope);
       expect(codeOf(r.err)).toBe("CONTEXT_REQUIRED");
       expect(configReq(r.err).point).toBe("address");
       expect(srv.requests()).toBe(before);
@@ -219,7 +224,7 @@ describe("address parameters (ASYNC-P-04)", () => {
       // The artifact-declared enum is authoritative.
       const r = await publish(invoker, doc, "#/operations/post", {
         configuration: { address: { parameters: { roomId: "backstage" } } },
-      });
+      }, { payload: { m: 1 } });
       expect(codeOf(r.err)).toBe("ERR_REFUSED");
       expect(srv.requests()).toBe(0);
     } finally {

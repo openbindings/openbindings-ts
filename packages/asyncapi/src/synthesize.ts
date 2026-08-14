@@ -1,23 +1,30 @@
 import type { OBInterface, Operation, Source } from "@openbindings/sdk";
 import { MAX_TESTED_VERSION, canonicalize, validateInterface } from "@openbindings/sdk";
-import { decircularizeSchema, decycleOperationSchema } from "./decycle.js";
+import { decycleOperationSchema } from "./decycle.js";
 import { deriveAvroSchema } from "./avro.js";
+import {
+  boundaryDocument,
+  deepCopyObject,
+  extractRefName,
+  isRawObject,
+  refStringOf,
+  resolveRawMessageRef,
+  type BoundaryDocument,
+  type RawObject,
+} from "./resolve-refs.js";
 import type {
   AsyncAPIChannel,
-  AsyncAPIParameter,
   AsyncAPIDocument,
   AsyncAPIMessage,
   AsyncAPIOperation,
-  AsyncAPIOperationReply,
 } from "./asyncapi-types.js";
 import {
   BINDING_SPEC,
   DEFAULT_SOURCE_NAME,
 } from "./constants.js";
 import { codePointCompare, operationRef, sanitizeKey, uniqueKey } from "./util.js";
-import { governingMessages, isJSONMediaType, messageEffectiveContentType, parseMedia, supportedMessageContentType } from "./content.js";
+import { governingMessages, isJSONMediaType, messageEffectiveContentType, parseMedia } from "./content.js";
 import { translateSchemaDialect } from "./translate.js";
-import { effectiveServers } from "./target.js";
 
 // eslint-disable-next-line @typescript-eslint/require-await -- the synthesizer contract is Promise-returning; this format synthesizes synchronously
 export async function convertToInterface(
@@ -68,13 +75,15 @@ export async function convertToInterface(
 
     // Schema direction follows the complementary perspective (ASYNC-P-02):
     // the artifact describes the application, the invocation is the
-    // counterparty. Cyclic-reference hoisting runs on each direction so
-    // recursion the artifact declared survives the projection ($defs,
-    // decycle.ts).
-    const { input, output } = operationBoundarySchemas(doc, asyncOp);
+    // counterparty. Boundary schemas derive from the raw lane
+    // (resolve-refs.ts) so cyclic cut points carry the artifact's own ref
+    // spellings; hoisting then runs on each direction so recursion the
+    // artifact declared survives the projection ($defs, decycle.ts).
+    const boundary = boundaryDocument(doc);
+    const { input, output } = operationBoundarySchemas(boundary, opID);
     const opPointer = `#/operations/${escapePointerSegment(opKey)}`;
-    if (input) obiOp.input = decycleOperationSchema(input, doc, `${opPointer}/input`);
-    if (output) obiOp.output = decycleOperationSchema(output, doc, `${opPointer}/output`);
+    if (input) obiOp.input = decycleOperationSchema(input, boundary.raw, `${opPointer}/input`);
+    if (output) obiOp.output = decycleOperationSchema(output, boundary.raw, `${opPointer}/output`);
 
     iface.operations[opKey] = obiOp;
 
@@ -98,7 +107,7 @@ export function bindableOperationEntries(
   bindingSpec = BINDING_SPEC,
 ): Array<[string, AsyncAPIOperation]> {
   return Object.entries(doc.operations ?? {})
-    .filter(([, operation]) => operationBindable(doc, operation, bindingSpec))
+    .filter(([opID, operation]) => operationBindable(doc, operation, opID, bindingSpec))
     .sort(([a], [b]) => codePointCompare(a, b));
 }
 
@@ -112,14 +121,16 @@ export interface AuthoringExclusion {
 function operationBindable(
   doc: AsyncAPIDocument,
   op: AsyncAPIOperation,
+  opID: string,
   bindingSpec: string,
 ): boolean {
-  return operationExclusion(doc, op, bindingSpec) === undefined;
+  return operationExclusion(doc, op, opID, bindingSpec) === undefined;
 }
 
 export function operationExclusion(
   doc: AsyncAPIDocument,
   op: AsyncAPIOperation,
+  opID: string,
   _bindingSpec = BINDING_SPEC,
 ): AuthoringExclusion | undefined {
   const unresolvedTrait = (op as unknown as Record<string, unknown>)["x-ob-asyncapi-unresolved-trait"];
@@ -174,7 +185,7 @@ export function operationExclusion(
   const outputMessages = op.action === "send" ? operationMessages : replyMessages;
   void inputMessages;
   void outputMessages;
-  return operationSchemaDefect(doc, op);
+  return operationSchemaDefect(boundaryDocument(doc), opID);
 }
 
 export function messageBindable(
@@ -221,22 +232,29 @@ export function requiredPropertiesMayBeStrings(schema: Record<string, unknown> |
  * Derives both directions' operation-boundary schemas under the
  * complementary caller perspective (ASYNC-P-02): a send operation's messages
  * are the invoker's output, a receive operation's the invoker's input, and a
- * declared reply is the opposite direction (Go twin: operationBoundarySchemas).
+ * declared reply is the opposite direction. Derivation reads the raw lane
+ * (resolve-refs.ts) exclusively, mirroring the Go SDK's navigation over its
+ * resolved document (Go twin: operationBoundarySchemas).
  */
 function operationBoundarySchemas(
-  doc: AsyncAPIDocument,
-  op: AsyncAPIOperation,
+  boundary: BoundaryDocument,
+  opID: string,
 ): { input?: Record<string, unknown>; output?: Record<string, unknown> } {
-  const params = channelEnvelopeParams(doc, op.channel);
-  switch (op.action) {
+  const op = rawObjectAt(boundary.doc["operations"], opID);
+  if (!op) return {};
+  const ch = rawOperationChannel(boundary, refStringOf(op["channel"]));
+  const params = channelEnvelopeParams(ch);
+  const replyValue = op["reply"];
+  const reply = isRawObject(replyValue) ? replyValue : undefined;
+  switch (op["action"]) {
     case "send": {
-      const output = operationPayloadSchema(doc, op, false);
-      let input = op.reply ? replyPayloadSchema(doc, op.reply) : undefined;
+      const output = operationPayloadSchema(boundary, op, false);
+      let input = reply ? replyPayloadSchema(boundary, reply) : undefined;
       // Addressing data is caller input even on the subscribe perspective:
       // the operation channel's location-less parameters ride the input
       // envelope (parameter-only when no reply input).
       if (params.length > 0) {
-        input = unionDirectionSchemas(doc, op.reply ? replyMessagesOf(op.reply) : [], params, op.reply !== undefined);
+        input = unionDirectionSchemas(boundary, reply ? replyMessagesOf(boundary, reply) : [], params, reply !== undefined);
       }
       const result: { input?: Record<string, unknown>; output?: Record<string, unknown> } = {};
       if (output !== undefined) result.output = output;
@@ -245,10 +263,10 @@ function operationBoundarySchemas(
     }
     case "receive": {
       const result: { input?: Record<string, unknown>; output?: Record<string, unknown> } = {};
-      const input = operationPayloadSchema(doc, op, true);
+      const input = operationPayloadSchema(boundary, op, true);
       if (input !== undefined) result.input = input;
-      if (op.reply) {
-        const output = replyPayloadSchema(doc, op.reply);
+      if (reply) {
+        const output = replyPayloadSchema(boundary, reply);
         if (output !== undefined) result.output = output;
       }
       return result;
@@ -256,6 +274,18 @@ function operationBoundarySchemas(
     default:
       return {};
   }
+}
+
+function rawObjectAt(map: unknown, key: string): RawObject | undefined {
+  if (!isRawObject(map)) return undefined;
+  const value = map[key];
+  return isRawObject(value) ? value : undefined;
+}
+
+/** The operation channel by the Go rule: the channels-map entry named by the
+ *  channel ref's trailing segment (Go twin: extractRefName + doc.Channels). */
+function rawOperationChannel(boundary: BoundaryDocument, channelRef: string): RawObject | undefined {
+  return rawObjectAt(boundary.doc["channels"], extractRefName(channelRef));
 }
 
 /**
@@ -268,14 +298,14 @@ function operationBoundarySchemas(
  * face (OBI-D-16/D-17).
  */
 function operationSchemaDefect(
-  doc: AsyncAPIDocument,
-  op: AsyncAPIOperation,
+  boundary: BoundaryDocument,
+  opID: string,
 ): AuthoringExclusion | undefined {
-  const { input, output } = operationBoundarySchemas(doc, op);
+  const { input, output } = operationBoundarySchemas(boundary, opID);
   if (!input && !output) return undefined;
   const probeOp: Operation = {};
-  if (input) probeOp.input = decycleOperationSchema(input, doc, "#/operations/probe/input");
-  if (output) probeOp.output = decycleOperationSchema(output, doc, "#/operations/probe/output");
+  if (input) probeOp.input = decycleOperationSchema(input, boundary.raw, "#/operations/probe/input");
+  if (output) probeOp.output = decycleOperationSchema(output, boundary.raw, "#/operations/probe/output");
   const probe: OBInterface = {
     openbindings: MAX_TESTED_VERSION,
     name: "probe",
@@ -300,21 +330,65 @@ function escapePointerSegment(segment: string): string {
   return segment.replaceAll("~", "~0").replaceAll("/", "~1");
 }
 
-function operationPayloadSchema(doc: AsyncAPIDocument, op: AsyncAPIOperation, input: boolean): Record<string, unknown> | undefined {
-  const channel = op.channel!;
-  const messages = governingMessages(op, channel);
+function operationPayloadSchema(boundary: BoundaryDocument, op: RawObject, input: boolean): Record<string, unknown> | undefined {
+  const ch = rawOperationChannel(boundary, refStringOf(op["channel"]));
+  const messages = rawGoverningMessages(boundary, op, ch);
   // Location-less channel parameters are caller input riding the routed
   // envelope (§9.2); declared headers ride it per message.
-  const params = input ? channelEnvelopeParams(doc, channel) : [];
-  return unionDirectionSchemas(doc, messages, params, true);
+  const params = input ? channelEnvelopeParams(ch) : [];
+  return unionDirectionSchemas(boundary, messages, params, true);
 }
 
-function replyMessagesOf(reply: AsyncAPIOperationReply): AsyncAPIMessage[] {
-  return reply.messages?.length ? [...reply.messages] : Object.values(reply.channel?.messages ?? {});
+/**
+ * The operation's governing message set on the raw lane: the operation's
+ * `messages` references resolved (an unresolvable member contributes
+ * nothing), else ALL of the operation channel's messages in sorted key
+ * order (Go twin: governingMessages).
+ */
+function rawGoverningMessages(boundary: BoundaryDocument, op: RawObject, ch: RawObject | undefined): RawObject[] {
+  const declared = op["messages"];
+  if (Array.isArray(declared) && declared.length > 0) {
+    const out: RawObject[] = [];
+    for (const member of declared) {
+      const message = resolveRawMessageRef(boundary.doc, refStringOf(member));
+      if (message) out.push(message);
+    }
+    return out;
+  }
+  if (!ch) return [];
+  return rawChannelMessages(ch);
 }
 
-function replyPayloadSchema(doc: AsyncAPIDocument, reply: AsyncAPIOperationReply): Record<string, unknown> | undefined {
-  return unionDirectionSchemas(doc, replyMessagesOf(reply), [], true);
+/** A channel's messages in sorted key order (Go twin: channelMessages). */
+function rawChannelMessages(ch: RawObject): RawObject[] {
+  const messages = ch["messages"];
+  if (!isRawObject(messages)) return [];
+  return Object.entries(messages)
+    .sort(([a], [b]) => codePointCompare(a, b))
+    .map(([, member]) => member)
+    .filter(isRawObject);
+}
+
+/** A reply declaration's governing messages: the reply's own list, else its
+ *  channel's messages (Go twin: replyMessagesOf). */
+function replyMessagesOf(boundary: BoundaryDocument, reply: RawObject): RawObject[] {
+  const out: RawObject[] = [];
+  const declared = reply["messages"];
+  if (Array.isArray(declared)) {
+    for (const member of declared) {
+      const message = resolveRawMessageRef(boundary.doc, refStringOf(member));
+      if (message) out.push(message);
+    }
+  }
+  if (out.length === 0 && isRawObject(reply["channel"])) {
+    const ch = rawOperationChannel(boundary, refStringOf(reply["channel"]));
+    if (ch) out.push(...rawChannelMessages(ch));
+  }
+  return out;
+}
+
+function replyPayloadSchema(boundary: BoundaryDocument, reply: RawObject): Record<string, unknown> | undefined {
+  return unionDirectionSchemas(boundary, replyMessagesOf(boundary, reply), [], true);
 }
 
 // Each governed payload enters an OBI position only under dialect
@@ -323,12 +397,13 @@ function replyPayloadSchema(doc: AsyncAPIDocument, reply: AsyncAPIOperationReply
 // contribute a faithful schema, so the direction is represented by the
 // unconstrained schema per the binding specification's §9.2 floor.
 // Declaration-driven only — never payload sniffing.
-function unionPayloadSchemas(doc: AsyncAPIDocument, messages: AsyncAPIMessage[]): Record<string, unknown> | undefined {
+function unionPayloadSchemas(boundary: BoundaryDocument, messages: RawObject[]): Record<string, unknown> | undefined {
   if (messages.length === 0) return undefined;
-  if (messages.some((message) => messagePayloadNotConvertible(doc, message))) return {};
+  const docLike = boundary.doc as unknown as AsyncAPIDocument;
+  if (messages.some((message) => messagePayloadNotConvertible(docLike, message))) return {};
   const unique = new Map<string, Record<string, unknown>>();
   for (const message of messages) {
-    const schema = messagePayloadBoundarySchema(doc, message);
+    const schema = messagePayloadBoundarySchema(boundary, message);
     // JSON object member order is not semantic. Use canonical JSON both for
     // de-duplication and anyOf ordering so source spelling cannot make the
     // TypeScript and Go projections disagree.
@@ -357,31 +432,34 @@ interface EnvelopeParam {
 /** The channel's location-less parameters in sorted name order. A parameter
  *  whose location declares a runtime expression stays derived from that
  *  expression's source (the artifact's own bridge). */
-function channelEnvelopeParams(doc: AsyncAPIDocument, ch: AsyncAPIChannel | undefined): EnvelopeParam[] {
-  const parameters = ch?.parameters;
-  if (!parameters) return [];
-  return Object.keys(parameters)
-    .filter((name) => !parameters[name]!.location)
+function channelEnvelopeParams(ch: RawObject | undefined): EnvelopeParam[] {
+  const parameters = ch?.["parameters"];
+  if (!isRawObject(parameters)) return [];
+  return Object.entries(parameters)
+    .filter((entry): entry is [string, RawObject] => isRawObject(entry[1]) && !entry[1]["location"])
+    .map(([name]) => name)
     .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
-    .map((name) => ({ name, schema: parameterEnvelopeSchema(doc, parameters[name]!) }));
+    .map((name) => ({ name, schema: parameterEnvelopeSchema(parameters[name] as RawObject) }));
 }
 
 /** A 3.x Parameter Object is string-valued by definition; a 2.x Parameter
  *  Object may declare a Schema Object, entering under dialect translation. */
-function parameterEnvelopeSchema(doc: AsyncAPIDocument, p: AsyncAPIParameter): Record<string, unknown> {
-  if (p.schema) {
-    return translateSchemaDialect(stripParserExtensions(decircularizeSchema(p.schema, doc)));
+function parameterEnvelopeSchema(p: RawObject): Record<string, unknown> {
+  const declared = p["schema"];
+  if (isRawObject(declared)) {
+    return translateSchemaDialect(stripParserExtensions(deepCopyObject(declared)));
   }
   const schema: Record<string, unknown> = { type: "string" };
-  if (p.enum && p.enum.length > 0) schema["enum"] = [...p.enum];
-  if (p.default !== undefined && p.default !== "") schema["default"] = p.default;
-  if (p.description !== undefined && p.description !== "") schema["description"] = p.description;
+  const enumValues = p["enum"];
+  if (Array.isArray(enumValues) && enumValues.length > 0) schema["enum"] = [...(enumValues as unknown[])];
+  if (p["default"] !== undefined && p["default"] !== "") schema["default"] = p["default"];
+  if (p["description"] !== undefined && p["description"] !== "") schema["description"] = p["description"];
   return schema;
 }
 
-function directionNeedsEnvelope(msgs: AsyncAPIMessage[], params: EnvelopeParam[]): boolean {
+function directionNeedsEnvelope(msgs: RawObject[], params: EnvelopeParam[]): boolean {
   if (params.length > 0) return true;
-  return msgs.some((message) => message.headers !== undefined);
+  return msgs.some((message) => isRawObject(message["headers"]));
 }
 
 /** A parameter literally named "payload"/"headers" keeps its own name; the
@@ -394,22 +472,20 @@ function envelopeFieldName(reserved: string, params: EnvelopeParam[]): string {
  * One message's declared headers contract for its envelope field, under the
  * same declaration pipeline as payloads (Go twin: headersBoundarySchema).
  */
-function headersBoundarySchema(doc: AsyncAPIDocument, message: AsyncAPIMessage): Record<string, unknown> {
-  let declared = message.headers as Record<string, unknown> | undefined;
+function headersBoundarySchema(message: RawObject): Record<string, unknown> {
+  let declared = isRawObject(message["headers"]) ? message["headers"] : undefined;
   let format: string | undefined;
   if (declared !== undefined && typeof declared["schemaFormat"] === "string") {
     format = declared["schemaFormat"];
     const inner = declared["schema"];
-    declared = inner !== null && typeof inner === "object" && !Array.isArray(inner)
-      ? (inner as Record<string, unknown>)
-      : undefined;
+    declared = isRawObject(inner) ? inner : undefined;
   }
   if (declared === undefined) return {};
   switch (classifySchemaFormat(format)) {
     case "translate":
-      return translateSchemaDialect(stripParserExtensions(decircularizeSchema(declared, doc)));
+      return translateSchemaDialect(stripParserExtensions(declared));
     case "passthrough":
-      return stripParserExtensions(decircularizeSchema(declared, doc));
+      return stripParserExtensions(deepCopyObject(declared));
     case "avro":
       return deriveAvroSchema(declared) ?? {};
     default:
@@ -424,14 +500,14 @@ function headersBoundarySchema(doc: AsyncAPIDocument, message: AsyncAPIMessage):
  * the same deterministic ordering (Go twin: unionDirectionSchemas).
  */
 function unionDirectionSchemas(
-  doc: AsyncAPIDocument,
-  msgs: AsyncAPIMessage[],
+  boundary: BoundaryDocument,
+  msgs: RawObject[],
   params: EnvelopeParam[],
   includePayload: boolean,
 ): Record<string, unknown> | undefined {
   if (!directionNeedsEnvelope(msgs, params)) {
     if (!includePayload) return undefined;
-    return unionPayloadSchemas(doc, msgs);
+    return unionPayloadSchemas(boundary, msgs);
   }
   if (msgs.length === 0) {
     // A parameter-only input envelope: addressing data is caller input even
@@ -442,11 +518,11 @@ function unionDirectionSchemas(
   const headersField = envelopeFieldName("headers", params);
   const unique = new Map<string, Record<string, unknown>>();
   for (const message of msgs) {
-    const payload = messagePayloadBoundarySchema(doc, message);
+    const payload = messagePayloadBoundarySchema(boundary, message);
     let headers: Record<string, unknown> | undefined;
     const required = [payloadField];
-    if (message.headers !== undefined) {
-      headers = headersBoundarySchema(doc, message);
+    if (isRawObject(message["headers"])) {
+      headers = headersBoundarySchema(message);
       required.push(headersField);
     }
     const envelope = envelopeObject(payload, headers, params, required);
@@ -486,7 +562,9 @@ function envelopeObject(
  * unionPayloadSchemas dedups over, and the routed envelope's per-message
  * "payload" field; Go twin: messagePayloadBoundarySchema).
  */
-function messagePayloadBoundarySchema(doc: AsyncAPIDocument, message: AsyncAPIMessage): Record<string, unknown> {
+function messagePayloadBoundarySchema(boundary: BoundaryDocument, raw: RawObject): Record<string, unknown> {
+  const doc = boundary.doc as unknown as AsyncAPIDocument;
+  const message = raw as unknown as AsyncAPIMessage;
   if (messagePayloadNotConvertible(doc, message)) return {};
   const { schema: effectiveSchema, schemaFormat } = effectivePayload(message);
   let schema: Record<string, unknown>;
@@ -511,12 +589,11 @@ function messagePayloadBoundarySchema(doc: AsyncAPIDocument, message: AsyncAPIMe
       ? lossyBoundaryDescription(messageEffectiveContentType(doc, message))
       : boundaryDescription(messageEffectiveContentType(doc, message));
   } else {
-    // Cut object-graph cycles into $ref form before any recursive walk —
-    // translation and serialization would otherwise recurse forever on a
-    // payload the reference pipeline terminated by sharing (decycle.ts).
-    // Decircularize FIRST: the shallow strip copy would break the root's
-    // identity with its components entry and move the cut point.
-    const stripped = stripParserExtensions(decircularizeSchema(effectiveSchema!, doc));
+    // The raw-lane payload is a plain acyclic tree: the resolver inlined
+    // every acyclic reference by copy and left cycles as the artifact's
+    // literal $ref strings (resolve-refs.ts), which decycle materializes
+    // under the artifact's own names.
+    const stripped = stripParserExtensions(deepCopyObject(effectiveSchema!));
     schema = classifySchemaFormat(schemaFormat) === "translate" ? translateSchemaDialect(stripped) : stripped;
   }
   return schema;
@@ -534,7 +611,7 @@ export function effectivePayload(message: AsyncAPIMessage): {
   schema: Record<string, unknown> | undefined;
   schemaFormat: string | undefined;
 } {
-  const payload = message.payload as Record<string, unknown> | undefined;
+  const payload = message.payload;
   if (payload !== undefined && typeof payload["schemaFormat"] === "string") {
     const wrapped = payload["schema"];
     return {

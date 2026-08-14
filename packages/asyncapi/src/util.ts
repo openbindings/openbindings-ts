@@ -1,6 +1,7 @@
 export {
   operationRef,
   parseRef,
+  rawParsedDocument,
   validateDocumentAddress,
 } from "@openbindings/asyncapi-client/analysis";
 import { parseAsyncAPIDocument as parseArtifactDocument } from "@openbindings/asyncapi-client/analysis";

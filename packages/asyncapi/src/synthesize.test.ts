@@ -285,6 +285,66 @@ describe("convertToInterface", () => {
     // comparison produces; ICU locale collation would flip the pair.
     expect(Object.keys(iface.operations)).toEqual(["Zulu", "alpha"]);
   });
+
+  it("cuts cyclic schema graphs at the artifact's own component ref, one artifact-named $defs entry (F7 cut-point parity)", async () => {
+    // The F7 mechanism: a self-referential component whose $ref carries a
+    // sibling (protoc-generated artifacts do this with `title`), reached
+    // from the payload through TWO ref sites. The shared-graph pipeline
+    // used to cut at anonymous interior nodes and name entries from
+    // registry pointers ("0", "constraints", "payload"); the raw lane cuts
+    // at the artifact's literal ref by construction, so both occurrences
+    // collapse onto one component-named entry — byte-identical to Go.
+    const doc = await parsedDoc({
+      asyncapi: "3.0.0",
+      info: { title: "Cyclic", version: "1" },
+      servers: { ws: { host: "events.example", protocol: "wss" } },
+      channels: {
+        nodes: {
+          address: "/nodes",
+          messages: {
+            Node: { payload: { $ref: "#/components/schemas/Node" } },
+          },
+        },
+      },
+      operations: {
+        sendNode: {
+          action: "receive",
+          channel: { $ref: "#/channels/nodes" },
+          messages: [{ $ref: "#/channels/nodes/messages/Node" }],
+        },
+      },
+      components: {
+        schemas: {
+          Node: {
+            type: "object",
+            properties: {
+              first: { $ref: "#/components/schemas/Node", title: "first child" },
+              second: { $ref: "#/components/schemas/Node", title: "second child" },
+            },
+          },
+        },
+      },
+    });
+    const iface = await convertToInterface(undefined, doc);
+
+    const input = iface.operations["sendNode"]?.input as Record<string, unknown>;
+    expect(Object.keys(input["$defs"] as Record<string, unknown>)).toEqual(["Node"]);
+    const properties = input["properties"] as Record<string, Record<string, unknown>>;
+    // Every occurrence points at the single hoisted entry; the artifact's
+    // ref siblings survive beside the rewritten pointer.
+    expect(properties["first"]).toMatchObject({
+      $ref: "#/operations/sendNode/input/$defs/Node",
+      title: "first child",
+    });
+    expect(properties["second"]).toMatchObject({
+      $ref: "#/operations/sendNode/input/$defs/Node",
+      title: "second child",
+    });
+    const hoisted = (input["$defs"] as Record<string, Record<string, unknown>>)["Node"]!;
+    const hoistedProperties = hoisted["properties"] as Record<string, Record<string, unknown>>;
+    expect(hoistedProperties["first"]!["$ref"]).toBe("#/operations/sendNode/input/$defs/Node");
+    expect(hoistedProperties["second"]!["$ref"]).toBe("#/operations/sendNode/input/$defs/Node");
+  });
 });
 
 describe("AsyncAPI synthesis coverage", () => {

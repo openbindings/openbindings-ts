@@ -56,7 +56,7 @@ export function synthesisCoverage(
   for (const [operationID, operation] of operations) {
     const ref = operationRef(operationID);
     const identity = represented.get(ref);
-    const exclusion = operationExclusion(doc, operation, bindingSpec);
+    const exclusion = operationExclusion(doc, operation, operationID, bindingSpec);
     if (exclusion) {
       entries.push(coverageExclusion(ref, "target", exclusion));
     } else if (!identity) {
@@ -227,7 +227,7 @@ function messageCoverage(
     // Carriage loss splits off: the runtime refuses that alternative before
     // dispatch today, so it is implementation-unsupported — never presented
     // as usable — until the codec extension path exists.
-    const lossReason = messagePayloadLossReason(doc, candidate.message!);
+    const lossReason = messagePayloadLossReason(doc, candidate.message);
     if (lossReason === "asyncapi.payload_carriage_unsupported") {
       return {
         sourceIndex: 0,
