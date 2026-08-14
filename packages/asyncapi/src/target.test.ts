@@ -90,7 +90,7 @@ describe("resolveTarget §9.2 server configuration carriage", () => {
   });
 
   const tail =
-    'this implementation accepts {"key": "<server-name>"?, "variables": {"<variable-name>": "<string-value>"}?, "url": "<connection-url>"?}; "key" selects an artifact member (required when several bindable members remain), "variables" completes that member, and "url" may replace only that selected member\'s target with the same scheme';
+    'this implementation accepts {"key": "<server-name>"?, "variables": {"<variable-name>": "<string-value>"}?, "url": "<connection-url>"?}; "key" selects an artifact member (required when several bindable members remain), "variables" completes that member, "url" may replace only that selected member\'s target with the same scheme, and when the artifact declares no server "url" alone supplies the whole connection URL';
 
   const refusals: Array<{ name: string; value: unknown; want: string }> = [
     {
@@ -279,5 +279,41 @@ describe("resolveTarget §9.2 server variables carriage", () => {
     expect(message).toBe(
       'configuration.server.variables["region"] names no declared variable of server "tiered"',
     );
+  });
+});
+
+// An artifact declaring no server is a complete target whose reachability is
+// consumer configuration (ruled 2026-08-13, R1+R5); Go twin:
+// TestResolveTarget_NoServers.
+describe("resolveTarget with no artifact servers", () => {
+  const doc = { asyncapi: "3.0.0", info: { title: "t", version: "1" } } as unknown as AsyncAPIDocument;
+  const cfg = (server: unknown) => ({ configuration: { server } });
+
+  it("challenges config.value at point server, path /url when unconfigured", () => {
+    try {
+      resolveTarget(doc, undefined, {});
+      expect.unreachable("expected a config-required challenge");
+    } catch (error: unknown) {
+      const challenge = error as { name?: string; point?: string; path?: string };
+      expect(challenge.name).toBe("ConfigRequired");
+      expect(challenge.point).toBe("server");
+      expect(challenge.path).toBe("/url");
+    }
+  });
+
+  it("accepts url alone as the whole connection URL, scheme carrying protocol", () => {
+    const target = resolveTarget(doc, undefined, cfg({ url: "wss://broker.example.com/v1" }));
+    expect(target.serverURL).toBe("wss://broker.example.com/v1");
+    expect(target.protocol).toBe("wss");
+  });
+
+  it("refuses variables when the artifact declares no server", () => {
+    expect(() => resolveTarget(doc, undefined, cfg({ url: "wss://broker.example.com", variables: { x: "y" } })))
+      .toThrowError(/variables completes an artifact-declared server/);
+  });
+
+  it("refuses an unbound scheme pre-dispatch", () => {
+    expect(() => resolveTarget(doc, undefined, cfg({ url: "kafka://broker.example.com:9092" })))
+      .toThrowError(/not bound by the supported openbindings.asyncapi revisions/);
   });
 });

@@ -640,9 +640,21 @@ describe("invokeBinding — responses", () => {
     await expect(call.closed).rejects.toMatchObject({ code: "ERR_RUNTIME" });
   });
 
-  it("omits data when a failure representation is not a JSON value", async () => {
+  it("carries a declared text failure body through the text lane", async () => {
+    // §9.5 names §9.2's decode lanes (ruled 2026-08-13): a declared
+    // text/plain failure body decodes exactly as a success body would and
+    // rides error data as application-authored failure data.
     const { fetch } = mockFetch(
       () => new Response("missing", { status: 404, headers: { "Content-Type": "text/plain" } }),
+    );
+    const call = new OpenAPIInvoker().invokeBinding({ source: SOURCE, ref: REF_PING, fetch });
+    const error = await call.closed.catch((caught: unknown) => caught);
+    expect(JSON.parse(JSON.stringify(error))).toEqual({ code: ERR_EXECUTION_FAILED, data: "missing" });
+  });
+
+  it("omits data when a failure body is undeclared", async () => {
+    const { fetch } = mockFetch(
+      () => new Response("<html>oops</html>", { status: 404, headers: { "Content-Type": "text/html" } }),
     );
     const call = new OpenAPIInvoker().invokeBinding({ source: SOURCE, ref: REF_PING, fetch });
     const error = await call.closed.catch((caught: unknown) => caught);

@@ -180,6 +180,9 @@ export function resolveTarget(
   const base = meta["baseURL"];
   if (typeof base === "string" && base !== "") {
     if (!def) {
+      if (candidates.length === 0) {
+        return directURLTarget(base);
+      }
       const names = boundServerNames(candidates);
       if (names.length === 0) {
         throw new Error("the effective server set declares no server with a protocol bound by the supported openbindings.asyncapi revisions");
@@ -196,6 +199,20 @@ export function resolveTarget(
   }
 
   if (!def) {
+    // An artifact that declares no server at all still names a complete
+    // target (ruled 2026-08-13, R1+R5): reachability is consumer
+    // configuration, negotiated via the same config.value challenge the
+    // several-servers case uses — the caller supplies the whole connection
+    // URL instead of selecting a member.
+    if (candidates.length === 0) {
+      throw new ConfigRequired(
+        "server",
+        "/url",
+        "the artifact declares no server; configuration.server.url must supply the connection URL",
+        undefined,
+        true,
+      );
+    }
     const names = boundServerNames(candidates);
     if (names.length === 0) {
       throw new Error("the effective server set declares no server with a protocol bound by the supported openbindings.asyncapi revisions");
@@ -212,13 +229,33 @@ export function resolveTarget(
 }
 
 /**
+ * Resolves a consumer-supplied connection URL as the whole target for an
+ * artifact that declares no server: there is no member to select or
+ * replace, so the URL's own scheme carries the protocol and no artifact
+ * server declarations apply (Go twin: directURLTarget).
+ */
+function directURLTarget(full: string): ResolvedTarget {
+  let parsed: URL;
+  try {
+    parsed = new URL(full);
+  } catch {
+    throw new Error(`connection URL ${JSON.stringify(full)} is not an absolute URL`);
+  }
+  const scheme = parsed.protocol.replace(/:$/, "").toLowerCase();
+  if (!isBoundProtocol(scheme)) {
+    throw new Error(`connection URL ${JSON.stringify(full)}: scheme ${JSON.stringify(scheme)} is not bound by the supported openbindings.asyncapi revisions (supported: http, https, ws, wss)`);
+  }
+  return { serverURL: full.replace(/\/+$/, ""), protocol: scheme };
+}
+
+/**
  * The teaching tail of every non-pinned-form refusal, byte-identical to the
  * Go SDK's: §9.2 pins the value "so two implementations carry it
  * identically", and silently tolerating extra spellings would defeat the
  * pin.
  */
 const SERVER_CONFIG_SHAPE =
-  'this implementation accepts {"key": "<server-name>"?, "variables": {"<variable-name>": "<string-value>"}?, "url": "<connection-url>"?}; "key" selects an artifact member (required when several bindable members remain), "variables" completes that member, and "url" may replace only that selected member\'s target with the same scheme';
+  'this implementation accepts {"key": "<server-name>"?, "variables": {"<variable-name>": "<string-value>"}?, "url": "<connection-url>"?}; "key" selects an artifact member (required when several bindable members remain), "variables" completes that member, "url" may replace only that selected member\'s target with the same scheme, and when the artifact declares no server "url" alone supplies the whole connection URL';
 
 /**
  * Applies one configured `server` value against the effective set,
@@ -279,6 +316,23 @@ function resolveServerConfig(
     }
   }
   if (!member) {
+    if (candidates.length === 0) {
+      // No artifact server exists to select, complete, or replace: the url
+      // form alone carries the whole target (R1+R5).
+      if (hasVars) {
+        throw new Error(`configuration.server.variables completes an artifact-declared server, and the artifact declares none: ${SERVER_CONFIG_SHAPE}`);
+      }
+      if (hasURL) {
+        return directURLTarget(full as string);
+      }
+      throw new ConfigRequired(
+        "server",
+        "/url",
+        "the artifact declares no server; configuration.server.url must supply the connection URL",
+        undefined,
+        true,
+      );
+    }
     const names = boundServerNames(candidates);
     if (names.length === 0) {
       throw new Error("the effective server set declares no server with a protocol bound by the supported openbindings.asyncapi revisions");

@@ -147,12 +147,10 @@ export function operationExclusion(
       message: "the operation channel reference does not resolve",
     };
   }
-  if (effectiveServers(doc, channel).length === 0) {
-    return {
-      status: "excluded", code: "asyncapi.no_effective_server", rule: "ASYNC-P-04",
-      message: "the operation has no effective artifact-declared server or protocol",
-    };
-  }
+  // A missing server is reachability configuration, not target identity
+  // (ruled 2026-08-13, R1+R5): the operation is represented with a
+  // configuration.server requirement and invocation challenges
+  // CONTEXT_REQUIRED (config.value, point server) before dispatch.
 
   const operationMessages = governingMessages(op, channel);
   if (operationMessages.length === 0) {
