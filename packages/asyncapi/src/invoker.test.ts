@@ -225,7 +225,7 @@ describe("AsyncAPIInvoker no-input publish refusal", () => {
       fetch: fetchFn,
     });
 
-    await expect(call.closed).rejects.toMatchObject({ code: "ERR_MISSING_INPUT" });
+    await expect(call.closed).rejects.toMatchObject({ code: "ERR_REFUSED" });
     expect(requests).toHaveLength(0);
   });
 });

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CONTEXT_REQUIRED, ERR_SOURCE_CONFIG_ERROR, ERR_VALIDATION_FAILED, type InvocationError } from "@openbindings/sdk";
+import { CONTEXT_REQUIRED, ERR_REFUSED, type InvocationError } from "@openbindings/sdk";
 import { BINDING_SPEC } from "./constants.js";
 import { OpenAPIInvoker, OpenAPISynthesizer } from "./invoker.js";
 import { convertToInterface } from "./synthesize.js";
@@ -165,7 +165,7 @@ describe("openbindings.openapi@1 request carriage", () => {
     const spec = document("3.1.2", { "image/*": {} }, false);
     const result = await invoke(spec, { body: "AAH+/w==" });
     expect(result.requests).toHaveLength(0);
-    expect(result.error?.code).toBe(ERR_VALIDATION_FAILED);
+    expect(result.error?.code).toBe(ERR_REFUSED);
   });
 
   it.each([
@@ -349,14 +349,14 @@ describe("openbindings.openapi@1 request carriage", () => {
     const exact = document("3.1.2", { "image/png": { schema: true } });
     const exactResult = await invoke(exact, { body: "AAH+/w==" });
     expect(exactResult.requests).toHaveLength(0);
-    expect(exactResult.error?.code).toBe(ERR_SOURCE_CONFIG_ERROR);
+    expect(exactResult.error?.code).toBe(ERR_REFUSED);
 
     const ranged = document("3.1.2", { "image/*": { schema: true } });
     const nonJSON = await invoke(ranged, { body: "AAH+/w==" }, {
       configuration: { requestMedia: "image/png" },
     });
     expect(nonJSON.requests).toHaveLength(0);
-    expect(nonJSON.error?.code).toBe(ERR_VALIDATION_FAILED);
+    expect(nonJSON.error?.code).toBe(ERR_REFUSED);
     const iface = await convertToInterface(undefined, ranged, undefined, undefined, undefined, undefined, BINDING_SPEC);
     const input = iface.operations["putPayload"]?.input as Record<string, unknown>;
     expect((input.properties as Record<string, unknown>)["body"]).toBe(true);
@@ -373,7 +373,7 @@ describe("openbindings.openapi@1 request carriage", () => {
     })).toBeNull();
     const result = await invoke(spec, { body: {} }, context);
     expect(result.requests).toHaveLength(0);
-    expect(result.error?.code).toBe(ERR_VALIDATION_FAILED);
+    expect(result.error?.code).toBe(ERR_REFUSED);
   });
 
   it("refuses invalid configured media syntax before dispatch", async () => {
@@ -384,7 +384,7 @@ describe("openbindings.openapi@1 request carriage", () => {
       configuration: { requestMedia: "application/json/extra" },
     });
     expect(result.requests).toHaveLength(0);
-    expect(result.error?.code).toBe(ERR_VALIDATION_FAILED);
+    expect(result.error?.code).toBe(ERR_REFUSED);
   });
 
   it("refuses non-canonical Base64 pad bits without dispatch", async () => {
@@ -393,7 +393,7 @@ describe("openbindings.openapi@1 request carriage", () => {
     });
     const result = await invoke(spec, { body: "AB==" });
     expect(result.requests).toHaveLength(0);
-    expect(result.error?.code).toBe(ERR_VALIDATION_FAILED);
+    expect(result.error?.code).toBe(ERR_REFUSED);
   });
 
   it("retains a range's application schema and records its concrete-media requirement", async () => {
@@ -462,7 +462,7 @@ describe("openbindings.openapi@1 request carriage", () => {
     });
     const result = await invoke(spec, { name: "Ada" });
     expect(result.requests).toHaveLength(0);
-    expect(result.error?.code).toBe(ERR_VALIDATION_FAILED);
+    expect(result.error?.code).toBe(ERR_REFUSED);
   });
 
   it.each([
@@ -496,7 +496,7 @@ describe("openbindings.openapi@1 request carriage", () => {
       configuration: { requestMedia },
     });
     expect(result.requests).toHaveLength(0);
-    expect(result.error?.code).toBe(ERR_VALIDATION_FAILED);
+    expect(result.error?.code).toBe(ERR_REFUSED);
   });
 
   it("refuses an all-unsupported required inventory before dispatch", async () => {
@@ -505,7 +505,7 @@ describe("openbindings.openapi@1 request carriage", () => {
     });
     const result = await invoke(spec, { body: { name: "Ada" } });
     expect(result.requests).toHaveLength(0);
-    expect(result.error?.code).toBe(ERR_SOURCE_CONFIG_ERROR);
+    expect(result.error?.code).toBe(ERR_REFUSED);
   });
 
   it("encodes an exact Latin-1 text body as the declared wire octets", async () => {
@@ -527,7 +527,7 @@ describe("openbindings.openapi@1 request carriage", () => {
       configuration: { requestMedia: "text/plain; charset=utf-16" },
     });
     expect(result.requests).toHaveLength(0);
-    expect(result.error?.code).toBe(ERR_VALIDATION_FAILED);
+    expect(result.error?.code).toBe(ERR_REFUSED);
   });
 
   it.each([
@@ -809,7 +809,7 @@ describe("openbindings.openapi@1 request carriage", () => {
       configuration: { requestMedia },
     });
     expect(result.requests).toHaveLength(0);
-    expect(result.error?.code).toBe(ERR_VALIDATION_FAILED);
+    expect(result.error?.code).toBe(ERR_REFUSED);
   });
 
   it("does not let an unreachable false multipart property poison its candidate", async () => {

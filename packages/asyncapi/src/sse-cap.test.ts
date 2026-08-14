@@ -39,7 +39,7 @@ describe("standalone HTTP send operations", () => {
       },
     });
 
-    await expect(call.closed).rejects.toMatchObject({ code: "ERR_SOURCE_CONFIG_ERROR" });
+    await expect(call.closed).rejects.toMatchObject({ code: "ERR_REFUSED" });
     expect(dispatches).toBe(0);
   });
 });

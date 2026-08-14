@@ -10,6 +10,7 @@ import {
   ERR_PROTOCOL,
   ERR_REF_NOT_FOUND,
   ERR_RESPONSE_ERROR,
+  ERR_REFUSED,
   ERR_SOURCE_CONFIG_ERROR,
   ERR_SOURCE_LOAD_FAILED,
   ERR_VALIDATION_FAILED,
@@ -301,7 +302,7 @@ describe("invokeBinding — request construction", () => {
     });
 
     await call.write({ id: "u1", name: "Ada" });
-    await expect(call.closed).rejects.toMatchObject({ code: ERR_VALIDATION_FAILED });
+    await expect(call.closed).rejects.toMatchObject({ code: ERR_REFUSED });
     expect(requests).toHaveLength(0);
   });
 
@@ -311,7 +312,7 @@ describe("invokeBinding — request construction", () => {
 
     await call.close();
 
-    await expect(call.closed).rejects.toMatchObject({ code: ERR_MISSING_INPUT });
+    await expect(call.closed).rejects.toMatchObject({ code: ERR_REFUSED });
     expect(requests).toHaveLength(0);
   });
 
@@ -474,7 +475,7 @@ describe("invokeBinding — request construction", () => {
     });
 
     await call.write({ id: "u1", name: "Ada" });
-    await expect(call.closed).rejects.toMatchObject({ code: ERR_VALIDATION_FAILED });
+    await expect(call.closed).rejects.toMatchObject({ code: ERR_REFUSED });
     expect(requests).toHaveLength(0);
   });
 
@@ -493,7 +494,7 @@ describe("invokeBinding — request construction", () => {
     });
 
     await call.close();
-    await expect(call.closed).rejects.toMatchObject({ code: ERR_MISSING_INPUT });
+    await expect(call.closed).rejects.toMatchObject({ code: ERR_REFUSED });
     expect(requests).toHaveLength(0);
   });
 });
@@ -1606,7 +1607,7 @@ describe("invokeBinding — context negotiation", () => {
     });
 
     await expect(call.closed).rejects.toMatchObject({
-      code: ERR_VALIDATION_FAILED,
+      code: ERR_REFUSED,
     });
     expect(requests).toHaveLength(0);
   });
@@ -1800,7 +1801,7 @@ describe("invokeBinding — context negotiation", () => {
     });
 
     await expect(call.closed).rejects.toMatchObject({
-      code: ERR_SOURCE_CONFIG_ERROR,
+      code: ERR_REFUSED,
     });
     expect(requests).toHaveLength(0);
   });
@@ -1819,7 +1820,7 @@ describe("invokeBinding — context negotiation", () => {
     });
 
     await expect(call.closed).rejects.toMatchObject({
-      code: ERR_SOURCE_CONFIG_ERROR,
+      code: ERR_REFUSED,
     });
     expect(requests).toHaveLength(0);
   });
@@ -1864,7 +1865,7 @@ describe("invokeBinding — context negotiation", () => {
       });
 
       await expect(call.closed).rejects.toMatchObject({
-        code: ERR_SOURCE_CONFIG_ERROR,
+        code: ERR_REFUSED,
       });
       expect(requests).toHaveLength(0);
     });
@@ -1885,7 +1886,7 @@ describe("invokeBinding — context negotiation", () => {
     });
 
     await expect(call.closed).rejects.toMatchObject({
-      code: ERR_SOURCE_CONFIG_ERROR,
+      code: ERR_REFUSED,
     });
     expect(requests).toHaveLength(0);
   });
@@ -1903,7 +1904,7 @@ describe("invokeBinding — context negotiation", () => {
     });
 
     await expect(call.closed).rejects.toMatchObject({
-      code: ERR_VALIDATION_FAILED,
+      code: ERR_REFUSED,
     });
     expect(requests).toHaveLength(0);
   });
@@ -1927,7 +1928,7 @@ describe("invokeBinding — context negotiation", () => {
     });
 
     await expect(call.closed).rejects.toMatchObject({
-      code: ERR_VALIDATION_FAILED,
+      code: ERR_REFUSED,
     });
     expect(requests).toHaveLength(0);
   });
@@ -1949,7 +1950,7 @@ describe("invokeBinding — context negotiation", () => {
     });
 
     await expect(call.closed).rejects.toMatchObject({
-      code: ERR_VALIDATION_FAILED,
+      code: ERR_REFUSED,
     });
     expect(requests).toHaveLength(0);
   });

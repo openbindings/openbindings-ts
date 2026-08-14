@@ -220,7 +220,7 @@ describe("address parameters (ASYNC-P-04)", () => {
       const r = await publish(invoker, doc, "#/operations/post", {
         configuration: { address: { parameters: { roomId: "backstage" } } },
       });
-      expect(codeOf(r.err)).toBe("ERR_SOURCE_CONFIG_ERROR");
+      expect(codeOf(r.err)).toBe("ERR_REFUSED");
       expect(srv.requests()).toBe(0);
     } finally {
       invoker.close();
@@ -285,7 +285,7 @@ describe("server variables and pathname assembly (ASYNC-P-04)", () => {
       r = await publish(invoker, doc, "#/operations/post", {
         configuration: { server: { key: "test", variables: { version: "v9" } } },
       });
-      expect(codeOf(r.err)).toBe("ERR_SOURCE_CONFIG_ERROR");
+      expect(codeOf(r.err)).toBe("ERR_REFUSED");
 
       // A declared default outside the variable's own enum is likewise
       // inconsistent and refused.
@@ -301,7 +301,7 @@ describe("server variables and pathname assembly (ASYNC-P-04)", () => {
         },
       };
       r = await publish(invoker, badDefault, "#/operations/post");
-      expect(codeOf(r.err)).toBe("ERR_SOURCE_CONFIG_ERROR");
+      expect(codeOf(r.err)).toBe("ERR_REFUSED");
 
       // No default and no supplied value: pre-dispatch refusal.
       const noDefault = {
@@ -417,7 +417,7 @@ describe("effective server set (ASYNC-P-04)", () => {
         "#/operations/post",
         { configuration: { server: { key: "bHTTP" } } },
       );
-      expect(codeOf(r.err)).toBe("ERR_SOURCE_CONFIG_ERROR");
+      expect(codeOf(r.err)).toBe("ERR_REFUSED");
       expect(srvA.requests()).toBe(1);
     } finally {
       invoker.close();
@@ -457,7 +457,7 @@ describe("effective server set (ASYNC-P-04)", () => {
         const r = await publish(invoker, doc, "#/operations/post", {
           configuration: { server: tc.cfg },
         });
-        expect(codeOf(r.err)).toBe("ERR_SOURCE_CONFIG_ERROR");
+        expect(codeOf(r.err)).toBe("ERR_REFUSED");
         expect(Object.hasOwn(r.err as object, "data")).toBe(false);
         expect(srv.requests()).toBe(before);
       }
@@ -546,7 +546,7 @@ describe("full-URL override (ASYNC-P-04, §9.5)", () => {
       let r = await publish(invoker, doc, "#/operations/post", {
         configuration: { server: { url: "ftp://files.example.com" } },
       });
-      expect(codeOf(r.err)).toBe("ERR_SOURCE_CONFIG_ERROR");
+      expect(codeOf(r.err)).toBe("ERR_REFUSED");
 
       // The selected server's declared security still applies under a
       // same-scheme URL replacement: challenge before I/O.
@@ -626,7 +626,7 @@ describe("http operation binding method override (ASYNC-P-02)", () => {
         ref: "#/operations/sub",
       });
       const { err } = await drainOutputs(sub);
-      expect(codeOf(err)).toBe("ERR_SOURCE_CONFIG_ERROR");
+      expect(codeOf(err)).toBe("ERR_REFUSED");
       expect(sseMethod).toBeUndefined();
     } finally {
       invoker.close();
@@ -729,14 +729,14 @@ describe("ws channel binding governs the upgrade (ASYNC-P-02, §8)", () => {
           protocolFields: { webSocketHeaders: { "X-Trace": "trace-2" } },
         },
       });
-      expect(codeOf(missingQuery.err)).toBe("ERR_SOURCE_CONFIG_ERROR");
+      expect(codeOf(missingQuery.err)).toBe("ERR_REFUSED");
       const missingHeader = await publish(invoker, wsBindingDoc(srv.port), "#/operations/publish", {
         configuration: {
           websocketMessageType: "text",
           protocolFields: { webSocketQuery: { token: "qtok" } },
         },
       });
-      expect(codeOf(missingHeader.err)).toBe("ERR_SOURCE_CONFIG_ERROR");
+      expect(codeOf(missingHeader.err)).toBe("ERR_REFUSED");
       expect(srv.upgrades()).toBe(before);
     } finally {
       invoker.close();
@@ -755,7 +755,7 @@ describe("ws channel binding governs the upgrade (ASYNC-P-02, §8)", () => {
       const r = await publish(invoker, doc, "#/operations/publish", {
         configuration: { websocketMessageType: "text" },
       });
-      expect(codeOf(r.err)).toBe("ERR_SOURCE_CONFIG_ERROR");
+      expect(codeOf(r.err)).toBe("ERR_REFUSED");
       expect(srv.upgrades()).toBe(0);
     } finally {
       invoker.close();
@@ -793,7 +793,7 @@ describe("standalone HTTP send exclusion (§8, ASYNC-P-02)", () => {
         ref: "#/operations/receiveCaps",
       });
       const { err } = await drainOutputs(call);
-      expect(codeOf(err)).toBe("ERR_SOURCE_CONFIG_ERROR");
+      expect(codeOf(err)).toBe("ERR_REFUSED");
       expect(srv.requests()).toBe(before);
     } finally {
       invoker.close();
@@ -861,7 +861,7 @@ describe("input text lane (§9.1, ASYNC-P-03)", () => {
         undefined,
         { not: "a string" },
       );
-      expect(codeOf(refused.err)).toBe("ERR_VALIDATION_FAILED");
+      expect(codeOf(refused.err)).toBe("ERR_REFUSED");
       expect(srv.requests()).toBe(before);
     } finally {
       invoker.close();
@@ -881,7 +881,7 @@ describe("the byte boundary for binary input families (§9.1, ruled 2026-08-13)"
       // canonical Base64 string of the exact octets, so the map value the
       // helper publishes refuses at validation, pre-dispatch.
       const r = await publish(invoker, laneDoc(srv.port, "http", "avro/binary"), "#/operations/post");
-      expect(codeOf(r.err)).toBe("ERR_VALIDATION_FAILED");
+      expect(codeOf(r.err)).toBe("ERR_REFUSED");
       expect(srv.requests()).toBe(0);
 
       // WS cell: refused before any socket is dialed.

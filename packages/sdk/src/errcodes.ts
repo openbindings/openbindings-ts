@@ -85,6 +85,11 @@ export const ERR_REF_NOT_FOUND = "ERR_REF_NOT_FOUND";
 export const ERR_SOURCE_LOAD_FAILED = "ERR_SOURCE_LOAD_FAILED";
 
 /** Source loaded but missing required configuration (e.g., no server URL). */
+/** The binding-invoker contract's never-dispatched guarantee: the
+ *  invocation was refused before dispatch and no observable interaction
+ *  side effect occurred. Emitted ONLY where that guarantee provably holds;
+ *  ERR_EXECUTION_FAILED makes no dispatch-state claim. */
+export const ERR_REFUSED = "ERR_REFUSED";
 export const ERR_SOURCE_CONFIG_ERROR = "ERR_SOURCE_CONFIG_ERROR";
 
 /** Connection to the service couldn't be established. */

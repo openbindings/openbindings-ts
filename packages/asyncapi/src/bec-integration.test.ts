@@ -224,7 +224,7 @@ describe("AsyncAPI binding invoker (real HTTP)", () => {
     const call = invoker.invokeBinding({ source: source(), ref: "#/operations/sendOpenMessage" });
 
     await call.close();
-    await expect(call.closed).rejects.toMatchObject({ code: "ERR_MISSING_INPUT" });
+    await expect(call.closed).rejects.toMatchObject({ code: "ERR_REFUSED" });
   });
 
   it("synthesizes standalone HTTP send but lets the built-in driver refuse before dispatch", async () => {
@@ -241,7 +241,7 @@ describe("AsyncAPI binding invoker (real HTTP)", () => {
       context: { bearerToken: SECRET },
     });
 
-    await expect(call.closed).rejects.toMatchObject({ code: "ERR_SOURCE_CONFIG_ERROR" });
+    await expect(call.closed).rejects.toMatchObject({ code: "ERR_REFUSED" });
     expect(requestCount).toBe(before);
   });
 
