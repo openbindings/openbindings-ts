@@ -208,17 +208,6 @@ function messageCoverage(
       message: "the message reference does not resolve",
     };
   }
-  if (candidate.message.headers !== undefined) {
-    return {
-      sourceIndex: 0,
-      sourceRef: candidate.sourceRef,
-      scope: "alternative",
-      status: "excluded",
-      reasonCode: "asyncapi.message_headers",
-      rule: "ASYNC-P-03",
-      message: "the first candidate cannot carry AsyncAPI message headers at the ordinary value boundary",
-    };
-  }
   if (!messageBindable(doc, candidate.message)) {
     return {
       sourceIndex: 0,

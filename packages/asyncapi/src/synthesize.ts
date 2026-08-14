@@ -4,6 +4,7 @@ import { decircularizeSchema, decycleOperationSchema } from "./decycle.js";
 import { deriveAvroSchema } from "./avro.js";
 import type {
   AsyncAPIChannel,
+  AsyncAPIParameter,
   AsyncAPIDocument,
   AsyncAPIMessage,
   AsyncAPIOperation,
@@ -171,18 +172,8 @@ export function operationExclusion(
   }
   const inputMessages = op.action === "receive" ? operationMessages : replyMessages;
   const outputMessages = op.action === "send" ? operationMessages : replyMessages;
-  if (inputMessages.length > 0 && inputMessages.every((message) => message.headers !== undefined)) {
-    return {
-      status: "excluded", code: "asyncapi.message_headers", rule: "ASYNC-P-03",
-      message: "every caller-input message declares application headers the first candidate cannot carry at the ordinary value boundary",
-    };
-  }
-  if (outputMessages.some((message) => message.headers !== undefined)) {
-    return {
-      status: "excluded", code: "asyncapi.message_headers", rule: "ASYNC-P-03",
-      message: "a possible caller-output message declares application headers the first candidate cannot carry at the ordinary value boundary",
-    };
-  }
+  void inputMessages;
+  void outputMessages;
   return operationSchemaDefect(doc, op);
 }
 
@@ -191,7 +182,6 @@ export function messageBindable(
   message: AsyncAPIMessage,
 ): boolean {
   if ((message as unknown as Record<string, unknown>)["x-ob-asyncapi-unresolved-trait"] !== undefined) return false;
-  if (message.headers !== undefined) return false;
   return typeof (message as unknown as Record<string, unknown>)["$ref"] !== "string";
 }
 
@@ -237,17 +227,32 @@ function operationBoundarySchemas(
   doc: AsyncAPIDocument,
   op: AsyncAPIOperation,
 ): { input?: Record<string, unknown>; output?: Record<string, unknown> } {
+  const params = channelEnvelopeParams(doc, op.channel);
   switch (op.action) {
-    case "send":
-      return {
-        output: operationPayloadSchema(doc, op, false),
-        input: op.reply ? replyPayloadSchema(doc, op.reply) : undefined,
-      };
-    case "receive":
-      return {
-        input: operationPayloadSchema(doc, op, true),
-        output: op.reply ? replyPayloadSchema(doc, op.reply) : undefined,
-      };
+    case "send": {
+      const output = operationPayloadSchema(doc, op, false);
+      let input = op.reply ? replyPayloadSchema(doc, op.reply) : undefined;
+      // Addressing data is caller input even on the subscribe perspective:
+      // the operation channel's location-less parameters ride the input
+      // envelope (parameter-only when no reply input).
+      if (params.length > 0) {
+        input = unionDirectionSchemas(doc, op.reply ? replyMessagesOf(op.reply) : [], params, op.reply !== undefined);
+      }
+      const result: { input?: Record<string, unknown>; output?: Record<string, unknown> } = {};
+      if (output !== undefined) result.output = output;
+      if (input !== undefined) result.input = input;
+      return result;
+    }
+    case "receive": {
+      const result: { input?: Record<string, unknown>; output?: Record<string, unknown> } = {};
+      const input = operationPayloadSchema(doc, op, true);
+      if (input !== undefined) result.input = input;
+      if (op.reply) {
+        const output = replyPayloadSchema(doc, op.reply);
+        if (output !== undefined) result.output = output;
+      }
+      return result;
+    }
     default:
       return {};
   }
@@ -297,15 +302,19 @@ function escapePointerSegment(segment: string): string {
 
 function operationPayloadSchema(doc: AsyncAPIDocument, op: AsyncAPIOperation, input: boolean): Record<string, unknown> | undefined {
   const channel = op.channel!;
-  const governed = governingMessages(op, channel);
-  const messages = input ? governed.filter((message) => message.headers === undefined) : governed;
-  return unionPayloadSchemas(doc, messages);
+  const messages = governingMessages(op, channel);
+  // Location-less channel parameters are caller input riding the routed
+  // envelope (§9.2); declared headers ride it per message.
+  const params = input ? channelEnvelopeParams(doc, channel) : [];
+  return unionDirectionSchemas(doc, messages, params, true);
+}
+
+function replyMessagesOf(reply: AsyncAPIOperationReply): AsyncAPIMessage[] {
+  return reply.messages?.length ? [...reply.messages] : Object.values(reply.channel?.messages ?? {});
 }
 
 function replyPayloadSchema(doc: AsyncAPIDocument, reply: AsyncAPIOperationReply): Record<string, unknown> | undefined {
-  const messages = (reply.messages?.length ? reply.messages : Object.values(reply.channel?.messages ?? {}))
-    .filter((message) => message.headers === undefined);
-  return unionPayloadSchemas(doc, messages);
+  return unionDirectionSchemas(doc, replyMessagesOf(reply), [], true);
 }
 
 // Each governed payload enters an OBI position only under dialect
@@ -319,37 +328,7 @@ function unionPayloadSchemas(doc: AsyncAPIDocument, messages: AsyncAPIMessage[])
   if (messages.some((message) => messagePayloadNotConvertible(doc, message))) return {};
   const unique = new Map<string, Record<string, unknown>>();
   for (const message of messages) {
-    const { schema: effectiveSchema, schemaFormat } = effectivePayload(message);
-    let schema: Record<string, unknown>;
-    const derivedAvro = classifySchemaFormat(schemaFormat) === "avro" ? deriveAvroSchema(effectiveSchema) : undefined;
-    if (classifySchemaFormat(schemaFormat) === "avro") {
-      // The named Avro correspondence: logical values under Avro's own JSON
-      // Encoding. A declaration that does not parse as an Avro schema falls
-      // to the byte rule as an inexpressible contract.
-      if (derivedAvro !== undefined) {
-        schema = derivedAvro;
-      } else if (messageCarriage(doc, message) === "bytes") {
-        schema = base64BoundarySchema();
-        schema["description"] = lossyBoundaryDescription(messageEffectiveContentType(doc, message));
-      } else {
-        schema = {};
-      }
-    } else if (messageCarriage(doc, message) === "bytes") {
-      // The byte boundary: exact octets as the canonical Base64 string,
-      // regardless of any declared (inexpressible) payload contract.
-      schema = base64BoundarySchema();
-      schema["description"] = messagePayloadLossReason(doc, message) === "asyncapi.payload_byte_carriage"
-        ? lossyBoundaryDescription(messageEffectiveContentType(doc, message))
-        : boundaryDescription(messageEffectiveContentType(doc, message));
-    } else {
-      // Cut object-graph cycles into $ref form before any recursive walk —
-      // translation and serialization would otherwise recurse forever on a
-      // payload the reference pipeline terminated by sharing (decycle.ts).
-      // Decircularize FIRST: the shallow strip copy would break the root's
-      // identity with its components entry and move the cut point.
-      const stripped = stripParserExtensions(decircularizeSchema(effectiveSchema!, doc));
-      schema = classifySchemaFormat(schemaFormat) === "translate" ? translateSchemaDialect(stripped) : stripped;
-    }
+    const schema = messagePayloadBoundarySchema(doc, message);
     // JSON object member order is not semantic. Use canonical JSON both for
     // de-duplication and anyOf ordering so source spelling cannot make the
     // TypeScript and Go projections disagree.
@@ -357,6 +336,190 @@ function unionPayloadSchemas(doc: AsyncAPIDocument, messages: AsyncAPIMessage[])
   }
   const schemas = [...unique.entries()].sort(([a], [b]) => codePointCompare(a, b)).map(([, schema]) => schema);
   return schemas.length === 1 ? schemas[0] : { anyOf: schemas };
+}
+
+// ---------------------------------------------------------------------------
+// The routed operation envelope (§9.2, ruled 2026-08-14; Go twin:
+// envelope.go): a location-less channel parameter is per-invocation
+// application data and a declared Message Object headers contract is
+// application data by AsyncAPI's own definition; both ride the affected
+// direction's operation-facing value as one JSON object in place of the
+// bare payload. A direction with neither keeps the bare wholesale payload.
+// The union is over PER-MESSAGE envelopes: each alternative's payload pairs
+// with its own declared headers, never a cross-product.
+// ---------------------------------------------------------------------------
+
+interface EnvelopeParam {
+  name: string;
+  schema: Record<string, unknown>;
+}
+
+/** The channel's location-less parameters in sorted name order. A parameter
+ *  whose location declares a runtime expression stays derived from that
+ *  expression's source (the artifact's own bridge). */
+function channelEnvelopeParams(doc: AsyncAPIDocument, ch: AsyncAPIChannel | undefined): EnvelopeParam[] {
+  const parameters = ch?.parameters;
+  if (!parameters) return [];
+  return Object.keys(parameters)
+    .filter((name) => !parameters[name]!.location)
+    .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
+    .map((name) => ({ name, schema: parameterEnvelopeSchema(doc, parameters[name]!) }));
+}
+
+/** A 3.x Parameter Object is string-valued by definition; a 2.x Parameter
+ *  Object may declare a Schema Object, entering under dialect translation. */
+function parameterEnvelopeSchema(doc: AsyncAPIDocument, p: AsyncAPIParameter): Record<string, unknown> {
+  if (p.schema) {
+    return translateSchemaDialect(stripParserExtensions(decircularizeSchema(p.schema, doc)));
+  }
+  const schema: Record<string, unknown> = { type: "string" };
+  if (p.enum && p.enum.length > 0) schema["enum"] = [...p.enum];
+  if (p.default !== undefined && p.default !== "") schema["default"] = p.default;
+  if (p.description !== undefined && p.description !== "") schema["description"] = p.description;
+  return schema;
+}
+
+function directionNeedsEnvelope(msgs: AsyncAPIMessage[], params: EnvelopeParam[]): boolean {
+  if (params.length > 0) return true;
+  return msgs.some((message) => message.headers !== undefined);
+}
+
+/** A parameter literally named "payload"/"headers" keeps its own name; the
+ *  reserved field takes the deterministic "_value"-suffixed spelling. */
+function envelopeFieldName(reserved: string, params: EnvelopeParam[]): string {
+  return params.some((p) => p.name === reserved) ? `${reserved}_value` : reserved;
+}
+
+/**
+ * One message's declared headers contract for its envelope field, under the
+ * same declaration pipeline as payloads (Go twin: headersBoundarySchema).
+ */
+function headersBoundarySchema(doc: AsyncAPIDocument, message: AsyncAPIMessage): Record<string, unknown> {
+  let declared = message.headers as Record<string, unknown> | undefined;
+  let format: string | undefined;
+  if (declared !== undefined && typeof declared["schemaFormat"] === "string") {
+    format = declared["schemaFormat"];
+    const inner = declared["schema"];
+    declared = inner !== null && typeof inner === "object" && !Array.isArray(inner)
+      ? (inner as Record<string, unknown>)
+      : undefined;
+  }
+  if (declared === undefined) return {};
+  switch (classifySchemaFormat(format)) {
+    case "translate":
+      return translateSchemaDialect(stripParserExtensions(decircularizeSchema(declared, doc)));
+    case "passthrough":
+      return stripParserExtensions(decircularizeSchema(declared, doc));
+    case "avro":
+      return deriveAvroSchema(declared) ?? {};
+    default:
+      return {};
+  }
+}
+
+/**
+ * Derives one direction's operation-boundary schema. Without envelope
+ * conditions it is exactly unionPayloadSchemas; with them, each governing
+ * message contributes its own envelope object, deduped and unioned under
+ * the same deterministic ordering (Go twin: unionDirectionSchemas).
+ */
+function unionDirectionSchemas(
+  doc: AsyncAPIDocument,
+  msgs: AsyncAPIMessage[],
+  params: EnvelopeParam[],
+  includePayload: boolean,
+): Record<string, unknown> | undefined {
+  if (!directionNeedsEnvelope(msgs, params)) {
+    if (!includePayload) return undefined;
+    return unionPayloadSchemas(doc, msgs);
+  }
+  if (msgs.length === 0) {
+    // A parameter-only input envelope: addressing data is caller input even
+    // when no payload travels (subscribe perspective).
+    return envelopeObject(undefined, undefined, params, []);
+  }
+  const payloadField = envelopeFieldName("payload", params);
+  const headersField = envelopeFieldName("headers", params);
+  const unique = new Map<string, Record<string, unknown>>();
+  for (const message of msgs) {
+    const payload = messagePayloadBoundarySchema(doc, message);
+    let headers: Record<string, unknown> | undefined;
+    const required = [payloadField];
+    if (message.headers !== undefined) {
+      headers = headersBoundarySchema(doc, message);
+      required.push(headersField);
+    }
+    const envelope = envelopeObject(payload, headers, params, required);
+    unique.set(canonicalize(envelope) ?? JSON.stringify(envelope), envelope);
+  }
+  const schemas = [...unique.entries()].sort(([a], [b]) => codePointCompare(a, b)).map(([, schema]) => schema);
+  return schemas.length === 1 ? schemas[0] : { anyOf: schemas };
+}
+
+/**
+ * Assembles one closed envelope. Parameter fields are never required:
+ * invocation context may pre-fill them (the amortized supply of an input),
+ * and a parameter with neither source is the ordinary pre-dispatch context
+ * negotiation.
+ */
+function envelopeObject(
+  payload: Record<string, unknown> | undefined,
+  headers: Record<string, unknown> | undefined,
+  params: EnvelopeParam[],
+  required: string[],
+): Record<string, unknown> {
+  const properties: Record<string, unknown> = {};
+  if (payload !== undefined) properties[envelopeFieldName("payload", params)] = payload;
+  if (headers !== undefined) properties[envelopeFieldName("headers", params)] = headers;
+  for (const p of params) properties[p.name] = p.schema;
+  const envelope: Record<string, unknown> = {
+    type: "object",
+    properties,
+    additionalProperties: false,
+  };
+  if (required.length > 0) envelope["required"] = required;
+  return envelope;
+}
+
+/**
+ * Derives ONE message's payload-boundary schema (the loop body
+ * unionPayloadSchemas dedups over, and the routed envelope's per-message
+ * "payload" field; Go twin: messagePayloadBoundarySchema).
+ */
+function messagePayloadBoundarySchema(doc: AsyncAPIDocument, message: AsyncAPIMessage): Record<string, unknown> {
+  if (messagePayloadNotConvertible(doc, message)) return {};
+  const { schema: effectiveSchema, schemaFormat } = effectivePayload(message);
+  let schema: Record<string, unknown>;
+  const derivedAvro = classifySchemaFormat(schemaFormat) === "avro" ? deriveAvroSchema(effectiveSchema) : undefined;
+  if (classifySchemaFormat(schemaFormat) === "avro") {
+    // The named Avro correspondence: logical values under Avro's own JSON
+    // Encoding. A declaration that does not parse as an Avro schema falls
+    // to the byte rule as an inexpressible contract.
+    if (derivedAvro !== undefined) {
+      schema = derivedAvro;
+    } else if (messageCarriage(doc, message) === "bytes") {
+      schema = base64BoundarySchema();
+      schema["description"] = lossyBoundaryDescription(messageEffectiveContentType(doc, message));
+    } else {
+      schema = {};
+    }
+  } else if (messageCarriage(doc, message) === "bytes") {
+    // The byte boundary: exact octets as the canonical Base64 string,
+    // regardless of any declared (inexpressible) payload contract.
+    schema = base64BoundarySchema();
+    schema["description"] = messagePayloadLossReason(doc, message) === "asyncapi.payload_byte_carriage"
+      ? lossyBoundaryDescription(messageEffectiveContentType(doc, message))
+      : boundaryDescription(messageEffectiveContentType(doc, message));
+  } else {
+    // Cut object-graph cycles into $ref form before any recursive walk —
+    // translation and serialization would otherwise recurse forever on a
+    // payload the reference pipeline terminated by sharing (decycle.ts).
+    // Decircularize FIRST: the shallow strip copy would break the root's
+    // identity with its components entry and move the cut point.
+    const stripped = stripParserExtensions(decircularizeSchema(effectiveSchema!, doc));
+    schema = classifySchemaFormat(schemaFormat) === "translate" ? translateSchemaDialect(stripped) : stripped;
+  }
+  return schema;
 }
 
 /**

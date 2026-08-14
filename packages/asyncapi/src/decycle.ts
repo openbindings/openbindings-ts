@@ -1,4 +1,5 @@
 import type { AsyncAPIDocument } from "./asyncapi-types.js";
+
 import { classifySchemaFormat } from "./synthesize.js";
 import { translateSchemaDialect } from "./translate.js";
 
@@ -114,6 +115,11 @@ export function decircularizeSchema(
     path.add(node);
     const copied: Record<string, unknown> = {};
     for (const [key, member] of Object.entries(node)) {
+      // The loader's internal identity tags (the x-ob-asyncapi-* minted
+      // namespace) are stamped on shared document nodes; a schema subtree
+      // aliasing such a node must not carry them into the emitted OBI (Go
+      // never mints them).
+      if (key.startsWith("x-ob-asyncapi-")) continue;
       if (SCHEMA_MAP_CONTAINER_KEYS.has(key) && isObject(member)) {
         const container: Record<string, unknown> = {};
         for (const [name, entry] of Object.entries(member)) container[name] = cutSchema(entry);
@@ -171,7 +177,7 @@ export function decycleOperationSchema(
   // hoisted component never shadows an artifact-authored definition.
   const existing = copied["$defs"];
   if (isObject(existing)) for (const name of Object.keys(existing)) state.taken.add(name);
-  const result = decycleNode(copied, state) as Record<string, unknown>;
+  const result = decycleNode(copied, state, "", state.refBase) as Record<string, unknown>;
   if (Object.keys(state.defs).length > 0) {
     const merged: Record<string, unknown> = {};
     const own = result["$defs"];
@@ -182,23 +188,35 @@ export function decycleOperationSchema(
   return result;
 }
 
-function decycleNode(node: unknown, state: DecycleState): unknown {
+/**
+ * Walks one node. path is the node's JSON Pointer below the operation
+ * direction (refBase); anchor is the absolute pointer of the nearest
+ * ancestor (or self) carrying a $defs map — the base a derivation-emitted
+ * "#/$defs/<name>" ref is relative to. A derived schema rides inside the
+ * routed envelope at properties.payload (or .headers), so its
+ * self-relative refs must rebase onto ITS location, not the direction
+ * root. (Go twin: decycleNode.)
+ */
+function decycleNode(node: unknown, state: DecycleState, path: string, anchor: string): unknown {
   if (Array.isArray(node)) {
-    for (let i = 0; i < node.length; i += 1) node[i] = decycleNode(node[i], state);
+    for (let i = 0; i < node.length; i += 1) node[i] = decycleNode(node[i], state, `${path}/${i}`, anchor);
     return node;
   }
   if (!isObject(node)) return node;
+  if (isObject(node["$defs"])) {
+    anchor = state.refBase + path;
+  }
   const ref = node["$ref"];
   if (typeof ref === "string" && ref.startsWith("#/")) {
     // A derivation-emitted local ref ("#/$defs/<name>", the Avro
-    // correspondence's named-type spelling) rebases onto the operation
-    // schema's own pointer; artifact refs materialize as before. The walk
+    // correspondence's named-type spelling) rebases onto its carrying
+    // schema's pointer; artifact refs materialize as before. The walk
     // then continues into sibling members: 2020-12 evaluates keywords
     // beside $ref, and the derived root is exactly {$ref, $defs} —
     // returning here would leave every ref inside that $defs unrebased
     // (dangling in the emitted document).
     if (ref.startsWith("#/$defs/")) {
-      node["$ref"] = state.refBase + ref.slice(1);
+      node["$ref"] = anchor + ref.slice(1);
     } else {
       const name = materialize(ref, state);
       if (name !== undefined) {
@@ -209,12 +227,12 @@ function decycleNode(node: unknown, state: DecycleState): unknown {
   for (const [key, value] of Object.entries(node)) {
     if (SCHEMA_MAP_CONTAINER_KEYS.has(key) && isObject(value)) {
       for (const [name, member] of Object.entries(value)) {
-        value[name] = decycleNode(member, state);
+        value[name] = decycleNode(member, state, `${path}/${escapeDefsPointerSegment(key)}/${escapeDefsPointerSegment(name)}`, anchor);
       }
       continue;
     }
     if (LITERAL_SCHEMA_VALUE_KEYS.has(key) || key.toLowerCase().startsWith("x-")) continue;
-    node[key] = decycleNode(value, state);
+    node[key] = decycleNode(value, state, `${path}/${escapeDefsPointerSegment(key)}`, anchor);
   }
   return node;
 }
@@ -260,7 +278,7 @@ function materialize(ref: string, state: DecycleState): string | undefined {
     default:
       break;
   }
-  state.defs[name] = decycleNode(copied, state);
+  state.defs[name] = decycleNode(copied, state, `/$defs/${escapeDefsPointerSegment(name)}`, state.refBase);
   return name;
 }
 

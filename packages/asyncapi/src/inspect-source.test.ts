@@ -95,8 +95,13 @@ describe("AsyncAPISynthesizer.inspectSource operationKey", () => {
     const synthesizer = new AsyncAPISynthesizer();
     const iface = await synthesizer.synthesizeInterface({ sources: [{ bindingSpec: BINDING_SPEC, content: artifact }] });
     const inspection = await synthesizer.inspectSource({ bindingSpec: BINDING_SPEC, content: artifact });
-    expect(Object.keys(iface.operations)).toEqual(["good"]);
-    expect(inspection.targets.map((target) => target.operationKey)).toEqual(["good"]);
+    // The routed-envelope ruling (2026-08-14): a headers-declaring message
+    // no longer excludes its operation — the direction becomes the envelope.
+    expect(Object.keys(iface.operations).sort()).toEqual(["good", "headers"]);
+    expect(inspection.targets.map((target) => target.operationKey).sort()).toEqual(["good", "headers"]);
     expect((iface.operations.good?.output as { anyOf?: unknown[] }).anyOf).toHaveLength(2);
+    const envelope = iface.operations.headers?.output as Record<string, unknown>;
+    expect(Object.keys(envelope.properties as Record<string, unknown>).sort()).toEqual(["headers", "payload"]);
+    expect(envelope.additionalProperties).toBe(false);
   });
 });

@@ -440,18 +440,17 @@ describe("AsyncAPI synthesis coverage", () => {
     const result = await new AsyncAPISynthesizer().synthesizeInterfaceWithCoverage({
       sources: [{ bindingSpec: BINDING_SPEC, content }],
     });
+    // The routed-envelope ruling (2026-08-14): the headers-declaring
+    // message alternative is represented, so every cell is represented.
     expect(result.coverage).toMatchObject({
       exhaustive: true,
-      fullyRepresented: false,
+      fullyRepresented: true,
     });
+    expect(result.coverage.entries.some((entry) => entry.reasonCode === "asyncapi.message_headers")).toBe(false);
     expect(result.coverage.entries).toEqual(expect.arrayContaining([
       expect.objectContaining({
         sourceRef: "#/operations/publish",
         status: "represented",
-      }),
-      expect.objectContaining({
-        status: "excluded",
-        reasonCode: "asyncapi.message_headers",
       }),
       expect.objectContaining({
         sourceRef: "#/operations/publish#server[0]=broker",
