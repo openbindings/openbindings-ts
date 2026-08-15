@@ -422,7 +422,7 @@ describe("synthesis coverage", () => {
                   required: true,
                   content: {
                     "application/json": { schema: { type: "object", properties: { name: { type: "string" } } } },
-                    "application/x-custom": { schema: { type: "string" } },
+                    "application/x-custom": { schema: { type: "object", properties: { name: { type: "string" } } } },
                   },
                 },
                 callbacks: {
@@ -661,16 +661,23 @@ describe("degenerate media/schema combination warning", () => {
       onWarning: (w) => warnings.push(w),
     });
     const byPath = new Map<string | undefined, { code: string; message: string; path?: string }>();
-    for (const w of warnings) {
-      if (w.code === "openapi.media_schema_mismatch") byPath.set(w.path, w);
-    }
+    for (const w of warnings) byPath.set(w.path, w);
     expect(byPath.size).toBe(2);
-    expect(byPath.get("operations.scalarMultipart.input")?.message).toBe(
-      "request media candidate multipart/form-data has a non-object body schema and is inadmissible; optional body omitted from the synthesized contract",
-    );
-    expect(byPath.get("operations.objectText.input")?.message).toBe(
-      "request media candidate text/plain has an object body schema and is inadmissible; optional body omitted from the synthesized contract",
-    );
+    // multipart's lane is selected by the media type, so a non-object schema
+    // is a degenerate media/schema combination (§9.2).
+    expect(byPath.get("operations.scalarMultipart.input")).toMatchObject({
+      code: "openapi.media_schema_mismatch",
+      message:
+        "request media candidate multipart/form-data has a non-object body schema and is inadmissible; optional body omitted from the synthesized contract",
+    });
+    // The string-carriage lane is selected by the DECLARATION (§9.2, ruled
+    // 2026-08-15), so an object-schema text declaration selects no lane at
+    // all rather than selecting one and then failing its schema test.
+    expect(byPath.get("operations.objectText.input")).toMatchObject({
+      code: "openapi.unresolvable_request_body",
+      message:
+        "request body declares no media type whose declaration selects a request carriage lane openbindings.openapi@1 defines (declared: text/plain); optional body omitted from the synthesized contract",
+    });
   });
 });
 
@@ -720,7 +727,7 @@ describe("synthesis coverage disposition identity", () => {
                   required: true,
                   content: {
                     "application/json": { schema: { type: "object", properties: { name: { type: "string" } } } },
-                    "application/x-custom": { schema: { type: "string" } },
+                    "application/x-custom": { schema: { type: "object", properties: { name: { type: "string" } } } },
                   },
                 },
                 responses: { "200": { description: "ok" } },

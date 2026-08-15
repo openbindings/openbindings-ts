@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   FAMILY_JSON,
+  FAMILY_RAW,
   FAMILY_TEXT,
   FAMILY_URLENCODED,
   acceptHeader,
@@ -113,7 +114,7 @@ describe("planRequestBody — deterministic unconfigured selection", () => {
     ];
     for (const content of refused) {
       expect(() => planRequestBody(opWithRequestBody(content, false))).toThrow(
-        "outside the families",
+        "selects a request carriage lane",
       );
     }
   });
@@ -152,7 +153,7 @@ describe("revision-3 media-range carriage existence", () => {
     expect(() => planRequestBodies(op, {
       profile: profileForBindingSpec(BINDING_SPEC),
       openapiVersion: "3.1.2",
-    })).toThrow(/outside the families/);
+    })).toThrow(/selects a request carriage lane/);
   });
 });
 
@@ -808,5 +809,96 @@ describe("§9.2 unconstrained and nullable-choice parts", () => {
       .toBe("note=x+y&tag=t1");
     expect(buildURLEncodedBody(media, { note: { a: 1 }, tag: null }, true, "3.1.2"))
       .toBe("note=%7B%22a%22%3A1%7D");
+  });
+});
+
+// §9.2's string-carriage lane, ruled 2026-08-15: every concrete non-JSON,
+// non-form selection whose GOVERNING SCHEMA resolves to `type: string`
+// carries the supplied string. The lane is stated once for every such media
+// type rather than as a list of admitted subtypes, and it is selected by the
+// declaration — never by the media type's primary type, and never by the
+// caller's value.
+describe("string-carriage lane (declaration-scoped)", () => {
+  const options = { profile: profileForBindingSpec(BINDING_SPEC), openapiVersion: "3.1.2" };
+
+  it.each([
+    ["text/plain"],
+    ["text/csv"],
+    ["text/markdown"],
+    ["text/x-markdown"],
+    ["application/xml"],
+    ["text/xml"],
+    ["application/x-custom"],
+  ])("carries a string-declared %s body", (media) => {
+    const plans = planRequestBodies(
+      opWithRequestBody({ [media]: { schema: { type: "string" } } }, true),
+      options,
+    );
+    expect(plans).toHaveLength(1);
+    expect(plans[0]).toMatchObject({ mediaKey: media, family: FAMILY_TEXT, synthetic: true });
+  });
+
+  it.each([
+    ["text/plain"],
+    ["text/csv"],
+    ["text/json"],
+    ["application/xml"],
+    ["text/xml"],
+  ])("refuses an object-declared %s body: no lane builds a document from an object model", (media) => {
+    expect(() => planRequestBodies(
+      opWithRequestBody({ [media]: { schema: { type: "object", properties: { a: { type: "string" } } } } }, true),
+      options,
+    )).toThrow(/selects a request carriage lane/);
+  });
+
+  it("keeps the incumbent text lane declaration-scoped: a non-string declaration selects nothing", () => {
+    expect(() => planRequestBodies(
+      opWithRequestBody({ "text/plain": { schema: { anyOf: [{ type: "string" }, { type: "object" }] } } }, true),
+      options,
+    )).toThrow(/selects a request carriage lane/);
+  });
+
+  it("leaves the artifact-authorized byte lanes first, with no text carve-out", () => {
+    // A schema-omitted text declaration is a schema-omitted declaration like
+    // any other: it takes the raw lane rather than being orphaned between two.
+    const omitted = planRequestBodies(opWithRequestBody({ "text/csv": {} }, true), options);
+    expect(omitted).toHaveLength(1);
+    expect(omitted[0]).toMatchObject({ mediaKey: "text/csv", family: FAMILY_RAW });
+
+    // OAS 3.0 `format: binary` is the artifact declaring octets; it wins.
+    const binary = planRequestBodies(
+      opWithRequestBody({ "text/csv": { schema: { type: "string", format: "binary" } } }, true),
+      { ...options, openapiVersion: "3.0.4" },
+    );
+    expect(binary).toHaveLength(1);
+    expect(binary[0]).toMatchObject({ mediaKey: "text/csv", family: FAMILY_RAW });
+  });
+
+  it("refuses an unsupported charset for the whole family, not just text/plain", () => {
+    expect(() => planRequestBodies(
+      opWithRequestBody({ "text/csv; charset=shift_jis": { schema: { type: "string" } } }, true),
+      options,
+    )).toThrow(/charset/);
+  });
+
+  it("encodes the emitted body under the declared charset for the whole family", () => {
+    const plans = planRequestBodies(
+      opWithRequestBody({ "text/csv; charset=iso-8859-1": { schema: { type: "string" } } }, true),
+      options,
+    );
+    expect(plans).toHaveLength(1);
+    const wire = buildRequestBody(DOC_31, plans[0]!, routedWith({ bodyValue: "é", bodySet: true }));
+    expect(wire.contentType).toBe("text/csv; charset=iso-8859-1");
+    expect(Array.from(wire.body as Uint8Array)).toEqual([0xe9]);
+  });
+
+  it("names the declaration, not text/plain, when the supplied value is not a string", () => {
+    const plans = planRequestBodies(
+      opWithRequestBody({ "application/xml": { schema: { type: "string" } } }, true),
+      options,
+    );
+    expect(() =>
+      buildRequestBody(DOC_31, plans[0]!, routedWith({ bodyValue: 42, bodySet: true })),
+    ).toThrow("request media application/xml declares a string body");
   });
 });

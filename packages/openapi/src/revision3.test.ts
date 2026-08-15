@@ -1021,9 +1021,19 @@ describe("openbindings.openapi@1 request carriage", () => {
     expect(result.outputs).toEqual([expected]);
   });
 
-  it("preserves OAS 3.1 boolean text schemas as whole bodies", async () => {
+  // §9.2's string-carriage lane is declaration-scoped (ruled 2026-08-15):
+  // the lane is selected when the governing schema resolves to `type:
+  // string`. A boolean `true` schema declares no type, so it selects no
+  // lane, and an OAS 3.1 raw lane needs an OMITTED schema rather than an
+  // unconstrained one. This narrows what the incumbent unconditional
+  // text/plain lane accepted; the corner is filed for a ruling (queue item
+  // 11 residue in unsupervised-loop.md) rather than repaired by inventing an
+  // "unconstrained schema" admissibility rule the ruling does not state.
+  // Pinned here and in Go's TestRequestStringCarriage_DeclarationScoped so
+  // the twins cannot drift while the corner is open.
+  it("selects no lane for an unconstrained boolean text schema", async () => {
     const spec = document("3.1.2", { "text/plain": { schema: true } });
-    const iface = await convertToInterface(
+    await expect(convertToInterface(
       undefined,
       spec,
       undefined,
@@ -1031,23 +1041,6 @@ describe("openbindings.openapi@1 request carriage", () => {
       undefined,
       undefined,
       BINDING_SPEC,
-    );
-    expect(iface.operations["putPayload"]?.input).toEqual({
-      type: "object",
-      properties: { body: true },
-      additionalProperties: false,
-      required: ["body"],
-    });
-
-    const captured = captureFetch();
-    const call = new OpenAPIInvoker().invokeBinding({
-      source: { bindingSpec: BINDING_SPEC, content: spec },
-      ref: "#/paths/~1payload/put",
-      fetch: captured.fetch,
-    });
-    await call.write({ body: "hello" });
-    for await (const _output of call.outputs) { /* 204 */ }
-    expect(captured.requests).toHaveLength(1);
-    expect(captured.requests[0]?.body).toBe("hello");
+    )).rejects.toThrow(/selects a request carriage lane/);
   });
 });
