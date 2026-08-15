@@ -488,6 +488,23 @@
 
 ### Fixed
 
+- **OBI-D-17 well-formedness is decided per distinct schema node, not per
+  occurrence.** A boundary schema synthesized from a heavily-referenced
+  artifact is a DAG: full dereference makes one component subtree the SAME
+  object at every position that referenced it, and every operation that
+  mentions the component carries its own copy. Meta-validating the expanded
+  TREE therefore cost the product of those repetitions — `discord/discord-api-spec`
+  (1.1 MB, 242 operations) presented 414,554 schema positions over 56,356
+  distinct nodes and exhausted an 8 GB heap before emitting anything, while
+  synthesis proper took 0.4 s and 42 MB (corpus-lab F-O1-1). The meta-schema
+  constrains a node's own keywords and otherwise only recurses itself into
+  that node's subschemas, so the verdict is now proven node by node, each
+  distinct node once, and repeated node shapes are answered from a cache.
+  A document that fails is still reported by the whole-tree walk, unchanged,
+  which remains the sole authority on the diagnostics. The same specimen now
+  synthesizes in 3.4 s inside a 192 MB heap. Nothing about what OBI-D-17
+  accepts, or what it says when it refuses, changes.
+
 - **Operation-boundary schema validation now preserves the OBI document as
   the same-document reference root.** Input, output, and example validation
   compile schemas at their canonical `#/operations/...` addresses instead of

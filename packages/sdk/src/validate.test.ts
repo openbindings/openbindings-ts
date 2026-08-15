@@ -653,6 +653,102 @@ describe("OBI-D-17 schema well-formedness", () => {
   });
 });
 
+// A boundary schema synthesized from a heavily-referenced artifact is a DAG:
+// one dereferenced component subtree occurs at hundreds of positions, in every
+// operation that mentions it. Deciding OBI-D-17 by walking the expanded TREE
+// costs the product of those repetitions, which is how a 1.1 MB OpenAPI
+// artifact exhausted an 8 GB heap (corpus-lab F-O1-1). The verdict is decided
+// per distinct node, so these documents must stay cheap without any change to
+// what OBI-D-17 accepts or to the diagnostics it emits.
+describe("OBI-D-17 on shared component graphs", () => {
+  // One shared "component": a wide object whose properties are themselves
+  // shared, so its expanded tree is far larger than its node count.
+  function component(depth: number, shared: Record<string, unknown>): Record<string, unknown> {
+    if (depth === 0) return shared;
+    const properties: Record<string, unknown> = {};
+    for (let i = 0; i < 5; i++) properties[`field${i}`] = component(depth - 1, shared);
+    return { type: "object", properties, required: ["field0"], additionalProperties: false };
+  }
+
+  function corpusShapedInterface(operationCount: number): OBInterface {
+    const leaf = { type: "string", description: "a shared leaf component" };
+    const shared = component(5, leaf);
+    const operations: Record<string, Operation> = {};
+    for (let i = 0; i < operationCount; i++) {
+      // Every operation carries its OWN copy, exactly as per-operation
+      // projection produces: sharing is real inside an operation, absent
+      // across them.
+      operations[`op${i}`] = {
+        input: structuredClone(shared),
+        output: structuredClone(shared),
+      };
+    }
+    return { openbindings: "0.2.0", operations };
+  }
+
+  it("validates a many-operation shared-component document in bounded time", () => {
+    const iface = corpusShapedInterface(10);
+    const started = performance.now();
+    expect(() => validateInterface(iface)).not.toThrow();
+    const elapsed = performance.now() - started;
+    // Tree-expanded validation of this document is ~78,000 schema positions
+    // — a minute of wall clock, and hundreds of megabytes of live validator
+    // state. Node-wise it is six distinct shapes. The bound is deliberately
+    // loose so it fails only on the growth class, never on machine speed.
+    expect(elapsed).toBeLessThan(10_000);
+  }, 120_000);
+
+  it("still reports a violation buried in a shared subtree", () => {
+    // Deliberately small: a document that fails is decided by the ordinary
+    // whole-tree walk, which is the sole authority on the diagnostics.
+    const leaf = { type: "string" };
+    const shared = { type: "object", properties: { field0: leaf, field1: leaf } };
+    const iface: OBInterface = {
+      openbindings: "0.2.0",
+      operations: {
+        op0: { input: structuredClone(shared) },
+        op1: { input: structuredClone(shared) },
+      },
+    };
+    const input = iface.operations["op1"]!.input as Record<string, unknown>;
+    const properties = input["properties"] as Record<string, Record<string, unknown>>;
+    // `items` in array form is draft-4 syntax, not 2020-12 (prefixItems).
+    properties["field1"]!["items"] = [{ type: "string" }];
+    let msg = "";
+    try {
+      validateInterface(iface);
+    } catch (e) {
+      msg = (e as Error).message;
+    }
+    expect(msg).toContain('operations["op1"].input: not a well-formed JSON Schema 2020-12 schema:');
+    expect(msg).toContain("/properties/field1/items");
+    expect(msg).toContain("(OBI-D-17)");
+    // The identical, well-formed sibling operation is untouched.
+    expect(msg).not.toContain('operations["op0"]');
+  });
+
+  it("keeps a malformed value that repeats at many positions reported once per schema position", () => {
+    const bad = { minLength: "3" };
+    const iface: OBInterface = {
+      openbindings: "0.2.0",
+      operations: {
+        op: {
+          input: { type: "object", properties: { a: bad, b: bad }, items: bad },
+        },
+      },
+    };
+    let msg = "";
+    try {
+      validateInterface(iface);
+    } catch (e) {
+      msg = (e as Error).message;
+    }
+    for (const pointer of ["/properties/a/minLength", "/properties/b/minLength", "/items/minLength"]) {
+      expect(msg).toContain(pointer);
+    }
+  });
+});
+
 // OBI-D-18: transform parse-validity — parse-only membership in the pinned
 // language. Mirrors the Go SDK's tests and detail strings.
 describe("OBI-D-18 transform parse-validity", () => {

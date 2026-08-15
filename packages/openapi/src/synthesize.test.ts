@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { convertToInterface } from "./synthesize.js";
 import { OpenAPIInvoker } from "./invoker.js";
-import { DEFAULT_SOURCE_NAME } from "./constants.js";
+import { BINDING_SPEC, DEFAULT_SOURCE_NAME } from "./constants.js";
 
 const MINIMAL_SPEC = {
   openapi: "3.1.0",
@@ -1105,6 +1105,73 @@ describe("directional request/response schema projection", () => {
       expect(JSON.stringify(output)).not.toContain('"writeOnly":true');
     });
   }
+});
+
+// A mainstream public API description is not a small document: hundreds of
+// operations, each answering with a component schema that references other
+// components, which reference others still. Full dereference turns that into
+// one shared object graph whose EXPANDED tree is orders of magnitude larger
+// than the artifact. Synthesis must stay proportional to the artifact, not to
+// that expansion — corpus-lab F-O1-1, where a 1.1 MB public artifact
+// exhausted an 8 GB heap.
+describe("synthesis of a heavily-referenced artifact", () => {
+  function referenceHeavyDocument(operationCount: number): Record<string, unknown> {
+    // Each component references the next level twice, so the expanded tree of
+    // Component0 is exponential in the level count while the artifact stays
+    // small — the shape a real component library takes.
+    const LEVELS = 9;
+    const schemas: Record<string, unknown> = {
+      [`Component${LEVELS}`]: { type: "object", properties: { id: { type: "string" } } },
+    };
+    for (let level = LEVELS - 1; level >= 0; level--) {
+      const child = { $ref: `#/components/schemas/Component${level + 1}` };
+      schemas[`Component${level}`] = {
+        type: "object",
+        properties: { left: child, right: child, name: { type: "string" } },
+        required: ["left"],
+      };
+    }
+    const paths: Record<string, unknown> = {};
+    for (let i = 0; i < operationCount; i++) {
+      paths[`/resource${i}`] = {
+        get: {
+          operationId: `getResource${i}`,
+          parameters: [{ name: "id", in: "query", schema: { type: "string" } }],
+          responses: {
+            "200": {
+              description: "OK",
+              content: {
+                "application/json": { schema: { $ref: "#/components/schemas/Component0" } },
+              },
+            },
+          },
+        },
+      };
+    }
+    return {
+      openapi: "3.1.0",
+      info: { title: "Reference Heavy", version: "1.0.0" },
+      paths,
+      components: { schemas },
+    };
+  }
+
+  it("synthesizes many operations over shared components in bounded time", async () => {
+    const document = referenceHeavyDocument(60);
+    const started = performance.now();
+    // The full synthesizer surface, so the emitted document's own validation
+    // is inside the measurement: that is where the expansion was paid.
+    const synthesis = await new OpenAPISynthesizer().synthesizeInterfaceWithCoverage({
+      sources: [{ bindingSpec: BINDING_SPEC, content: document }],
+    });
+    const elapsed = performance.now() - started;
+    expect(Object.keys(synthesis.interface.operations)).toHaveLength(60);
+    // Each operation's output expands to ~1,500 schema positions, so a
+    // per-position cost anywhere in this path costs 90,000 of them. The bound
+    // is loose enough to be machine-independent and still an order of
+    // magnitude below the pre-fix cost.
+    expect(elapsed).toBeLessThan(20_000);
+  }, 60_000);
 });
 
 function findSchemaWithProperty(

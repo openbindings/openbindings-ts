@@ -103,6 +103,13 @@ export function validateSchemaWellFormedness(
 ): void {
   if (typeof schema === "boolean") return; // boolean form is always well-formed
   if (typeof schema === "object" && schema !== null && !Array.isArray(schema)) {
+    // Fast path first (see metaValidatesNodeWise): a synthesized boundary
+    // schema is a DAG whose shared component subtrees repeat thousands of
+    // times, and the backend re-walks every repetition. When the node-wise
+    // check proves well-formedness, the whole-tree walk is skipped; when it
+    // cannot, the whole-tree walk below remains the sole authority on which
+    // failures are reported.
+    if (metaValidatesNodeWise(schema as Record<string, unknown>)) return;
     const meta = metaValidator().validate(schema);
     if (!meta.valid) {
       for (const f of meta.failures) {
@@ -155,6 +162,144 @@ function metaValidator(): CompiledSchema {
   delete compound.$schema;
   _metaValidator = wrapNode(compileSchema(compound, { drafts: [OBI_BOUNDARY_DRAFT] }));
   return _metaValidator;
+}
+
+// ---------------------------------------------------------------------------
+// Node-wise well-formedness (an acceleration of the whole-tree meta-check)
+// ---------------------------------------------------------------------------
+
+/**
+ * The 2020-12 meta-schema positions whose value is a `{ name -> schema }`
+ * map, an array of schemas, or a single schema. Every one of them constrains
+ * its subschemas solely by recursing the meta-schema into them
+ * (`$dynamicRef: "#meta"`), which is what makes the node-wise decomposition
+ * below exact.
+ *
+ * `dependencies` is deliberately absent: its members are a CHOICE between a
+ * schema and a string array, so a member's verdict is not the meta-schema's
+ * verdict on a schema. Leaving a position out only costs speed — the value
+ * stays in place and the meta-schema checks it where it sits.
+ */
+const META_SUBSCHEMA_MAP_KEYWORDS = new Set([
+  "properties", "patternProperties", "dependentSchemas", "$defs", "definitions",
+]);
+const META_SUBSCHEMA_ARRAY_KEYWORDS = new Set([
+  "allOf", "anyOf", "oneOf", "prefixItems",
+]);
+const META_SUBSCHEMA_SINGLE_KEYWORDS = new Set([
+  "items", "contains", "additionalProperties", "propertyNames", "not",
+  "if", "then", "else", "unevaluatedItems", "unevaluatedProperties",
+  "contentSchema",
+]);
+
+/**
+ * Distinct node SHAPES already meta-validated, keyed by the JSON text of the
+ * shape. Synthesized boundary schemas repeat the same component shapes across
+ * every operation that mentions them, so this is where the dominant saving
+ * comes from. Keyed by value, never by object identity: a caller that mutates
+ * a schema between validations still gets the mutated shape's own verdict.
+ */
+const nodeShapeVerdicts = new Map<string, boolean>();
+const NODE_SHAPE_VERDICT_LIMIT = 20000;
+
+/** An object-form schema: the only value this decomposition lifts out. */
+function isObjectFormSchema(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** Object or boolean form — the two forms a schema position admits. */
+function isSchemaPositionValue(value: unknown): boolean {
+  return typeof value === "boolean" || isObjectFormSchema(value);
+}
+
+/**
+ * Builds one node's SHAPE: the node with every object-form subschema replaced
+ * by `true`. `true` is well-formed under every vocabulary, so the shape's
+ * verdict is exactly the node's own contribution; the replaced subschemas are
+ * collected into `children` and checked on their own. Values that are not in
+ * schema form stay exactly where they are, so a malformed `items: [ ... ]` or
+ * `properties: 3` still fails at the node that declares it.
+ */
+function nodeShape(
+  node: Record<string, unknown>,
+  children: Record<string, unknown>[],
+): Record<string, unknown> {
+  const shape: Record<string, unknown> = {};
+  for (const [keyword, value] of Object.entries(node)) {
+    if (META_SUBSCHEMA_MAP_KEYWORDS.has(keyword) && isObjectFormSchema(value)) {
+      const members: Record<string, unknown> = {};
+      for (const [name, member] of Object.entries(value)) {
+        if (!isSchemaPositionValue(member)) { members[name] = member; continue; }
+        if (isObjectFormSchema(member)) children.push(member);
+        members[name] = true;
+      }
+      shape[keyword] = members;
+    } else if (META_SUBSCHEMA_ARRAY_KEYWORDS.has(keyword) && Array.isArray(value)) {
+      shape[keyword] = (value as unknown[]).map((member): unknown => {
+        if (!isSchemaPositionValue(member)) return member;
+        if (isObjectFormSchema(member)) children.push(member);
+        return true;
+      });
+    } else if (META_SUBSCHEMA_SINGLE_KEYWORDS.has(keyword) && isSchemaPositionValue(value)) {
+      if (isObjectFormSchema(value)) children.push(value);
+      shape[keyword] = true;
+    } else {
+      shape[keyword] = value;
+    }
+  }
+  return shape;
+}
+
+/**
+ * Proves OBI-D-17 well-formedness node by node instead of by whole tree.
+ *
+ * A JSON Schema is well-formed exactly when every schema-position node in it
+ * is: the 2020-12 meta-schema constrains a node's own keywords and otherwise
+ * only recurses itself into that node's subschemas. Deciding it node-wise
+ * therefore reaches the same verdict while visiting each DISTINCT node once
+ * — a synthesized boundary schema is a DAG in which one dereferenced
+ * component subtree occurs at hundreds of positions, and the whole-tree walk
+ * re-validates every occurrence.
+ *
+ * Returns true only when every reachable node's shape validated. `false`
+ * means "not proven here" — never "invalid": the caller re-runs the
+ * whole-tree meta-validation, which stays the sole authority on the reported
+ * failures. Anything this decomposition does not model (a position kept out
+ * of the keyword sets, a value form it does not recognize) is left in place
+ * and decided by the meta-schema, so the answer can only be conservative.
+ */
+function metaValidatesNodeWise(root: Record<string, unknown>): boolean {
+  const visited = new WeakSet<object>();
+  const pending: Record<string, unknown>[] = [root];
+  while (pending.length > 0) {
+    const node = pending.pop() as Record<string, unknown>;
+    if (visited.has(node)) continue;
+    visited.add(node);
+
+    const children: Record<string, unknown>[] = [];
+    const shape = nodeShape(node, children);
+
+    let key: string | undefined;
+    try {
+      key = JSON.stringify(shape);
+    } catch {
+      // A value JSON cannot represent (a cycle through an annotation, a
+      // BigInt) has no shape key; decide this node without the cache.
+      key = undefined;
+    }
+    let verdict = key === undefined ? undefined : nodeShapeVerdicts.get(key);
+    if (verdict === undefined) {
+      verdict = metaValidator().validate(shape).valid;
+      if (key !== undefined) {
+        if (nodeShapeVerdicts.size >= NODE_SHAPE_VERDICT_LIMIT) nodeShapeVerdicts.clear();
+        nodeShapeVerdicts.set(key, verdict);
+      }
+    }
+    if (!verdict) return false;
+
+    for (const child of children) pending.push(child);
+  }
+  return true;
 }
 
 /**
