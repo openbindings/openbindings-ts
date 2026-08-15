@@ -693,3 +693,120 @@ describe("revision-3 response media governance", () => {
     expect(() => parseMediaType("text/plain/extra", true)).toThrow();
   });
 });
+
+// §9.2: an unconstrained part schema is admitted, its OAS per-type part
+// default keyed by the supplied value's JSON application type; a part
+// schema declaring one non-null anyOf/oneOf branch beside {type:"null"}
+// branches collapses to that branch, with JSON null eliding the optional
+// part. Mirrors Go's TestRevision3MultipartUnconstrainedPartUsesValueTypedDefaults
+// and TestRevision3MultipartNullableChoiceCollapsesToBranchCarriage.
+describe("§9.2 unconstrained and nullable-choice parts", () => {
+  it("admits an unconstrained part and keys its per-type default from the value", async () => {
+    const media: OpenAPIMediaType = {
+      schema: { type: "object", properties: { file: { description: "Profile picture file" } } },
+    };
+    const plan = planRequestBody(
+      opWithRequestBody({ "multipart/form-data": media }, true),
+      { profile: profileForBindingSpec(BINDING_SPEC), openapiVersion: "3.1.2" },
+    );
+
+    let wire = buildRequestBody(DOC_31, plan, routedWith({ bodyFields: { file: "hello" } }));
+    let parts = await formDataParts(wire.body as FormData);
+    expect(parts.file?.[0]).toEqual(["", "hello"]);
+
+    wire = buildRequestBody(DOC_31, plan, routedWith({ bodyFields: { file: { a: 1 } } }));
+    parts = await formDataParts(wire.body as FormData);
+    expect(parts.file?.[0]).toEqual(["application/json", '{"a":1}']);
+
+    wire = buildRequestBody(DOC_31, plan, routedWith({ bodyFields: { file: ["a", 2] } }));
+    parts = await formDataParts(wire.body as FormData);
+    expect(parts.file?.[0]).toEqual(["application/json", '["a",2]']);
+
+    expect(() => buildRequestBody(DOC_31, plan, routedWith({ bodyFields: { file: null } })))
+      .toThrow(/no form carriage for JSON null/);
+  });
+
+  it("collapses a nullable choice to the non-null branch's carriage and elides null", async () => {
+    const media: OpenAPIMediaType = {
+      schema: {
+        type: "object",
+        properties: {
+          file: {
+            anyOf: [
+              { type: "string", contentMediaType: "application/octet-stream" },
+              { type: "null" },
+            ],
+            description: "nullable upload",
+          },
+          file_id: { anyOf: [{ type: "string" }, { type: "null" }] },
+          options: { oneOf: [{ type: "object", additionalProperties: true }, { type: "null" }] },
+        },
+      },
+    };
+    const plan = planRequestBody(
+      opWithRequestBody({ "multipart/form-data": media }, true),
+      { profile: profileForBindingSpec(BINDING_SPEC), openapiVersion: "3.1.0" },
+    );
+
+    let wire = buildRequestBody(DOC_31, plan, routedWith({
+      bodyFields: { file: "raw-text", file_id: "id-1", options: { k: "v" } },
+    }));
+    let parts = await formDataParts(wire.body as FormData);
+    expect(parts.file?.[0]).toEqual(["", "raw-text"]);
+    expect(parts.file_id?.[0]).toEqual(["", "id-1"]);
+    expect(parts.options?.[0]).toEqual(["application/json", '{"k":"v"}']);
+
+    wire = buildRequestBody(DOC_31, plan, routedWith({
+      bodyFields: { file: null, file_id: "id-2" },
+    }));
+    parts = await formDataParts(wire.body as FormData);
+    expect(parts.file).toBeUndefined();
+    expect(parts.file_id?.[0]).toEqual(["", "id-2"]);
+  });
+
+  it("still refuses a choice with more than one non-null branch", () => {
+    const media: OpenAPIMediaType = {
+      schema: {
+        type: "object",
+        properties: { pick: { anyOf: [{ type: "string" }, { type: "integer" }] } },
+      },
+    };
+    expect(() => planRequestBody(
+      opWithRequestBody({ "multipart/form-data": media }, true),
+      { profile: profileForBindingSpec(BINDING_SPEC), openapiVersion: "3.1.0" },
+    )).toThrow(/choice applicator/);
+    const nullable: OpenAPIMediaType = {
+      schema: {
+        type: "object",
+        properties: {
+          pick: { anyOf: [{ type: "string" }, { type: "integer" }, { type: "null" }] },
+        },
+      },
+    };
+    expect(() => planRequestBody(
+      opWithRequestBody({ "multipart/form-data": nullable }, true),
+      { profile: profileForBindingSpec(BINDING_SPEC), openapiVersion: "3.1.0" },
+    )).toThrow(/choice applicator/);
+  });
+
+  it("applies the same rules on the urlencoded lane", () => {
+    const media: OpenAPIMediaType = {
+      schema: {
+        type: "object",
+        properties: {
+          note: { description: "free-form" },
+          tag: { anyOf: [{ type: "string" }, { type: "null" }] },
+        },
+      },
+    };
+    expect(() => planRequestBody(
+      opWithRequestBody({ "application/x-www-form-urlencoded": media }, true),
+      { profile: profileForBindingSpec(BINDING_SPEC), openapiVersion: "3.1.2" },
+    )).not.toThrow();
+
+    expect(buildURLEncodedBody(media, { note: "x y", tag: "t1" }, true, "3.1.2"))
+      .toBe("note=x+y&tag=t1");
+    expect(buildURLEncodedBody(media, { note: { a: 1 }, tag: null }, true, "3.1.2"))
+      .toBe("note=%7B%22a%22%3A1%7D");
+  });
+});

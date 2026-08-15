@@ -726,12 +726,8 @@ describe("openbindings.openapi@1 request carriage", () => {
       },
     ],
     [
-      "typeless 3.1 part",
-      { schema: { type: "object", properties: { note: {} } } },
-    ],
-    [
-      "true 3.1 part",
-      { schema: { type: "object", properties: { note: true } } },
+      "multi-non-null choice part",
+      { schema: { type: "object", properties: { note: { anyOf: [{ type: "string" }, { type: "integer" }] } } } },
     ],
     [
       "unsafe content transfer encoding",
@@ -751,6 +747,27 @@ describe("openbindings.openapi@1 request carriage", () => {
       scope: "alternative",
       status: "excluded",
       reasonCode: "openapi.request_media_excluded",
+    }));
+  });
+
+  // §9.2: an unconstrained part schema (typeless, boolean true) is admitted
+  // with its per-type default keyed by the value's JSON application type,
+  // and a single-non-null-branch choice collapses to that branch.
+  it.each([
+    ["typeless 3.1 part", { schema: { type: "object", properties: { note: {} } } }],
+    ["true 3.1 part", { schema: { type: "object", properties: { note: true } } }],
+    [
+      "nullable-choice part",
+      { schema: { type: "object", properties: { note: { anyOf: [{ type: "string" }, { type: "null" }] } } } },
+    ],
+  ])("coverage-represents multipart %s (§9.2 part interpretation)", async (_case, media) => {
+    const spec = document("3.1.2", { "multipart/form-data": media }, false);
+    const result = await new OpenAPISynthesizer().synthesizeInterfaceWithCoverage({
+      sources: [{ bindingSpec: BINDING_SPEC, content: spec }],
+    });
+    expect(result.coverage.entries).toContainEqual(expect.objectContaining({
+      scope: "alternative",
+      status: "represented",
     }));
   });
 
