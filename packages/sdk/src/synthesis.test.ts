@@ -93,6 +93,41 @@ describe("shared synthesis behavior", () => {
     });
   });
 
+  // An invalid entry clears fullyRepresented exactly like every other
+  // non-represented status: an upstream-invalid unit is still an inventoried
+  // unit the emitted OBI does not represent. Pinned by MC5 seal-1 finding
+  // F-V3-1, where a document whose every target was invalid reported
+  // fullyRepresented true.
+  it("clears fullyRepresented when any entry is invalid", () => {
+    const iface: OBInterface = {
+      openbindings: "0.2.0",
+      operations: { getUser: {} },
+      sources: { api: { bindingSpec: "example.spec@1", location: "https://example.com/spec" } },
+      bindings: { "getUser.api": { operation: "getUser", source: "api", ref: "#/getUser" } },
+    };
+    const result = finalizeSynthesisCoverage(iface, [
+      {
+        sourceIndex: 0,
+        sourceRef: "#/getUser",
+        scope: "target",
+        status: "represented",
+        operationKey: "getUser",
+        bindingRef: "#/getUser",
+      },
+      {
+        sourceIndex: 0,
+        sourceRef: "#/operations/broken",
+        scope: "target",
+        status: "invalid",
+        reasonCode: "example.invalid_target",
+        rule: "EXAMPLE-D-03",
+        message: "the target does not resolve to an operation object",
+      },
+    ], true);
+    expect(result.coverage.exhaustive).toBe(true);
+    expect(result.coverage.fullyRepresented).toBe(false);
+  });
+
   it("rejects represented coverage without a matching binding", () => {
     const iface: OBInterface = {
       openbindings: "0.2.0",

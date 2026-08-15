@@ -588,12 +588,18 @@ function messagePayloadBoundarySchema(boundary: BoundaryDocument, raw: RawObject
     schema["description"] = messagePayloadLossReason(doc, message) === "asyncapi.payload_byte_carriage"
       ? lossyBoundaryDescription(messageEffectiveContentType(doc, message))
       : boundaryDescription(messageEffectiveContentType(doc, message));
+  } else if (!isPlainObjectSchema(effectiveSchema)) {
+    // messagePayloadNotConvertible has already floored every non-object
+    // schema under a translate/passthrough format, so this branch is a
+    // guard: an unexpected shape stays unconstrained rather than crashing
+    // (Go twin: messagePayloadBoundarySchema).
+    schema = {};
   } else {
     // The raw-lane payload is a plain acyclic tree: the resolver inlined
     // every acyclic reference by copy and left cycles as the artifact's
     // literal $ref strings (resolve-refs.ts), which decycle materializes
     // under the artifact's own names.
-    const stripped = stripParserExtensions(deepCopyObject(effectiveSchema!));
+    const stripped = stripParserExtensions(deepCopyObject(effectiveSchema));
     schema = classifySchemaFormat(schemaFormat) === "translate" ? translateSchemaDialect(stripped) : stripped;
   }
   return schema;
@@ -608,21 +614,28 @@ function messagePayloadBoundarySchema(boundary: BoundaryDocument, raw: RawObject
  * wrapper (Go twin: effectivePayload in authoring.go).
  */
 export function effectivePayload(message: AsyncAPIMessage): {
-  schema: Record<string, unknown> | undefined;
+  schema: unknown;
   schemaFormat: string | undefined;
 } {
   const payload = message.payload;
   if (payload !== undefined && typeof payload["schemaFormat"] === "string") {
+    // The wrapper's schema member is untyped: a foreign schema language's
+    // document need not be a JSON object — a top-level Avro union is an
+    // array and a bare Avro primitive name is a string, both legal schema
+    // forms the Avro correspondence reaches (external composition and the
+    // normalization hoist deliver them in wrapper form; Go twin:
+    // effectivePayload).
     const wrapped = payload["schema"];
     return {
-      schema:
-        wrapped !== null && typeof wrapped === "object" && !Array.isArray(wrapped)
-          ? (wrapped as Record<string, unknown>)
-          : undefined,
+      schema: wrapped === null ? undefined : wrapped,
       schemaFormat: payload["schemaFormat"],
     };
   }
   return { schema: payload, schemaFormat: message.schemaFormat };
+}
+
+function isPlainObjectSchema(schema: unknown): schema is Record<string, unknown> {
+  return schema !== null && typeof schema === "object" && !Array.isArray(schema);
 }
 
 // The EMISSION predicate: whether the direction must be the unconstrained
@@ -636,7 +649,14 @@ export function messagePayloadNotConvertible(doc: AsyncAPIDocument, message: Asy
   // boundary schema, likewise never unconstrained.
   if (messageCarriage(doc, message) === "bytes") return false;
   if (classifySchemaFormat(effectivePayload(message).schemaFormat) === "avro") return false;
-  if (effectivePayload(message).schema === undefined) return true;
+  const { schema } = effectivePayload(message);
+  if (schema === undefined) return true;
+  // A declared JSON Schema dialect types its schemas as objects (the OBI
+  // position additionally excludes boolean schemas); a wrapper carrying a
+  // non-object schema under a translate/passthrough format declares no
+  // carryable contract, so the direction is the unconstrained schema (Go
+  // twin: messagePayloadNotConvertible).
+  if (!isPlainObjectSchema(schema)) return true;
   return messagePayloadLossReason(doc, message) !== undefined;
 }
 
@@ -721,7 +741,7 @@ export function messagePayloadLossReason(doc: AsyncAPIDocument, message: AsyncAP
     // the enrichment path (Go twin: messagePayloadLossReason).
     if (!hasForeignSchemaFormat(schemaFormat)) {
       if (schema === undefined) return undefined;
-      if (schemaEqualsBoundary(schema, classifySchemaFormat(schemaFormat))) return undefined;
+      if (isPlainObjectSchema(schema) && schemaEqualsBoundary(schema, classifySchemaFormat(schemaFormat))) return undefined;
     }
     return "asyncapi.payload_byte_carriage";
   }

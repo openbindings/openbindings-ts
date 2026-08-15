@@ -244,7 +244,12 @@ export interface SynthesisCoverage {
   entries: SynthesisCoverageEntry[];
   /** True only when the governing family inventory is completely accounted for. */
   exhaustive: boolean;
-  /** Derived: exhaustive and every upstream-valid unit is represented. */
+  /**
+   * Derived: exhaustive and every inventoried unit is represented. Any
+   * non-represented entry — lossy, excluded, invalid, or
+   * implementation-unsupported — clears it: a document with an invalid unit
+   * is accounted, never reported as fully represented.
+   */
   fullyRepresented: boolean;
   /** Explains what may be missing when exhaustive is false. */
   limitation?: SynthesisCoverageLimitation;
@@ -387,7 +392,11 @@ export function finalizeSynthesisCoverage(
     if (!entry.message) {
       throw new Error(`synthesis coverage entry ${index} requires a message`);
     }
-    if (entry.status !== "invalid") fullyRepresented = false;
+    // Every non-represented status clears fullyRepresented — invalid
+    // included. An upstream-invalid unit is still an inventoried unit the
+    // emitted OBI does not represent (MC5 seal-1 finding F-V3-1: a document
+    // whose every target was invalid reported fullyRepresented true).
+    fullyRepresented = false;
   }
 
   return {

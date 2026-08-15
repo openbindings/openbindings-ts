@@ -4,6 +4,38 @@
 
 ### Changed
 
+- **Synthesis coverage: an `invalid` entry now clears `fullyRepresented`.**
+  Every non-represented status — lossy, excluded, invalid,
+  implementation-unsupported — clears the derived flag; previously an
+  upstream-invalid unit left it standing, so a document whose every target
+  was invalid could report `fullyRepresented: true` (MC5 seal-1 finding
+  F-V3-1). The Go SDK carries the identical change.
+
+- **AsyncAPI: 2.x Reference Objects at non-admitting positions refuse
+  whole-artifact, before reference composition.** Position admission is
+  pinned from the 2.x edition texts: the whole `servers`/`channels` maps,
+  `publish`/`subscribe` (the 2.x Operation Object), string-typed fields
+  (descriptions, `contentType`, `schemaFormat`, channel `servers` name
+  strings), and — before 2.4.0 — servers-map values admit no Reference
+  Object. A document writing `$ref` there has no interpretation under its
+  own edition (ASYNC-P-01); the refusal is the adjudicated
+  consistent-loud-refusal convergence for the parser-tolerance class that
+  previously synthesized a zero-operation OBI (MC5 seal-1 finding F-V3-1;
+  ASYNC-SS-22/23; rule shared with the asyncapi-client parser,
+  byte-identical to the Go SDK's).
+
+- **AsyncAPI: external reference composition admits non-object documents at
+  Avro-declared schema positions.** A top-level Avro union is a JSON array
+  and a bare primitive type name is a JSON string — legal Avro schema forms
+  the §9.2 named correspondence reaches — so a `payload`/wrapper-`schema`
+  `$ref` whose declared `schemaFormat` is on the Avro list composes them
+  instead of rejecting the artifact ("did not return an object document"
+  stays the rule at every structural position). A composed or authored
+  non-object message-level Avro payload takes the Multi Format Schema
+  Object wrapper shape during normalization, and the derivation accepts a
+  top-level union exactly like an interior one (MC5 seal-1 finding F-V3-2;
+  ASYNC-SS-24).
+
 - **Invocation failures now use the minimal abstract record `{code,data?}`.**
   Portable `message`, `details`, and `diagnostics` members were removed;
   `data` is JSON-domain data defined by the code-owning rule or opaque

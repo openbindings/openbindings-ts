@@ -104,3 +104,62 @@ describe("avroMediaGuard", () => {
     expect(() => avroMediaGuard({ payload: { type: "object" } }, "avro/binary")).not.toThrow();
   });
 });
+
+// A top-level union: the Avro specification admits a JSON ARRAY as a
+// complete schema, so the derivation must accept it at the root exactly as
+// at an interior position, and the Multi Format Schema Object's untyped
+// schema member must carry it through to a fully represented direction
+// (MC5 seal-1 finding F-V3-2's derivation cell; ASYNC-SS-24 pins the
+// portable projection; Go twin: TestDeriveAvroSchemaTopLevelUnion).
+describe("top-level Avro union", () => {
+  const union = [
+    "null",
+    { type: "record", name: "File", fields: [{ name: "path", type: "string" }] },
+  ];
+
+  it("derives at the schema root", () => {
+    const derived = deriveAvroSchema(union);
+    expect(derived).toBeDefined();
+    const branches = derived!["oneOf"] as Array<Record<string, unknown>>;
+    expect(branches).toHaveLength(2);
+    expect(branches[0]).toEqual({ type: "null" });
+    expect(branches[1]!["required"]).toEqual(["File"]);
+  });
+
+  it("projects a wrapper-declared union as the operation direction", async () => {
+    const artifact = JSON.stringify({
+      asyncapi: "3.0.0",
+      info: { title: "Top-level Avro union", version: "1" },
+      servers: { broker: { host: "broker.example:9092", protocol: "kafka" } },
+      channels: {
+        files: {
+          address: "files.v1",
+          messages: {
+            file: {
+              payload: {
+                schemaFormat: "application/vnd.apache.avro;version=1.9.0",
+                schema: union,
+              },
+            },
+          },
+        },
+      },
+      operations: {
+        publishFile: {
+          action: "receive",
+          channel: { $ref: "#/channels/files" },
+          messages: [{ $ref: "#/channels/files/messages/file" }],
+        },
+      },
+    });
+    const synthesis = await new AsyncAPISynthesizer().synthesizeInterfaceWithCoverage({
+      sources: [{ bindingSpec: BINDING_SPEC, content: artifact }],
+    });
+    const op = synthesis.interface.operations.publishFile;
+    expect(op, "operation wrongly excluded").toBeDefined();
+    const input = op!.input as Record<string, unknown>;
+    expect(Array.isArray(input["oneOf"])).toBe(true);
+    expect((input["oneOf"] as unknown[])).toHaveLength(2);
+    expect(synthesis.coverage.fullyRepresented).toBe(true);
+  });
+});
