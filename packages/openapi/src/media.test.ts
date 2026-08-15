@@ -812,15 +812,18 @@ describe("§9.2 unconstrained and nullable-choice parts", () => {
   });
 });
 
-// §9.2's string-carriage lane, ruled 2026-08-15: every concrete non-JSON,
-// non-form selection whose GOVERNING SCHEMA resolves to `type: string`
-// carries the supplied string. The lane is stated once for every such media
-// type rather than as a list of admitted subtypes, and it is selected by the
-// declaration — never by the media type's primary type, and never by the
-// caller's value.
+// §9.2's string-carriage lane, ruled 2026-08-15 and scope-corrected the same
+// day: a concrete non-JSON, non-form selection carries the supplied string
+// when its GOVERNING SCHEMA resolves to `type: string` AND its media type is
+// character data. Both halves are derived — the OAS decides the value is a
+// string, the media-type registration decides whether a string has an octet
+// image — so the lane is never keyed on the caller's value and never on the
+// media type's primary type alone.
 describe("string-carriage lane (declaration-scoped)", () => {
   const options = { profile: profileForBindingSpec(BINDING_SPEC), openapiVersion: "3.1.2" };
 
+  // Character data: the text tree (RFC 6838 §4.2.1), the XML registrations
+  // and the +xml suffix (RFC 7303 §9.1/§9.2/§9.6.1).
   it.each([
     ["text/plain"],
     ["text/csv"],
@@ -828,7 +831,7 @@ describe("string-carriage lane (declaration-scoped)", () => {
     ["text/x-markdown"],
     ["application/xml"],
     ["text/xml"],
-    ["application/x-custom"],
+    ["image/svg+xml"],
   ])("carries a string-declared %s body", (media) => {
     const plans = planRequestBodies(
       opWithRequestBody({ [media]: { schema: { type: "string" } } }, true),
@@ -836,6 +839,44 @@ describe("string-carriage lane (declaration-scoped)", () => {
     );
     expect(plans).toHaveLength(1);
     expect(plans[0]).toMatchObject({ mediaKey: media, family: FAMILY_TEXT, synthetic: true });
+  });
+
+  // NOT character data: no registration establishes a charset for these, so a
+  // caller-supplied string has no defined octet image and the declaration
+  // keeps the byte lanes. Under OAS 3.1 `format: binary` is an annotation
+  // with no assertion force, so the arrow-stream declaration resolves to a
+  // bare `type: string` and is decided entirely by its media type.
+  it.each([
+    ["application/x-custom"],
+    ["application/vnd.apache.arrow.stream"],
+    ["application/octet-stream"],
+    ["application/cbor"],
+  ])("refuses a string-declared %s body: no charset applies", (media) => {
+    for (const schema of [{ type: "string" }, { type: "string", format: "binary" }]) {
+      expect(() => planRequestBodies(
+        opWithRequestBody({ [media]: { schema } }, true),
+        options,
+      )).toThrow(/selects a request carriage lane/);
+    }
+  });
+
+  // A schema that asserts nothing makes no claim the body is a string, so it
+  // is the same declaration as an omitted schema and takes the
+  // artifact-authorized byte lane — including for character-data media. This
+  // is the corner the 2026-08-15 ruling pass filed rather than decided; it is
+  // settled by the same authority that scopes the lane.
+  it.each([
+    ["text/plain", true],
+    ["text/plain", {}],
+    ["application/vnd.apache.arrow.stream", true],
+    ["application/vnd.apache.arrow.stream", {}],
+  ])("carries an unconstrained %s declaration at the byte boundary", (media, schema) => {
+    const plans = planRequestBodies(
+      opWithRequestBody({ [media]: { schema } }, true),
+      options,
+    );
+    expect(plans).toHaveLength(1);
+    expect(plans[0]).toMatchObject({ mediaKey: media, family: FAMILY_RAW, rawBoundary: true });
   });
 
   it.each([

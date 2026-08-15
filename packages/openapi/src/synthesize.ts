@@ -634,9 +634,13 @@ function buildInputSchema(
         new Set(),
       );
     }
+    // A schema that asserts nothing is the same declaration as an omitted one
+    // (§9.2), so the byte lane it selects synthesizes the canonical boundary
+    // schema rather than decorating an empty declaration.
     const bodySchema: unknown = requestPlan.rawBoundary
       ? { ...(
           projectedBodySchema && typeof projectedBodySchema === "object" && !Array.isArray(projectedBodySchema)
+            && Object.keys(projectedBodySchema).length > 0
             ? projectedBodySchema
             : { type: "string" }
         ), contentEncoding: "base64" }

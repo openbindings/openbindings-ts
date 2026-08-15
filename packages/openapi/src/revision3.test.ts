@@ -345,21 +345,33 @@ describe("openbindings.openapi@1 request carriage", () => {
     expect(iface.operations["getBoolean"]?.output).toBe(false);
   });
 
-  it("never treats present boolean schemas as omitted raw bodies", async () => {
+  // §9.2: a boolean `true` schema ASSERTS NOTHING, so it is the same
+  // declaration as an omitted `schema` and takes the artifact-authorized
+  // byte lane. A boolean `false` asserts that no value is admissible, which
+  // is not that case, so it still selects no lane.
+  it("treats an assertion-free boolean schema as an omitted raw body, and false as no lane at all", async () => {
     const exact = document("3.1.2", { "image/png": { schema: true } });
     const exactResult = await invoke(exact, { body: "AAH+/w==" });
-    expect(exactResult.requests).toHaveLength(0);
-    expect(exactResult.error?.code).toBe(ERR_REFUSED);
+    expect(exactResult.error).toBeUndefined();
+    expect(exactResult.requests).toHaveLength(1);
 
     const ranged = document("3.1.2", { "image/*": { schema: true } });
     const nonJSON = await invoke(ranged, { body: "AAH+/w==" }, {
       configuration: { requestMedia: "image/png" },
     });
-    expect(nonJSON.requests).toHaveLength(0);
-    expect(nonJSON.error?.code).toBe(ERR_REFUSED);
+    expect(nonJSON.error).toBeUndefined();
+    expect(nonJSON.requests).toHaveLength(1);
     const iface = await convertToInterface(undefined, ranged, undefined, undefined, undefined, undefined, BINDING_SPEC);
     const input = iface.operations["putPayload"]?.input as Record<string, unknown>;
+    // A range projects its declared schema, exactly as a schema-omitted
+    // range projects `{}`; only a concrete selection carries the boundary
+    // schema. Both SDKs agree here.
     expect((input.properties as Record<string, unknown>)["body"]).toBe(true);
+
+    const unsatisfiable = document("3.1.2", { "image/png": { schema: false } });
+    const refused = await invoke(unsatisfiable, { body: "AAH+/w==" });
+    expect(refused.requests).toHaveLength(0);
+    expect(refused.error?.code).toBe(ERR_REFUSED);
   });
 
   it("refuses an empty requestMedia consistently instead of treating it as missing context", async () => {
@@ -1021,19 +1033,18 @@ describe("openbindings.openapi@1 request carriage", () => {
     expect(result.outputs).toEqual([expected]);
   });
 
-  // §9.2's string-carriage lane is declaration-scoped (ruled 2026-08-15):
-  // the lane is selected when the governing schema resolves to `type:
-  // string`. A boolean `true` schema declares no type, so it selects no
-  // lane, and an OAS 3.1 raw lane needs an OMITTED schema rather than an
-  // unconstrained one. This narrows what the incumbent unconditional
-  // text/plain lane accepted; the corner is filed for a ruling (queue item
-  // 11 residue in unsupervised-loop.md) rather than repaired by inventing an
-  // "unconstrained schema" admissibility rule the ruling does not state.
-  // Pinned here and in Go's TestRequestStringCarriage_DeclarationScoped so
-  // the twins cannot drift while the corner is open.
-  it("selects no lane for an unconstrained boolean text schema", async () => {
+  // §9.2's string-carriage lane is declaration-scoped (ruled 2026-08-15) and
+  // scope-corrected the same day: it needs a governing schema that resolves
+  // to `type: string` AND a character-data media type. A boolean `true`
+  // schema ASSERTS NOTHING, so the artifact made no claim the body is a
+  // string; it is the same declaration as an omitted `schema` and takes the
+  // artifact-authorized byte lane. This settles the corner the ruling pass
+  // filed as open, by the same authority that scopes the lane. Pinned here
+  // and in Go's TestRequestStringCarriage_DeclarationScoped so the twins
+  // cannot drift.
+  it("carries an unconstrained boolean text schema at the byte boundary", async () => {
     const spec = document("3.1.2", { "text/plain": { schema: true } });
-    await expect(convertToInterface(
+    const iface = await convertToInterface(
       undefined,
       spec,
       undefined,
@@ -1041,6 +1052,9 @@ describe("openbindings.openapi@1 request carriage", () => {
       undefined,
       undefined,
       BINDING_SPEC,
-    )).rejects.toThrow(/selects a request carriage lane/);
+    );
+    const input = Object.values(iface.operations)[0]!.input as Record<string, unknown>;
+    const properties = input.properties as Record<string, unknown>;
+    expect(properties.body).toMatchObject({ type: "string", contentEncoding: "base64" });
   });
 });
