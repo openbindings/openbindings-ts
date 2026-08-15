@@ -1,3 +1,5 @@
+import type { DeclaredComponent } from "./util.js";
+
 /** Which OpenAPI data direction a synthesized operation boundary represents. */
 export type OpenAPISchemaDirection = "request" | "response";
 
@@ -5,7 +7,7 @@ export interface OpenAPISchemaProjector {
   /** Projects one schema root without treating the root itself as a property. */
   project(schema: unknown): unknown;
   /** Component names transferred from dereferenced source nodes to projected clones. */
-  readonly componentNames: ReadonlyMap<object, string>;
+  readonly componentNames: ReadonlyMap<object, DeclaredComponent>;
 }
 
 const SCHEMA_MAP_KEYS = new Set([
@@ -50,10 +52,10 @@ const SCHEMA_SINGLE_KEYS = new Set([
  */
 export function createOpenAPISchemaProjector(
   direction: OpenAPISchemaDirection,
-  sourceComponentNames: ReadonlyMap<object, string> = new Map(),
+  sourceComponentNames: ReadonlyMap<object, DeclaredComponent> = new Map(),
 ): OpenAPISchemaProjector {
   const memo = new WeakMap<object, unknown>();
-  const componentNames = new Map<object, string>();
+  const componentNames = new Map<object, DeclaredComponent>();
   const omittedMemo = new WeakMap<object, ReadonlySet<string>>();
 
   const excludedProperty = (schema: unknown): boolean => {

@@ -39,6 +39,8 @@ import {
   buildJsonPointerRef,
   codePointCompare,
   componentSchemaNames,
+  type DeclaredComponent,
+  type LoadedResource,
   cycleSafeKey,
   decycleSchema,
   escapePointerSegment,
@@ -92,12 +94,21 @@ export async function convertToInterface(
   // loadOpenAPIDocument fully dereferences (every $ref, internal and
   // external, matching Go's kin-openapi loader), so extracted schemas are
   // already inlined here.
+  // Every document this load composes is recorded, so an externally-declared
+  // component can be named by its own document rather than by a counter.
+  const resources: LoadedResource[] = [];
   const doc = await loadOpenAPIDocument(
     location,
     content,
-    options,
+    {
+      ...options,
+      onResource: (root, baseURI) => { resources.push({ root, baseURI }); },
+    },
     options?.fetch,
   );
+  // The artifact's own address as the loader used it: a qualified cut-point
+  // name is relative to it.
+  const artifactBase = resources[0]?.baseURI ?? location;
   onDocument?.(doc);
   // The schema-dialect translation keys off the artifact's own declared
   // version (3.0 vs 3.1); the identifier stays exact and version-free.
@@ -130,7 +141,7 @@ export async function convertToInterface(
   // Full dereference aliases internal $refs to shared nodes, so a recursive
   // component is a true object cycle here. Schema embedding rewrites cycle
   // participants to self-contained $defs references (decycleSchema).
-  const schemaNames = componentSchemaNames(doc);
+  const schemaNames = componentSchemaNames(doc, resources);
 
   const usedKeys = new Set<string>();
 
@@ -295,6 +306,7 @@ export async function convertToInterface(
           inputSchema,
           requestProjector.componentNames,
           `${opPointer}/input`,
+          artifactBase,
         );
         obiOp.input = translateSchemaDialect(acyclicInput, formatVersion) as JSONSchema;
       }
@@ -311,6 +323,7 @@ export async function convertToInterface(
           outputSchema,
           responseProjector.componentNames,
           `${opPointer}/output`,
+          artifactBase,
         );
         obiOp.output = translateSchemaDialect(acyclicOutput, formatVersion) as JSONSchema;
       }
@@ -760,7 +773,7 @@ function decorateMultipartItemBoundary(items: unknown): void {
 function candidateLocalSchemaClone<T>(
   value: T,
   memo: Map<object, unknown>,
-  componentNames: ReadonlyMap<object, string>,
+  componentNames: ReadonlyMap<object, DeclaredComponent>,
 ): T {
   if (value === null || typeof value !== "object") return value;
   const cached = memo.get(value);
@@ -777,7 +790,7 @@ function candidateLocalSchemaClone<T>(
   memo.set(value, clone);
   const componentName = componentNames.get(value);
   if (componentName !== undefined) {
-    (componentNames as Map<object, string>).set(clone, componentName);
+    (componentNames as Map<object, DeclaredComponent>).set(clone, componentName);
   }
   for (const [key, member] of Object.entries(value as Record<string, unknown>)) {
     clone[key] = candidateLocalSchemaClone(member, memo, componentNames);
