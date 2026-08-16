@@ -1,0 +1,351 @@
+{
+  "note": "Frozen twin case table for pointer-scoped external reference composition. openbindings.openapi@1 section 6 ('Reference scope'): a reference that leaves the current document composes the value at the referenced JSON Pointer together with that value's transitive closure of references, and nothing else. Each case is a multi-document artifact plus the one verdict every engine must reach. The identical file is executed by openbindings-go's formats/openapi, by openapi-client/go, and by openbindings-ts's packages/openapi; a divergence in one fails the others' suites too. Authored from the OAS and JSON Reference text. No byte comes from a corpus specimen.",
+  "cases": [
+    {
+      "name": "defect-outside-the-composed-closure",
+      "why": "A dangling reference in a component the pointer never reaches is outside the composed closure, so the referencing artifact resolves (openbindings.openapi@1 section 6).",
+      "entry": "https://composition.example/openapi.yaml",
+      "documents": {
+        "https://composition.example/openapi.yaml": {
+          "text": "openapi: 3.1.2\ninfo: {title: Entry, version: \"1\"}\nservers: [{url: \"https://api.example\"}]\npaths:\n  /items:\n    post:\n      operationId: createItem\n      requestBody:\n        required: true\n        content:\n          application/json:\n            schema: {$ref: \"./library.yaml#/components/schemas/Used\"}\n      responses: {\"204\": {description: ok}}\n"
+        },
+        "https://composition.example/library.yaml": {
+          "text": "openapi: 3.1.2\ninfo: {title: Library, version: \"1\"}\ncomponents:\n  schemas:\n    Used:\n      type: object\n      properties:\n        name: {$ref: \"#/components/schemas/Name\"}\n    Name: {type: string}\n    Unused:\n      type: object\n      properties:\n        broken: {$ref: \"#/components/schemas/NeverDeclared\"}\n"
+        }
+      },
+      "expect": {
+        "outcome": "accepted",
+        "operations": [
+          "createItem"
+        ],
+        "values": {
+          "/operations/createItem/input/properties/name": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "defect-inside-the-composed-closure",
+      "why": "A reference reachable from the referenced pointer, and unresolvable there, does make the referencing artifact unresolvable.",
+      "entry": "https://composition.example/openapi.yaml",
+      "documents": {
+        "https://composition.example/openapi.yaml": {
+          "text": "openapi: 3.1.2\ninfo: {title: Entry, version: \"1\"}\nservers: [{url: \"https://api.example\"}]\npaths:\n  /items:\n    post:\n      operationId: createItem\n      requestBody:\n        required: true\n        content:\n          application/json:\n            schema: {$ref: \"./library.yaml#/components/schemas/Used\"}\n      responses: {\"204\": {description: ok}}\n"
+        },
+        "https://composition.example/library.yaml": {
+          "text": "openapi: 3.1.2\ninfo: {title: Library, version: \"1\"}\ncomponents:\n  schemas:\n    Used:\n      type: object\n      properties:\n        name: {$ref: \"#/components/schemas/NeverDeclared\"}\n    Unused: {type: string}\n"
+        }
+      },
+      "expect": {
+        "outcome": "refused",
+        "messageContains": [
+          "NeverDeclared"
+        ]
+      }
+    },
+    {
+      "name": "defect-outside-the-closure-inside-the-same-component",
+      "why": "The composed value is the value AT the pointer, not the component that contains it: a sibling property of the same Schema Object is outside the closure.",
+      "entry": "https://composition.example/openapi.yaml",
+      "documents": {
+        "https://composition.example/openapi.yaml": {
+          "text": "openapi: 3.1.2\ninfo: {title: Entry, version: \"1\"}\nservers: [{url: \"https://api.example\"}]\npaths:\n  /items:\n    post:\n      operationId: createItem\n      requestBody:\n        required: true\n        content:\n          application/json:\n            schema: {$ref: \"./library.yaml#/components/schemas/Big/properties/kept\"}\n      responses: {\"204\": {description: ok}}\n"
+        },
+        "https://composition.example/library.yaml": {
+          "text": "openapi: 3.1.2\ninfo: {title: Library, version: \"1\"}\ncomponents:\n  schemas:\n    Big:\n      type: object\n      properties:\n        kept: {type: string}\n        broken: {$ref: \"#/components/schemas/NeverDeclared\"}\n"
+        }
+      },
+      "expect": {
+        "outcome": "accepted",
+        "operations": [
+          "createItem"
+        ],
+        "values": {
+          "/operations/createItem/input/properties/body": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "target-is-not-an-openapi-document",
+      "why": "No accepted edition requires a reference target to be a conforming OpenAPI Document; the OAS's own Reference Object examples address a bare schema file.",
+      "entry": "https://composition.example/openapi.yaml",
+      "documents": {
+        "https://composition.example/openapi.yaml": {
+          "text": "openapi: 3.1.2\ninfo: {title: Entry, version: \"1\"}\nservers: [{url: \"https://api.example\"}]\npaths:\n  /items:\n    post:\n      operationId: createItem\n      requestBody:\n        required: true\n        content:\n          application/json:\n            schema: {$ref: \"./fragments.yaml#/Thing\"}\n      responses: {\"204\": {description: ok}}\n"
+        },
+        "https://composition.example/fragments.yaml": {
+          "text": "Thing:\n  type: object\n  properties:\n    name: {$ref: \"#/Name\"}\nName: {type: string}\nBroken:\n  type: object\n  properties:\n    gone: {$ref: \"#/NeverDeclared\"}\n"
+        }
+      },
+      "expect": {
+        "outcome": "accepted",
+        "operations": [
+          "createItem"
+        ],
+        "values": {
+          "/operations/createItem/input/properties/name": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "pointer-into-a-bare-json-schema-file",
+      "why": "A JSON Schema resource is a legal reference target; its own $defs are addressable and nothing outside the addressed pointer is composed.",
+      "entry": "https://composition.example/openapi.yaml",
+      "documents": {
+        "https://composition.example/openapi.yaml": {
+          "text": "openapi: 3.1.2\ninfo: {title: Entry, version: \"1\"}\nservers: [{url: \"https://api.example\"}]\npaths:\n  /items:\n    post:\n      operationId: createItem\n      requestBody:\n        required: true\n        content:\n          application/json:\n            schema: {$ref: \"./schema.json#/$defs/Widget\"}\n      responses: {\"204\": {description: ok}}\n"
+        },
+        "https://composition.example/schema.json": {
+          "json": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "$defs": {
+              "Widget": {
+                "type": "object",
+                "properties": {
+                  "size": {
+                    "$ref": "#/$defs/Size"
+                  }
+                }
+              },
+              "Size": {
+                "type": "integer"
+              },
+              "Rotten": {
+                "$ref": "#/$defs/NeverDeclared"
+              }
+            }
+          }
+        }
+      },
+      "expect": {
+        "outcome": "accepted",
+        "operations": [
+          "createItem"
+        ],
+        "values": {
+          "/operations/createItem/input/properties/size": {
+            "type": "integer"
+          }
+        }
+      }
+    },
+    {
+      "name": "cycle-spanning-two-documents",
+      "why": "A cycle whose members are declared in different documents is composed like any other; both engines must cut it at the same members and name them from the declaring document.",
+      "entry": "https://composition.example/openapi.yaml",
+      "documents": {
+        "https://composition.example/openapi.yaml": {
+          "text": "openapi: 3.1.2\ninfo: {title: Entry, version: \"1\"}\nservers: [{url: \"https://api.example\"}]\npaths:\n  /items:\n    post:\n      operationId: createItem\n      requestBody:\n        required: true\n        content:\n          application/json:\n            schema: {$ref: \"./a.yaml#/components/schemas/Node\"}\n      responses: {\"204\": {description: ok}}\n"
+        },
+        "https://composition.example/a.yaml": {
+          "text": "openapi: 3.1.2\ninfo: {title: A, version: \"1\"}\ncomponents:\n  schemas:\n    Node:\n      type: object\n      properties:\n        peer: {$ref: \"./b.yaml#/components/schemas/Peer\"}\n"
+        },
+        "https://composition.example/b.yaml": {
+          "text": "openapi: 3.1.2\ninfo: {title: B, version: \"1\"}\ncomponents:\n  schemas:\n    Peer:\n      type: object\n      properties:\n        back: {$ref: \"./a.yaml#/components/schemas/Node\"}\n    Rotten: {$ref: \"#/components/schemas/NeverDeclared\"}\n"
+        }
+      },
+      "expect": {
+        "outcome": "accepted",
+        "operations": [
+          "createItem"
+        ],
+        "defsAt": "/operations/createItem/input",
+        "defs": [
+          "Node",
+          "Peer"
+        ]
+      }
+    },
+    {
+      "name": "relative-base-two-directories-up",
+      "why": "A relative reference resolves against the referring document's own address, so the closure pass and the resolver must join it the same way.",
+      "entry": "https://composition.example/spec/v1/openapi.yaml",
+      "documents": {
+        "https://composition.example/spec/v1/openapi.yaml": {
+          "text": "openapi: 3.1.2\ninfo: {title: Entry, version: \"1\"}\nservers: [{url: \"https://api.example\"}]\npaths:\n  /items:\n    post:\n      operationId: createItem\n      requestBody:\n        required: true\n        content:\n          application/json:\n            schema: {$ref: \"../../shared/library.yaml#/components/schemas/Used\"}\n      responses: {\"204\": {description: ok}}\n"
+        },
+        "https://composition.example/shared/library.yaml": {
+          "text": "openapi: 3.1.2\ninfo: {title: Library, version: \"1\"}\ncomponents:\n  schemas:\n    Used: {type: string}\n    Unused: {$ref: \"#/components/schemas/NeverDeclared\"}\n"
+        }
+      },
+      "expect": {
+        "outcome": "accepted",
+        "operations": [
+          "createItem"
+        ],
+        "values": {
+          "/operations/createItem/input/properties/body": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "absolute-base-on-another-host",
+      "why": "An absolute reference identifies its resource without the referring document's base; the same scope rule applies.",
+      "entry": "https://composition.example/openapi.yaml",
+      "documents": {
+        "https://composition.example/openapi.yaml": {
+          "text": "openapi: 3.1.2\ninfo: {title: Entry, version: \"1\"}\nservers: [{url: \"https://api.example\"}]\npaths:\n  /items:\n    post:\n      operationId: createItem\n      requestBody:\n        required: true\n        content:\n          application/json:\n            schema: {$ref: \"https://library.example/shared.yaml#/components/schemas/Used\"}\n      responses: {\"204\": {description: ok}}\n"
+        },
+        "https://library.example/shared.yaml": {
+          "text": "openapi: 3.1.2\ninfo: {title: Shared, version: \"1\"}\ncomponents:\n  schemas:\n    Used: {type: string}\n    Unused: {$ref: \"#/components/schemas/NeverDeclared\"}\n"
+        }
+      },
+      "expect": {
+        "outcome": "accepted",
+        "operations": [
+          "createItem"
+        ],
+        "values": {
+          "/operations/createItem/input/properties/body": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "target-file-is-not-well-formed",
+      "why": "Parsing is not scoping: a target that cannot be read as a document fails the reference that reaches it, whatever the pointer would have selected.",
+      "entry": "https://composition.example/openapi.yaml",
+      "documents": {
+        "https://composition.example/openapi.yaml": {
+          "text": "openapi: 3.1.2\ninfo: {title: Entry, version: \"1\"}\nservers: [{url: \"https://api.example\"}]\npaths:\n  /items:\n    post:\n      operationId: createItem\n      requestBody:\n        required: true\n        content:\n          application/json:\n            schema: {$ref: \"./broken.yaml#/components/schemas/Used\"}\n      responses: {\"204\": {description: ok}}\n"
+        },
+        "https://composition.example/broken.yaml": {
+          "text": "openapi: 3.1.2\ninfo: {title: Broken, version: \"1\"}\ncomponents:\n  schemas:\n    Used:\n      type: array\n      items:\n      type: integer\n"
+        }
+      },
+      "expect": {
+        "outcome": "refused",
+        "messageContains": [
+          "broken.yaml"
+        ]
+      }
+    },
+    {
+      "name": "unreachable-resource-referenced-only-outside-the-closure",
+      "why": "A resource reached only from outside the composed closure is never retrieved, so its availability cannot decide the artifact.",
+      "entry": "https://composition.example/openapi.yaml",
+      "documents": {
+        "https://composition.example/openapi.yaml": {
+          "text": "openapi: 3.1.2\ninfo: {title: Entry, version: \"1\"}\nservers: [{url: \"https://api.example\"}]\npaths:\n  /items:\n    post:\n      operationId: createItem\n      requestBody:\n        required: true\n        content:\n          application/json:\n            schema: {$ref: \"./library.yaml#/components/schemas/Used\"}\n      responses: {\"204\": {description: ok}}\n"
+        },
+        "https://composition.example/library.yaml": {
+          "text": "openapi: 3.1.2\ninfo: {title: Library, version: \"1\"}\ncomponents:\n  schemas:\n    Used: {type: string}\n    Unused: {$ref: \"./never-published.yaml#/components/schemas/Gone\"}\n"
+        }
+      },
+      "expect": {
+        "outcome": "accepted",
+        "operations": [
+          "createItem"
+        ],
+        "values": {
+          "/operations/createItem/input/properties/body": {
+            "type": "string"
+          }
+        },
+        "unretrieved": [
+          "https://composition.example/never-published.yaml"
+        ]
+      }
+    },
+    {
+      "name": "defect-outside-a-second-hop-closure",
+      "why": "The closure is transitive: a second document reached through the first composes only what the first reference's value reaches.",
+      "entry": "https://composition.example/openapi.yaml",
+      "documents": {
+        "https://composition.example/openapi.yaml": {
+          "text": "openapi: 3.1.2\ninfo: {title: Entry, version: \"1\"}\nservers: [{url: \"https://api.example\"}]\npaths:\n  /items:\n    post:\n      operationId: createItem\n      requestBody:\n        required: true\n        content:\n          application/json:\n            schema: {$ref: \"./a.yaml#/components/schemas/Used\"}\n      responses: {\"204\": {description: ok}}\n"
+        },
+        "https://composition.example/a.yaml": {
+          "text": "openapi: 3.1.2\ninfo: {title: A, version: \"1\"}\ncomponents:\n  schemas:\n    Used:\n      type: object\n      properties:\n        deep: {$ref: \"./b.yaml#/components/schemas/Deep\"}\n"
+        },
+        "https://composition.example/b.yaml": {
+          "text": "openapi: 3.1.2\ninfo: {title: B, version: \"1\"}\ncomponents:\n  schemas:\n    Deep: {type: integer}\n    Rotten: {$ref: \"#/components/schemas/NeverDeclared\"}\n"
+        }
+      },
+      "expect": {
+        "outcome": "accepted",
+        "operations": [
+          "createItem"
+        ],
+        "values": {
+          "/operations/createItem/input/properties/deep": {
+            "type": "integer"
+          }
+        }
+      }
+    },
+    {
+      "name": "defect-inside-a-second-hop-closure",
+      "why": "Transitivity cuts both ways: a defect the second hop's value does reach refuses the artifact.",
+      "entry": "https://composition.example/openapi.yaml",
+      "documents": {
+        "https://composition.example/openapi.yaml": {
+          "text": "openapi: 3.1.2\ninfo: {title: Entry, version: \"1\"}\nservers: [{url: \"https://api.example\"}]\npaths:\n  /items:\n    post:\n      operationId: createItem\n      requestBody:\n        required: true\n        content:\n          application/json:\n            schema: {$ref: \"./a.yaml#/components/schemas/Used\"}\n      responses: {\"204\": {description: ok}}\n"
+        },
+        "https://composition.example/a.yaml": {
+          "text": "openapi: 3.1.2\ninfo: {title: A, version: \"1\"}\ncomponents:\n  schemas:\n    Used:\n      type: object\n      properties:\n        deep: {$ref: \"./b.yaml#/components/schemas/Deep\"}\n"
+        },
+        "https://composition.example/b.yaml": {
+          "text": "openapi: 3.1.2\ninfo: {title: B, version: \"1\"}\ncomponents:\n  schemas:\n    Deep:\n      type: object\n      properties:\n        gone: {$ref: \"#/components/schemas/NeverDeclared\"}\n    Rotten: {type: string}\n"
+        }
+      },
+      "expect": {
+        "outcome": "refused",
+        "messageContains": [
+          "NeverDeclared"
+        ]
+      }
+    },
+    {
+      "name": "pointer-below-a-reference",
+      "why": "A pointer whose path runs through a reference reaches the position the resolved value has there; the reference it passes through is itself composed.",
+      "entry": "https://composition.example/openapi.yaml",
+      "documents": {
+        "https://composition.example/openapi.yaml": {
+          "text": "openapi: 3.1.2\ninfo: {title: Entry, version: \"1\"}\nservers: [{url: \"https://api.example\"}]\npaths:\n  /items:\n    post:\n      operationId: createItem\n      requestBody:\n        required: true\n        content:\n          application/json:\n            schema: {$ref: \"./library.yaml#/components/schemas/Alias/properties/name\"}\n      responses: {\"204\": {description: ok}}\n"
+        },
+        "https://composition.example/library.yaml": {
+          "text": "openapi: 3.1.2\ninfo: {title: Library, version: \"1\"}\ncomponents:\n  schemas:\n    Alias: {$ref: \"#/components/schemas/Real\"}\n    Real:\n      type: object\n      properties:\n        name: {type: string}\n    Unused: {$ref: \"#/components/schemas/NeverDeclared\"}\n"
+        }
+      },
+      "expect": {
+        "outcome": "accepted",
+        "operations": [
+          "createItem"
+        ],
+        "values": {
+          "/operations/createItem/input/properties/body": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "whole-file-reference-composes-the-file",
+      "why": "A reference with no fragment addresses the resource root, so the composed value is the whole file and a defect anywhere in it is inside the closure.",
+      "entry": "https://composition.example/openapi.yaml",
+      "documents": {
+        "https://composition.example/openapi.yaml": {
+          "text": "openapi: 3.1.2\ninfo: {title: Entry, version: \"1\"}\nservers: [{url: \"https://api.example\"}]\npaths:\n  /items: {$ref: \"./path-item.yaml\"}\n"
+        },
+        "https://composition.example/path-item.yaml": {
+          "text": "get:\n  operationId: externalGet\n  responses: {\"200\": {description: ok}}\n"
+        }
+      },
+      "expect": {
+        "outcome": "accepted",
+        "operations": [
+          "externalGet"
+        ]
+      }
+    }
+  ]
+}
