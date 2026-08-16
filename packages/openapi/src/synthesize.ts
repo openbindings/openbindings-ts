@@ -41,6 +41,7 @@ import {
   componentSchemaNames,
   type DeclaredComponent,
   type LoadedResource,
+  type AddressedNode,
   cycleSafeKey,
   decycleSchema,
   escapePointerSegment,
@@ -96,13 +97,20 @@ export async function convertToInterface(
   // already inlined here.
   // Every document this load composes is recorded, so an externally-declared
   // component can be named by its own document rather than by a counter.
+  // Every node the load reaches through a `$ref` is recorded too: those are
+  // exactly the nodes that may become cut points, and the artifact's own
+  // pointer is what names them.
   const resources: LoadedResource[] = [];
+  const addressed: AddressedNode[] = [];
   const doc = await loadOpenAPIDocument(
     location,
     content,
     {
       ...options,
       onResource: (root, baseURI) => { resources.push({ root, baseURI }); },
+      onRefTarget: (node, declaringRoot, pointer) => {
+        addressed.push({ node, declaringRoot, pointer });
+      },
     },
     options?.fetch,
   );
@@ -141,7 +149,7 @@ export async function convertToInterface(
   // Full dereference aliases internal $refs to shared nodes, so a recursive
   // component is a true object cycle here. Schema embedding rewrites cycle
   // participants to self-contained $defs references (decycleSchema).
-  const schemaNames = componentSchemaNames(doc, resources);
+  const schemaNames = componentSchemaNames(doc, resources, addressed);
 
   const usedKeys = new Set<string>();
 

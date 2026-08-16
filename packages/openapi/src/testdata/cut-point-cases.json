@@ -1,0 +1,1949 @@
+{
+  "$comment": "Cut-point case table, shared byte-for-byte by the Go and TypeScript engines (openbindings-go/formats/openapi/cut_points_test.go and openbindings-ts/packages/openapi/src/cut-points.test.ts). Every document is authored from the OpenAPI and JSON Schema texts; no corpus bytes. `expect` is the emission BOTH engines must produce, so a divergence in either fails the other engine's suite too.",
+  "cases": [
+    {
+      "name": "same-document component cycle",
+      "document": {
+        "openapi": "3.0.3",
+        "info": {
+          "title": "Self cycle",
+          "version": "1"
+        },
+        "servers": [
+          {
+            "url": "https://api.example.test"
+          }
+        ],
+        "components": {
+          "schemas": {
+            "Node": {
+              "type": "object",
+              "properties": {
+                "label": {
+                  "type": "string"
+                },
+                "child": {
+                  "$ref": "#/components/schemas/Node"
+                }
+              }
+            }
+          }
+        },
+        "paths": {
+          "/n": {
+            "post": {
+              "operationId": "putNode",
+              "requestBody": {
+                "required": true,
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "type": "object",
+                      "properties": {
+                        "root": {
+                          "$ref": "#/components/schemas/Node"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "responses": {
+                "200": {
+                  "description": "ok",
+                  "content": {
+                    "application/json": {
+                      "schema": {
+                        "$ref": "#/components/schemas/Node"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "expect": {
+        "strict": "accepted",
+        "operations": {
+          "putNode": {
+            "input": {
+              "$defs": {
+                "Node": {
+                  "properties": {
+                    "child": {
+                      "$ref": "#/operations/putNode/input/$defs/Node"
+                    },
+                    "label": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                }
+              },
+              "properties": {
+                "root": {
+                  "$ref": "#/operations/putNode/input/$defs/Node"
+                }
+              },
+              "type": "object"
+            },
+            "output": {
+              "$defs": {
+                "Node": {
+                  "properties": {
+                    "child": {
+                      "$ref": "#/operations/putNode/output/$defs/Node"
+                    },
+                    "label": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                }
+              },
+              "properties": {
+                "child": {
+                  "$ref": "#/operations/putNode/output/$defs/Node"
+                },
+                "label": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "mutual two-cycle",
+      "document": {
+        "openapi": "3.0.3",
+        "info": {
+          "title": "Mutual",
+          "version": "1"
+        },
+        "servers": [
+          {
+            "url": "https://api.example.test"
+          }
+        ],
+        "components": {
+          "schemas": {
+            "Author": {
+              "type": "object",
+              "properties": {
+                "book": {
+                  "$ref": "#/components/schemas/Book"
+                }
+              }
+            },
+            "Book": {
+              "type": "object",
+              "properties": {
+                "author": {
+                  "$ref": "#/components/schemas/Author"
+                }
+              }
+            }
+          }
+        },
+        "paths": {
+          "/a": {
+            "post": {
+              "operationId": "putAuthor",
+              "requestBody": {
+                "required": true,
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "type": "object",
+                      "properties": {
+                        "a": {
+                          "$ref": "#/components/schemas/Author"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "responses": {
+                "200": {
+                  "description": "ok",
+                  "content": {
+                    "application/json": {
+                      "schema": {
+                        "type": "object",
+                        "properties": {
+                          "b": {
+                            "$ref": "#/components/schemas/Book"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "expect": {
+        "strict": "accepted",
+        "operations": {
+          "putAuthor": {
+            "input": {
+              "$defs": {
+                "Author": {
+                  "properties": {
+                    "book": {
+                      "$ref": "#/operations/putAuthor/input/$defs/Book"
+                    }
+                  },
+                  "type": "object"
+                },
+                "Book": {
+                  "properties": {
+                    "author": {
+                      "$ref": "#/operations/putAuthor/input/$defs/Author"
+                    }
+                  },
+                  "type": "object"
+                }
+              },
+              "properties": {
+                "a": {
+                  "$ref": "#/operations/putAuthor/input/$defs/Author"
+                }
+              },
+              "type": "object"
+            },
+            "output": {
+              "$defs": {
+                "Author": {
+                  "properties": {
+                    "book": {
+                      "$ref": "#/operations/putAuthor/output/$defs/Book"
+                    }
+                  },
+                  "type": "object"
+                },
+                "Book": {
+                  "properties": {
+                    "author": {
+                      "$ref": "#/operations/putAuthor/output/$defs/Author"
+                    }
+                  },
+                  "type": "object"
+                }
+              },
+              "properties": {
+                "b": {
+                  "$ref": "#/operations/putAuthor/output/$defs/Book"
+                }
+              },
+              "type": "object"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "three-member strongly connected component",
+      "document": {
+        "openapi": "3.0.3",
+        "info": {
+          "title": "Triangle",
+          "version": "1"
+        },
+        "servers": [
+          {
+            "url": "https://api.example.test"
+          }
+        ],
+        "components": {
+          "schemas": {
+            "A": {
+              "type": "object",
+              "properties": {
+                "b": {
+                  "$ref": "#/components/schemas/B"
+                }
+              }
+            },
+            "B": {
+              "type": "object",
+              "properties": {
+                "c": {
+                  "$ref": "#/components/schemas/C"
+                }
+              }
+            },
+            "C": {
+              "type": "object",
+              "properties": {
+                "a": {
+                  "$ref": "#/components/schemas/A"
+                }
+              }
+            }
+          }
+        },
+        "paths": {
+          "/t": {
+            "post": {
+              "operationId": "putTriangle",
+              "requestBody": {
+                "required": true,
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "type": "object",
+                      "properties": {
+                        "start": {
+                          "$ref": "#/components/schemas/A"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "responses": {
+                "200": {
+                  "description": "ok",
+                  "content": {
+                    "application/json": {
+                      "schema": {
+                        "type": "object",
+                        "properties": {
+                          "start": {
+                            "$ref": "#/components/schemas/B"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "expect": {
+        "strict": "accepted",
+        "operations": {
+          "putTriangle": {
+            "input": {
+              "$defs": {
+                "A": {
+                  "properties": {
+                    "b": {
+                      "$ref": "#/operations/putTriangle/input/$defs/B"
+                    }
+                  },
+                  "type": "object"
+                },
+                "B": {
+                  "properties": {
+                    "c": {
+                      "$ref": "#/operations/putTriangle/input/$defs/C"
+                    }
+                  },
+                  "type": "object"
+                },
+                "C": {
+                  "properties": {
+                    "a": {
+                      "$ref": "#/operations/putTriangle/input/$defs/A"
+                    }
+                  },
+                  "type": "object"
+                }
+              },
+              "properties": {
+                "start": {
+                  "$ref": "#/operations/putTriangle/input/$defs/A"
+                }
+              },
+              "type": "object"
+            },
+            "output": {
+              "$defs": {
+                "A": {
+                  "properties": {
+                    "b": {
+                      "$ref": "#/operations/putTriangle/output/$defs/B"
+                    }
+                  },
+                  "type": "object"
+                },
+                "B": {
+                  "properties": {
+                    "c": {
+                      "$ref": "#/operations/putTriangle/output/$defs/C"
+                    }
+                  },
+                  "type": "object"
+                },
+                "C": {
+                  "properties": {
+                    "a": {
+                      "$ref": "#/operations/putTriangle/output/$defs/A"
+                    }
+                  },
+                  "type": "object"
+                }
+              },
+              "properties": {
+                "start": {
+                  "$ref": "#/operations/putTriangle/output/$defs/B"
+                }
+              },
+              "type": "object"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "cycle broken by readOnly in the request direction only",
+      "document": {
+        "openapi": "3.0.3",
+        "info": {
+          "title": "Read-only break",
+          "version": "1"
+        },
+        "servers": [
+          {
+            "url": "https://api.example.test"
+          }
+        ],
+        "components": {
+          "schemas": {
+            "Folder": {
+              "type": "object",
+              "required": [
+                "name",
+                "parent"
+              ],
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "parent": {
+                  "readOnly": true,
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/Folder"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "paths": {
+          "/f": {
+            "post": {
+              "operationId": "putFolder",
+              "requestBody": {
+                "required": true,
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "type": "object",
+                      "properties": {
+                        "folder": {
+                          "$ref": "#/components/schemas/Folder"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "responses": {
+                "200": {
+                  "description": "ok",
+                  "content": {
+                    "application/json": {
+                      "schema": {
+                        "type": "object",
+                        "properties": {
+                          "folder": {
+                            "$ref": "#/components/schemas/Folder"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "expect": {
+        "strict": "accepted",
+        "operations": {
+          "putFolder": {
+            "input": {
+              "properties": {
+                "folder": {
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "name"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "object"
+            },
+            "output": {
+              "$defs": {
+                "Folder": {
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    },
+                    "parent": {
+                      "allOf": [
+                        {
+                          "$ref": "#/operations/putFolder/output/$defs/Folder"
+                        }
+                      ],
+                      "readOnly": true
+                    }
+                  },
+                  "required": [
+                    "name",
+                    "parent"
+                  ],
+                  "type": "object"
+                }
+              },
+              "properties": {
+                "folder": {
+                  "$ref": "#/operations/putFolder/output/$defs/Folder"
+                }
+              },
+              "type": "object"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "cycle broken by writeOnly in the response direction only",
+      "document": {
+        "openapi": "3.0.3",
+        "info": {
+          "title": "Write-only break",
+          "version": "1"
+        },
+        "servers": [
+          {
+            "url": "https://api.example.test"
+          }
+        ],
+        "components": {
+          "schemas": {
+            "Draft": {
+              "type": "object",
+              "required": [
+                "title",
+                "previous"
+              ],
+              "properties": {
+                "title": {
+                  "type": "string"
+                },
+                "previous": {
+                  "writeOnly": true,
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/Draft"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "paths": {
+          "/d": {
+            "post": {
+              "operationId": "putDraft",
+              "requestBody": {
+                "required": true,
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "type": "object",
+                      "properties": {
+                        "draft": {
+                          "$ref": "#/components/schemas/Draft"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "responses": {
+                "200": {
+                  "description": "ok",
+                  "content": {
+                    "application/json": {
+                      "schema": {
+                        "type": "object",
+                        "properties": {
+                          "draft": {
+                            "$ref": "#/components/schemas/Draft"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "expect": {
+        "strict": "accepted",
+        "operations": {
+          "putDraft": {
+            "input": {
+              "$defs": {
+                "Draft": {
+                  "properties": {
+                    "previous": {
+                      "allOf": [
+                        {
+                          "$ref": "#/operations/putDraft/input/$defs/Draft"
+                        }
+                      ],
+                      "writeOnly": true
+                    },
+                    "title": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "title",
+                    "previous"
+                  ],
+                  "type": "object"
+                }
+              },
+              "properties": {
+                "draft": {
+                  "$ref": "#/operations/putDraft/input/$defs/Draft"
+                }
+              },
+              "type": "object"
+            },
+            "output": {
+              "properties": {
+                "draft": {
+                  "properties": {
+                    "title": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "title"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "object"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "anonymous cycle through a non-component position",
+      "document": {
+        "openapi": "3.0.3",
+        "info": {
+          "title": "Anonymous",
+          "version": "1"
+        },
+        "servers": [
+          {
+            "url": "https://api.example.test"
+          }
+        ],
+        "components": {
+          "schemas": {
+            "Wrapper": {
+              "type": "object",
+              "properties": {
+                "inner": {
+                  "type": "object",
+                  "properties": {
+                    "back": {
+                      "$ref": "#/components/schemas/Wrapper/properties/inner"
+                    },
+                    "label": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "paths": {
+          "/w": {
+            "get": {
+              "operationId": "getWrapper",
+              "responses": {
+                "200": {
+                  "description": "ok",
+                  "content": {
+                    "application/json": {
+                      "schema": {
+                        "$ref": "#/components/schemas/Wrapper"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "expect": {
+        "strict": "accepted",
+        "operations": {
+          "getWrapper": {
+            "input": null,
+            "output": {
+              "$defs": {
+                "inner": {
+                  "properties": {
+                    "back": {
+                      "$ref": "#/operations/getWrapper/output/$defs/inner"
+                    },
+                    "label": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                }
+              },
+              "properties": {
+                "inner": {
+                  "$ref": "#/operations/getWrapper/output/$defs/inner"
+                }
+              },
+              "type": "object"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "anonymous cut point reached from a second component",
+      "document": {
+        "openapi": "3.0.3",
+        "info": {
+          "title": "Anonymous shared",
+          "version": "1"
+        },
+        "servers": [
+          {
+            "url": "https://api.example.test"
+          }
+        ],
+        "components": {
+          "schemas": {
+            "Wrapper": {
+              "type": "object",
+              "properties": {
+                "inner": {
+                  "type": "object",
+                  "properties": {
+                    "back": {
+                      "$ref": "#/components/schemas/Wrapper/properties/inner"
+                    }
+                  }
+                }
+              }
+            },
+            "Holder": {
+              "type": "object",
+              "properties": {
+                "held": {
+                  "$ref": "#/components/schemas/Wrapper/properties/inner"
+                }
+              }
+            }
+          }
+        },
+        "paths": {
+          "/h": {
+            "get": {
+              "operationId": "getHolder",
+              "responses": {
+                "200": {
+                  "description": "ok",
+                  "content": {
+                    "application/json": {
+                      "schema": {
+                        "$ref": "#/components/schemas/Holder"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "expect": {
+        "strict": "accepted",
+        "operations": {
+          "getHolder": {
+            "input": null,
+            "output": {
+              "$defs": {
+                "inner": {
+                  "properties": {
+                    "back": {
+                      "$ref": "#/operations/getHolder/output/$defs/inner"
+                    }
+                  },
+                  "type": "object"
+                }
+              },
+              "properties": {
+                "held": {
+                  "$ref": "#/operations/getHolder/output/$defs/inner"
+                }
+              },
+              "type": "object"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "artifact-declared nested $defs beside a cycle",
+      "document": {
+        "openapi": "3.1.0",
+        "info": {
+          "title": "Authorial defs",
+          "version": "1"
+        },
+        "servers": [
+          {
+            "url": "https://api.example.test"
+          }
+        ],
+        "components": {
+          "schemas": {
+            "Tree": {
+              "type": "object",
+              "properties": {
+                "leaf": {
+                  "$defs": {
+                    "Unit": {
+                      "type": "string",
+                      "enum": [
+                        "m",
+                        "km"
+                      ]
+                    }
+                  },
+                  "type": "object",
+                  "properties": {
+                    "unit": {
+                      "$ref": "#/components/schemas/Tree/properties/leaf/$defs/Unit"
+                    }
+                  }
+                },
+                "child": {
+                  "$ref": "#/components/schemas/Tree"
+                }
+              }
+            }
+          }
+        },
+        "paths": {
+          "/t": {
+            "get": {
+              "operationId": "getTree",
+              "responses": {
+                "200": {
+                  "description": "ok",
+                  "content": {
+                    "application/json": {
+                      "schema": {
+                        "type": "object",
+                        "properties": {
+                          "tree": {
+                            "$ref": "#/components/schemas/Tree"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "expect": {
+        "strict": "accepted",
+        "operations": {
+          "getTree": {
+            "input": null,
+            "output": {
+              "$defs": {
+                "Tree": {
+                  "properties": {
+                    "child": {
+                      "$ref": "#/operations/getTree/output/$defs/Tree"
+                    },
+                    "leaf": {
+                      "$defs": {
+                        "Unit": {
+                          "enum": [
+                            "m",
+                            "km"
+                          ],
+                          "type": "string"
+                        }
+                      },
+                      "properties": {
+                        "unit": {
+                          "enum": [
+                            "m",
+                            "km"
+                          ],
+                          "type": "string"
+                        }
+                      },
+                      "type": "object"
+                    }
+                  },
+                  "type": "object"
+                }
+              },
+              "properties": {
+                "tree": {
+                  "$ref": "#/operations/getTree/output/$defs/Tree"
+                }
+              },
+              "type": "object"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "cycle plus a definition unreachable after projection",
+      "document": {
+        "openapi": "3.0.3",
+        "info": {
+          "title": "Unreachable",
+          "version": "1"
+        },
+        "servers": [
+          {
+            "url": "https://api.example.test"
+          }
+        ],
+        "components": {
+          "schemas": {
+            "Archive": {
+              "type": "object",
+              "properties": {
+                "title": {
+                  "type": "string"
+                },
+                "owner": {
+                  "readOnly": true,
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/Owner"
+                    }
+                  ]
+                }
+              }
+            },
+            "Owner": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "supervisor": {
+                  "$ref": "#/components/schemas/Owner"
+                }
+              }
+            }
+          }
+        },
+        "paths": {
+          "/a": {
+            "post": {
+              "operationId": "putArchive",
+              "requestBody": {
+                "required": true,
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "type": "object",
+                      "properties": {
+                        "archive": {
+                          "$ref": "#/components/schemas/Archive"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "responses": {
+                "200": {
+                  "description": "ok",
+                  "content": {
+                    "application/json": {
+                      "schema": {
+                        "type": "object",
+                        "properties": {
+                          "archive": {
+                            "$ref": "#/components/schemas/Archive"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "expect": {
+        "strict": "accepted",
+        "operations": {
+          "putArchive": {
+            "input": {
+              "properties": {
+                "archive": {
+                  "properties": {
+                    "title": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                }
+              },
+              "type": "object"
+            },
+            "output": {
+              "$defs": {
+                "Owner": {
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    },
+                    "supervisor": {
+                      "$ref": "#/operations/putArchive/output/$defs/Owner"
+                    }
+                  },
+                  "type": "object"
+                }
+              },
+              "properties": {
+                "archive": {
+                  "properties": {
+                    "owner": {
+                      "allOf": [
+                        {
+                          "$ref": "#/operations/putArchive/output/$defs/Owner"
+                        }
+                      ],
+                      "readOnly": true
+                    },
+                    "title": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                }
+              },
+              "type": "object"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "cycle behind allOf and array items",
+      "document": {
+        "openapi": "3.0.3",
+        "info": {
+          "title": "Composed",
+          "version": "1"
+        },
+        "servers": [
+          {
+            "url": "https://api.example.test"
+          }
+        ],
+        "components": {
+          "schemas": {
+            "Base": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                }
+              }
+            },
+            "Comment": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/Base"
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "replies": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Comment"
+                      }
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        },
+        "paths": {
+          "/c": {
+            "post": {
+              "operationId": "putComment",
+              "requestBody": {
+                "required": true,
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "type": "object",
+                      "properties": {
+                        "comment": {
+                          "$ref": "#/components/schemas/Comment"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "responses": {
+                "200": {
+                  "description": "ok",
+                  "content": {
+                    "application/json": {
+                      "schema": {
+                        "type": "object",
+                        "properties": {
+                          "comment": {
+                            "$ref": "#/components/schemas/Comment"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "expect": {
+        "strict": "accepted",
+        "operations": {
+          "putComment": {
+            "input": {
+              "$defs": {
+                "Comment": {
+                  "allOf": [
+                    {
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        }
+                      },
+                      "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "replies": {
+                          "items": {
+                            "$ref": "#/operations/putComment/input/$defs/Comment"
+                          },
+                          "type": "array"
+                        }
+                      },
+                      "type": "object"
+                    }
+                  ]
+                }
+              },
+              "properties": {
+                "comment": {
+                  "$ref": "#/operations/putComment/input/$defs/Comment"
+                }
+              },
+              "type": "object"
+            },
+            "output": {
+              "$defs": {
+                "Comment": {
+                  "allOf": [
+                    {
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        }
+                      },
+                      "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "replies": {
+                          "items": {
+                            "$ref": "#/operations/putComment/output/$defs/Comment"
+                          },
+                          "type": "array"
+                        }
+                      },
+                      "type": "object"
+                    }
+                  ]
+                }
+              },
+              "properties": {
+                "comment": {
+                  "$ref": "#/operations/putComment/output/$defs/Comment"
+                }
+              },
+              "type": "object"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "two cut points whose trailing tokens collide",
+      "document": {
+        "openapi": "3.0.3",
+        "info": {
+          "title": "Colliding tokens",
+          "version": "1"
+        },
+        "servers": [
+          {
+            "url": "https://api.example.test"
+          }
+        ],
+        "components": {
+          "schemas": {
+            "Left": {
+              "type": "object",
+              "properties": {
+                "node": {
+                  "type": "object",
+                  "properties": {
+                    "back": {
+                      "$ref": "#/components/schemas/Left/properties/node"
+                    }
+                  }
+                }
+              }
+            },
+            "Right": {
+              "type": "object",
+              "properties": {
+                "node": {
+                  "type": "object",
+                  "properties": {
+                    "back": {
+                      "$ref": "#/components/schemas/Right/properties/node"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "paths": {
+          "/lr": {
+            "get": {
+              "operationId": "getBoth",
+              "responses": {
+                "200": {
+                  "description": "ok",
+                  "content": {
+                    "application/json": {
+                      "schema": {
+                        "type": "object",
+                        "properties": {
+                          "left": {
+                            "$ref": "#/components/schemas/Left"
+                          },
+                          "right": {
+                            "$ref": "#/components/schemas/Right"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "expect": {
+        "strict": "accepted",
+        "operations": {
+          "getBoth": {
+            "input": null,
+            "output": {
+              "$defs": {
+                "node": {
+                  "properties": {
+                    "back": {
+                      "$ref": "#/operations/getBoth/output/$defs/node"
+                    }
+                  },
+                  "type": "object"
+                },
+                "node_2": {
+                  "properties": {
+                    "back": {
+                      "$ref": "#/operations/getBoth/output/$defs/node_2"
+                    }
+                  },
+                  "type": "object"
+                }
+              },
+              "properties": {
+                "left": {
+                  "properties": {
+                    "node": {
+                      "$ref": "#/operations/getBoth/output/$defs/node"
+                    }
+                  },
+                  "type": "object"
+                },
+                "right": {
+                  "properties": {
+                    "node": {
+                      "$ref": "#/operations/getBoth/output/$defs/node_2"
+                    }
+                  },
+                  "type": "object"
+                }
+              },
+              "type": "object"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "cycle reached only through a parameter",
+      "document": {
+        "openapi": "3.0.3",
+        "info": {
+          "title": "Parameter cycle",
+          "version": "1"
+        },
+        "servers": [
+          {
+            "url": "https://api.example.test"
+          }
+        ],
+        "components": {
+          "schemas": {
+            "Selector": {
+              "type": "object",
+              "properties": {
+                "and": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Selector"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "paths": {
+          "/q": {
+            "get": {
+              "operationId": "query",
+              "parameters": [
+                {
+                  "name": "where",
+                  "in": "query",
+                  "required": true,
+                  "content": {
+                    "application/json": {
+                      "schema": {
+                        "$ref": "#/components/schemas/Selector"
+                      }
+                    }
+                  }
+                }
+              ],
+              "responses": {
+                "200": {
+                  "description": "ok",
+                  "content": {
+                    "application/json": {
+                      "schema": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "expect": {
+        "strict": "accepted",
+        "operations": {
+          "query": {
+            "input": {
+              "$defs": {
+                "Selector": {
+                  "properties": {
+                    "and": {
+                      "items": {
+                        "$ref": "#/operations/query/input/$defs/Selector"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "type": "object"
+                }
+              },
+              "additionalProperties": false,
+              "properties": {
+                "where": {
+                  "$ref": "#/operations/query/input/$defs/Selector"
+                }
+              },
+              "required": [
+                "where"
+              ],
+              "type": "object"
+            },
+            "output": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "cycle each direction keeps through the branch the other removes",
+      "document": {
+        "openapi": "3.0.3",
+        "info": {
+          "title": "Both directions",
+          "version": "1"
+        },
+        "servers": [
+          {
+            "url": "https://api.example.test"
+          }
+        ],
+        "components": {
+          "schemas": {
+            "Audit": {
+              "type": "object",
+              "properties": {
+                "note": {
+                  "type": "string"
+                },
+                "prior": {
+                  "readOnly": true,
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/Audit"
+                    }
+                  ]
+                },
+                "proposed": {
+                  "writeOnly": true,
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/Audit"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "paths": {
+          "/au": {
+            "post": {
+              "operationId": "putAudit",
+              "requestBody": {
+                "required": true,
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "type": "object",
+                      "properties": {
+                        "audit": {
+                          "$ref": "#/components/schemas/Audit"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "responses": {
+                "200": {
+                  "description": "ok",
+                  "content": {
+                    "application/json": {
+                      "schema": {
+                        "type": "object",
+                        "properties": {
+                          "audit": {
+                            "$ref": "#/components/schemas/Audit"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "expect": {
+        "strict": "accepted",
+        "operations": {
+          "putAudit": {
+            "input": {
+              "$defs": {
+                "Audit": {
+                  "properties": {
+                    "note": {
+                      "type": "string"
+                    },
+                    "proposed": {
+                      "allOf": [
+                        {
+                          "$ref": "#/operations/putAudit/input/$defs/Audit"
+                        }
+                      ],
+                      "writeOnly": true
+                    }
+                  },
+                  "type": "object"
+                }
+              },
+              "properties": {
+                "audit": {
+                  "$ref": "#/operations/putAudit/input/$defs/Audit"
+                }
+              },
+              "type": "object"
+            },
+            "output": {
+              "$defs": {
+                "Audit": {
+                  "properties": {
+                    "note": {
+                      "type": "string"
+                    },
+                    "prior": {
+                      "allOf": [
+                        {
+                          "$ref": "#/operations/putAudit/output/$defs/Audit"
+                        }
+                      ],
+                      "readOnly": true
+                    }
+                  },
+                  "type": "object"
+                }
+              },
+              "properties": {
+                "audit": {
+                  "$ref": "#/operations/putAudit/output/$defs/Audit"
+                }
+              },
+              "type": "object"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "cycle survives one direction because only one branch is annotated",
+      "document": {
+        "openapi": "3.0.3",
+        "info": {
+          "title": "Asymmetric",
+          "version": "1"
+        },
+        "servers": [
+          {
+            "url": "https://api.example.test"
+          }
+        ],
+        "components": {
+          "schemas": {
+            "Ring": {
+              "type": "object",
+              "properties": {
+                "next": {
+                  "$ref": "#/components/schemas/Ring"
+                },
+                "audit": {
+                  "readOnly": true,
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/Trail"
+                    }
+                  ]
+                }
+              }
+            },
+            "Trail": {
+              "type": "object",
+              "properties": {
+                "ring": {
+                  "$ref": "#/components/schemas/Ring"
+                }
+              }
+            }
+          }
+        },
+        "paths": {
+          "/r": {
+            "post": {
+              "operationId": "putRing",
+              "requestBody": {
+                "required": true,
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "type": "object",
+                      "properties": {
+                        "ring": {
+                          "$ref": "#/components/schemas/Ring"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "responses": {
+                "200": {
+                  "description": "ok",
+                  "content": {
+                    "application/json": {
+                      "schema": {
+                        "type": "object",
+                        "properties": {
+                          "ring": {
+                            "$ref": "#/components/schemas/Ring"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "expect": {
+        "strict": "accepted",
+        "operations": {
+          "putRing": {
+            "input": {
+              "$defs": {
+                "Ring": {
+                  "properties": {
+                    "next": {
+                      "$ref": "#/operations/putRing/input/$defs/Ring"
+                    }
+                  },
+                  "type": "object"
+                }
+              },
+              "properties": {
+                "ring": {
+                  "$ref": "#/operations/putRing/input/$defs/Ring"
+                }
+              },
+              "type": "object"
+            },
+            "output": {
+              "$defs": {
+                "Ring": {
+                  "properties": {
+                    "audit": {
+                      "allOf": [
+                        {
+                          "$ref": "#/operations/putRing/output/$defs/Trail"
+                        }
+                      ],
+                      "readOnly": true
+                    },
+                    "next": {
+                      "$ref": "#/operations/putRing/output/$defs/Ring"
+                    }
+                  },
+                  "type": "object"
+                },
+                "Trail": {
+                  "properties": {
+                    "ring": {
+                      "$ref": "#/operations/putRing/output/$defs/Ring"
+                    }
+                  },
+                  "type": "object"
+                }
+              },
+              "properties": {
+                "ring": {
+                  "$ref": "#/operations/putRing/output/$defs/Ring"
+                }
+              },
+              "type": "object"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "cycle reached through a parameter carrying a description",
+      "document": {
+        "openapi": "3.0.3",
+        "info": {
+          "title": "Described parameter",
+          "version": "1"
+        },
+        "servers": [
+          {
+            "url": "https://api.example.test"
+          }
+        ],
+        "components": {
+          "schemas": {
+            "Selector": {
+              "type": "object",
+              "properties": {
+                "and": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Selector"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "paths": {
+          "/q": {
+            "get": {
+              "operationId": "query",
+              "parameters": [
+                {
+                  "name": "where",
+                  "in": "query",
+                  "required": true,
+                  "description": "a where clause",
+                  "style": "deepObject",
+                  "explode": true,
+                  "schema": {
+                    "$ref": "#/components/schemas/Selector"
+                  }
+                }
+              ],
+              "responses": {
+                "200": {
+                  "description": "ok",
+                  "content": {
+                    "application/json": {
+                      "schema": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "expect": {
+        "strict": "accepted",
+        "operations": {
+          "query": {
+            "input": {
+              "$defs": {
+                "Selector": {
+                  "properties": {
+                    "and": {
+                      "items": {
+                        "$ref": "#/operations/query/input/$defs/Selector"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "type": "object"
+                }
+              },
+              "additionalProperties": false,
+              "properties": {
+                "where": {
+                  "description": "a where clause",
+                  "properties": {
+                    "and": {
+                      "items": {
+                        "$ref": "#/operations/query/input/$defs/Selector"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "type": "object"
+                }
+              },
+              "required": [
+                "where"
+              ],
+              "type": "object"
+            },
+            "output": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "referenced component declaring an empty required list beside a cycle",
+      "document": {
+        "openapi": "3.0.3",
+        "info": {
+          "title": "Empty required",
+          "version": "1"
+        },
+        "servers": [
+          {
+            "url": "https://api.example.test"
+          }
+        ],
+        "components": {
+          "schemas": {
+            "Envelope": {
+              "type": "object",
+              "required": [],
+              "properties": {
+                "item": {
+                  "$ref": "#/components/schemas/Item"
+                }
+              }
+            },
+            "Item": {
+              "type": "object",
+              "required": [],
+              "properties": {
+                "next": {
+                  "$ref": "#/components/schemas/Item"
+                }
+              }
+            }
+          }
+        },
+        "paths": {
+          "/e": {
+            "get": {
+              "operationId": "getEnvelope",
+              "responses": {
+                "200": {
+                  "description": "ok",
+                  "content": {
+                    "application/json": {
+                      "schema": {
+                        "type": "object",
+                        "properties": {
+                          "envelope": {
+                            "$ref": "#/components/schemas/Envelope"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "expect": {
+        "strict": "accepted",
+        "operations": {
+          "getEnvelope": {
+            "input": null,
+            "output": {
+              "$defs": {
+                "Item": {
+                  "properties": {
+                    "next": {
+                      "$ref": "#/operations/getEnvelope/output/$defs/Item"
+                    }
+                  },
+                  "type": "object"
+                }
+              },
+              "properties": {
+                "envelope": {
+                  "properties": {
+                    "item": {
+                      "$ref": "#/operations/getEnvelope/output/$defs/Item"
+                    }
+                  },
+                  "type": "object"
+                }
+              },
+              "type": "object"
+            }
+          }
+        }
+      }
+    }
+  ]
+}
