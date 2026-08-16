@@ -1,5 +1,5 @@
 {
-  "note": "Frozen twin case table for pointer-scoped external reference composition. openbindings.openapi@1 section 6 ('Reference scope'): a reference that leaves the current document composes the value at the referenced JSON Pointer together with that value's transitive closure of references, and nothing else. Each case is a multi-document artifact plus the one verdict every engine must reach. The identical file is executed by openbindings-go's formats/openapi, by openapi-client/go, and by openbindings-ts's packages/openapi; a divergence in one fails the others' suites too. Authored from the OAS and JSON Reference text. No byte comes from a corpus specimen.",
+  "note": "Frozen twin case table for pointer-scoped external reference composition. openbindings.openapi@1 section 6 ('Reference scope'): a reference that leaves the current document composes the value at the referenced JSON Pointer together with that value's transitive closure of references, and nothing else. Each case is a multi-document artifact plus the one verdict every engine must reach. The identical file is executed by openbindings-go's formats/openapi, by openapi-client/go, and by openbindings-ts's packages/openapi; a divergence in one fails the others' suites too. Authored from the OAS, JSON Reference and RFC 6901 text; no byte comes from a corpus specimen. ONE case is a disclosed exception to that provenance: 'pointer-below-a-reference' pins a convention of these implementations rather than an authority answer, and its own 'why' says so.",
   "cases": [
     {
       "name": "defect-outside-the-composed-closure",
@@ -306,7 +306,7 @@
     },
     {
       "name": "pointer-below-a-reference",
-      "why": "A pointer whose path runs through a reference reaches the position the resolved value has there; the reference it passes through is itself composed.",
+      "why": "CONVENTION, NOT AUTHORITY. Both engines reach a position that lies below a reference, and no authority decides whether they should: RFC 6901 section 4 evaluates each token against the document's contents, under which 'Alias/properties/name' denotes nothing, while JSON Reference section 4 says an implementation MAY replace a reference with the referenced value, after which it denotes the string. Neither text sequences the two. Both engines did this before pointer scope was implemented and the block preserved it rather than smuggle a new observable behavior in under a conformance fix. Pinned here so the two engines cannot drift apart while the question is open; recorded as an open item in corpus-lab/OPENAPI-RUNTIME.md.",
       "entry": "https://composition.example/openapi.yaml",
       "documents": {
         "https://composition.example/openapi.yaml": {
@@ -345,6 +345,58 @@
         "operations": [
           "externalGet"
         ]
+      }
+    },
+    {
+      "name": "defect-in-a-sibling-sequence-element",
+      "why": "A sequence member is addressed by index exactly as an object member is addressed by name: the composed value is allOf/0, so the defective allOf/1 beside it is outside the closure and the referencing artifact resolves.",
+      "entry": "https://composition.example/openapi.yaml",
+      "documents": {
+        "https://composition.example/openapi.yaml": {
+          "text": "openapi: 3.1.2\ninfo: {title: Entry, version: \"1\"}\nservers: [{url: \"https://api.example\"}]\npaths:\n  /items:\n    post:\n      operationId: createItem\n      requestBody:\n        required: true\n        content:\n          application/json:\n            schema: {$ref: \"./library.yaml#/components/schemas/Combo/allOf/0\"}\n      responses: {\"204\": {description: ok}}\n"
+        },
+        "https://composition.example/library.yaml": {
+          "text": "openapi: 3.1.2\ninfo: {title: Library, version: \"1\"}\ncomponents:\n  schemas:\n    Combo:\n      allOf:\n        - type: object\n          properties:\n            name: {$ref: \"#/components/schemas/Name\"}\n        - {$ref: \"#/components/schemas/NeverDeclared\"}\n    Name: {type: string}\n"
+        }
+      },
+      "expect": {
+        "outcome": "accepted",
+        "operations": [
+          "createItem"
+        ],
+        "values": {
+          "/operations/createItem/input/properties/name": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "two-pointers-into-one-sequence",
+      "why": "Two references compose two elements of the same sequence, and the element between them - which nothing composes and which is defective - is outside the closure. allOf/2 must still denote the third element, so no index may be renumbered.",
+      "entry": "https://composition.example/openapi.yaml",
+      "documents": {
+        "https://composition.example/openapi.yaml": {
+          "text": "openapi: 3.1.2\ninfo: {title: Entry, version: \"1\"}\nservers: [{url: \"https://api.example\"}]\npaths:\n  /items:\n    post:\n      operationId: createItem\n      requestBody:\n        required: true\n        content:\n          application/json:\n            schema: {$ref: \"./library.yaml#/components/schemas/Combo/allOf/0\"}\n      responses: {\"204\": {description: ok}}\n  /others:\n    post:\n      operationId: createOther\n      requestBody:\n        required: true\n        content:\n          application/json:\n            schema: {$ref: \"./library.yaml#/components/schemas/Combo/allOf/2\"}\n      responses: {\"204\": {description: ok}}\n"
+        },
+        "https://composition.example/library.yaml": {
+          "text": "openapi: 3.1.2\ninfo: {title: Library, version: \"1\"}\ncomponents:\n  schemas:\n    Combo:\n      allOf:\n        - type: object\n          properties:\n            alpha: {$ref: \"#/components/schemas/Alpha\"}\n        - {$ref: \"#/components/schemas/NeverDeclared\"}\n        - type: object\n          properties:\n            gamma: {$ref: \"#/components/schemas/Gamma\"}\n    Alpha: {type: string}\n    Gamma: {type: integer}\n"
+        }
+      },
+      "expect": {
+        "outcome": "accepted",
+        "operations": [
+          "createItem",
+          "createOther"
+        ],
+        "values": {
+          "/operations/createItem/input/properties/alpha": {
+            "type": "string"
+          },
+          "/operations/createOther/input/properties/gamma": {
+            "type": "integer"
+          }
+        }
       }
     }
   ]
