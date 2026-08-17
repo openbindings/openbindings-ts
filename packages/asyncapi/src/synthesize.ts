@@ -301,6 +301,35 @@ function operationSchemaDefect(
   boundary: BoundaryDocument,
   opID: string,
 ): AuthoringExclusion | undefined {
+  // A declaration under an ON-LIST foreign format (§9.2's named
+  // correspondences) that is not a valid schema of that language is the same
+  // class of artifact defect: the core validator cannot see it, because an
+  // underivable Avro schema projects to the well-formed but unconstrained {}
+  // rather than to an ill-formed one. Emitting that {} would assert that any
+  // JSON value satisfies a contract the artifact got wrong, so the affected
+  // operation is invalid instead (Go twin: operationSchemaDefect).
+  const op = rawObjectAt(boundary.doc["operations"], opID);
+  if (op) {
+    const ch = rawOperationChannel(boundary, refStringOf(op["channel"]));
+    const replyValue = op["reply"];
+    const reply = isRawObject(replyValue) ? replyValue : undefined;
+    const governed = [
+      ...rawGoverningMessages(boundary, op, ch),
+      ...(reply ? replyMessagesOf(boundary, reply) : []),
+    ];
+    const docLike = boundary.doc as unknown as AsyncAPIDocument;
+    for (const raw of governed) {
+      const message = raw as unknown as AsyncAPIMessage;
+      if (messagePayloadDialectInvalid(docLike, message)) {
+        return {
+          status: "invalid",
+          code: "asyncapi.payload_schema_invalid",
+          rule: "ASYNC-P-05",
+          message: "the payload declaration is not a valid schema of its own declared foreign schema format",
+        };
+      }
+    }
+  }
   const { input, output } = operationBoundarySchemas(boundary, opID);
   if (!input && !output) return undefined;
   const probeOp: Operation = {};
@@ -571,8 +600,12 @@ function messagePayloadBoundarySchema(boundary: BoundaryDocument, raw: RawObject
   const derivedAvro = classifySchemaFormat(schemaFormat) === "avro" ? deriveAvroSchema(effectiveSchema) : undefined;
   if (classifySchemaFormat(schemaFormat) === "avro") {
     // The named Avro correspondence: logical values under Avro's own JSON
-    // Encoding. A declaration that does not parse as an Avro schema falls
-    // to the byte rule as an inexpressible contract.
+    // Encoding. A declaration that is not a valid Avro schema falls to the
+    // byte rule as an inexpressible contract where the carriage IS the byte
+    // rule; on value carriage the operation is invalid
+    // (messagePayloadDialectInvalid / operationSchemaDefect), so the
+    // unconstrained schema below never reaches an emitted document — it
+    // only ever feeds that gate's own probe.
     if (derivedAvro !== undefined) {
       schema = derivedAvro;
     } else if (messageCarriage(doc, message) === "bytes") {
@@ -715,6 +748,26 @@ function schemaEqualsBoundary(schema: Record<string, unknown>, disposition: Sche
 }
 
 /**
+ * Reports whether a declaration under one of §9.2's named correspondences is
+ * not a valid schema of that language while the direction's carriage is the
+ * ordinary JSON or text value boundary. Avro's resolution scope is the
+ * single JSON parse tree — it defines no cross-document import, and its
+ * Names rule requires that "a name must be defined before it is used" — so a
+ * schema naming a type it does not define is invalid under its own declared
+ * dialect, not merely unresolvable here. On byte carriage the same
+ * declaration is instead an inexpressible contract at the byte rule, which
+ * stays lossy; this predicate is the value-carriage half (Go twin:
+ * messagePayloadDialectInvalid).
+ */
+export function messagePayloadDialectInvalid(doc: AsyncAPIDocument, message: AsyncAPIMessage): boolean {
+  const { schema, schemaFormat } = effectivePayload(message);
+  if (schema === undefined && message.payload === undefined) return false;
+  if (classifySchemaFormat(schemaFormat) !== "avro") return false;
+  if (messageCarriage(doc, message) === "bytes") return false;
+  return deriveAvroSchema(schema) === undefined;
+}
+
+/**
  * Names the lossy-coverage reason when the floored direction discards an
  * author-declared contract, or undefined when nothing is lost. The two
  * causes carry different authority and remediation, so they account under
@@ -727,10 +780,14 @@ export function messagePayloadLossReason(doc: AsyncAPIDocument, message: AsyncAP
   if (classifySchemaFormat(schemaFormat) === "avro") {
     // The named correspondence (ruled 2026-08-14): a derivable Avro
     // contract crosses as logical values — nothing lost. An underivable
-    // declaration is an inexpressible contract under the byte rule.
+    // declaration is an inexpressible contract under the byte rule where
+    // the carriage IS the byte rule; on value carriage it is not a loss at
+    // all but the artifact's own dialect defect, and operationSchemaDefect
+    // owns it (§9.2, F-V4-1) — exactly as it owns a payload invalid under
+    // the edition's own Schema Object (Go twin).
     if (deriveAvroSchema(schema) !== undefined) return undefined;
     if (messageCarriage(doc, message) === "bytes") return "asyncapi.payload_byte_carriage";
-    return "asyncapi.schema_format_not_convertible";
+    return undefined;
   }
   if (messageCarriage(doc, message) === "bytes") {
     // The byte boundary (§9.2, ruled 2026-08-13): declared binary media
