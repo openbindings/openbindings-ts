@@ -11,13 +11,6 @@
 
 const AVRO_BYTES_PATTERN = "^[\\u0000-\\u00ff]*$";
 
-// `Array.isArray` narrows an `unknown` to `any[]`, which reintroduces `any`
-// into every element read. This guard narrows to `unknown[]` instead, so
-// element values stay unknown until something checks them.
-function isUnknownArray(value: unknown): value is unknown[] {
-  return Array.isArray(value);
-}
-
 interface AvroContext {
   defs: Record<string, unknown>;
   inProgress: Set<string>;
@@ -57,14 +50,14 @@ function deriveAvro(node: unknown, namespace: string, ctx: AvroContext): Record<
   }
   if (typeof node === "object" && node !== null) {
     const v = node as Record<string, unknown>;
-    const typ = typeof v["type"] === "string" ? v["type"] : "";
+    const typ = typeof v["type"] === "string" ? (v["type"] as string) : "";
     switch (typ) {
       case "record":
       case "error":
         return deriveAvroRecord(v, namespace, ctx);
       case "enum": {
         const symbols = v["symbols"];
-        if (!isUnknownArray(symbols)) return undefined;
+        if (!Array.isArray(symbols)) return undefined;
         const full = registerAvroName(v, namespace, ctx);
         if (full === undefined) return undefined;
         ctx.defs[full] = { enum: [...symbols] };
@@ -164,7 +157,7 @@ function resolveAvroName(name: string, namespace: string, ctx: AvroContext): str
 function registerAvroName(v: Record<string, unknown>, namespace: string, ctx: AvroContext): string | undefined {
   const name = v["name"];
   if (typeof name !== "string" || name === "") return undefined;
-  let ns = typeof v["namespace"] === "string" ? v["namespace"] : "";
+  let ns = typeof v["namespace"] === "string" ? (v["namespace"] as string) : "";
   if (ns === "" && !name.includes(".")) ns = namespace;
   const full = ns !== "" && !name.includes(".") ? `${ns}.${name}` : name;
   const short = full.includes(".") ? full.slice(full.lastIndexOf(".") + 1) : full;
@@ -191,7 +184,7 @@ function avroBranchName(member: unknown, namespace: string, ctx: AvroContext): s
   }
   if (typeof member === "object" && member !== null) {
     const v = member as Record<string, unknown>;
-    const typ = typeof v["type"] === "string" ? v["type"] : "";
+    const typ = typeof v["type"] === "string" ? (v["type"] as string) : "";
     switch (typ) {
       case "record":
       case "error":
@@ -199,7 +192,7 @@ function avroBranchName(member: unknown, namespace: string, ctx: AvroContext): s
       case "fixed": {
         const name = v["name"];
         if (typeof name !== "string" || name === "") return undefined;
-        let ns = typeof v["namespace"] === "string" ? v["namespace"] : "";
+        let ns = typeof v["namespace"] === "string" ? (v["namespace"] as string) : "";
         if (ns === "" && !name.includes(".")) ns = namespace;
         return ns !== "" && !name.includes(".") ? `${ns}.${name}` : name;
       }
