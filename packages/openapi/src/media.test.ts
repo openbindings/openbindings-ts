@@ -702,29 +702,46 @@ describe("revision-3 response media governance", () => {
 // part. Mirrors Go's TestRevision3MultipartUnconstrainedPartUsesValueTypedDefaults
 // and TestRevision3MultipartNullableChoiceCollapsesToBranchCarriage.
 describe("§9.2 unconstrained and nullable-choice parts", () => {
-  it("admits an unconstrained part and keys its per-type default from the value", async () => {
+  // §9.2's type-absent convention covers the 3.0 line alone: no accepted 3.0
+  // edition states a default contentType row that reaches a declaration with
+  // no `type`. This test read `3.1.2` until 2026-08-17, where the Encoding
+  // Object's own default table states application/octet-stream for it.
+  it("admits a type-absent part on the 3.0 line and keys its per-type default from the value", async () => {
     const media: OpenAPIMediaType = {
       schema: { type: "object", properties: { file: { description: "Profile picture file" } } },
     };
     const plan = planRequestBody(
       opWithRequestBody({ "multipart/form-data": media }, true),
-      { profile: profileForBindingSpec(BINDING_SPEC), openapiVersion: "3.1.2" },
+      { profile: profileForBindingSpec(BINDING_SPEC), openapiVersion: "3.0.3" },
     );
 
-    let wire = buildRequestBody(DOC_31, plan, routedWith({ bodyFields: { file: "hello" } }));
+    let wire = buildRequestBody(DOC_30, plan, routedWith({ bodyFields: { file: "hello" } }));
     let parts = await formDataParts(wire.body as FormData);
     expect(parts.file?.[0]).toEqual(["", "hello"]);
 
-    wire = buildRequestBody(DOC_31, plan, routedWith({ bodyFields: { file: { a: 1 } } }));
+    wire = buildRequestBody(DOC_30, plan, routedWith({ bodyFields: { file: { a: 1 } } }));
     parts = await formDataParts(wire.body as FormData);
     expect(parts.file?.[0]).toEqual(["application/json", '{"a":1}']);
 
-    wire = buildRequestBody(DOC_31, plan, routedWith({ bodyFields: { file: ["a", 2] } }));
+    wire = buildRequestBody(DOC_30, plan, routedWith({ bodyFields: { file: ["a", 2] } }));
     parts = await formDataParts(wire.body as FormData);
     expect(parts.file?.[0]).toEqual(["application/json", '["a",2]']);
 
-    expect(() => buildRequestBody(DOC_31, plan, routedWith({ bodyFields: { file: null } })))
+    expect(() => buildRequestBody(DOC_30, plan, routedWith({ bodyFields: { file: null } })))
       .toThrow(/no form carriage for JSON null/);
+  });
+
+  // The other half of the edition split: every accepted 3.1 edition states
+  // application/octet-stream for a part whose `type` is absent, and this
+  // revision defines no JSON-to-octet part boundary.
+  it.each([["3.1.0"], ["3.1.1"], ["3.1.2"]])("refuses a type-absent part on OAS %s", (edition) => {
+    const media: OpenAPIMediaType = {
+      schema: { type: "object", properties: { file: { description: "Profile picture file" } } },
+    };
+    expect(() => planRequestBody(
+      opWithRequestBody({ "multipart/form-data": media }, true),
+      { profile: profileForBindingSpec(BINDING_SPEC), openapiVersion: edition },
+    )).toThrow(/application\/octet-stream/);
   });
 
   it("collapses a nullable choice to the non-null branch's carriage and elides null", async () => {
@@ -791,24 +808,35 @@ describe("§9.2 unconstrained and nullable-choice parts", () => {
   });
 
   it("applies the same rules on the urlencoded lane", () => {
-    const media: OpenAPIMediaType = {
-      schema: {
-        type: "object",
-        properties: {
-          note: { description: "free-form" },
-          tag: { anyOf: [{ type: "string" }, { type: "null" }] },
-        },
-      },
+    // The nullable-choice collapse is read under the 3.1 line; the
+    // type-absent field is read under the 3.0 line, the only line whose
+    // stated rows leave it open.
+    const choice: OpenAPIMediaType = {
+      schema: { type: "object", properties: { tag: { anyOf: [{ type: "string" }, { type: "null" }] } } },
     };
     expect(() => planRequestBody(
-      opWithRequestBody({ "application/x-www-form-urlencoded": media }, true),
+      opWithRequestBody({ "application/x-www-form-urlencoded": choice }, true),
       { profile: profileForBindingSpec(BINDING_SPEC), openapiVersion: "3.1.2" },
     )).not.toThrow();
+    expect(buildURLEncodedBody(choice, { tag: "t1" }, true, "3.1.2")).toBe("tag=t1");
+    expect(buildURLEncodedBody(choice, { tag: null }, true, "3.1.2")).toBe("");
 
-    expect(buildURLEncodedBody(media, { note: "x y", tag: "t1" }, true, "3.1.2"))
-      .toBe("note=x+y&tag=t1");
-    expect(buildURLEncodedBody(media, { note: { a: 1 }, tag: null }, true, "3.1.2"))
+    const typeAbsent: OpenAPIMediaType = {
+      schema: { type: "object", properties: { note: { description: "free-form" } } },
+    };
+    expect(() => planRequestBody(
+      opWithRequestBody({ "application/x-www-form-urlencoded": typeAbsent }, true),
+      { profile: profileForBindingSpec(BINDING_SPEC), openapiVersion: "3.0.4" },
+    )).not.toThrow();
+    expect(buildURLEncodedBody(typeAbsent, { note: "x y" }, true, "3.0.4")).toBe("note=x+y");
+    expect(buildURLEncodedBody(typeAbsent, { note: { a: 1 } }, true, "3.0.4"))
       .toBe("note=%7B%22a%22%3A1%7D");
+    for (const edition of ["3.1.0", "3.1.1", "3.1.2"]) {
+      expect(() => planRequestBody(
+        opWithRequestBody({ "application/x-www-form-urlencoded": typeAbsent }, true),
+        { profile: profileForBindingSpec(BINDING_SPEC), openapiVersion: edition },
+      )).toThrow(/application\/octet-stream/);
+    }
   });
 });
 

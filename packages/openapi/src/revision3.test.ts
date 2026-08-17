@@ -762,12 +762,11 @@ describe("openbindings.openapi@1 request carriage", () => {
     }));
   });
 
-  // §9.2: an unconstrained part schema (typeless, boolean true) is admitted
-  // with its per-type default keyed by the value's JSON application type,
-  // and a single-non-null-branch choice collapses to that branch.
+  // §9.2: a single-non-null-branch choice collapses to that branch. The
+  // typeless and boolean-true parts moved out of this case list on
+  // 2026-08-17 — see the two cases below — because every accepted 3.1 edition
+  // states application/octet-stream for a part whose `type` is absent.
   it.each([
-    ["typeless 3.1 part", { schema: { type: "object", properties: { note: {} } } }],
-    ["true 3.1 part", { schema: { type: "object", properties: { note: true } } }],
     [
       "nullable-choice part",
       { schema: { type: "object", properties: { note: { anyOf: [{ type: "string" }, { type: "null" }] } } } },
@@ -781,6 +780,35 @@ describe("openbindings.openapi@1 request carriage", () => {
       scope: "alternative",
       status: "represented",
     }));
+  });
+
+  // §9.2 per edition: on the 3.0 line no stated default contentType row
+  // reaches a part declaring no `type`, so this specification's own
+  // convention answers and the alternative is represented; on every accepted
+  // 3.1 edition the OAS states application/octet-stream for it and this
+  // revision defines no JSON-to-octet part boundary, so the alternative is an
+  // accounted exclusion.
+  it.each([
+    ["typeless part", { schema: { type: "object", properties: { note: {} } } }],
+    ["boolean-true part", { schema: { type: "object", properties: { note: true } } }],
+  ])("coverage splits multipart %s by edition (§9.2 part interpretation)", async (_case, media) => {
+    const represented = await new OpenAPISynthesizer().synthesizeInterfaceWithCoverage({
+      sources: [{ bindingSpec: BINDING_SPEC, content: document("3.0.4", { "multipart/form-data": media }, false) }],
+    });
+    expect(represented.coverage.entries).toContainEqual(expect.objectContaining({
+      scope: "alternative",
+      status: "represented",
+    }));
+    for (const edition of ["3.1.0", "3.1.1", "3.1.2"]) {
+      const excluded = await new OpenAPISynthesizer().synthesizeInterfaceWithCoverage({
+        sources: [{ bindingSpec: BINDING_SPEC, content: document(edition, { "multipart/form-data": media }, false) }],
+      });
+      expect(excluded.coverage.entries).toContainEqual(expect.objectContaining({
+        scope: "alternative",
+        status: "excluded",
+        reasonCode: "openapi.request_media_excluded",
+      }));
+    }
   });
 
   it("coverage-excludes an exact schema-omitted urlencoded form", async () => {
