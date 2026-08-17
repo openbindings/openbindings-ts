@@ -68,6 +68,17 @@ paths:
     ["0x1F", 31],
     ["+12.3", 12.3],
     [".5", 0.5],
+    // F-O1-7, closed: §10.3.2 has no binary row, its `0o`/`0x` rows carry no
+    // sign, no row admits a `_` separator, and its float row signs the whole
+    // group. Through the BUILT client dist, which is what this package ships.
+    ["0b101", "0b101"],
+    ["-0b101", "-0b101"],
+    ["1_000", "1_000"],
+    ["-0x1F", "-0x1F"],
+    ["-.5", -0.5],
+    ["0120", 120],
+    // F-O1-15: a magnitude the double domain cannot hold keeps its text.
+    ["600e27371700", "600e27371700"],
   ] as const)("emits %s with its §10.3.2 JSON type", async (spelling, want) => {
     expect(await emittedExample(spelling)).toStrictEqual(want);
   });
