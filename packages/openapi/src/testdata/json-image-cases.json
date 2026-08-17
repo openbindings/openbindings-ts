@@ -1,0 +1,2057 @@
+{
+  "$comment": "The shared JSON-image case table. Executed byte-for-byte by\nopenbindings-go/formats/openapi, openapi-client/go, openapi-client/typescript\nand openbindings-ts/packages/openapi (the last against that package's BUILT\ndist, which is the shipped path it re-exports).\n\nWHAT IT PINS. RFC 8259 Section 7 requires exactly three escapes inside a JSON\nstring -- quotation mark, reverse solidus, and U+0000 through U+001F -- and\nthen permits, without ever requiring, any other character to be escaped as a\nsix-character \\uXXXX sequence. U+0026, U+003C and U+003E all fall inside its\n`unescaped` production, so both spellings are conformant JSON.\nopenbindings.openapi@1 Section 9.2 preserves that permitted set and states no\npreference inside it. Exactly one byte string still goes on the wire, so the\nthree engines make and document the same choice -- emit the literal\ncharacters -- and this table is where that choice is held identical.\n\nHOW THE EXPECTATIONS WERE AUTHORED. From three rules, never from an engine:\n(1) RFC 8259 Section 7 plus the engines' literal-spelling convention for the\nJSON image; (2) RFC 1866 Section 8.2.1 with RFC 1738 Section 2.2 for the\nurlencoded CONTENT-path escaper, whose audit this table does not reopen; and\n(3) RFC 6570 with allowReserved absent, i.e. RFC 3986's unreserved set, for\nthe STYLE path. The generator is\ncorpus-lab/scripts/build-json-image-table.mjs.\n\nTHE STYLE LANE IS THE CONTROL. The two urlencoded lanes are SUPPOSED to\nspell a space differently, and the style lane expands an object's members as\nseparate name=value pairs without ever forming a JSON image. Not one of its\ncells may move, and each engine asserts that separately from the cells.\n\nEVERY CASE CARRIES ITS WHOLE OpenAPI DOCUMENT, and each engine loads that\ndocument through its own shipped loader rather than building a typed model\ndirectly. A harness that hands the engine a hand-built media object measures\nan engine the project does not ship.\n\nEvery value is a SINGLE-KEY object so member ordering never enters the table:\nGo sorts a map's keys and JavaScript preserves insertion order, and a twin\ntable must not pin a difference it is not about.",
+  "cases": [
+    {
+      "name": "3.1.1|json-body|none",
+      "openapi": "3.1.1",
+      "lane": "json-body",
+      "media": "application/json",
+      "cell": "none",
+      "formsJSONImage": true,
+      "document": {
+        "openapi": "3.1.1",
+        "info": {
+          "title": "JSON image case table",
+          "version": "1.0.0"
+        },
+        "paths": {
+          "/probe": {
+            "post": {
+              "operationId": "postProbe",
+              "requestBody": {
+                "required": true,
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "type": "object",
+                      "properties": {
+                        "address": {
+                          "type": "object"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "responses": {
+                "200": {
+                  "description": "ok"
+                }
+              }
+            }
+          }
+        }
+      },
+      "input": {
+        "address": {
+          "street": "1 AB"
+        }
+      },
+      "expect": "{\"address\":{\"street\":\"1 AB\"}}",
+      "basis": "3.1.1, the JSON request body. RFC 8259 §7 permits both the literal and the six-character spelling and requires neither (openbindings.openapi@1 §9.2, \"The JSON image of an application value\"); the engines' own documented convention is the literal one. the control: no character of the class appears, so no cell of any lane may move."
+    },
+    {
+      "name": "3.1.1|json-body|ampersand",
+      "openapi": "3.1.1",
+      "lane": "json-body",
+      "media": "application/json",
+      "cell": "ampersand",
+      "formsJSONImage": true,
+      "document": {
+        "openapi": "3.1.1",
+        "info": {
+          "title": "JSON image case table",
+          "version": "1.0.0"
+        },
+        "paths": {
+          "/probe": {
+            "post": {
+              "operationId": "postProbe",
+              "requestBody": {
+                "required": true,
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "type": "object",
+                      "properties": {
+                        "address": {
+                          "type": "object"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "responses": {
+                "200": {
+                  "description": "ok"
+                }
+              }
+            }
+          }
+        }
+      },
+      "input": {
+        "address": {
+          "street": "1 A&B"
+        }
+      },
+      "expect": "{\"address\":{\"street\":\"1 A&B\"}}",
+      "basis": "3.1.1, the JSON request body. RFC 8259 §7 permits both the literal and the six-character spelling and requires neither (openbindings.openapi@1 §9.2, \"The JSON image of an application value\"); the engines' own documented convention is the literal one. AMPERSAND U+0026, inside RFC 8259 §7's `unescaped = %x20-21 / %x23-5B / %x5D-10FFFF`."
+    },
+    {
+      "name": "3.1.1|json-body|less-than",
+      "openapi": "3.1.1",
+      "lane": "json-body",
+      "media": "application/json",
+      "cell": "less-than",
+      "formsJSONImage": true,
+      "document": {
+        "openapi": "3.1.1",
+        "info": {
+          "title": "JSON image case table",
+          "version": "1.0.0"
+        },
+        "paths": {
+          "/probe": {
+            "post": {
+              "operationId": "postProbe",
+              "requestBody": {
+                "required": true,
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "type": "object",
+                      "properties": {
+                        "address": {
+                          "type": "object"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "responses": {
+                "200": {
+                  "description": "ok"
+                }
+              }
+            }
+          }
+        }
+      },
+      "input": {
+        "address": {
+          "street": "1 A<B"
+        }
+      },
+      "expect": "{\"address\":{\"street\":\"1 A<B\"}}",
+      "basis": "3.1.1, the JSON request body. RFC 8259 §7 permits both the literal and the six-character spelling and requires neither (openbindings.openapi@1 §9.2, \"The JSON image of an application value\"); the engines' own documented convention is the literal one. LESS-THAN SIGN U+003C, inside the same production."
+    },
+    {
+      "name": "3.1.1|json-body|greater-than",
+      "openapi": "3.1.1",
+      "lane": "json-body",
+      "media": "application/json",
+      "cell": "greater-than",
+      "formsJSONImage": true,
+      "document": {
+        "openapi": "3.1.1",
+        "info": {
+          "title": "JSON image case table",
+          "version": "1.0.0"
+        },
+        "paths": {
+          "/probe": {
+            "post": {
+              "operationId": "postProbe",
+              "requestBody": {
+                "required": true,
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "type": "object",
+                      "properties": {
+                        "address": {
+                          "type": "object"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "responses": {
+                "200": {
+                  "description": "ok"
+                }
+              }
+            }
+          }
+        }
+      },
+      "input": {
+        "address": {
+          "street": "1 A>B"
+        }
+      },
+      "expect": "{\"address\":{\"street\":\"1 A>B\"}}",
+      "basis": "3.1.1, the JSON request body. RFC 8259 §7 permits both the literal and the six-character spelling and requires neither (openbindings.openapi@1 §9.2, \"The JSON image of an application value\"); the engines' own documented convention is the literal one. GREATER-THAN SIGN U+003E, inside the same production."
+    },
+    {
+      "name": "3.1.1|json-body|all-three",
+      "openapi": "3.1.1",
+      "lane": "json-body",
+      "media": "application/json",
+      "cell": "all-three",
+      "formsJSONImage": true,
+      "document": {
+        "openapi": "3.1.1",
+        "info": {
+          "title": "JSON image case table",
+          "version": "1.0.0"
+        },
+        "paths": {
+          "/probe": {
+            "post": {
+              "operationId": "postProbe",
+              "requestBody": {
+                "required": true,
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "type": "object",
+                      "properties": {
+                        "address": {
+                          "type": "object"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "responses": {
+                "200": {
+                  "description": "ok"
+                }
+              }
+            }
+          }
+        }
+      },
+      "input": {
+        "address": {
+          "street": "1 A&<>B"
+        }
+      },
+      "expect": "{\"address\":{\"street\":\"1 A&<>B\"}}",
+      "basis": "3.1.1, the JSON request body. RFC 8259 §7 permits both the literal and the six-character spelling and requires neither (openbindings.openapi@1 §9.2, \"The JSON image of an application value\"); the engines' own documented convention is the literal one. all three characters in one string value."
+    },
+    {
+      "name": "3.1.1|json-body|key-and-value",
+      "openapi": "3.1.1",
+      "lane": "json-body",
+      "media": "application/json",
+      "cell": "key-and-value",
+      "formsJSONImage": true,
+      "document": {
+        "openapi": "3.1.1",
+        "info": {
+          "title": "JSON image case table",
+          "version": "1.0.0"
+        },
+        "paths": {
+          "/probe": {
+            "post": {
+              "operationId": "postProbe",
+              "requestBody": {
+                "required": true,
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "type": "object",
+                      "properties": {
+                        "address": {
+                          "type": "object"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "responses": {
+                "200": {
+                  "description": "ok"
+                }
+              }
+            }
+          }
+        }
+      },
+      "input": {
+        "address": {
+          "a&<>b": "1 A&<>B"
+        }
+      },
+      "expect": "{\"address\":{\"a&<>b\":\"1 A&<>B\"}}",
+      "basis": "3.1.1, the JSON request body. RFC 8259 §7 permits both the literal and the six-character spelling and requires neither (openbindings.openapi@1 §9.2, \"The JSON image of an application value\"); the engines' own documented convention is the literal one. all three characters in the object's KEY as well as its value, which exercises the encoder's name path rather than only its string path."
+    },
+    {
+      "name": "3.0.3|json-body|none",
+      "openapi": "3.0.3",
+      "lane": "json-body",
+      "media": "application/json",
+      "cell": "none",
+      "formsJSONImage": true,
+      "document": {
+        "openapi": "3.0.3",
+        "info": {
+          "title": "JSON image case table",
+          "version": "1.0.0"
+        },
+        "paths": {
+          "/probe": {
+            "post": {
+              "operationId": "postProbe",
+              "requestBody": {
+                "required": true,
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "type": "object",
+                      "properties": {
+                        "address": {
+                          "type": "object"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "responses": {
+                "200": {
+                  "description": "ok"
+                }
+              }
+            }
+          }
+        }
+      },
+      "input": {
+        "address": {
+          "street": "1 AB"
+        }
+      },
+      "expect": "{\"address\":{\"street\":\"1 AB\"}}",
+      "basis": "3.0.3, the JSON request body. RFC 8259 §7 permits both the literal and the six-character spelling and requires neither (openbindings.openapi@1 §9.2, \"The JSON image of an application value\"); the engines' own documented convention is the literal one. the control: no character of the class appears, so no cell of any lane may move."
+    },
+    {
+      "name": "3.0.3|json-body|ampersand",
+      "openapi": "3.0.3",
+      "lane": "json-body",
+      "media": "application/json",
+      "cell": "ampersand",
+      "formsJSONImage": true,
+      "document": {
+        "openapi": "3.0.3",
+        "info": {
+          "title": "JSON image case table",
+          "version": "1.0.0"
+        },
+        "paths": {
+          "/probe": {
+            "post": {
+              "operationId": "postProbe",
+              "requestBody": {
+                "required": true,
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "type": "object",
+                      "properties": {
+                        "address": {
+                          "type": "object"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "responses": {
+                "200": {
+                  "description": "ok"
+                }
+              }
+            }
+          }
+        }
+      },
+      "input": {
+        "address": {
+          "street": "1 A&B"
+        }
+      },
+      "expect": "{\"address\":{\"street\":\"1 A&B\"}}",
+      "basis": "3.0.3, the JSON request body. RFC 8259 §7 permits both the literal and the six-character spelling and requires neither (openbindings.openapi@1 §9.2, \"The JSON image of an application value\"); the engines' own documented convention is the literal one. AMPERSAND U+0026, inside RFC 8259 §7's `unescaped = %x20-21 / %x23-5B / %x5D-10FFFF`."
+    },
+    {
+      "name": "3.0.3|json-body|less-than",
+      "openapi": "3.0.3",
+      "lane": "json-body",
+      "media": "application/json",
+      "cell": "less-than",
+      "formsJSONImage": true,
+      "document": {
+        "openapi": "3.0.3",
+        "info": {
+          "title": "JSON image case table",
+          "version": "1.0.0"
+        },
+        "paths": {
+          "/probe": {
+            "post": {
+              "operationId": "postProbe",
+              "requestBody": {
+                "required": true,
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "type": "object",
+                      "properties": {
+                        "address": {
+                          "type": "object"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "responses": {
+                "200": {
+                  "description": "ok"
+                }
+              }
+            }
+          }
+        }
+      },
+      "input": {
+        "address": {
+          "street": "1 A<B"
+        }
+      },
+      "expect": "{\"address\":{\"street\":\"1 A<B\"}}",
+      "basis": "3.0.3, the JSON request body. RFC 8259 §7 permits both the literal and the six-character spelling and requires neither (openbindings.openapi@1 §9.2, \"The JSON image of an application value\"); the engines' own documented convention is the literal one. LESS-THAN SIGN U+003C, inside the same production."
+    },
+    {
+      "name": "3.0.3|json-body|greater-than",
+      "openapi": "3.0.3",
+      "lane": "json-body",
+      "media": "application/json",
+      "cell": "greater-than",
+      "formsJSONImage": true,
+      "document": {
+        "openapi": "3.0.3",
+        "info": {
+          "title": "JSON image case table",
+          "version": "1.0.0"
+        },
+        "paths": {
+          "/probe": {
+            "post": {
+              "operationId": "postProbe",
+              "requestBody": {
+                "required": true,
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "type": "object",
+                      "properties": {
+                        "address": {
+                          "type": "object"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "responses": {
+                "200": {
+                  "description": "ok"
+                }
+              }
+            }
+          }
+        }
+      },
+      "input": {
+        "address": {
+          "street": "1 A>B"
+        }
+      },
+      "expect": "{\"address\":{\"street\":\"1 A>B\"}}",
+      "basis": "3.0.3, the JSON request body. RFC 8259 §7 permits both the literal and the six-character spelling and requires neither (openbindings.openapi@1 §9.2, \"The JSON image of an application value\"); the engines' own documented convention is the literal one. GREATER-THAN SIGN U+003E, inside the same production."
+    },
+    {
+      "name": "3.0.3|json-body|all-three",
+      "openapi": "3.0.3",
+      "lane": "json-body",
+      "media": "application/json",
+      "cell": "all-three",
+      "formsJSONImage": true,
+      "document": {
+        "openapi": "3.0.3",
+        "info": {
+          "title": "JSON image case table",
+          "version": "1.0.0"
+        },
+        "paths": {
+          "/probe": {
+            "post": {
+              "operationId": "postProbe",
+              "requestBody": {
+                "required": true,
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "type": "object",
+                      "properties": {
+                        "address": {
+                          "type": "object"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "responses": {
+                "200": {
+                  "description": "ok"
+                }
+              }
+            }
+          }
+        }
+      },
+      "input": {
+        "address": {
+          "street": "1 A&<>B"
+        }
+      },
+      "expect": "{\"address\":{\"street\":\"1 A&<>B\"}}",
+      "basis": "3.0.3, the JSON request body. RFC 8259 §7 permits both the literal and the six-character spelling and requires neither (openbindings.openapi@1 §9.2, \"The JSON image of an application value\"); the engines' own documented convention is the literal one. all three characters in one string value."
+    },
+    {
+      "name": "3.0.3|json-body|key-and-value",
+      "openapi": "3.0.3",
+      "lane": "json-body",
+      "media": "application/json",
+      "cell": "key-and-value",
+      "formsJSONImage": true,
+      "document": {
+        "openapi": "3.0.3",
+        "info": {
+          "title": "JSON image case table",
+          "version": "1.0.0"
+        },
+        "paths": {
+          "/probe": {
+            "post": {
+              "operationId": "postProbe",
+              "requestBody": {
+                "required": true,
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "type": "object",
+                      "properties": {
+                        "address": {
+                          "type": "object"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "responses": {
+                "200": {
+                  "description": "ok"
+                }
+              }
+            }
+          }
+        }
+      },
+      "input": {
+        "address": {
+          "a&<>b": "1 A&<>B"
+        }
+      },
+      "expect": "{\"address\":{\"a&<>b\":\"1 A&<>B\"}}",
+      "basis": "3.0.3, the JSON request body. RFC 8259 §7 permits both the literal and the six-character spelling and requires neither (openbindings.openapi@1 §9.2, \"The JSON image of an application value\"); the engines' own documented convention is the literal one. all three characters in the object's KEY as well as its value, which exercises the encoder's name path rather than only its string path."
+    },
+    {
+      "name": "3.1.1|multipart-part|none",
+      "openapi": "3.1.1",
+      "lane": "multipart-part",
+      "media": "multipart/form-data",
+      "cell": "none",
+      "formsJSONImage": true,
+      "document": {
+        "openapi": "3.1.1",
+        "info": {
+          "title": "JSON image case table",
+          "version": "1.0.0"
+        },
+        "paths": {
+          "/probe": {
+            "post": {
+              "operationId": "postProbe",
+              "requestBody": {
+                "required": true,
+                "content": {
+                  "multipart/form-data": {
+                    "schema": {
+                      "type": "object",
+                      "properties": {
+                        "address": {
+                          "type": "object"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "responses": {
+                "200": {
+                  "description": "ok"
+                }
+              }
+            }
+          }
+        }
+      },
+      "input": {
+        "address": {
+          "street": "1 AB"
+        }
+      },
+      "expect": "application/json:{\"street\":\"1 AB\"}",
+      "basis": "3.1.1, a multipart part whose selected part media type is JSON-family. RFC 8259 §7 permits both the literal and the six-character spelling and requires neither (openbindings.openapi@1 §9.2, \"The JSON image of an application value\"); the engines' own documented convention is the literal one. the control: no character of the class appears, so no cell of any lane may move."
+    },
+    {
+      "name": "3.1.1|multipart-part|ampersand",
+      "openapi": "3.1.1",
+      "lane": "multipart-part",
+      "media": "multipart/form-data",
+      "cell": "ampersand",
+      "formsJSONImage": true,
+      "document": {
+        "openapi": "3.1.1",
+        "info": {
+          "title": "JSON image case table",
+          "version": "1.0.0"
+        },
+        "paths": {
+          "/probe": {
+            "post": {
+              "operationId": "postProbe",
+              "requestBody": {
+                "required": true,
+                "content": {
+                  "multipart/form-data": {
+                    "schema": {
+                      "type": "object",
+                      "properties": {
+                        "address": {
+                          "type": "object"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "responses": {
+                "200": {
+                  "description": "ok"
+                }
+              }
+            }
+          }
+        }
+      },
+      "input": {
+        "address": {
+          "street": "1 A&B"
+        }
+      },
+      "expect": "application/json:{\"street\":\"1 A&B\"}",
+      "basis": "3.1.1, a multipart part whose selected part media type is JSON-family. RFC 8259 §7 permits both the literal and the six-character spelling and requires neither (openbindings.openapi@1 §9.2, \"The JSON image of an application value\"); the engines' own documented convention is the literal one. AMPERSAND U+0026, inside RFC 8259 §7's `unescaped = %x20-21 / %x23-5B / %x5D-10FFFF`."
+    },
+    {
+      "name": "3.1.1|multipart-part|less-than",
+      "openapi": "3.1.1",
+      "lane": "multipart-part",
+      "media": "multipart/form-data",
+      "cell": "less-than",
+      "formsJSONImage": true,
+      "document": {
+        "openapi": "3.1.1",
+        "info": {
+          "title": "JSON image case table",
+          "version": "1.0.0"
+        },
+        "paths": {
+          "/probe": {
+            "post": {
+              "operationId": "postProbe",
+              "requestBody": {
+                "required": true,
+                "content": {
+                  "multipart/form-data": {
+                    "schema": {
+                      "type": "object",
+                      "properties": {
+                        "address": {
+                          "type": "object"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "responses": {
+                "200": {
+                  "description": "ok"
+                }
+              }
+            }
+          }
+        }
+      },
+      "input": {
+        "address": {
+          "street": "1 A<B"
+        }
+      },
+      "expect": "application/json:{\"street\":\"1 A<B\"}",
+      "basis": "3.1.1, a multipart part whose selected part media type is JSON-family. RFC 8259 §7 permits both the literal and the six-character spelling and requires neither (openbindings.openapi@1 §9.2, \"The JSON image of an application value\"); the engines' own documented convention is the literal one. LESS-THAN SIGN U+003C, inside the same production."
+    },
+    {
+      "name": "3.1.1|multipart-part|greater-than",
+      "openapi": "3.1.1",
+      "lane": "multipart-part",
+      "media": "multipart/form-data",
+      "cell": "greater-than",
+      "formsJSONImage": true,
+      "document": {
+        "openapi": "3.1.1",
+        "info": {
+          "title": "JSON image case table",
+          "version": "1.0.0"
+        },
+        "paths": {
+          "/probe": {
+            "post": {
+              "operationId": "postProbe",
+              "requestBody": {
+                "required": true,
+                "content": {
+                  "multipart/form-data": {
+                    "schema": {
+                      "type": "object",
+                      "properties": {
+                        "address": {
+                          "type": "object"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "responses": {
+                "200": {
+                  "description": "ok"
+                }
+              }
+            }
+          }
+        }
+      },
+      "input": {
+        "address": {
+          "street": "1 A>B"
+        }
+      },
+      "expect": "application/json:{\"street\":\"1 A>B\"}",
+      "basis": "3.1.1, a multipart part whose selected part media type is JSON-family. RFC 8259 §7 permits both the literal and the six-character spelling and requires neither (openbindings.openapi@1 §9.2, \"The JSON image of an application value\"); the engines' own documented convention is the literal one. GREATER-THAN SIGN U+003E, inside the same production."
+    },
+    {
+      "name": "3.1.1|multipart-part|all-three",
+      "openapi": "3.1.1",
+      "lane": "multipart-part",
+      "media": "multipart/form-data",
+      "cell": "all-three",
+      "formsJSONImage": true,
+      "document": {
+        "openapi": "3.1.1",
+        "info": {
+          "title": "JSON image case table",
+          "version": "1.0.0"
+        },
+        "paths": {
+          "/probe": {
+            "post": {
+              "operationId": "postProbe",
+              "requestBody": {
+                "required": true,
+                "content": {
+                  "multipart/form-data": {
+                    "schema": {
+                      "type": "object",
+                      "properties": {
+                        "address": {
+                          "type": "object"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "responses": {
+                "200": {
+                  "description": "ok"
+                }
+              }
+            }
+          }
+        }
+      },
+      "input": {
+        "address": {
+          "street": "1 A&<>B"
+        }
+      },
+      "expect": "application/json:{\"street\":\"1 A&<>B\"}",
+      "basis": "3.1.1, a multipart part whose selected part media type is JSON-family. RFC 8259 §7 permits both the literal and the six-character spelling and requires neither (openbindings.openapi@1 §9.2, \"The JSON image of an application value\"); the engines' own documented convention is the literal one. all three characters in one string value."
+    },
+    {
+      "name": "3.1.1|multipart-part|key-and-value",
+      "openapi": "3.1.1",
+      "lane": "multipart-part",
+      "media": "multipart/form-data",
+      "cell": "key-and-value",
+      "formsJSONImage": true,
+      "document": {
+        "openapi": "3.1.1",
+        "info": {
+          "title": "JSON image case table",
+          "version": "1.0.0"
+        },
+        "paths": {
+          "/probe": {
+            "post": {
+              "operationId": "postProbe",
+              "requestBody": {
+                "required": true,
+                "content": {
+                  "multipart/form-data": {
+                    "schema": {
+                      "type": "object",
+                      "properties": {
+                        "address": {
+                          "type": "object"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "responses": {
+                "200": {
+                  "description": "ok"
+                }
+              }
+            }
+          }
+        }
+      },
+      "input": {
+        "address": {
+          "a&<>b": "1 A&<>B"
+        }
+      },
+      "expect": "application/json:{\"a&<>b\":\"1 A&<>B\"}",
+      "basis": "3.1.1, a multipart part whose selected part media type is JSON-family. RFC 8259 §7 permits both the literal and the six-character spelling and requires neither (openbindings.openapi@1 §9.2, \"The JSON image of an application value\"); the engines' own documented convention is the literal one. all three characters in the object's KEY as well as its value, which exercises the encoder's name path rather than only its string path."
+    },
+    {
+      "name": "3.1.1|parameter-content|none",
+      "openapi": "3.1.1",
+      "lane": "parameter-content",
+      "media": "application/json",
+      "cell": "none",
+      "formsJSONImage": true,
+      "document": {
+        "openapi": "3.1.1",
+        "info": {
+          "title": "JSON image case table",
+          "version": "1.0.0"
+        },
+        "paths": {
+          "/probe": {
+            "post": {
+              "operationId": "postProbe",
+              "parameters": [
+                {
+                  "name": "X-Address",
+                  "in": "header",
+                  "required": true,
+                  "content": {
+                    "application/json": {
+                      "schema": {
+                        "type": "object"
+                      }
+                    }
+                  }
+                }
+              ],
+              "responses": {
+                "200": {
+                  "description": "ok"
+                }
+              }
+            }
+          }
+        }
+      },
+      "input": {
+        "X-Address": {
+          "street": "1 AB"
+        }
+      },
+      "expect": "X-Address: {\"street\":\"1 AB\"}",
+      "basis": "3.1.1, a `content`-form parameter declaring a JSON media type (§9.1, OAPI-P-02). RFC 8259 §7 permits both the literal and the six-character spelling and requires neither (openbindings.openapi@1 §9.2, \"The JSON image of an application value\"); the engines' own documented convention is the literal one. the control: no character of the class appears, so no cell of any lane may move."
+    },
+    {
+      "name": "3.1.1|parameter-content|ampersand",
+      "openapi": "3.1.1",
+      "lane": "parameter-content",
+      "media": "application/json",
+      "cell": "ampersand",
+      "formsJSONImage": true,
+      "document": {
+        "openapi": "3.1.1",
+        "info": {
+          "title": "JSON image case table",
+          "version": "1.0.0"
+        },
+        "paths": {
+          "/probe": {
+            "post": {
+              "operationId": "postProbe",
+              "parameters": [
+                {
+                  "name": "X-Address",
+                  "in": "header",
+                  "required": true,
+                  "content": {
+                    "application/json": {
+                      "schema": {
+                        "type": "object"
+                      }
+                    }
+                  }
+                }
+              ],
+              "responses": {
+                "200": {
+                  "description": "ok"
+                }
+              }
+            }
+          }
+        }
+      },
+      "input": {
+        "X-Address": {
+          "street": "1 A&B"
+        }
+      },
+      "expect": "X-Address: {\"street\":\"1 A&B\"}",
+      "basis": "3.1.1, a `content`-form parameter declaring a JSON media type (§9.1, OAPI-P-02). RFC 8259 §7 permits both the literal and the six-character spelling and requires neither (openbindings.openapi@1 §9.2, \"The JSON image of an application value\"); the engines' own documented convention is the literal one. AMPERSAND U+0026, inside RFC 8259 §7's `unescaped = %x20-21 / %x23-5B / %x5D-10FFFF`."
+    },
+    {
+      "name": "3.1.1|parameter-content|less-than",
+      "openapi": "3.1.1",
+      "lane": "parameter-content",
+      "media": "application/json",
+      "cell": "less-than",
+      "formsJSONImage": true,
+      "document": {
+        "openapi": "3.1.1",
+        "info": {
+          "title": "JSON image case table",
+          "version": "1.0.0"
+        },
+        "paths": {
+          "/probe": {
+            "post": {
+              "operationId": "postProbe",
+              "parameters": [
+                {
+                  "name": "X-Address",
+                  "in": "header",
+                  "required": true,
+                  "content": {
+                    "application/json": {
+                      "schema": {
+                        "type": "object"
+                      }
+                    }
+                  }
+                }
+              ],
+              "responses": {
+                "200": {
+                  "description": "ok"
+                }
+              }
+            }
+          }
+        }
+      },
+      "input": {
+        "X-Address": {
+          "street": "1 A<B"
+        }
+      },
+      "expect": "X-Address: {\"street\":\"1 A<B\"}",
+      "basis": "3.1.1, a `content`-form parameter declaring a JSON media type (§9.1, OAPI-P-02). RFC 8259 §7 permits both the literal and the six-character spelling and requires neither (openbindings.openapi@1 §9.2, \"The JSON image of an application value\"); the engines' own documented convention is the literal one. LESS-THAN SIGN U+003C, inside the same production."
+    },
+    {
+      "name": "3.1.1|parameter-content|greater-than",
+      "openapi": "3.1.1",
+      "lane": "parameter-content",
+      "media": "application/json",
+      "cell": "greater-than",
+      "formsJSONImage": true,
+      "document": {
+        "openapi": "3.1.1",
+        "info": {
+          "title": "JSON image case table",
+          "version": "1.0.0"
+        },
+        "paths": {
+          "/probe": {
+            "post": {
+              "operationId": "postProbe",
+              "parameters": [
+                {
+                  "name": "X-Address",
+                  "in": "header",
+                  "required": true,
+                  "content": {
+                    "application/json": {
+                      "schema": {
+                        "type": "object"
+                      }
+                    }
+                  }
+                }
+              ],
+              "responses": {
+                "200": {
+                  "description": "ok"
+                }
+              }
+            }
+          }
+        }
+      },
+      "input": {
+        "X-Address": {
+          "street": "1 A>B"
+        }
+      },
+      "expect": "X-Address: {\"street\":\"1 A>B\"}",
+      "basis": "3.1.1, a `content`-form parameter declaring a JSON media type (§9.1, OAPI-P-02). RFC 8259 §7 permits both the literal and the six-character spelling and requires neither (openbindings.openapi@1 §9.2, \"The JSON image of an application value\"); the engines' own documented convention is the literal one. GREATER-THAN SIGN U+003E, inside the same production."
+    },
+    {
+      "name": "3.1.1|parameter-content|all-three",
+      "openapi": "3.1.1",
+      "lane": "parameter-content",
+      "media": "application/json",
+      "cell": "all-three",
+      "formsJSONImage": true,
+      "document": {
+        "openapi": "3.1.1",
+        "info": {
+          "title": "JSON image case table",
+          "version": "1.0.0"
+        },
+        "paths": {
+          "/probe": {
+            "post": {
+              "operationId": "postProbe",
+              "parameters": [
+                {
+                  "name": "X-Address",
+                  "in": "header",
+                  "required": true,
+                  "content": {
+                    "application/json": {
+                      "schema": {
+                        "type": "object"
+                      }
+                    }
+                  }
+                }
+              ],
+              "responses": {
+                "200": {
+                  "description": "ok"
+                }
+              }
+            }
+          }
+        }
+      },
+      "input": {
+        "X-Address": {
+          "street": "1 A&<>B"
+        }
+      },
+      "expect": "X-Address: {\"street\":\"1 A&<>B\"}",
+      "basis": "3.1.1, a `content`-form parameter declaring a JSON media type (§9.1, OAPI-P-02). RFC 8259 §7 permits both the literal and the six-character spelling and requires neither (openbindings.openapi@1 §9.2, \"The JSON image of an application value\"); the engines' own documented convention is the literal one. all three characters in one string value."
+    },
+    {
+      "name": "3.1.1|parameter-content|key-and-value",
+      "openapi": "3.1.1",
+      "lane": "parameter-content",
+      "media": "application/json",
+      "cell": "key-and-value",
+      "formsJSONImage": true,
+      "document": {
+        "openapi": "3.1.1",
+        "info": {
+          "title": "JSON image case table",
+          "version": "1.0.0"
+        },
+        "paths": {
+          "/probe": {
+            "post": {
+              "operationId": "postProbe",
+              "parameters": [
+                {
+                  "name": "X-Address",
+                  "in": "header",
+                  "required": true,
+                  "content": {
+                    "application/json": {
+                      "schema": {
+                        "type": "object"
+                      }
+                    }
+                  }
+                }
+              ],
+              "responses": {
+                "200": {
+                  "description": "ok"
+                }
+              }
+            }
+          }
+        }
+      },
+      "input": {
+        "X-Address": {
+          "a&<>b": "1 A&<>B"
+        }
+      },
+      "expect": "X-Address: {\"a&<>b\":\"1 A&<>B\"}",
+      "basis": "3.1.1, a `content`-form parameter declaring a JSON media type (§9.1, OAPI-P-02). RFC 8259 §7 permits both the literal and the six-character spelling and requires neither (openbindings.openapi@1 §9.2, \"The JSON image of an application value\"); the engines' own documented convention is the literal one. all three characters in the object's KEY as well as its value, which exercises the encoder's name path rather than only its string path."
+    },
+    {
+      "name": "3.1.1|urlencoded-content|none",
+      "openapi": "3.1.1",
+      "lane": "urlencoded-content",
+      "media": "application/x-www-form-urlencoded",
+      "cell": "none",
+      "formsJSONImage": true,
+      "document": {
+        "openapi": "3.1.1",
+        "info": {
+          "title": "JSON image case table",
+          "version": "1.0.0"
+        },
+        "paths": {
+          "/probe": {
+            "post": {
+              "operationId": "postProbe",
+              "requestBody": {
+                "required": true,
+                "content": {
+                  "application/x-www-form-urlencoded": {
+                    "schema": {
+                      "type": "object",
+                      "properties": {
+                        "address": {
+                          "type": "object"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "responses": {
+                "200": {
+                  "description": "ok"
+                }
+              }
+            }
+          }
+        }
+      },
+      "input": {
+        "address": {
+          "street": "1 AB"
+        }
+      },
+      "expect": "address=%7B%22street%22%3A%221+AB%22%7D",
+      "basis": "3.1.1, an application/x-www-form-urlencoded property on the CONTENT path. RFC 8259 §7 permits both the literal and the six-character spelling and requires neither (openbindings.openapi@1 §9.2, \"The JSON image of an application value\"); the engines' own documented convention is the literal one. The JSON image is then percent-encoded by the CONTENT-path escaper — RFC 1866 §8.2.1 with RFC 1738 §2.2, space to '+' — which this table does not reopen. the control: no character of the class appears, so no cell of any lane may move."
+    },
+    {
+      "name": "3.1.1|urlencoded-content|ampersand",
+      "openapi": "3.1.1",
+      "lane": "urlencoded-content",
+      "media": "application/x-www-form-urlencoded",
+      "cell": "ampersand",
+      "formsJSONImage": true,
+      "document": {
+        "openapi": "3.1.1",
+        "info": {
+          "title": "JSON image case table",
+          "version": "1.0.0"
+        },
+        "paths": {
+          "/probe": {
+            "post": {
+              "operationId": "postProbe",
+              "requestBody": {
+                "required": true,
+                "content": {
+                  "application/x-www-form-urlencoded": {
+                    "schema": {
+                      "type": "object",
+                      "properties": {
+                        "address": {
+                          "type": "object"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "responses": {
+                "200": {
+                  "description": "ok"
+                }
+              }
+            }
+          }
+        }
+      },
+      "input": {
+        "address": {
+          "street": "1 A&B"
+        }
+      },
+      "expect": "address=%7B%22street%22%3A%221+A%26B%22%7D",
+      "basis": "3.1.1, an application/x-www-form-urlencoded property on the CONTENT path. RFC 8259 §7 permits both the literal and the six-character spelling and requires neither (openbindings.openapi@1 §9.2, \"The JSON image of an application value\"); the engines' own documented convention is the literal one. The JSON image is then percent-encoded by the CONTENT-path escaper — RFC 1866 §8.2.1 with RFC 1738 §2.2, space to '+' — which this table does not reopen. AMPERSAND U+0026, inside RFC 8259 §7's `unescaped = %x20-21 / %x23-5B / %x5D-10FFFF`."
+    },
+    {
+      "name": "3.1.1|urlencoded-content|less-than",
+      "openapi": "3.1.1",
+      "lane": "urlencoded-content",
+      "media": "application/x-www-form-urlencoded",
+      "cell": "less-than",
+      "formsJSONImage": true,
+      "document": {
+        "openapi": "3.1.1",
+        "info": {
+          "title": "JSON image case table",
+          "version": "1.0.0"
+        },
+        "paths": {
+          "/probe": {
+            "post": {
+              "operationId": "postProbe",
+              "requestBody": {
+                "required": true,
+                "content": {
+                  "application/x-www-form-urlencoded": {
+                    "schema": {
+                      "type": "object",
+                      "properties": {
+                        "address": {
+                          "type": "object"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "responses": {
+                "200": {
+                  "description": "ok"
+                }
+              }
+            }
+          }
+        }
+      },
+      "input": {
+        "address": {
+          "street": "1 A<B"
+        }
+      },
+      "expect": "address=%7B%22street%22%3A%221+A%3CB%22%7D",
+      "basis": "3.1.1, an application/x-www-form-urlencoded property on the CONTENT path. RFC 8259 §7 permits both the literal and the six-character spelling and requires neither (openbindings.openapi@1 §9.2, \"The JSON image of an application value\"); the engines' own documented convention is the literal one. The JSON image is then percent-encoded by the CONTENT-path escaper — RFC 1866 §8.2.1 with RFC 1738 §2.2, space to '+' — which this table does not reopen. LESS-THAN SIGN U+003C, inside the same production."
+    },
+    {
+      "name": "3.1.1|urlencoded-content|greater-than",
+      "openapi": "3.1.1",
+      "lane": "urlencoded-content",
+      "media": "application/x-www-form-urlencoded",
+      "cell": "greater-than",
+      "formsJSONImage": true,
+      "document": {
+        "openapi": "3.1.1",
+        "info": {
+          "title": "JSON image case table",
+          "version": "1.0.0"
+        },
+        "paths": {
+          "/probe": {
+            "post": {
+              "operationId": "postProbe",
+              "requestBody": {
+                "required": true,
+                "content": {
+                  "application/x-www-form-urlencoded": {
+                    "schema": {
+                      "type": "object",
+                      "properties": {
+                        "address": {
+                          "type": "object"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "responses": {
+                "200": {
+                  "description": "ok"
+                }
+              }
+            }
+          }
+        }
+      },
+      "input": {
+        "address": {
+          "street": "1 A>B"
+        }
+      },
+      "expect": "address=%7B%22street%22%3A%221+A%3EB%22%7D",
+      "basis": "3.1.1, an application/x-www-form-urlencoded property on the CONTENT path. RFC 8259 §7 permits both the literal and the six-character spelling and requires neither (openbindings.openapi@1 §9.2, \"The JSON image of an application value\"); the engines' own documented convention is the literal one. The JSON image is then percent-encoded by the CONTENT-path escaper — RFC 1866 §8.2.1 with RFC 1738 §2.2, space to '+' — which this table does not reopen. GREATER-THAN SIGN U+003E, inside the same production."
+    },
+    {
+      "name": "3.1.1|urlencoded-content|all-three",
+      "openapi": "3.1.1",
+      "lane": "urlencoded-content",
+      "media": "application/x-www-form-urlencoded",
+      "cell": "all-three",
+      "formsJSONImage": true,
+      "document": {
+        "openapi": "3.1.1",
+        "info": {
+          "title": "JSON image case table",
+          "version": "1.0.0"
+        },
+        "paths": {
+          "/probe": {
+            "post": {
+              "operationId": "postProbe",
+              "requestBody": {
+                "required": true,
+                "content": {
+                  "application/x-www-form-urlencoded": {
+                    "schema": {
+                      "type": "object",
+                      "properties": {
+                        "address": {
+                          "type": "object"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "responses": {
+                "200": {
+                  "description": "ok"
+                }
+              }
+            }
+          }
+        }
+      },
+      "input": {
+        "address": {
+          "street": "1 A&<>B"
+        }
+      },
+      "expect": "address=%7B%22street%22%3A%221+A%26%3C%3EB%22%7D",
+      "basis": "3.1.1, an application/x-www-form-urlencoded property on the CONTENT path. RFC 8259 §7 permits both the literal and the six-character spelling and requires neither (openbindings.openapi@1 §9.2, \"The JSON image of an application value\"); the engines' own documented convention is the literal one. The JSON image is then percent-encoded by the CONTENT-path escaper — RFC 1866 §8.2.1 with RFC 1738 §2.2, space to '+' — which this table does not reopen. all three characters in one string value."
+    },
+    {
+      "name": "3.1.1|urlencoded-content|key-and-value",
+      "openapi": "3.1.1",
+      "lane": "urlencoded-content",
+      "media": "application/x-www-form-urlencoded",
+      "cell": "key-and-value",
+      "formsJSONImage": true,
+      "document": {
+        "openapi": "3.1.1",
+        "info": {
+          "title": "JSON image case table",
+          "version": "1.0.0"
+        },
+        "paths": {
+          "/probe": {
+            "post": {
+              "operationId": "postProbe",
+              "requestBody": {
+                "required": true,
+                "content": {
+                  "application/x-www-form-urlencoded": {
+                    "schema": {
+                      "type": "object",
+                      "properties": {
+                        "address": {
+                          "type": "object"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "responses": {
+                "200": {
+                  "description": "ok"
+                }
+              }
+            }
+          }
+        }
+      },
+      "input": {
+        "address": {
+          "a&<>b": "1 A&<>B"
+        }
+      },
+      "expect": "address=%7B%22a%26%3C%3Eb%22%3A%221+A%26%3C%3EB%22%7D",
+      "basis": "3.1.1, an application/x-www-form-urlencoded property on the CONTENT path. RFC 8259 §7 permits both the literal and the six-character spelling and requires neither (openbindings.openapi@1 §9.2, \"The JSON image of an application value\"); the engines' own documented convention is the literal one. The JSON image is then percent-encoded by the CONTENT-path escaper — RFC 1866 §8.2.1 with RFC 1738 §2.2, space to '+' — which this table does not reopen. all three characters in the object's KEY as well as its value, which exercises the encoder's name path rather than only its string path."
+    },
+    {
+      "name": "3.0.4|urlencoded-content|none",
+      "openapi": "3.0.4",
+      "lane": "urlencoded-content",
+      "media": "application/x-www-form-urlencoded",
+      "cell": "none",
+      "formsJSONImage": true,
+      "document": {
+        "openapi": "3.0.4",
+        "info": {
+          "title": "JSON image case table",
+          "version": "1.0.0"
+        },
+        "paths": {
+          "/probe": {
+            "post": {
+              "operationId": "postProbe",
+              "requestBody": {
+                "required": true,
+                "content": {
+                  "application/x-www-form-urlencoded": {
+                    "schema": {
+                      "type": "object",
+                      "properties": {
+                        "address": {
+                          "type": "object"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "responses": {
+                "200": {
+                  "description": "ok"
+                }
+              }
+            }
+          }
+        }
+      },
+      "input": {
+        "address": {
+          "street": "1 AB"
+        }
+      },
+      "expect": "address=%7B%22street%22%3A%221+AB%22%7D",
+      "basis": "3.0.4, an application/x-www-form-urlencoded property on the CONTENT path. RFC 8259 §7 permits both the literal and the six-character spelling and requires neither (openbindings.openapi@1 §9.2, \"The JSON image of an application value\"); the engines' own documented convention is the literal one. The JSON image is then percent-encoded by the CONTENT-path escaper — RFC 1866 §8.2.1 with RFC 1738 §2.2, space to '+' — which this table does not reopen. the control: no character of the class appears, so no cell of any lane may move."
+    },
+    {
+      "name": "3.0.4|urlencoded-content|ampersand",
+      "openapi": "3.0.4",
+      "lane": "urlencoded-content",
+      "media": "application/x-www-form-urlencoded",
+      "cell": "ampersand",
+      "formsJSONImage": true,
+      "document": {
+        "openapi": "3.0.4",
+        "info": {
+          "title": "JSON image case table",
+          "version": "1.0.0"
+        },
+        "paths": {
+          "/probe": {
+            "post": {
+              "operationId": "postProbe",
+              "requestBody": {
+                "required": true,
+                "content": {
+                  "application/x-www-form-urlencoded": {
+                    "schema": {
+                      "type": "object",
+                      "properties": {
+                        "address": {
+                          "type": "object"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "responses": {
+                "200": {
+                  "description": "ok"
+                }
+              }
+            }
+          }
+        }
+      },
+      "input": {
+        "address": {
+          "street": "1 A&B"
+        }
+      },
+      "expect": "address=%7B%22street%22%3A%221+A%26B%22%7D",
+      "basis": "3.0.4, an application/x-www-form-urlencoded property on the CONTENT path. RFC 8259 §7 permits both the literal and the six-character spelling and requires neither (openbindings.openapi@1 §9.2, \"The JSON image of an application value\"); the engines' own documented convention is the literal one. The JSON image is then percent-encoded by the CONTENT-path escaper — RFC 1866 §8.2.1 with RFC 1738 §2.2, space to '+' — which this table does not reopen. AMPERSAND U+0026, inside RFC 8259 §7's `unescaped = %x20-21 / %x23-5B / %x5D-10FFFF`."
+    },
+    {
+      "name": "3.0.4|urlencoded-content|less-than",
+      "openapi": "3.0.4",
+      "lane": "urlencoded-content",
+      "media": "application/x-www-form-urlencoded",
+      "cell": "less-than",
+      "formsJSONImage": true,
+      "document": {
+        "openapi": "3.0.4",
+        "info": {
+          "title": "JSON image case table",
+          "version": "1.0.0"
+        },
+        "paths": {
+          "/probe": {
+            "post": {
+              "operationId": "postProbe",
+              "requestBody": {
+                "required": true,
+                "content": {
+                  "application/x-www-form-urlencoded": {
+                    "schema": {
+                      "type": "object",
+                      "properties": {
+                        "address": {
+                          "type": "object"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "responses": {
+                "200": {
+                  "description": "ok"
+                }
+              }
+            }
+          }
+        }
+      },
+      "input": {
+        "address": {
+          "street": "1 A<B"
+        }
+      },
+      "expect": "address=%7B%22street%22%3A%221+A%3CB%22%7D",
+      "basis": "3.0.4, an application/x-www-form-urlencoded property on the CONTENT path. RFC 8259 §7 permits both the literal and the six-character spelling and requires neither (openbindings.openapi@1 §9.2, \"The JSON image of an application value\"); the engines' own documented convention is the literal one. The JSON image is then percent-encoded by the CONTENT-path escaper — RFC 1866 §8.2.1 with RFC 1738 §2.2, space to '+' — which this table does not reopen. LESS-THAN SIGN U+003C, inside the same production."
+    },
+    {
+      "name": "3.0.4|urlencoded-content|greater-than",
+      "openapi": "3.0.4",
+      "lane": "urlencoded-content",
+      "media": "application/x-www-form-urlencoded",
+      "cell": "greater-than",
+      "formsJSONImage": true,
+      "document": {
+        "openapi": "3.0.4",
+        "info": {
+          "title": "JSON image case table",
+          "version": "1.0.0"
+        },
+        "paths": {
+          "/probe": {
+            "post": {
+              "operationId": "postProbe",
+              "requestBody": {
+                "required": true,
+                "content": {
+                  "application/x-www-form-urlencoded": {
+                    "schema": {
+                      "type": "object",
+                      "properties": {
+                        "address": {
+                          "type": "object"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "responses": {
+                "200": {
+                  "description": "ok"
+                }
+              }
+            }
+          }
+        }
+      },
+      "input": {
+        "address": {
+          "street": "1 A>B"
+        }
+      },
+      "expect": "address=%7B%22street%22%3A%221+A%3EB%22%7D",
+      "basis": "3.0.4, an application/x-www-form-urlencoded property on the CONTENT path. RFC 8259 §7 permits both the literal and the six-character spelling and requires neither (openbindings.openapi@1 §9.2, \"The JSON image of an application value\"); the engines' own documented convention is the literal one. The JSON image is then percent-encoded by the CONTENT-path escaper — RFC 1866 §8.2.1 with RFC 1738 §2.2, space to '+' — which this table does not reopen. GREATER-THAN SIGN U+003E, inside the same production."
+    },
+    {
+      "name": "3.0.4|urlencoded-content|all-three",
+      "openapi": "3.0.4",
+      "lane": "urlencoded-content",
+      "media": "application/x-www-form-urlencoded",
+      "cell": "all-three",
+      "formsJSONImage": true,
+      "document": {
+        "openapi": "3.0.4",
+        "info": {
+          "title": "JSON image case table",
+          "version": "1.0.0"
+        },
+        "paths": {
+          "/probe": {
+            "post": {
+              "operationId": "postProbe",
+              "requestBody": {
+                "required": true,
+                "content": {
+                  "application/x-www-form-urlencoded": {
+                    "schema": {
+                      "type": "object",
+                      "properties": {
+                        "address": {
+                          "type": "object"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "responses": {
+                "200": {
+                  "description": "ok"
+                }
+              }
+            }
+          }
+        }
+      },
+      "input": {
+        "address": {
+          "street": "1 A&<>B"
+        }
+      },
+      "expect": "address=%7B%22street%22%3A%221+A%26%3C%3EB%22%7D",
+      "basis": "3.0.4, an application/x-www-form-urlencoded property on the CONTENT path. RFC 8259 §7 permits both the literal and the six-character spelling and requires neither (openbindings.openapi@1 §9.2, \"The JSON image of an application value\"); the engines' own documented convention is the literal one. The JSON image is then percent-encoded by the CONTENT-path escaper — RFC 1866 §8.2.1 with RFC 1738 §2.2, space to '+' — which this table does not reopen. all three characters in one string value."
+    },
+    {
+      "name": "3.0.4|urlencoded-content|key-and-value",
+      "openapi": "3.0.4",
+      "lane": "urlencoded-content",
+      "media": "application/x-www-form-urlencoded",
+      "cell": "key-and-value",
+      "formsJSONImage": true,
+      "document": {
+        "openapi": "3.0.4",
+        "info": {
+          "title": "JSON image case table",
+          "version": "1.0.0"
+        },
+        "paths": {
+          "/probe": {
+            "post": {
+              "operationId": "postProbe",
+              "requestBody": {
+                "required": true,
+                "content": {
+                  "application/x-www-form-urlencoded": {
+                    "schema": {
+                      "type": "object",
+                      "properties": {
+                        "address": {
+                          "type": "object"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "responses": {
+                "200": {
+                  "description": "ok"
+                }
+              }
+            }
+          }
+        }
+      },
+      "input": {
+        "address": {
+          "a&<>b": "1 A&<>B"
+        }
+      },
+      "expect": "address=%7B%22a%26%3C%3Eb%22%3A%221+A%26%3C%3EB%22%7D",
+      "basis": "3.0.4, an application/x-www-form-urlencoded property on the CONTENT path. RFC 8259 §7 permits both the literal and the six-character spelling and requires neither (openbindings.openapi@1 §9.2, \"The JSON image of an application value\"); the engines' own documented convention is the literal one. The JSON image is then percent-encoded by the CONTENT-path escaper — RFC 1866 §8.2.1 with RFC 1738 §2.2, space to '+' — which this table does not reopen. all three characters in the object's KEY as well as its value, which exercises the encoder's name path rather than only its string path."
+    },
+    {
+      "name": "3.0.3|urlencoded-style|none",
+      "openapi": "3.0.3",
+      "lane": "urlencoded-style",
+      "media": "application/x-www-form-urlencoded",
+      "cell": "none",
+      "formsJSONImage": false,
+      "document": {
+        "openapi": "3.0.3",
+        "info": {
+          "title": "JSON image case table",
+          "version": "1.0.0"
+        },
+        "paths": {
+          "/probe": {
+            "post": {
+              "operationId": "postProbe",
+              "requestBody": {
+                "required": true,
+                "content": {
+                  "application/x-www-form-urlencoded": {
+                    "schema": {
+                      "type": "object",
+                      "properties": {
+                        "address": {
+                          "type": "object"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "responses": {
+                "200": {
+                  "description": "ok"
+                }
+              }
+            }
+          }
+        }
+      },
+      "input": {
+        "address": {
+          "street": "1 AB"
+        }
+      },
+      "expect": "street=1%20AB",
+      "basis": "3.0.3, the urlencoded STYLE path — the control, which forms no JSON image. CONTROL — RFC 6570 expansion with allowReserved absent, i.e. RFC 3986's unreserved set and %20 for a space. This lane expands the object's members as separate name=value pairs and never forms a JSON image, so no cell of it may move. the control: no character of the class appears, so no cell of any lane may move."
+    },
+    {
+      "name": "3.0.3|urlencoded-style|ampersand",
+      "openapi": "3.0.3",
+      "lane": "urlencoded-style",
+      "media": "application/x-www-form-urlencoded",
+      "cell": "ampersand",
+      "formsJSONImage": false,
+      "document": {
+        "openapi": "3.0.3",
+        "info": {
+          "title": "JSON image case table",
+          "version": "1.0.0"
+        },
+        "paths": {
+          "/probe": {
+            "post": {
+              "operationId": "postProbe",
+              "requestBody": {
+                "required": true,
+                "content": {
+                  "application/x-www-form-urlencoded": {
+                    "schema": {
+                      "type": "object",
+                      "properties": {
+                        "address": {
+                          "type": "object"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "responses": {
+                "200": {
+                  "description": "ok"
+                }
+              }
+            }
+          }
+        }
+      },
+      "input": {
+        "address": {
+          "street": "1 A&B"
+        }
+      },
+      "expect": "street=1%20A%26B",
+      "basis": "3.0.3, the urlencoded STYLE path — the control, which forms no JSON image. CONTROL — RFC 6570 expansion with allowReserved absent, i.e. RFC 3986's unreserved set and %20 for a space. This lane expands the object's members as separate name=value pairs and never forms a JSON image, so no cell of it may move. AMPERSAND U+0026, inside RFC 8259 §7's `unescaped = %x20-21 / %x23-5B / %x5D-10FFFF`."
+    },
+    {
+      "name": "3.0.3|urlencoded-style|less-than",
+      "openapi": "3.0.3",
+      "lane": "urlencoded-style",
+      "media": "application/x-www-form-urlencoded",
+      "cell": "less-than",
+      "formsJSONImage": false,
+      "document": {
+        "openapi": "3.0.3",
+        "info": {
+          "title": "JSON image case table",
+          "version": "1.0.0"
+        },
+        "paths": {
+          "/probe": {
+            "post": {
+              "operationId": "postProbe",
+              "requestBody": {
+                "required": true,
+                "content": {
+                  "application/x-www-form-urlencoded": {
+                    "schema": {
+                      "type": "object",
+                      "properties": {
+                        "address": {
+                          "type": "object"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "responses": {
+                "200": {
+                  "description": "ok"
+                }
+              }
+            }
+          }
+        }
+      },
+      "input": {
+        "address": {
+          "street": "1 A<B"
+        }
+      },
+      "expect": "street=1%20A%3CB",
+      "basis": "3.0.3, the urlencoded STYLE path — the control, which forms no JSON image. CONTROL — RFC 6570 expansion with allowReserved absent, i.e. RFC 3986's unreserved set and %20 for a space. This lane expands the object's members as separate name=value pairs and never forms a JSON image, so no cell of it may move. LESS-THAN SIGN U+003C, inside the same production."
+    },
+    {
+      "name": "3.0.3|urlencoded-style|greater-than",
+      "openapi": "3.0.3",
+      "lane": "urlencoded-style",
+      "media": "application/x-www-form-urlencoded",
+      "cell": "greater-than",
+      "formsJSONImage": false,
+      "document": {
+        "openapi": "3.0.3",
+        "info": {
+          "title": "JSON image case table",
+          "version": "1.0.0"
+        },
+        "paths": {
+          "/probe": {
+            "post": {
+              "operationId": "postProbe",
+              "requestBody": {
+                "required": true,
+                "content": {
+                  "application/x-www-form-urlencoded": {
+                    "schema": {
+                      "type": "object",
+                      "properties": {
+                        "address": {
+                          "type": "object"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "responses": {
+                "200": {
+                  "description": "ok"
+                }
+              }
+            }
+          }
+        }
+      },
+      "input": {
+        "address": {
+          "street": "1 A>B"
+        }
+      },
+      "expect": "street=1%20A%3EB",
+      "basis": "3.0.3, the urlencoded STYLE path — the control, which forms no JSON image. CONTROL — RFC 6570 expansion with allowReserved absent, i.e. RFC 3986's unreserved set and %20 for a space. This lane expands the object's members as separate name=value pairs and never forms a JSON image, so no cell of it may move. GREATER-THAN SIGN U+003E, inside the same production."
+    },
+    {
+      "name": "3.0.3|urlencoded-style|all-three",
+      "openapi": "3.0.3",
+      "lane": "urlencoded-style",
+      "media": "application/x-www-form-urlencoded",
+      "cell": "all-three",
+      "formsJSONImage": false,
+      "document": {
+        "openapi": "3.0.3",
+        "info": {
+          "title": "JSON image case table",
+          "version": "1.0.0"
+        },
+        "paths": {
+          "/probe": {
+            "post": {
+              "operationId": "postProbe",
+              "requestBody": {
+                "required": true,
+                "content": {
+                  "application/x-www-form-urlencoded": {
+                    "schema": {
+                      "type": "object",
+                      "properties": {
+                        "address": {
+                          "type": "object"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "responses": {
+                "200": {
+                  "description": "ok"
+                }
+              }
+            }
+          }
+        }
+      },
+      "input": {
+        "address": {
+          "street": "1 A&<>B"
+        }
+      },
+      "expect": "street=1%20A%26%3C%3EB",
+      "basis": "3.0.3, the urlencoded STYLE path — the control, which forms no JSON image. CONTROL — RFC 6570 expansion with allowReserved absent, i.e. RFC 3986's unreserved set and %20 for a space. This lane expands the object's members as separate name=value pairs and never forms a JSON image, so no cell of it may move. all three characters in one string value."
+    },
+    {
+      "name": "3.0.3|urlencoded-style|key-and-value",
+      "openapi": "3.0.3",
+      "lane": "urlencoded-style",
+      "media": "application/x-www-form-urlencoded",
+      "cell": "key-and-value",
+      "formsJSONImage": false,
+      "document": {
+        "openapi": "3.0.3",
+        "info": {
+          "title": "JSON image case table",
+          "version": "1.0.0"
+        },
+        "paths": {
+          "/probe": {
+            "post": {
+              "operationId": "postProbe",
+              "requestBody": {
+                "required": true,
+                "content": {
+                  "application/x-www-form-urlencoded": {
+                    "schema": {
+                      "type": "object",
+                      "properties": {
+                        "address": {
+                          "type": "object"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "responses": {
+                "200": {
+                  "description": "ok"
+                }
+              }
+            }
+          }
+        }
+      },
+      "input": {
+        "address": {
+          "a&<>b": "1 A&<>B"
+        }
+      },
+      "expect": "a%26%3C%3Eb=1%20A%26%3C%3EB",
+      "basis": "3.0.3, the urlencoded STYLE path — the control, which forms no JSON image. CONTROL — RFC 6570 expansion with allowReserved absent, i.e. RFC 3986's unreserved set and %20 for a space. This lane expands the object's members as separate name=value pairs and never forms a JSON image, so no cell of it may move. all three characters in the object's KEY as well as its value, which exercises the encoder's name path rather than only its string path."
+    }
+  ]
+}
