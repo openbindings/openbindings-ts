@@ -254,7 +254,7 @@ export type { InvocationErrorCode } from "./errcodes.js";
 
 export { dereference } from "./deref.js";
 
-export { checkAssertions, matchProcessorObservation } from "./processor-scenarios.js";
+export { matchProcessorObservation } from "./processor-scenarios.js";
 export type {
   ProcessorScenarioFile,
   ProcessorScenario,
@@ -267,10 +267,8 @@ export type {
 } from "./processor-scenarios.js";
 
 export {
-  SYNTHESIS_SCENARIO_FORMAT,
   matchSynthesisScenario,
   normalizeSynthesis,
-  parseSynthesisScenarioFile,
   verifySynthesisScenario,
 } from "./synthesis-scenarios.js";
 export type {
