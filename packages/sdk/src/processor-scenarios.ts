@@ -96,8 +96,19 @@ function matchAlternative(expected: ProcessorExpected, got: ProcessorObservation
   if (got.phase !== expected.phase) {
     throw new Error(`phase = ${quoted(got.phase)}, want ${quoted(expected.phase)}`);
   }
-  for (const assertion of expected.assertions) {
-    const selected = selectPointer(got.data, assertion.path);
+  checkAssertions(got.data, expected.assertions);
+}
+
+/**
+ * Applies every assertion to one JSON-shaped root value. Exported so the other
+ * portable-corpus runners in this package evaluate the shared assertion
+ * vocabulary through this evaluator instead of reimplementing it: the synthesis
+ * corpus addresses an emitted OBI document with the same five verbs this corpus
+ * addresses a normalized observation with.
+ */
+export function checkAssertions(root: unknown, assertions: ProcessorAssertion[]): void {
+  for (const assertion of assertions) {
+    const selected = selectPointer(root, assertion.path);
     if (assertion.absent === true) {
       if (selected.present) {
         throw new Error(`${assertion.path} is present (${printable(selected.value)}), want absent`);

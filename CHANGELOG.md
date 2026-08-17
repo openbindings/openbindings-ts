@@ -4,6 +4,20 @@
 
 ### Changed
 
+- **The portable synthesis runner implements
+  `openbindings.binding-spec-synthesis-scenarios@3`, and now checks the format
+  at runtime at all.** The previous artifact was a compile-time literal type
+  that is erased, so a corpus revision this runner does not implement ran
+  silently and reported green — the exact failure a revision bump exists to
+  prevent, and the Go twin had checked at runtime since `@1`. New exports:
+  `parseSynthesisScenarioFile`, which refuses an unrecognized `format` or a
+  mismatched family, and `SYNTHESIS_SCENARIO_FORMAT`. A scenario's optional
+  `assertions` are evaluated against the emitted OBI document through
+  `checkAssertions`, lifted out of the processor-scenario runner and exported so
+  both portable corpora share one evaluator instead of two. A scenario's
+  optional `resources` are served offline by the family adapter, through the
+  `fetch` seam `OpenAPISynthesizer` already takes.
+
 - **Synthesis coverage: an `invalid` entry now clears `fullyRepresented`.**
   Every non-represented status — lossy, excluded, invalid,
   implementation-unsupported — clears the derived flag; previously an
