@@ -4,6 +4,24 @@
 
 ### Changed
 
+- **The portable synthesis corpus runs at
+  `openbindings.binding-spec-synthesis-scenarios@3`, and this runner checks the
+  corpus revision at all.** It previously performed **no** runtime format check:
+  the only artifact was a compile-time literal type, which is erased, and the
+  family tests cast with `as SynthesisScenarioFile` — so a corpus revision this
+  runner does not implement would have run silently and reported green, the
+  precise failure an identifier bump exists to prevent. `@openbindings/sdk` now
+  exports `parseSynthesisScenarioFile` and `SYNTHESIS_SCENARIO_FORMAT`, and the
+  seven family tests load through it. It also exports `fixedSynthesizer`, the
+  twin of `synthesisscenarios.Fixed` in openbindings-go: the six families whose
+  corpus sources are self-contained refuse a scenario declaring `resources`
+  rather than composing one document and reporting green, and they call it
+  outside `verifySynthesisScenario` so the refusal can never be absorbed as a
+  satisfied `refused` outcome. A scenario's optional `assertions` are evaluated
+  against the emitted OBI document through `checkAssertions`, lifted out of the
+  processor-scenario runner and exported so both portable corpora share one
+  evaluator.
+
 - **Synthesis coverage: an `invalid` entry now clears `fullyRepresented`.**
   Every non-represented status — lossy, excluded, invalid,
   implementation-unsupported — clears the derived flag; previously an
