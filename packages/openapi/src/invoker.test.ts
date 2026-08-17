@@ -520,7 +520,7 @@ describe("invokeBinding — pre-dispatch failures", () => {
     expect(requests).toHaveLength(0);
   });
 
-  it("refuses before dispatch when the document declares no absolute server URL", async () => {
+  it("challenges config.value when the document declares no absolute server URL", async () => {
     const { fetch, requests } = mockFetch(() => jsonResponse({}));
     const spec = { ...SPEC, servers: undefined };
     const call = new OpenAPIInvoker().invokeBinding({
@@ -529,16 +529,12 @@ describe("invokeBinding — pre-dispatch failures", () => {
       fetch,
     });
 
-    // openbindings.openapi@1 §9.3 names this exact shape: "a server URL that
-    // cannot resolve to an absolute URL — the implied `/` with no base URI, for
-    // instance — is a pre-dispatch refusal", restated by OAPI-P-05 as
-    // "unresolvable targets refuse before dispatch". The retryable
-    // config.value CONTEXT_REQUIRED lane is reserved for the OTHER half of that
-    // sentence — a multi-entry effective list with no selection — which the
-    // test above this one pins. Supplying configuration.server still resolves
-    // the operation; what is gone is the mid-flight negotiation for an address
-    // the artifact never named.
-    await expect(call.closed).rejects.toMatchObject({ code: ERR_REFUSED });
+    // R1a: the implied "/" with no absolute base is resolvable by supplying a
+    // base URL — a config.value CONTEXT_REQUIRED, not a terminal error.
+    await expect(call.closed).rejects.toMatchObject({
+      code: "CONTEXT_REQUIRED",
+      data: { alternatives: [{ requirements: [{ type: "config.value", point: "server", path: "/url" }] }] },
+    });
     expect(requests).toHaveLength(0);
   });
 

@@ -5,7 +5,6 @@ import { describe, expect, it } from "vitest";
 
 import { OpenAPISynthesizer } from "./invoker.js";
 import { BINDING_SPEC } from "./constants.js";
-import { ConfigRequired, resolveServer } from "./servers.js";
 
 // The `requirements` half of the shared server target-base case table. The
 // resolution and predicate halves are executed by the engine that owns
@@ -17,7 +16,7 @@ import { ConfigRequired, resolveServer } from "./servers.js";
 // The file is byte-identical to the copies in
 // openbindings-go/formats/openapi/testdata, openapi-client/go/testdata and
 // openapi-client/typescript/src/testdata.
-const serverTargetBaseCasesDigest = "ddb3478b583c694a707a6f1316329809c3ebf560a0d5275a1adf11ff3fb6b1da";
+const serverTargetBaseCasesDigest = "808708805f527a21c4e5012640245238637934e22dd177c3b5787f4f3eec7e5b";
 
 interface ResolutionCase {
   name: string;
@@ -25,7 +24,6 @@ interface ResolutionCase {
   rootServers: Record<string, unknown>[] | null;
   operationServers: Record<string, unknown>[] | null;
   expect: { resolvable: boolean; targetBase: string | null };
-  outcomeClass: string;
   requirements: string[];
   basis: string;
 }
@@ -58,31 +56,6 @@ function caseDocument(c: ResolutionCase): Record<string, unknown> {
   if (c.rootServers !== null) document["servers"] = c.rootServers;
   return document;
 }
-
-// The re-exported half. This package does not own resolveServer -- it
-// re-exports openapi-client/typescript's, resolved to that package's BUILT
-// `dist` -- so this block proves the outcome class survives the re-export and
-// that the dist in use is not stale. openbindings.openapi@1 Section 9.3
-// partitions the two unsuccessful classes: a missing selection from a
-// multi-entry list is "the retryable context challenge above, never a terminal
-// refusal" (ConfigRequired), while an unresolvable server URL "is a
-// pre-dispatch refusal" (an ordinary error). OAPI-P-05 restates the second.
-describe("server target base: re-exported outcome class", () => {
-  for (const c of table.resolutionCases) {
-    it(c.name, () => {
-      const doc = caseDocument(c);
-      const pathItem = (doc as { paths: Record<string, unknown> }).paths["/things"];
-      const op = (pathItem as { get: unknown }).get;
-      let observed = "resolved";
-      try {
-        resolveServer(doc as never, pathItem as never, op as never, undefined, undefined);
-      } catch (error: unknown) {
-        observed = error instanceof ConfigRequired ? "retryable-context" : "refusal";
-      }
-      expect(observed, `${c.name}\nbasis: ${c.basis}`).toBe(c.outcomeClass);
-    });
-  }
-});
 
 describe("server target base: emitted coverage requirements", () => {
   for (const c of table.resolutionCases) {

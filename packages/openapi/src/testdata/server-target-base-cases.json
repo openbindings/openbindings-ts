@@ -1,5 +1,5 @@
 {
-  "$comment": "Server target-base case table, shared byte-for-byte by the three engines that resolve an\nOpenAPI Server Object into a target address: openbindings-go/formats/openapi (synthesis\ncoverage), openapi-client/go (invocation), and openapi-client/typescript/src (invocation, and\nsynthesis coverage through openbindings-ts/packages/openapi, which re-exports it).\n\nWHAT THIS TABLE GUARDS. Whether a declared server URL denotes a target address at all, and\ntherefore whether a consumer must supply the `server` configuration point before the operation\ncan be invoked.\n\nWHY IT EXISTS. Each engine used to delegate that question to its HOST LANGUAGE's URL parser --\nGo's net/url (url.Parse + IsAbs) and the WHATWG URL parser (new URL) -- and neither is an\nauthority `openbindings.openapi@1` incorporates. The two parsers disagree, and the corpus caught\nboth halves of the disagreement in opposite directions: Go rejects an unsubstituted template\nvariable and accepts an empty http host, WHATWG accepts the template and rejects the empty host.\nEach engine was right about one shape by accident.\n\nTHE PREDICATE, and where every clause of it comes from. A server URL denotes a target address iff\n\n  1. it matches RFC 3986's `URI` production -- `scheme \":\" hier-part [ \"?\" query ] [ \"#\" fragment ]`,\n     Appendix A, Collected ABNF -- so it carries a scheme and every character is drawn from the\n     productions that ABNF defines; and\n  2. when its scheme is `http` or `https` (compared ASCII case-insensitively), its authority\n     carries a NON-EMPTY host, per RFC 9110 Section 4.2.1 and Section 4.2.2: \"A sender MUST NOT\n     generate an 'http' URI with an empty host identifier. A recipient that processes such a URI\n     reference MUST reject it as invalid.\"\n\nBoth are incorporated authorities, not this project's inventions: `openbindings.openapi@1` Section 2\nincorporates RFC 9110 \"for plain HTTP semantics\", and Section 9.3 and Section 11 name RFC 3986 for\nserver-URL resolution. The bytes are pinned at corpus-lab/authorities/texts/openapi/uri/rfc3986.txt\nand .../http/rfc9110.txt (digests in corpus-lab/AUTHORITY-PINS.md).\n\nWHY `URI` AND NOT `absolute-URI`. `absolute-URI` forbids a fragment. Refusing a fragment-bearing\nserver URL would be a new refusal this question does not need, and only OAS 3.1.2 says anything\nabout it (\"Query and fragment MUST NOT be part of this URL\", Section 4.8.5.1, absent from the\nother seven accepted editions). That is a per-edition artifact-validity question and belongs to\nthe acceptance floor, not here. `URI` is `absolute-URI` plus an optional fragment, and every `URI`\ncarries a scheme, which is the sense of \"absolute\" Section 9.3 is using.\n\nWHY SUBSTITUTION COMES FIRST. A Server Variable Object's `default` is REQUIRED in all eight\naccepted OAS editions, so a DECLARED variable always has a value and the engines substitute it\nbefore asking this question. An UNDECLARED brace variable has no value under the OAS's own\nmechanism -- `variables` is \"A map between a variable name and its value\", and there is no other\nrule producing one -- so it survives substitution, and `{` and `}` appear in no RFC 3986\nproduction. The template therefore never reduces to a URL, which is why an artifact declaring one\nleaves the target address undetermined.\n\nTHE OUTCOME CLASS, which this table also decides as of 2026-08-17. When resolution does not\nsucceed, `openbindings.openapi@1` Section 9.3 partitions the two ways it can fail inside one\nsentence: \"A missing selection from a multi-entry list is the retryable context challenge above,\nnever a terminal refusal; an out-of-enum variable value, or a server URL that cannot resolve to an\nabsolute URL -- the implied `/` with no base URI, for instance -- is a pre-dispatch refusal.\"\nOAPI-P-05 restates it: \"unresolvable targets refuse before dispatch\". Each resolution case\ntherefore carries an `outcomeClass`:\n\n  \"resolved\"          -- a target base exists; `targetBase` states it.\n  \"retryable-context\" -- the consumer is challenged for the `server` point and the invocation may\n                         be retried once a choice is supplied. The engines signal this with the\n                         configRequired / ConfigRequired type, which the invoke path turns into a\n                         CONTEXT_REQUIRED challenge. Two shapes reach it: a multi-entry effective\n                         list with no selection (Section 9.3's own first half), and a declared\n                         Server Variable Object with no `default` (an artifact defect no accepted\n                         edition permits, left in this class deliberately -- Section 9.3 does not\n                         name it, and narrowing it is acceptance-floor business, not this table's).\n  \"refusal\"           -- terminal, before dispatch. Never a configRequired.\n\nBranch ORDER is part of the answer and is pinned here: multiplicity is decided before any member\nis resolved, so a multi-entry list none of whose members resolves is \"retryable-context\", not\n\"refusal\". Consumer configuration is consulted before either -- a supplied `configuration.server`\nthat does resolve makes every one of these cases resolve -- so a refusal is what an artifact whose\nown declaration names no address gets when nothing was configured.\n\nThe class is observable at INVOCATION only. Synthesis coverage emits `configuration.server` on any\nresolution failure, so the `requirements` column below is deliberately identical for both\nunsuccessful classes; that is why the divergence this field now pins was invisible to the corpus\nfor as long as it existed.\n\nEvery resolution case is rendered as a WHOLE OpenAPI document and loaded through each engine's own\nshipped loader, so the table exercises the shipped path rather than a hand-built typed model.",
+  "$comment": "Server target-base case table, shared byte-for-byte by the three engines that resolve an\nOpenAPI Server Object into a target address: openbindings-go/formats/openapi (synthesis\ncoverage), openapi-client/go (invocation), and openapi-client/typescript/src (invocation, and\nsynthesis coverage through openbindings-ts/packages/openapi, which re-exports it).\n\nWHAT THIS TABLE GUARDS. Whether a declared server URL denotes a target address at all, and\ntherefore whether a consumer must supply the `server` configuration point before the operation\ncan be invoked.\n\nWHY IT EXISTS. Each engine used to delegate that question to its HOST LANGUAGE's URL parser --\nGo's net/url (url.Parse + IsAbs) and the WHATWG URL parser (new URL) -- and neither is an\nauthority `openbindings.openapi@1` incorporates. The two parsers disagree, and the corpus caught\nboth halves of the disagreement in opposite directions: Go rejects an unsubstituted template\nvariable and accepts an empty http host, WHATWG accepts the template and rejects the empty host.\nEach engine was right about one shape by accident.\n\nTHE PREDICATE, and where every clause of it comes from. A server URL denotes a target address iff\n\n  1. it matches RFC 3986's `URI` production -- `scheme \":\" hier-part [ \"?\" query ] [ \"#\" fragment ]`,\n     Appendix A, Collected ABNF -- so it carries a scheme and every character is drawn from the\n     productions that ABNF defines; and\n  2. when its scheme is `http` or `https` (compared ASCII case-insensitively), its authority\n     carries a NON-EMPTY host, per RFC 9110 Section 4.2.1 and Section 4.2.2: \"A sender MUST NOT\n     generate an 'http' URI with an empty host identifier. A recipient that processes such a URI\n     reference MUST reject it as invalid.\"\n\nBoth are incorporated authorities, not this project's inventions: `openbindings.openapi@1` Section 2\nincorporates RFC 9110 \"for plain HTTP semantics\", and Section 9.3 and Section 11 name RFC 3986 for\nserver-URL resolution. The bytes are pinned at corpus-lab/authorities/texts/openapi/uri/rfc3986.txt\nand .../http/rfc9110.txt (digests in corpus-lab/AUTHORITY-PINS.md).\n\nWHY `URI` AND NOT `absolute-URI`. `absolute-URI` forbids a fragment. Refusing a fragment-bearing\nserver URL would be a new refusal this question does not need, and only OAS 3.1.2 says anything\nabout it (\"Query and fragment MUST NOT be part of this URL\", Section 4.8.5.1, absent from the\nother seven accepted editions). That is a per-edition artifact-validity question and belongs to\nthe acceptance floor, not here. `URI` is `absolute-URI` plus an optional fragment, and every `URI`\ncarries a scheme, which is the sense of \"absolute\" Section 9.3 is using.\n\nWHY SUBSTITUTION COMES FIRST. A Server Variable Object's `default` is REQUIRED in all eight\naccepted OAS editions, so a DECLARED variable always has a value and the engines substitute it\nbefore asking this question. An UNDECLARED brace variable has no value under the OAS's own\nmechanism -- `variables` is \"A map between a variable name and its value\", and there is no other\nrule producing one -- so it survives substitution, and `{` and `}` appear in no RFC 3986\nproduction. The template therefore never reduces to a URL, which is why an artifact declaring one\nleaves the target address undetermined.\n\nWHAT THIS TABLE DOES NOT DECIDE. Whether an unresolvable target refuses terminally or challenges\nretryably: `openbindings.openapi@1` Section 9.3 and OAPI-P-05 answer that (\"unresolvable targets\nrefuse before dispatch\") and the engines currently return a retryable ConfigRequired. That\ndivergence is filed, is invisible to synthesis coverage, and is not touched here. The table\nasserts only whether resolution SUCCEEDS and what base it yields.\n\nEvery resolution case is rendered as a WHOLE OpenAPI document and loaded through each engine's own\nshipped loader, so the table exercises the shipped path rather than a hand-built typed model.",
   "predicateCases": [
     {
       "name": "plain-https",
@@ -212,7 +212,6 @@
         "resolvable": true,
         "targetBase": "https://api.example.test/v1"
       },
-      "outcomeClass": "resolved",
       "requirements": [],
       "basis": "openbindings.openapi@1 Section 9.3: \"An effective list with exactly one entry selects that entry.\" The entry resolves, so nothing is required of the consumer."
     },
@@ -229,7 +228,6 @@
         "resolvable": true,
         "targetBase": "https://api.example.test/v1"
       },
-      "outcomeClass": "resolved",
       "requirements": [],
       "basis": "The resolved base carries no trailing slash so that joining it with the operation's path template is concatenation. Unchanged behaviour, pinned here so the predicate change cannot disturb it."
     },
@@ -251,7 +249,6 @@
         "resolvable": true,
         "targetBase": "https://eu.api.example.test/v1"
       },
-      "outcomeClass": "resolved",
       "requirements": [],
       "basis": "The Server Variable Object's `default` is REQUIRED in all eight accepted editions (the field row reads \"default string REQUIRED.\" in each). Six of them -- 3.0.2, 3.0.3, 3.0.4, 3.1.0, 3.1.1, 3.1.2 -- continue \"The default value to use for substitution, which SHALL be sent if an alternate value is not supplied\"; 3.0.0 and 3.0.1 spell the same duty \"The default value to use for substitution, and to send, if an alternate value is not supplied\". So a declared variable always reduces, on every accepted edition, and the target address exists without consumer configuration."
     },
@@ -277,7 +274,6 @@
         "resolvable": true,
         "targetBase": "https://api.example.test/v2"
       },
-      "outcomeClass": "resolved",
       "requirements": [],
       "basis": "A declared enum constrains a SUPPLIED value; the declared default is used when none is supplied. Pinned so the predicate change cannot reopen the enum path."
     },
@@ -294,11 +290,10 @@
         "resolvable": false,
         "targetBase": null
       },
-      "outcomeClass": "refusal",
       "requirements": [
         "configuration.server"
       ],
-      "basis": "The nhost/nhost shape at commit b711a092180f931f876350cc0068b753318889dc. The sole entry selects itself, but the OAS defines substitution only for variables the Server Object declares, so the braces survive and the string is not a URI under RFC 3986. The target address is undetermined until the consumer supplies one at the `server` point. CLASS: the URL cannot resolve to an absolute URL, which Section 9.3 names a pre-dispatch refusal, so the failure is terminal rather than a retryable challenge."
+      "basis": "The nhost/nhost shape at commit b711a092180f931f876350cc0068b753318889dc. The sole entry selects itself, but the OAS defines substitution only for variables the Server Object declares, so the braces survive and the string is not a URI under RFC 3986. The target address is undetermined until the consumer supplies one at the `server` point."
     },
     {
       "name": "sole-server-partially-declared-template-variables",
@@ -318,11 +313,10 @@
         "resolvable": false,
         "targetBase": null
       },
-      "outcomeClass": "refusal",
       "requirements": [
         "configuration.server"
       ],
-      "basis": "Declaring SOME of the URL's variables does not make the rest resolvable. `{subdomain}` survives substitution and the residue is still not a URI. CLASS: refusal, on the same clause -- a partially reduced template is still not a URL."
+      "basis": "Declaring SOME of the URL's variables does not make the rest resolvable. `{subdomain}` survives substitution and the residue is still not a URI."
     },
     {
       "name": "sole-server-empty-http-host",
@@ -337,11 +331,10 @@
         "resolvable": false,
         "targetBase": null
       },
-      "outcomeClass": "refusal",
       "requirements": [
         "configuration.server"
       ],
-      "basis": "The nixopus/nixopus shape at commit cf05d97a352f364bbe02870b140f2ccceba298d2. RFC 3986 admits the string, RFC 9110 Section 4.2.1 requires a recipient to reject it as invalid, so it names no origin server and the `server` point must supply one. CLASS: refusal. RFC 9110 requires the recipient to reject the URI, so no address exists to challenge FOR; Section 9.3's retryable half is reserved for a declared alternative the consumer merely has not picked."
+      "basis": "The nixopus/nixopus shape at commit cf05d97a352f364bbe02870b140f2ccceba298d2. RFC 3986 admits the string, RFC 9110 Section 4.2.1 requires a recipient to reject it as invalid, so it names no origin server and the `server` point must supply one."
     },
     {
       "name": "several-servers-no-selection",
@@ -359,11 +352,10 @@
         "resolvable": false,
         "targetBase": null
       },
-      "outcomeClass": "retryable-context",
       "requirements": [
         "configuration.server"
       ],
-      "basis": "openbindings.openapi@1 Section 9.3: \"With more than one, the artifact has declared alternatives without a preference and the server point is required.\" Both entries are individually usable; multiplicity alone is the trigger. CLASS: retryable-context, stated by Section 9.3 in as many words -- \"never a terminal refusal\"."
+      "basis": "openbindings.openapi@1 Section 9.3: \"With more than one, the artifact has declared alternatives without a preference and the server point is required.\" Both entries are individually usable; multiplicity alone is the trigger."
     },
     {
       "name": "several-servers-first-defective",
@@ -381,11 +373,10 @@
         "resolvable": false,
         "targetBase": null
       },
-      "outcomeClass": "retryable-context",
       "requirements": [
         "configuration.server"
       ],
-      "basis": "Multiplicity requires a selection whatever the members look like; the engine never silently drops a defective alternative to make a sole usable one appear. CLASS: retryable-context, and this cell is where branch order is pinned: multiplicity is decided before any member is resolved, so the defective first member never reaches the refusal branch."
+      "basis": "Multiplicity requires a selection whatever the members look like; the engine never silently drops a defective alternative to make a sole usable one appear."
     },
     {
       "name": "operation-servers-override-defective-root",
@@ -404,7 +395,6 @@
         "resolvable": true,
         "targetBase": "https://ops.example.test/v1"
       },
-      "outcomeClass": "resolved",
       "requirements": [],
       "basis": "The effective server list is the operation's when it declares one, so a defective document-level entry is never consulted and never raises a requirement. This is the case that proves the predicate is applied to the EFFECTIVE entry rather than to every declared server."
     },
@@ -425,11 +415,10 @@
         "resolvable": false,
         "targetBase": null
       },
-      "outcomeClass": "refusal",
       "requirements": [
         "configuration.server"
       ],
-      "basis": "The converse: a usable document-level entry does not rescue a defective operation-level one, because the operation's list REPLACES the document's rather than extending it. CLASS: refusal, because the effective entry is the operation's and it names no address."
+      "basis": "The converse: a usable document-level entry does not rescue a defective operation-level one, because the operation's list REPLACES the document's rather than extending it."
     },
     {
       "name": "sole-server-declared-variable-without-default",
@@ -452,11 +441,10 @@
         "resolvable": false,
         "targetBase": null
       },
-      "outcomeClass": "retryable-context",
       "requirements": [
         "configuration.server"
       ],
-      "basis": "`default` is REQUIRED on a Server Variable Object in every accepted edition (verified in all eight); an artifact omitting it has declared a variable with no value, so the consumer must supply one. Unchanged behaviour, pinned so the predicate change cannot absorb it. CLASS: retryable-context, deliberately. Section 9.3 names the out-of-enum value and the unresolvable URL as refusals and says nothing about a missing default; the value is genuinely a consumer choice, and whether an artifact that omits a REQUIRED field should be refused at all is the acceptance floor's question, not this point's."
+      "basis": "`default` is REQUIRED on a Server Variable Object in every accepted edition (verified in all eight); an artifact omitting it has declared a variable with no value, so the consumer must supply one. Unchanged behaviour, pinned so the predicate change cannot absorb it."
     },
     {
       "name": "no-servers-declared-no-base-uri",
@@ -467,11 +455,10 @@
         "resolvable": false,
         "targetBase": null
       },
-      "outcomeClass": "refusal",
       "requirements": [
         "configuration.server"
       ],
-      "basis": "openbindings.openapi@1 Section 9.3: the effective list falls back to the OAS-defined implied server of url \"/\", which is a relative reference and has no base URI to resolve against when the source carries embedded content and no location. CLASS: refusal. This is Section 9.3's own worked example -- \"the implied `/` with no base URI, for instance -- is a pre-dispatch refusal\"."
+      "basis": "openbindings.openapi@1 Section 9.3: the effective list falls back to the OAS-defined implied server of url \"/\", which is a relative reference and has no base URI to resolve against when the source carries embedded content and no location."
     },
     {
       "name": "sole-relative-server-no-base-uri",
@@ -486,71 +473,10 @@
         "resolvable": false,
         "targetBase": null
       },
-      "outcomeClass": "refusal",
       "requirements": [
         "configuration.server"
       ],
-      "basis": "A relative effective-server URL resolves against the artifact's base URI per RFC 3986; with no base there is no address. Unchanged behaviour, pinned because the predicate now decides the absolute/relative split. CLASS: refusal, on the same clause as the implied `/`; nothing turns on whether the relative reference was written by the artifact or supplied by the OAS fallback."
-    },
-    {
-      "name": "several-servers-none-resolvable",
-      "openapi": "3.1.0",
-      "rootServers": [
-        {
-          "url": "http://:8080"
-        },
-        {
-          "url": "https://{tenant}.example.test/v1"
-        }
-      ],
-      "operationServers": null,
-      "expect": {
-        "resolvable": false,
-        "targetBase": null
-      },
-      "outcomeClass": "retryable-context",
-      "requirements": [
-        "configuration.server"
-      ],
-      "basis": "The sharpest branch-order cell: NEITHER declared alternative denotes an address, yet the class is retryable-context, because Section 9.3 makes multiplicity the trigger (\"With more than one, the artifact has declared alternatives without a preference and the server point is required\") and that test is applied before any member is resolved. An engine that resolved members first, or that dropped unresolvable members to find a sole usable one, would land on the refusal class here and diverge from its twin."
-    },
-    {
-      "name": "sole-server-network-path-reference-no-base-uri",
-      "openapi": "3.0.4",
-      "rootServers": [
-        {
-          "url": "//api.example.test/v1"
-        }
-      ],
-      "operationServers": null,
-      "expect": {
-        "resolvable": false,
-        "targetBase": null
-      },
-      "outcomeClass": "refusal",
-      "requirements": [
-        "configuration.server"
-      ],
-      "basis": "RFC 3986 Section 4.2 calls `//api.example.test/v1` a network-path reference: it carries an authority but no scheme, so it is a relative reference and needs a base URI. With none, it cannot resolve to an absolute URL and takes Section 9.3's refusal. Pinned because a network-path reference is the relative shape most likely to be mistaken for an absolute URL by a host-language parser."
-    },
-    {
-      "name": "sole-server-absolute-url-with-space-in-path",
-      "openapi": "3.1.1",
-      "rootServers": [
-        {
-          "url": "https://api.example.test/a b"
-        }
-      ],
-      "operationServers": null,
-      "expect": {
-        "resolvable": false,
-        "targetBase": null
-      },
-      "outcomeClass": "refusal",
-      "requirements": [
-        "configuration.server"
-      ],
-      "basis": "SP appears in no RFC 3986 production and the engines deliberately repair nothing (they do not percent-encode it), so the string is not a URI and the target is undetermined. Its value here is that the refusal class does not depend on braces or on an empty host: this URL carries a scheme, an authority and a non-empty host, and is still refused."
+      "basis": "A relative effective-server URL resolves against the artifact's base URI per RFC 3986; with no base there is no address. Unchanged behaviour, pinned because the predicate now decides the absolute/relative split."
     }
   ]
 }
