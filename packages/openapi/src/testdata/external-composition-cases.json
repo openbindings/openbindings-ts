@@ -1,5 +1,5 @@
 {
-  "note": "Frozen twin case table for pointer-scoped external reference composition. openbindings.openapi@1 section 6 ('Reference scope'): a reference that leaves the current document composes the value at the referenced JSON Pointer together with that value's transitive closure of references, and nothing else. Each case is a multi-document artifact plus the one verdict every engine must reach. The identical file is executed by openbindings-go's formats/openapi, by openapi-client/go, and by openbindings-ts's packages/openapi; a divergence in one fails the others' suites too. Authored from the OAS, JSON Reference and RFC 6901 text; no byte comes from a corpus specimen. ONE case is a disclosed exception to that provenance: 'pointer-below-a-reference' pins a convention of these implementations rather than an authority answer, and its own 'why' says so.",
+  "note": "Frozen twin case table for pointer-scoped external reference composition and reference traversal. openbindings.openapi@1 section 6 'Reference scope': a reference that leaves the current document composes the value at the referenced JSON Pointer together with that value's transitive closure of references, and nothing else. openbindings.openapi@1 section 6 'Reference traversal': a $ref standing in a fragment's own path is resolved and evaluation continues into the target under OAS 3.0.0-3.0.4, and is not under OAS 3.1.0-3.1.2, where the reference is unresolvable. Each case is a multi-document artifact plus the one verdict every engine must reach; the two 'same-document-pointer-below-a-reference' cases are the exception, and carry one document, because the traversal rule is a property of a fragment and the document it is evaluated against rather than of the reference having left the document. The identical file is executed by openbindings-go's formats/openapi, by openapi-client/go, and by openbindings-ts's packages/openapi; a divergence in one fails the others' suites too. Every case is authored from the OAS, JSON Reference, JSON Schema 2020-12 and RFC 6901 text; no byte comes from a corpus specimen, and no case pins an implementations' convention. The traversal authorities are quoted per edition in each engine's own reference-traversal comment and re-derived at the pinned bytes by corpus-lab/scripts/verify-pointer-below-reference-authorities.mjs.",
   "cases": [
     {
       "name": "defect-outside-the-composed-closure",
@@ -305,12 +305,207 @@
       }
     },
     {
-      "name": "pointer-below-a-reference",
-      "why": "CONVENTION, NOT AUTHORITY. Both engines reach a position that lies below a reference, and no authority decides whether they should: RFC 6901 section 4 evaluates each token against the document's contents, under which 'Alias/properties/name' denotes nothing, while JSON Reference section 4 says an implementation MAY replace a reference with the referenced value, after which it denotes the string. Neither text sequences the two. Both engines did this before pointer scope was implemented and the block preserved it rather than smuggle a new observable behavior in under a conformance fix. Pinned here so the two engines cannot drift apart while the question is open; recorded as an open item in corpus-lab/OPENAPI-RUNTIME.md.",
+      "name": "pointer-below-a-reference-3.0.0",
+      "why": "Reference traversal, FOLLOWING branch. Under OAS 3.0.0 a $ref is processed as per JSON Reference (section 4.6 'Relative References in URLs', and the Reference Object's 'The Reference Object is defined by JSON Reference and follows the same structure, behavior and rules' plus 'reference resolution is accomplished as defined by the JSON Reference specification and not by the JSON Schema specification'). JSON Reference states its own basis as transclusion (section 1), ignores every member other than $ref (section 3), and resolves to the referenced value (section 4). So a reference standing in this pointer's path is resolved and evaluation continues into the target. This is the incorporated authority's answer, not these implementations' convention.",
+      "entry": "https://composition.example/openapi.yaml",
+      "documents": {
+        "https://composition.example/openapi.yaml": {
+          "text": "openapi: 3.0.0\ninfo: {title: Entry, version: \"1\"}\nservers: [{url: \"https://api.example\"}]\npaths:\n  /items:\n    post:\n      operationId: createItem\n      requestBody:\n        required: true\n        content:\n          application/json:\n            schema: {$ref: \"./library.yaml#/components/schemas/Alias/properties/name\"}\n      responses: {\"204\": {description: ok}}\n"
+        },
+        "https://composition.example/library.yaml": {
+          "text": "openapi: 3.0.0\ninfo: {title: Library, version: \"1\"}\ncomponents:\n  schemas:\n    Alias: {$ref: \"#/components/schemas/Real\"}\n    Real:\n      type: object\n      properties:\n        name: {type: string}\n    Unused: {$ref: \"#/components/schemas/NeverDeclared\"}\n"
+        }
+      },
+      "expect": {
+        "outcome": "accepted",
+        "operations": [
+          "createItem"
+        ],
+        "values": {
+          "/operations/createItem/input/properties/body": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "pointer-below-a-reference-3.0.4",
+      "why": "Reference traversal, FOLLOWING branch. Under OAS 3.0.4 a $ref is processed as per JSON Reference (section 4.6 'Relative References in URLs', and the Reference Object's 'The Reference Object is defined by JSON Reference and follows the same structure, behavior and rules' plus 'reference resolution is accomplished as defined by the JSON Reference specification and not by the JSON Schema specification'). JSON Reference states its own basis as transclusion (section 1), ignores every member other than $ref (section 3), and resolves to the referenced value (section 4). So a reference standing in this pointer's path is resolved and evaluation continues into the target. This is the incorporated authority's answer, not these implementations' convention.",
+      "entry": "https://composition.example/openapi.yaml",
+      "documents": {
+        "https://composition.example/openapi.yaml": {
+          "text": "openapi: 3.0.4\ninfo: {title: Entry, version: \"1\"}\nservers: [{url: \"https://api.example\"}]\npaths:\n  /items:\n    post:\n      operationId: createItem\n      requestBody:\n        required: true\n        content:\n          application/json:\n            schema: {$ref: \"./library.yaml#/components/schemas/Alias/properties/name\"}\n      responses: {\"204\": {description: ok}}\n"
+        },
+        "https://composition.example/library.yaml": {
+          "text": "openapi: 3.0.4\ninfo: {title: Library, version: \"1\"}\ncomponents:\n  schemas:\n    Alias: {$ref: \"#/components/schemas/Real\"}\n    Real:\n      type: object\n      properties:\n        name: {type: string}\n    Unused: {$ref: \"#/components/schemas/NeverDeclared\"}\n"
+        }
+      },
+      "expect": {
+        "outcome": "accepted",
+        "operations": [
+          "createItem"
+        ],
+        "values": {
+          "/operations/createItem/input/properties/body": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "pointer-below-a-reference-3.1.0",
+      "why": "Reference traversal, REFUSING branch, at the SAME position as its pointer-below-a-reference-3.0.4 twin and with a byte-identical artifact apart from the declared edition. Under OAS 3.1.0 section 4.6 'Relative References in URIs', 'If the representation of the referenced document is JSON or YAML, then the fragment identifier SHOULD be interpreted as a JSON-Pointer as per [RFC6901]' — over the REFERENCED DOCUMENT — and the 3.1 Schema Object is a superset of JSON Schema 2020-12, whose section 8.2.3.1 makes $ref an applicator whose 'results are the results of the referenced schema', with the authors' note that other keywords may sit alongside it. Nothing is substituted, so the node keeps its one member, the next token identifies nothing, and RFC 6901 section 4's error condition arises. No 3.1 edition mentions JSON Reference at all.",
+      "entry": "https://composition.example/openapi.yaml",
+      "documents": {
+        "https://composition.example/openapi.yaml": {
+          "text": "openapi: 3.1.0\ninfo: {title: Entry, version: \"1\"}\nservers: [{url: \"https://api.example\"}]\npaths:\n  /items:\n    post:\n      operationId: createItem\n      requestBody:\n        required: true\n        content:\n          application/json:\n            schema: {$ref: \"./library.yaml#/components/schemas/Alias/properties/name\"}\n      responses: {\"204\": {description: ok}}\n"
+        },
+        "https://composition.example/library.yaml": {
+          "text": "openapi: 3.1.0\ninfo: {title: Library, version: \"1\"}\ncomponents:\n  schemas:\n    Alias: {$ref: \"#/components/schemas/Real\"}\n    Real:\n      type: object\n      properties:\n        name: {type: string}\n    Unused: {$ref: \"#/components/schemas/NeverDeclared\"}\n"
+        }
+      },
+      "expect": {
+        "outcome": "refused",
+        "messageContains": [
+          "is unresolvable under OAS 3.1.0",
+          "./library.yaml#/components/schemas/Alias/properties/name",
+          "token \"properties\" identifies no member"
+        ]
+      }
+    },
+    {
+      "name": "pointer-below-a-reference-3.1.1",
+      "why": "Reference traversal, REFUSING branch, at the SAME position as its pointer-below-a-reference-3.0.4 twin and with a byte-identical artifact apart from the declared edition. Under OAS 3.1.1 section 4.6 'Relative References in URIs', 'If the representation of the referenced document is JSON or YAML, then the fragment identifier SHOULD be interpreted as a JSON-Pointer as per [RFC6901]' — over the REFERENCED DOCUMENT — and the 3.1 Schema Object is a superset of JSON Schema 2020-12, whose section 8.2.3.1 makes $ref an applicator whose 'results are the results of the referenced schema', with the authors' note that other keywords may sit alongside it. Nothing is substituted, so the node keeps its one member, the next token identifies nothing, and RFC 6901 section 4's error condition arises. No 3.1 edition mentions JSON Reference at all.",
+      "entry": "https://composition.example/openapi.yaml",
+      "documents": {
+        "https://composition.example/openapi.yaml": {
+          "text": "openapi: 3.1.1\ninfo: {title: Entry, version: \"1\"}\nservers: [{url: \"https://api.example\"}]\npaths:\n  /items:\n    post:\n      operationId: createItem\n      requestBody:\n        required: true\n        content:\n          application/json:\n            schema: {$ref: \"./library.yaml#/components/schemas/Alias/properties/name\"}\n      responses: {\"204\": {description: ok}}\n"
+        },
+        "https://composition.example/library.yaml": {
+          "text": "openapi: 3.1.1\ninfo: {title: Library, version: \"1\"}\ncomponents:\n  schemas:\n    Alias: {$ref: \"#/components/schemas/Real\"}\n    Real:\n      type: object\n      properties:\n        name: {type: string}\n    Unused: {$ref: \"#/components/schemas/NeverDeclared\"}\n"
+        }
+      },
+      "expect": {
+        "outcome": "refused",
+        "messageContains": [
+          "is unresolvable under OAS 3.1.1",
+          "./library.yaml#/components/schemas/Alias/properties/name",
+          "token \"properties\" identifies no member"
+        ]
+      }
+    },
+    {
+      "name": "pointer-below-a-reference-3.1.2",
+      "why": "Reference traversal, REFUSING branch, at the SAME position as its pointer-below-a-reference-3.0.4 twin and with a byte-identical artifact apart from the declared edition. Under OAS 3.1.2 section 4.6 'Relative References in URIs', 'If the representation of the referenced document is JSON or YAML, then the fragment identifier SHOULD be interpreted as a JSON-Pointer as per [RFC6901]' — over the REFERENCED DOCUMENT — and the 3.1 Schema Object is a superset of JSON Schema 2020-12, whose section 8.2.3.1 makes $ref an applicator whose 'results are the results of the referenced schema', with the authors' note that other keywords may sit alongside it. Nothing is substituted, so the node keeps its one member, the next token identifies nothing, and RFC 6901 section 4's error condition arises. No 3.1 edition mentions JSON Reference at all.",
       "entry": "https://composition.example/openapi.yaml",
       "documents": {
         "https://composition.example/openapi.yaml": {
           "text": "openapi: 3.1.2\ninfo: {title: Entry, version: \"1\"}\nservers: [{url: \"https://api.example\"}]\npaths:\n  /items:\n    post:\n      operationId: createItem\n      requestBody:\n        required: true\n        content:\n          application/json:\n            schema: {$ref: \"./library.yaml#/components/schemas/Alias/properties/name\"}\n      responses: {\"204\": {description: ok}}\n"
+        },
+        "https://composition.example/library.yaml": {
+          "text": "openapi: 3.1.2\ninfo: {title: Library, version: \"1\"}\ncomponents:\n  schemas:\n    Alias: {$ref: \"#/components/schemas/Real\"}\n    Real:\n      type: object\n      properties:\n        name: {type: string}\n    Unused: {$ref: \"#/components/schemas/NeverDeclared\"}\n"
+        }
+      },
+      "expect": {
+        "outcome": "refused",
+        "messageContains": [
+          "is unresolvable under OAS 3.1.2",
+          "./library.yaml#/components/schemas/Alias/properties/name",
+          "token \"properties\" identifies no member"
+        ]
+      }
+    },
+    {
+      "name": "pointer-below-a-reference-inside-the-referenced-resource-3.0.4",
+      "why": "Reference traversal, FOLLOWING branch. Under OAS 3.0.4 a $ref is processed as per JSON Reference (section 4.6 'Relative References in URLs', and the Reference Object's 'The Reference Object is defined by JSON Reference and follows the same structure, behavior and rules' plus 'reference resolution is accomplished as defined by the JSON Reference specification and not by the JSON Schema specification'). JSON Reference states its own basis as transclusion (section 1), ignores every member other than $ref (section 3), and resolves to the referenced value (section 4). So a reference standing in this pointer's path is resolved and evaluation continues into the target. This is the incorporated authority's answer, not these implementations' convention. Here the pointer that runs below a reference is declared INSIDE the referenced resource and addresses that resource, not the entry document.",
+      "entry": "https://composition.example/openapi.yaml",
+      "documents": {
+        "https://composition.example/openapi.yaml": {
+          "text": "openapi: 3.0.4\ninfo: {title: Entry, version: \"1\"}\nservers: [{url: \"https://api.example\"}]\npaths:\n  /items:\n    post:\n      operationId: createItem\n      requestBody:\n        required: true\n        content:\n          application/json:\n            schema: {$ref: \"./library.yaml#/components/schemas/Wrapper\"}\n      responses: {\"204\": {description: ok}}\n"
+        },
+        "https://composition.example/library.yaml": {
+          "text": "openapi: 3.0.4\ninfo: {title: Library, version: \"1\"}\ncomponents:\n  schemas:\n    Wrapper:\n      type: object\n      properties:\n        inner: {$ref: \"#/components/schemas/Alias/properties/name\"}\n    Alias: {$ref: \"#/components/schemas/Real\"}\n    Real:\n      type: object\n      properties:\n        name: {type: string}\n"
+        }
+      },
+      "expect": {
+        "outcome": "accepted",
+        "operations": [
+          "createItem"
+        ],
+        "values": {
+          "/operations/createItem/input/properties/inner": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "pointer-below-a-reference-inside-the-referenced-resource-3.1.2",
+      "why": "Reference traversal, REFUSING branch, at the SAME position as its pointer-below-a-reference-inside-the-referenced-resource-3.0.4 twin and with a byte-identical artifact apart from the declared edition. Under OAS 3.1.2 section 4.6 'Relative References in URIs', 'If the representation of the referenced document is JSON or YAML, then the fragment identifier SHOULD be interpreted as a JSON-Pointer as per [RFC6901]' — over the REFERENCED DOCUMENT — and the 3.1 Schema Object is a superset of JSON Schema 2020-12, whose section 8.2.3.1 makes $ref an applicator whose 'results are the results of the referenced schema', with the authors' note that other keywords may sit alongside it. Nothing is substituted, so the node keeps its one member, the next token identifies nothing, and RFC 6901 section 4's error condition arises. No 3.1 edition mentions JSON Reference at all. Here the pointer that runs below a reference is declared INSIDE the referenced resource and addresses that resource, not the entry document.",
+      "entry": "https://composition.example/openapi.yaml",
+      "documents": {
+        "https://composition.example/openapi.yaml": {
+          "text": "openapi: 3.1.2\ninfo: {title: Entry, version: \"1\"}\nservers: [{url: \"https://api.example\"}]\npaths:\n  /items:\n    post:\n      operationId: createItem\n      requestBody:\n        required: true\n        content:\n          application/json:\n            schema: {$ref: \"./library.yaml#/components/schemas/Wrapper\"}\n      responses: {\"204\": {description: ok}}\n"
+        },
+        "https://composition.example/library.yaml": {
+          "text": "openapi: 3.1.2\ninfo: {title: Library, version: \"1\"}\ncomponents:\n  schemas:\n    Wrapper:\n      type: object\n      properties:\n        inner: {$ref: \"#/components/schemas/Alias/properties/name\"}\n    Alias: {$ref: \"#/components/schemas/Real\"}\n    Real:\n      type: object\n      properties:\n        name: {type: string}\n"
+        }
+      },
+      "expect": {
+        "outcome": "refused",
+        "messageContains": [
+          "is unresolvable under OAS 3.1.2",
+          "#/components/schemas/Alias/properties/name",
+          "token \"properties\" identifies no member"
+        ]
+      }
+    },
+    {
+      "name": "same-document-pointer-below-a-reference-3.0.4",
+      "why": "Reference traversal, FOLLOWING branch. Under OAS 3.0.4 a $ref is processed as per JSON Reference (section 4.6 'Relative References in URLs', and the Reference Object's 'The Reference Object is defined by JSON Reference and follows the same structure, behavior and rules' plus 'reference resolution is accomplished as defined by the JSON Reference specification and not by the JSON Schema specification'). JSON Reference states its own basis as transclusion (section 1), ignores every member other than $ref (section 3), and resolves to the referenced value (section 4). So a reference standing in this pointer's path is resolved and evaluation continues into the target. This is the incorporated authority's answer, not these implementations' convention. Single-document artifact: the rule is a property of the fragment and the document it is evaluated against, not of the reference having left the document, so the entry document's own references ask it too.",
+      "entry": "https://composition.example/openapi.yaml",
+      "documents": {
+        "https://composition.example/openapi.yaml": {
+          "text": "openapi: 3.0.4\ninfo: {title: Entry, version: \"1\"}\nservers: [{url: \"https://api.example\"}]\npaths:\n  /items:\n    post:\n      operationId: createItem\n      requestBody:\n        required: true\n        content:\n          application/json:\n            schema: {$ref: \"#/components/schemas/Alias/properties/name\"}\n      responses: {\"204\": {description: ok}}\ncomponents:\n  schemas:\n    Alias: {$ref: \"#/components/schemas/Real\"}\n    Real:\n      type: object\n      properties:\n        name: {type: string}\n"
+        }
+      },
+      "expect": {
+        "outcome": "accepted",
+        "operations": [
+          "createItem"
+        ],
+        "values": {
+          "/operations/createItem/input/properties/body": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "same-document-pointer-below-a-reference-3.1.2",
+      "why": "Reference traversal, REFUSING branch, at the SAME position as its same-document-pointer-below-a-reference-3.0.4 twin and with a byte-identical artifact apart from the declared edition. Under OAS 3.1.2 section 4.6 'Relative References in URIs', 'If the representation of the referenced document is JSON or YAML, then the fragment identifier SHOULD be interpreted as a JSON-Pointer as per [RFC6901]' — over the REFERENCED DOCUMENT — and the 3.1 Schema Object is a superset of JSON Schema 2020-12, whose section 8.2.3.1 makes $ref an applicator whose 'results are the results of the referenced schema', with the authors' note that other keywords may sit alongside it. Nothing is substituted, so the node keeps its one member, the next token identifies nothing, and RFC 6901 section 4's error condition arises. No 3.1 edition mentions JSON Reference at all. Single-document artifact, for the reason its 3.0.4 twin gives.",
+      "entry": "https://composition.example/openapi.yaml",
+      "documents": {
+        "https://composition.example/openapi.yaml": {
+          "text": "openapi: 3.1.2\ninfo: {title: Entry, version: \"1\"}\nservers: [{url: \"https://api.example\"}]\npaths:\n  /items:\n    post:\n      operationId: createItem\n      requestBody:\n        required: true\n        content:\n          application/json:\n            schema: {$ref: \"#/components/schemas/Alias/properties/name\"}\n      responses: {\"204\": {description: ok}}\ncomponents:\n  schemas:\n    Alias: {$ref: \"#/components/schemas/Real\"}\n    Real:\n      type: object\n      properties:\n        name: {type: string}\n"
+        }
+      },
+      "expect": {
+        "outcome": "refused",
+        "messageContains": [
+          "is unresolvable under OAS 3.1.2",
+          "#/components/schemas/Alias/properties/name",
+          "token \"properties\" identifies no member"
+        ]
+      }
+    },
+    {
+      "name": "deep-pointer-with-no-reference-in-its-path-3.1.2",
+      "why": "Negative control for the refusing branch. The same depth of pointer, the same edition and the same library, but every node on the path is spelled out, so no token is ever looked up inside a $ref object and RFC 6901 section 4 resolves a concrete value for every token. An engine that refused deep pointers on the 3.1 line would fail here.",
+      "entry": "https://composition.example/openapi.yaml",
+      "documents": {
+        "https://composition.example/openapi.yaml": {
+          "text": "openapi: 3.1.2\ninfo: {title: Entry, version: \"1\"}\nservers: [{url: \"https://api.example\"}]\npaths:\n  /items:\n    post:\n      operationId: createItem\n      requestBody:\n        required: true\n        content:\n          application/json:\n            schema: {$ref: \"./library.yaml#/components/schemas/Real/properties/name\"}\n      responses: {\"204\": {description: ok}}\n"
         },
         "https://composition.example/library.yaml": {
           "text": "openapi: 3.1.2\ninfo: {title: Library, version: \"1\"}\ncomponents:\n  schemas:\n    Alias: {$ref: \"#/components/schemas/Real\"}\n    Real:\n      type: object\n      properties:\n        name: {type: string}\n    Unused: {$ref: \"#/components/schemas/NeverDeclared\"}\n"
@@ -323,6 +518,30 @@
         ],
         "values": {
           "/operations/createItem/input/properties/body": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "pointer-lands-on-a-reference-3.1.2",
+      "why": "Negative control for the refusing branch. The pointer's last token lands ON the reference object rather than below it, so no token is ever looked up inside a $ref object; resolving that reference is ordinary reference resolution, which the 3.1 line does not change. An engine that refused whenever a $ref appeared anywhere near a pointer would fail here.",
+      "entry": "https://composition.example/openapi.yaml",
+      "documents": {
+        "https://composition.example/openapi.yaml": {
+          "text": "openapi: 3.1.2\ninfo: {title: Entry, version: \"1\"}\nservers: [{url: \"https://api.example\"}]\npaths:\n  /items:\n    post:\n      operationId: createItem\n      requestBody:\n        required: true\n        content:\n          application/json:\n            schema: {$ref: \"./library.yaml#/components/schemas/Alias\"}\n      responses: {\"204\": {description: ok}}\n"
+        },
+        "https://composition.example/library.yaml": {
+          "text": "openapi: 3.1.2\ninfo: {title: Library, version: \"1\"}\ncomponents:\n  schemas:\n    Alias: {$ref: \"#/components/schemas/Real\"}\n    Real:\n      type: object\n      properties:\n        name: {type: string}\n    Unused: {$ref: \"#/components/schemas/NeverDeclared\"}\n"
+        }
+      },
+      "expect": {
+        "outcome": "accepted",
+        "operations": [
+          "createItem"
+        ],
+        "values": {
+          "/operations/createItem/input/properties/name": {
             "type": "string"
           }
         }
