@@ -847,6 +847,150 @@
           }
         }
       }
+    },
+    {
+      "name": "pointer-into-a-reference-sibling-3.0.0",
+      "why": "Reference traversal, FOLLOWING branch, where the reference ALSO declares the pointer's next token. Under OAS 3.0.0-3.0.4 the Reference Object is defined by JSON Reference, whose section 3 says 'Any members other than \"$ref\" in a JSON Reference object SHALL be ignored' — so the node has no denotable member named properties at all, the token cannot address the sibling, and evaluation continues into the referenced value exactly as it does when no sibling is declared. Retention follows the same reading: the closure composes the reference standing in the pointer's path, so the reference's own target is served with it.",
+      "entry": "https://composition.example/openapi.yaml",
+      "documents": {
+        "https://composition.example/openapi.yaml": {
+          "text": "openapi: 3.0.0\ninfo: {title: Entry, version: \"1\"}\nservers: [{url: \"https://api.example\"}]\npaths:\n  /items:\n    post:\n      operationId: createItem\n      requestBody:\n        required: true\n        content:\n          application/json:\n            schema:\n              type: object\n              properties:\n                pick: {$ref: \"./library.yaml#/components/schemas/Alias/properties/name\"}\n      responses: {\"204\": {description: ok}}\n"
+        },
+        "https://composition.example/library.yaml": {
+          "text": "openapi: 3.0.0\ninfo: {title: Library, version: \"1\"}\ncomponents:\n  schemas:\n    Alias:\n      $ref: \"#/components/schemas/Real\"\n      properties:\n        name: {type: string, title: sibling}\n    Real:\n      type: object\n      properties:\n        name: {type: integer, title: target}\n"
+        }
+      },
+      "expect": {
+        "outcome": "accepted",
+        "operations": [
+          "createItem"
+        ],
+        "values": {
+          "/operations/createItem/input/properties/pick": {
+            "type": "integer",
+            "title": "target"
+          }
+        }
+      }
+    },
+    {
+      "name": "pointer-into-a-reference-sibling-3.0.4",
+      "why": "Reference traversal, FOLLOWING branch, where the reference ALSO declares the pointer's next token. Under OAS 3.0.0-3.0.4 the Reference Object is defined by JSON Reference, whose section 3 says 'Any members other than \"$ref\" in a JSON Reference object SHALL be ignored' — so the node has no denotable member named properties at all, the token cannot address the sibling, and evaluation continues into the referenced value exactly as it does when no sibling is declared. Retention follows the same reading: the closure composes the reference standing in the pointer's path, so the reference's own target is served with it.",
+      "entry": "https://composition.example/openapi.yaml",
+      "documents": {
+        "https://composition.example/openapi.yaml": {
+          "text": "openapi: 3.0.4\ninfo: {title: Entry, version: \"1\"}\nservers: [{url: \"https://api.example\"}]\npaths:\n  /items:\n    post:\n      operationId: createItem\n      requestBody:\n        required: true\n        content:\n          application/json:\n            schema:\n              type: object\n              properties:\n                pick: {$ref: \"./library.yaml#/components/schemas/Alias/properties/name\"}\n      responses: {\"204\": {description: ok}}\n"
+        },
+        "https://composition.example/library.yaml": {
+          "text": "openapi: 3.0.4\ninfo: {title: Library, version: \"1\"}\ncomponents:\n  schemas:\n    Alias:\n      $ref: \"#/components/schemas/Real\"\n      properties:\n        name: {type: string, title: sibling}\n    Real:\n      type: object\n      properties:\n        name: {type: integer, title: target}\n"
+        }
+      },
+      "expect": {
+        "outcome": "accepted",
+        "operations": [
+          "createItem"
+        ],
+        "values": {
+          "/operations/createItem/input/properties/pick": {
+            "type": "integer",
+            "title": "target"
+          }
+        }
+      }
+    },
+    {
+      "name": "pointer-into-a-reference-sibling-3.1.0",
+      "why": "The SAME artifact apart from the declared edition, on the branch where the sibling is denotable. The 3.1 Schema Object is a superset of JSON Schema 2020-12, whose section 8.2.3.1 note has 'other keywords can appear alongside of \"$ref\" in the same schema object', so the node keeps its own members and the token names one of them. Nothing is substituted, so the composed value is that member and the node's own $ref is outside the closure section 6 defines.",
+      "entry": "https://composition.example/openapi.yaml",
+      "documents": {
+        "https://composition.example/openapi.yaml": {
+          "text": "openapi: 3.1.0\ninfo: {title: Entry, version: \"1\"}\nservers: [{url: \"https://api.example\"}]\npaths:\n  /items:\n    post:\n      operationId: createItem\n      requestBody:\n        required: true\n        content:\n          application/json:\n            schema:\n              type: object\n              properties:\n                pick: {$ref: \"./library.yaml#/components/schemas/Alias/properties/name\"}\n      responses: {\"204\": {description: ok}}\n"
+        },
+        "https://composition.example/library.yaml": {
+          "text": "openapi: 3.1.0\ninfo: {title: Library, version: \"1\"}\ncomponents:\n  schemas:\n    Alias:\n      $ref: \"#/components/schemas/Real\"\n      properties:\n        name: {type: string, title: sibling}\n    Real:\n      type: object\n      properties:\n        name: {type: integer, title: target}\n"
+        }
+      },
+      "expect": {
+        "outcome": "accepted",
+        "operations": [
+          "createItem"
+        ],
+        "values": {
+          "/operations/createItem/input/properties/pick": {
+            "type": "string",
+            "title": "sibling"
+          }
+        }
+      }
+    },
+    {
+      "name": "pointer-into-a-reference-sibling-3.1.2",
+      "why": "The SAME artifact apart from the declared edition, on the branch where the sibling is denotable. The 3.1 Schema Object is a superset of JSON Schema 2020-12, whose section 8.2.3.1 note has 'other keywords can appear alongside of \"$ref\" in the same schema object', so the node keeps its own members and the token names one of them. Nothing is substituted, so the composed value is that member and the node's own $ref is outside the closure section 6 defines.",
+      "entry": "https://composition.example/openapi.yaml",
+      "documents": {
+        "https://composition.example/openapi.yaml": {
+          "text": "openapi: 3.1.2\ninfo: {title: Entry, version: \"1\"}\nservers: [{url: \"https://api.example\"}]\npaths:\n  /items:\n    post:\n      operationId: createItem\n      requestBody:\n        required: true\n        content:\n          application/json:\n            schema:\n              type: object\n              properties:\n                pick: {$ref: \"./library.yaml#/components/schemas/Alias/properties/name\"}\n      responses: {\"204\": {description: ok}}\n"
+        },
+        "https://composition.example/library.yaml": {
+          "text": "openapi: 3.1.2\ninfo: {title: Library, version: \"1\"}\ncomponents:\n  schemas:\n    Alias:\n      $ref: \"#/components/schemas/Real\"\n      properties:\n        name: {type: string, title: sibling}\n    Real:\n      type: object\n      properties:\n        name: {type: integer, title: target}\n"
+        }
+      },
+      "expect": {
+        "outcome": "accepted",
+        "operations": [
+          "createItem"
+        ],
+        "values": {
+          "/operations/createItem/input/properties/pick": {
+            "type": "string",
+            "title": "sibling"
+          }
+        }
+      }
+    },
+    {
+      "name": "reference-a-sibling-pointer-composes-is-inside-the-closure-3.0.4",
+      "why": "The retention consequence of the FOLLOWING branch, stated as a defect. The reference standing in the pointer's path is what the pointer runs into on the 3.0 line, so it is composed, so its dangling target is a defect INSIDE the closure and the source is unresolvable. Its 3.1.2 twin below is byte-identical apart from the declared edition and resolves.",
+      "entry": "https://composition.example/openapi.yaml",
+      "documents": {
+        "https://composition.example/openapi.yaml": {
+          "text": "openapi: 3.0.4\ninfo: {title: Entry, version: \"1\"}\nservers: [{url: \"https://api.example\"}]\npaths:\n  /items:\n    post:\n      operationId: createItem\n      requestBody:\n        required: true\n        content:\n          application/json:\n            schema:\n              type: object\n              properties:\n                pick: {$ref: \"./library.yaml#/components/schemas/Alias/properties/name\"}\n      responses: {\"204\": {description: ok}}\n"
+        },
+        "https://composition.example/library.yaml": {
+          "text": "openapi: 3.0.4\ninfo: {title: Library, version: \"1\"}\ncomponents:\n  schemas:\n    Alias:\n      $ref: \"#/components/schemas/NeverDeclared\"\n      properties:\n        name: {type: string, title: sibling}\n"
+        }
+      },
+      "expect": {
+        "outcome": "refused",
+        "messageContains": [
+          "./library.yaml#/components/schemas/Alias/properties/name"
+        ]
+      }
+    },
+    {
+      "name": "reference-a-sibling-pointer-walks-past-is-outside-the-closure-3.1.2",
+      "why": "The retention consequence of the other branch, on the byte-identical artifact. On the 3.1 line the token names a member of the node in hand, so the composed value is that member and the node's own $ref is composed by nothing. A dangling target there is a defect OUTSIDE the closure, which section 6 says does not make the referencing artifact unresolvable, so it must not be served to the resolver either.",
+      "entry": "https://composition.example/openapi.yaml",
+      "documents": {
+        "https://composition.example/openapi.yaml": {
+          "text": "openapi: 3.1.2\ninfo: {title: Entry, version: \"1\"}\nservers: [{url: \"https://api.example\"}]\npaths:\n  /items:\n    post:\n      operationId: createItem\n      requestBody:\n        required: true\n        content:\n          application/json:\n            schema:\n              type: object\n              properties:\n                pick: {$ref: \"./library.yaml#/components/schemas/Alias/properties/name\"}\n      responses: {\"204\": {description: ok}}\n"
+        },
+        "https://composition.example/library.yaml": {
+          "text": "openapi: 3.1.2\ninfo: {title: Library, version: \"1\"}\ncomponents:\n  schemas:\n    Alias:\n      $ref: \"#/components/schemas/NeverDeclared\"\n      properties:\n        name: {type: string, title: sibling}\n"
+        }
+      },
+      "expect": {
+        "outcome": "accepted",
+        "operations": [
+          "createItem"
+        ],
+        "values": {
+          "/operations/createItem/input/properties/pick": {
+            "type": "string",
+            "title": "sibling"
+          }
+        }
+      }
     }
   ]
 }
