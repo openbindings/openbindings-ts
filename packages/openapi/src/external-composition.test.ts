@@ -19,7 +19,7 @@ import { BINDING_SPEC } from "./constants.js";
  * referenced JSON Pointer together with that value's transitive closure of
  * references, and nothing else.
  */
-const CASES_DIGEST = "7d1e992f9a147939fe0d0063a5de3a46035342f6a2567b0b0c0747fddfa2fdde";
+const CASES_DIGEST = "c0a90a4e410dccc0d456b6113387cf82989a9324f7c4ac4ba80b0bd58e5a8a2e";
 
 interface CompositionDocument {
   readonly text?: string;

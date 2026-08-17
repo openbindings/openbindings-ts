@@ -1,5 +1,5 @@
 {
-  "note": "Frozen twin case table for pointer-scoped external reference composition and reference traversal. openbindings.openapi@1 section 6 'Reference scope': a reference that leaves the current document composes the value at the referenced JSON Pointer together with that value's transitive closure of references, and nothing else. openbindings.openapi@1 section 6 'Reference traversal': a $ref standing in a fragment's own path is resolved and evaluation continues into the target under OAS 3.0.0-3.0.4, and is not under OAS 3.1.0-3.1.2, where the reference is unresolvable. Each case is a multi-document artifact plus the one verdict every engine must reach; the two 'same-document-pointer-below-a-reference' cases are the exception, and carry one document, because the traversal rule is a property of a fragment and the document it is evaluated against rather than of the reference having left the document. The identical file is executed by openbindings-go's formats/openapi, by openapi-client/go, and by openbindings-ts's packages/openapi; a divergence in one fails the others' suites too. Every case is authored from the OAS, JSON Reference, JSON Schema 2020-12 and RFC 6901 text; no byte comes from a corpus specimen, and no case pins an implementations' convention. The traversal authorities are quoted per edition in each engine's own reference-traversal comment and re-derived at the pinned bytes by corpus-lab/scripts/verify-pointer-below-reference-authorities.mjs.",
+  "note": "Frozen twin case table for pointer-scoped external reference composition and reference traversal. openbindings.openapi@1 section 6 'Reference scope': a reference that leaves the current document composes the value at the referenced JSON Pointer together with that value's transitive closure of references, and nothing else. openbindings.openapi@1 section 6 'Reference traversal': a $ref standing in a fragment's own path is resolved and evaluation continues into the target under OAS 3.0.0-3.0.4, and is not under OAS 3.1.0-3.1.2, where the reference is unresolvable. Each case is a multi-document artifact plus the one verdict every engine must reach; the two 'same-document-pointer-below-a-reference' cases are the exception, and carry one document, because the traversal rule is a property of a fragment and the document it is evaluated against rather than of the reference having left the document. The identical file is executed by openbindings-go's formats/openapi, by openapi-client/go, and by openbindings-ts's packages/openapi; a divergence in one fails the others' suites too. The sibling-kind cases vary the JSON kind of a sequence index nothing composes, at two positions, because section 6 and RFC 6901 draw no line there and an engine that reads the sequence with a typed model can. Every case is authored from the OAS, JSON Reference, JSON Schema 2020-12 and RFC 6901 text; no byte comes from a corpus specimen, and no case pins an implementations' convention. The traversal authorities are quoted per edition in each engine's own reference-traversal comment and re-derived at the pinned bytes by corpus-lab/scripts/verify-pointer-below-reference-authorities.mjs.",
   "cases": [
     {
       "name": "defect-outside-the-composed-closure",
@@ -614,6 +614,236 @@
           },
           "/operations/createOther/input/properties/gamma": {
             "type": "integer"
+          }
+        }
+      }
+    },
+    {
+      "name": "sequence-sibling-is-a-string",
+      "why": "A string beside the composed element. Section 6 makes a defect outside the composed closure irrelevant 'however the referenced document is stored', and RFC 6901 section 4 addresses a sequence element by index exactly as it addresses an object member by name. Neither draws a line at the sibling's JSON kind, so this must resolve to the same operation and the same emitted schema as a mapping sibling.",
+      "entry": "https://composition.example/openapi.yaml",
+      "documents": {
+        "https://composition.example/openapi.yaml": {
+          "text": "openapi: 3.1.2\ninfo: {title: Entry, version: \"1\"}\nservers: [{url: \"https://api.example\"}]\npaths:\n  /items:\n    post:\n      operationId: createItem\n      requestBody:\n        required: true\n        content:\n          application/json:\n            schema: {$ref: \"./library.yaml#/components/schemas/Combo/allOf/0\"}\n      responses: {\"204\": {description: ok}}\n"
+        },
+        "https://composition.example/library.yaml": {
+          "text": "openapi: 3.1.2\ninfo: {title: Library, version: \"1\"}\ncomponents:\n  schemas:\n    Combo:\n      allOf:\n        - type: object\n          properties:\n            name: {$ref: \"#/components/schemas/Name\"}\n        - \"oops\"\n    Name: {type: string}\n"
+        }
+      },
+      "expect": {
+        "outcome": "accepted",
+        "operations": [
+          "createItem"
+        ],
+        "values": {
+          "/operations/createItem/input": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "sequence-sibling-is-a-number",
+      "why": "A number beside the composed element. Section 6 makes a defect outside the composed closure irrelevant 'however the referenced document is stored', and RFC 6901 section 4 addresses a sequence element by index exactly as it addresses an object member by name. Neither draws a line at the sibling's JSON kind, so this must resolve to the same operation and the same emitted schema as a mapping sibling.",
+      "entry": "https://composition.example/openapi.yaml",
+      "documents": {
+        "https://composition.example/openapi.yaml": {
+          "text": "openapi: 3.1.2\ninfo: {title: Entry, version: \"1\"}\nservers: [{url: \"https://api.example\"}]\npaths:\n  /items:\n    post:\n      operationId: createItem\n      requestBody:\n        required: true\n        content:\n          application/json:\n            schema: {$ref: \"./library.yaml#/components/schemas/Combo/allOf/0\"}\n      responses: {\"204\": {description: ok}}\n"
+        },
+        "https://composition.example/library.yaml": {
+          "text": "openapi: 3.1.2\ninfo: {title: Library, version: \"1\"}\ncomponents:\n  schemas:\n    Combo:\n      allOf:\n        - type: object\n          properties:\n            name: {$ref: \"#/components/schemas/Name\"}\n        - 42\n    Name: {type: string}\n"
+        }
+      },
+      "expect": {
+        "outcome": "accepted",
+        "operations": [
+          "createItem"
+        ],
+        "values": {
+          "/operations/createItem/input": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "sequence-sibling-is-null",
+      "why": "An explicit null beside the composed element - a JSON value like any other at an index nothing composes. Section 6 makes a defect outside the composed closure irrelevant 'however the referenced document is stored', and RFC 6901 section 4 addresses a sequence element by index exactly as it addresses an object member by name. Neither draws a line at the sibling's JSON kind, so this must resolve to the same operation and the same emitted schema as a mapping sibling.",
+      "entry": "https://composition.example/openapi.yaml",
+      "documents": {
+        "https://composition.example/openapi.yaml": {
+          "text": "openapi: 3.1.2\ninfo: {title: Entry, version: \"1\"}\nservers: [{url: \"https://api.example\"}]\npaths:\n  /items:\n    post:\n      operationId: createItem\n      requestBody:\n        required: true\n        content:\n          application/json:\n            schema: {$ref: \"./library.yaml#/components/schemas/Combo/allOf/0\"}\n      responses: {\"204\": {description: ok}}\n"
+        },
+        "https://composition.example/library.yaml": {
+          "text": "openapi: 3.1.2\ninfo: {title: Library, version: \"1\"}\ncomponents:\n  schemas:\n    Combo:\n      allOf:\n        - type: object\n          properties:\n            name: {$ref: \"#/components/schemas/Name\"}\n        - null\n    Name: {type: string}\n"
+        }
+      },
+      "expect": {
+        "outcome": "accepted",
+        "operations": [
+          "createItem"
+        ],
+        "values": {
+          "/operations/createItem/input": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "sequence-sibling-is-a-sequence",
+      "why": "A sequence beside the composed element. Section 6 makes a defect outside the composed closure irrelevant 'however the referenced document is stored', and RFC 6901 section 4 addresses a sequence element by index exactly as it addresses an object member by name. Neither draws a line at the sibling's JSON kind, so this must resolve to the same operation and the same emitted schema as a mapping sibling.",
+      "entry": "https://composition.example/openapi.yaml",
+      "documents": {
+        "https://composition.example/openapi.yaml": {
+          "text": "openapi: 3.1.2\ninfo: {title: Entry, version: \"1\"}\nservers: [{url: \"https://api.example\"}]\npaths:\n  /items:\n    post:\n      operationId: createItem\n      requestBody:\n        required: true\n        content:\n          application/json:\n            schema: {$ref: \"./library.yaml#/components/schemas/Combo/allOf/0\"}\n      responses: {\"204\": {description: ok}}\n"
+        },
+        "https://composition.example/library.yaml": {
+          "text": "openapi: 3.1.2\ninfo: {title: Library, version: \"1\"}\ncomponents:\n  schemas:\n    Combo:\n      allOf:\n        - type: object\n          properties:\n            name: {$ref: \"#/components/schemas/Name\"}\n        - [1, 2]\n    Name: {type: string}\n"
+        }
+      },
+      "expect": {
+        "outcome": "accepted",
+        "operations": [
+          "createItem"
+        ],
+        "values": {
+          "/operations/createItem/input": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "sequence-sibling-is-a-string-below-a-traversed-index",
+      "why": "The pointer runs THROUGH allOf/0 into a property of it rather than terminating at the index, so the sibling index is decided on the way past rather than at the pointer's end. Section 6 makes a defect outside the composed closure irrelevant 'however the referenced document is stored', and RFC 6901 section 4 addresses a sequence element by index exactly as it addresses an object member by name. Neither draws a line at the sibling's JSON kind, so this must resolve to the same operation and the same emitted schema as a mapping sibling.",
+      "entry": "https://composition.example/openapi.yaml",
+      "documents": {
+        "https://composition.example/openapi.yaml": {
+          "text": "openapi: 3.1.2\ninfo: {title: Entry, version: \"1\"}\nservers: [{url: \"https://api.example\"}]\npaths:\n  /items:\n    post:\n      operationId: createItem\n      requestBody:\n        required: true\n        content:\n          application/json:\n            schema: {$ref: \"./library.yaml#/components/schemas/Combo/allOf/0/properties/name\"}\n      responses: {\"204\": {description: ok}}\n"
+        },
+        "https://composition.example/library.yaml": {
+          "text": "openapi: 3.1.2\ninfo: {title: Library, version: \"1\"}\ncomponents:\n  schemas:\n    Combo:\n      allOf:\n        - type: object\n          properties:\n            name: {$ref: \"#/components/schemas/Name\"}\n        - \"oops\"\n    Name: {type: string}\n"
+        }
+      },
+      "expect": {
+        "outcome": "accepted",
+        "operations": [
+          "createItem"
+        ],
+        "values": {
+          "/operations/createItem/input/properties/body": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "sequence-sibling-is-a-string-at-a-parameters-position",
+      "why": "A second sequence position, so nothing here is a property of allOf alone: a Parameter Object list is addressed by index the same way. Section 6 makes a defect outside the composed closure irrelevant 'however the referenced document is stored', and RFC 6901 section 4 addresses a sequence element by index exactly as it addresses an object member by name. Neither draws a line at the sibling's JSON kind, so this must resolve to the same operation and the same emitted schema as a mapping sibling.",
+      "entry": "https://composition.example/openapi.yaml",
+      "documents": {
+        "https://composition.example/openapi.yaml": {
+          "text": "openapi: 3.1.2\ninfo: {title: Entry, version: \"1\"}\nservers: [{url: \"https://api.example\"}]\npaths:\n  /items:\n    get:\n      operationId: listItems\n      parameters:\n        - $ref: \"./library.yaml#/paths/~1holder/get/parameters/0\"\n      responses: {\"204\": {description: ok}}\n"
+        },
+        "https://composition.example/library.yaml": {
+          "text": "openapi: 3.1.2\ninfo: {title: Library, version: \"1\"}\npaths:\n  /holder:\n    get:\n      parameters:\n        - {name: alpha, in: query, schema: {type: string}}\n        - \"oops\"\n      responses: {\"200\": {description: ok}}\n"
+        }
+      },
+      "expect": {
+        "outcome": "accepted",
+        "operations": [
+          "listItems"
+        ],
+        "values": {
+          "/operations/listItems/input": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "alpha": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "sequence-sibling-is-a-boolean-at-a-parameters-position",
+      "why": "A boolean beside the composed element at a position that holds Objects only. This kind is not interchangeable with the allOf case: under JSON Schema 2020-12 a boolean IS a schema, so an allOf sibling would be readable by accident, while a Parameter Object list has no boolean form at all. Section 6 makes a defect outside the composed closure irrelevant 'however the referenced document is stored', and RFC 6901 section 4 addresses a sequence element by index exactly as it addresses an object member by name. Neither draws a line at the sibling's JSON kind, so this must resolve to the same operation and the same emitted schema as a mapping sibling.",
+      "entry": "https://composition.example/openapi.yaml",
+      "documents": {
+        "https://composition.example/openapi.yaml": {
+          "text": "openapi: 3.1.2\ninfo: {title: Entry, version: \"1\"}\nservers: [{url: \"https://api.example\"}]\npaths:\n  /items:\n    get:\n      operationId: listItems\n      parameters:\n        - $ref: \"./library.yaml#/paths/~1holder/get/parameters/0\"\n      responses: {\"204\": {description: ok}}\n"
+        },
+        "https://composition.example/library.yaml": {
+          "text": "openapi: 3.1.2\ninfo: {title: Library, version: \"1\"}\npaths:\n  /holder:\n    get:\n      parameters:\n        - {name: alpha, in: query, schema: {type: string}}\n        - true\n      responses: {\"200\": {description: ok}}\n"
+        }
+      },
+      "expect": {
+        "outcome": "accepted",
+        "operations": [
+          "listItems"
+        ],
+        "values": {
+          "/operations/listItems/input": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "alpha": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "sequence-sibling-is-null-at-a-parameters-position",
+      "why": "An explicit null at the same Object-only position. Section 6 makes a defect outside the composed closure irrelevant 'however the referenced document is stored', and RFC 6901 section 4 addresses a sequence element by index exactly as it addresses an object member by name. Neither draws a line at the sibling's JSON kind, so this must resolve to the same operation and the same emitted schema as a mapping sibling.",
+      "entry": "https://composition.example/openapi.yaml",
+      "documents": {
+        "https://composition.example/openapi.yaml": {
+          "text": "openapi: 3.1.2\ninfo: {title: Entry, version: \"1\"}\nservers: [{url: \"https://api.example\"}]\npaths:\n  /items:\n    get:\n      operationId: listItems\n      parameters:\n        - $ref: \"./library.yaml#/paths/~1holder/get/parameters/0\"\n      responses: {\"204\": {description: ok}}\n"
+        },
+        "https://composition.example/library.yaml": {
+          "text": "openapi: 3.1.2\ninfo: {title: Library, version: \"1\"}\npaths:\n  /holder:\n    get:\n      parameters:\n        - {name: alpha, in: query, schema: {type: string}}\n        - null\n      responses: {\"200\": {description: ok}}\n"
+        }
+      },
+      "expect": {
+        "outcome": "accepted",
+        "operations": [
+          "listItems"
+        ],
+        "values": {
+          "/operations/listItems/input": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "alpha": {
+                "type": "string"
+              }
+            }
           }
         }
       }
