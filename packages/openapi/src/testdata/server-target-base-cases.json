@@ -1,0 +1,482 @@
+{
+  "$comment": "Server target-base case table, shared byte-for-byte by the three engines that resolve an\nOpenAPI Server Object into a target address: openbindings-go/formats/openapi (synthesis\ncoverage), openapi-client/go (invocation), and openapi-client/typescript/src (invocation, and\nsynthesis coverage through openbindings-ts/packages/openapi, which re-exports it).\n\nWHAT THIS TABLE GUARDS. Whether a declared server URL denotes a target address at all, and\ntherefore whether a consumer must supply the `server` configuration point before the operation\ncan be invoked.\n\nWHY IT EXISTS. Each engine used to delegate that question to its HOST LANGUAGE's URL parser --\nGo's net/url (url.Parse + IsAbs) and the WHATWG URL parser (new URL) -- and neither is an\nauthority `openbindings.openapi@1` incorporates. The two parsers disagree, and the corpus caught\nboth halves of the disagreement in opposite directions: Go rejects an unsubstituted template\nvariable and accepts an empty http host, WHATWG accepts the template and rejects the empty host.\nEach engine was right about one shape by accident.\n\nTHE PREDICATE, and where every clause of it comes from. A server URL denotes a target address iff\n\n  1. it matches RFC 3986's `URI` production -- `scheme \":\" hier-part [ \"?\" query ] [ \"#\" fragment ]`,\n     Appendix A, Collected ABNF -- so it carries a scheme and every character is drawn from the\n     productions that ABNF defines; and\n  2. when its scheme is `http` or `https` (compared ASCII case-insensitively), its authority\n     carries a NON-EMPTY host, per RFC 9110 Section 4.2.1 and Section 4.2.2: \"A sender MUST NOT\n     generate an 'http' URI with an empty host identifier. A recipient that processes such a URI\n     reference MUST reject it as invalid.\"\n\nBoth are incorporated authorities, not this project's inventions: `openbindings.openapi@1` Section 2\nincorporates RFC 9110 \"for plain HTTP semantics\", and Section 9.3 and Section 11 name RFC 3986 for\nserver-URL resolution. The bytes are pinned at corpus-lab/authorities/texts/openapi/uri/rfc3986.txt\nand .../http/rfc9110.txt (digests in corpus-lab/AUTHORITY-PINS.md).\n\nWHY `URI` AND NOT `absolute-URI`. `absolute-URI` forbids a fragment. Refusing a fragment-bearing\nserver URL would be a new refusal this question does not need, and only OAS 3.1.2 says anything\nabout it (\"Query and fragment MUST NOT be part of this URL\", Section 4.8.5.1, absent from the\nother seven accepted editions). That is a per-edition artifact-validity question and belongs to\nthe acceptance floor, not here. `URI` is `absolute-URI` plus an optional fragment, and every `URI`\ncarries a scheme, which is the sense of \"absolute\" Section 9.3 is using.\n\nWHY SUBSTITUTION COMES FIRST. A Server Variable Object's `default` is REQUIRED in all eight\naccepted OAS editions, so a DECLARED variable always has a value and the engines substitute it\nbefore asking this question. An UNDECLARED brace variable has no value under the OAS's own\nmechanism -- `variables` is \"A map between a variable name and its value\", and there is no other\nrule producing one -- so it survives substitution, and `{` and `}` appear in no RFC 3986\nproduction. The template therefore never reduces to a URL, which is why an artifact declaring one\nleaves the target address undetermined.\n\nWHAT THIS TABLE DOES NOT DECIDE. Whether an unresolvable target refuses terminally or challenges\nretryably: `openbindings.openapi@1` Section 9.3 and OAPI-P-05 answer that (\"unresolvable targets\nrefuse before dispatch\") and the engines currently return a retryable ConfigRequired. That\ndivergence is filed, is invisible to synthesis coverage, and is not touched here. The table\nasserts only whether resolution SUCCEEDS and what base it yields.\n\nEvery resolution case is rendered as a WHOLE OpenAPI document and loaded through each engine's own\nshipped loader, so the table exercises the shipped path rather than a hand-built typed model.",
+  "predicateCases": [
+    {
+      "name": "plain-https",
+      "url": "https://api.example.test/v1",
+      "usable": true,
+      "why": "",
+      "basis": "RFC 3986 Appendix A: scheme `https`, hier-part `//api.example.test/v1` with a reg-name host and a path-abempty path. RFC 9110 Section 4.2.2's host requirement is met."
+    },
+    {
+      "name": "plain-http",
+      "url": "http://api.example.test",
+      "usable": true,
+      "why": "",
+      "basis": "RFC 3986 Appendix A: path-abempty may be empty, so a bare authority is a URI."
+    },
+    {
+      "name": "https-with-port",
+      "url": "https://api.example.test:8443/v1",
+      "usable": true,
+      "why": "",
+      "basis": "RFC 3986 Appendix A: `port = *DIGIT`, after the host's final colon."
+    },
+    {
+      "name": "https-with-userinfo",
+      "url": "https://user:secret@api.example.test/v1",
+      "usable": true,
+      "why": "",
+      "basis": "RFC 3986 Appendix A: `authority = [ userinfo \"@\" ] host [ \":\" port ]`, and `userinfo` admits colons."
+    },
+    {
+      "name": "ipv4-host",
+      "url": "http://192.0.2.10:8080/api",
+      "usable": true,
+      "why": "",
+      "basis": "RFC 3986 Appendix A: `host = IP-literal / IPv4address / reg-name`."
+    },
+    {
+      "name": "ipv6-literal-host",
+      "url": "http://[2001:db8::1]:8080/api",
+      "usable": true,
+      "why": "",
+      "basis": "RFC 3986 Appendix A: `IP-literal = \"[\" ( IPv6address / IPvFuture ) \"]\"`; the host is non-empty, so RFC 9110 Section 4.2.1 is satisfied."
+    },
+    {
+      "name": "ipv6-loopback-host",
+      "url": "http://[::1]/api",
+      "usable": true,
+      "why": "",
+      "basis": "RFC 3986 Appendix A: the `[ *6( h16 \":\" ) h16 ] \"::\"` and following IPv6address alternatives admit an all-elided address."
+    },
+    {
+      "name": "underscore-in-reg-name",
+      "url": "http://my_host.example.test/api",
+      "usable": true,
+      "why": "",
+      "basis": "RFC 3986 Appendix A: `reg-name = *( unreserved / pct-encoded / sub-delims )` and `unreserved` includes `_`. RFC 3986 does not apply DNS name rules."
+    },
+    {
+      "name": "percent-encoded-path",
+      "url": "https://api.example.test/a%20b/v1",
+      "usable": true,
+      "why": "",
+      "basis": "RFC 3986 Appendix A: `pchar` admits `pct-encoded = \"%\" HEXDIG HEXDIG`."
+    },
+    {
+      "name": "query-present",
+      "url": "https://api.example.test/v1?tenant=acme",
+      "usable": true,
+      "why": "",
+      "basis": "RFC 3986 Appendix A: `URI = scheme \":\" hier-part [ \"?\" query ] [ \"#\" fragment ]`."
+    },
+    {
+      "name": "fragment-present",
+      "url": "https://api.example.test/v1#anchor",
+      "usable": true,
+      "why": "",
+      "basis": "The predicate is RFC 3986's `URI`, not `absolute-URI`: refusing a fragment is a separate per-edition question (OAS 3.1.2 Section 4.8.5.1 alone states \"Query and fragment MUST NOT be part of this URL\") and belongs to artifact validity, not to whether an address exists."
+    },
+    {
+      "name": "uppercase-scheme",
+      "url": "HTTPS://API.EXAMPLE.TEST/v1",
+      "usable": true,
+      "why": "",
+      "basis": "RFC 3986 Section 3.1: \"Although schemes are case-insensitive, the canonical form is lowercase ... An implementation should accept uppercase letters as equivalent to lowercase in scheme names (e.g., allow \\\"HTTP\\\" as well as \\\"http\\\") for the sake of robustness\". The RFC 9110 host rule is therefore keyed on the lowercased scheme."
+    },
+    {
+      "name": "non-http-scheme-empty-host",
+      "url": "file:///srv/api/openapi.yaml",
+      "usable": true,
+      "why": "",
+      "basis": "RFC 9110 Section 4.2.1/4.2.2 constrain the `http` and `https` schemes only; `file` legitimately carries an empty authority. This case is why the host rule is scheme-keyed rather than universal."
+    },
+    {
+      "name": "non-http-scheme-rootless-path",
+      "url": "localhost:8080/api/v1",
+      "usable": true,
+      "why": "",
+      "basis": "RFC 3986 Appendix A: `hier-part` admits `path-rootless`, so this is a URI whose scheme happens to be `localhost`. It is not an http URI and the RFC 9110 rule does not reach it. The corpus contains this spelling."
+    },
+    {
+      "name": "websocket-scheme",
+      "url": "wss://events.example.test/stream",
+      "usable": true,
+      "why": "",
+      "basis": "A URI under RFC 3986 whose scheme is neither http nor https. This predicate answers whether an address exists, not whether the family can act on it."
+    },
+    {
+      "name": "empty-http-host",
+      "url": "http://:8080",
+      "usable": false,
+      "why": "rfc9110-empty-host",
+      "basis": "RFC 3986 Appendix A admits it -- `reg-name` may be empty, so `:8080` is a well-formed authority with an empty host and port 8080 -- but RFC 9110 Section 4.2.1 states: \"A sender MUST NOT generate an 'http' URI with an empty host identifier. A recipient that processes such a URI reference MUST reject it as invalid.\" Go's net/url accepted this; the WHATWG parser rejected it."
+    },
+    {
+      "name": "empty-https-host",
+      "url": "https://:8443/v1",
+      "usable": false,
+      "why": "rfc9110-empty-host",
+      "basis": "RFC 9110 Section 4.2.2 carries the identical sentence for the `https` scheme."
+    },
+    {
+      "name": "empty-http-host-no-port",
+      "url": "http:///v1",
+      "usable": false,
+      "why": "rfc9110-empty-host",
+      "basis": "RFC 9110 Section 4.2.1: the authority is present and its host identifier is empty."
+    },
+    {
+      "name": "http-scheme-no-authority",
+      "url": "http:/v1",
+      "usable": false,
+      "why": "rfc9110-empty-host",
+      "basis": "RFC 9110 Section 4.2.1's `http-URI = \"http\" \"://\" authority path-abempty [ \"?\" query ]` requires the authority form; a path-absolute hier-part carries no host identifier at all."
+    },
+    {
+      "name": "unsubstituted-template-in-host",
+      "url": "https://{subdomain}.auth.{region}.example.test/v1",
+      "usable": false,
+      "why": "rfc3986-not-a-uri",
+      "basis": "`{` and `}` appear in no RFC 3986 production: they are not in `unreserved` (ALPHA / DIGIT / \"-\" / \".\" / \"_\" / \"~\"), not in `sub-delims`, not in `gen-delims`, and not `pct-encoded`. A string carrying them is not a URI. This is the nhost/nhost shape: the OAS substitutes only variables the Server Object declares, and this one declares none."
+    },
+    {
+      "name": "unsubstituted-template-in-path",
+      "url": "https://api.example.test/{version}",
+      "usable": false,
+      "why": "rfc3986-not-a-uri",
+      "basis": "Same clause: the braces are outside RFC 3986's grammar wherever they sit, so an undeclared variable in the path is no more resolvable than one in the host."
+    },
+    {
+      "name": "space-in-path",
+      "url": "https://api.example.test/a b",
+      "usable": false,
+      "why": "rfc3986-not-a-uri",
+      "basis": "RFC 3986 Appendix A: SP is not `pchar` and is not percent-encoded here. The WHATWG parser silently percent-encodes it; this predicate does not repair the artifact's value."
+    },
+    {
+      "name": "truncated-pct-encoding",
+      "url": "https://api.example.test/a%2",
+      "usable": false,
+      "why": "rfc3986-not-a-uri",
+      "basis": "RFC 3986 Appendix A: `pct-encoded = \"%\" HEXDIG HEXDIG` requires exactly two hex digits."
+    },
+    {
+      "name": "relative-absolute-path",
+      "url": "/api/v1",
+      "usable": false,
+      "why": "not-absolute",
+      "basis": "RFC 3986 Appendix A: a `relative-ref`, not a `URI`. It denotes a target only after resolution against the artifact's base URI, which openbindings.openapi@1 Section 9.3 sends to Section 6."
+    },
+    {
+      "name": "relative-network-path",
+      "url": "//localhost:8080/api/v1",
+      "usable": false,
+      "why": "not-absolute",
+      "basis": "RFC 3986 Appendix A: a network-path `relative-ref` carries no scheme. The corpus contains this spelling."
+    },
+    {
+      "name": "shell-template",
+      "url": "${apiUrl}",
+      "usable": false,
+      "why": "not-absolute",
+      "basis": "No scheme, so it is not a URI; it is also not an OAS server variable, whose syntax is `{name}`. The corpus contains this spelling."
+    },
+    {
+      "name": "empty-string",
+      "url": "",
+      "usable": false,
+      "why": "not-absolute",
+      "basis": "RFC 3986 Appendix A: `scheme = ALPHA *( ... )` requires at least one character. The corpus contains a Server Object whose url is the empty string."
+    },
+    {
+      "name": "scheme-starting-with-digit",
+      "url": "1http://api.example.test",
+      "usable": false,
+      "why": "not-absolute",
+      "basis": "RFC 3986 Appendix A: a scheme MUST begin with ALPHA."
+    }
+  ],
+  "resolutionCases": [
+    {
+      "name": "sole-usable-server",
+      "openapi": "3.1.0",
+      "rootServers": [
+        {
+          "url": "https://api.example.test/v1"
+        }
+      ],
+      "operationServers": null,
+      "expect": {
+        "resolvable": true,
+        "targetBase": "https://api.example.test/v1"
+      },
+      "requirements": [],
+      "basis": "openbindings.openapi@1 Section 9.3: \"An effective list with exactly one entry selects that entry.\" The entry resolves, so nothing is required of the consumer."
+    },
+    {
+      "name": "sole-usable-server-trailing-slash",
+      "openapi": "3.0.0",
+      "rootServers": [
+        {
+          "url": "https://api.example.test/v1/"
+        }
+      ],
+      "operationServers": null,
+      "expect": {
+        "resolvable": true,
+        "targetBase": "https://api.example.test/v1"
+      },
+      "requirements": [],
+      "basis": "The resolved base carries no trailing slash so that joining it with the operation's path template is concatenation. Unchanged behaviour, pinned here so the predicate change cannot disturb it."
+    },
+    {
+      "name": "sole-server-declared-variable-with-default",
+      "openapi": "3.0.0",
+      "rootServers": [
+        {
+          "url": "https://{region}.api.example.test/v1",
+          "variables": {
+            "region": {
+              "default": "eu"
+            }
+          }
+        }
+      ],
+      "operationServers": null,
+      "expect": {
+        "resolvable": true,
+        "targetBase": "https://eu.api.example.test/v1"
+      },
+      "requirements": [],
+      "basis": "The Server Variable Object's `default` is REQUIRED in all eight accepted editions (the field row reads \"default string REQUIRED.\" in each). Six of them -- 3.0.2, 3.0.3, 3.0.4, 3.1.0, 3.1.1, 3.1.2 -- continue \"The default value to use for substitution, which SHALL be sent if an alternate value is not supplied\"; 3.0.0 and 3.0.1 spell the same duty \"The default value to use for substitution, and to send, if an alternate value is not supplied\". So a declared variable always reduces, on every accepted edition, and the target address exists without consumer configuration."
+    },
+    {
+      "name": "sole-server-declared-variable-with-enum-default",
+      "openapi": "3.1.2",
+      "rootServers": [
+        {
+          "url": "https://api.example.test/{basePath}",
+          "variables": {
+            "basePath": {
+              "default": "v2",
+              "enum": [
+                "v1",
+                "v2"
+              ]
+            }
+          }
+        }
+      ],
+      "operationServers": null,
+      "expect": {
+        "resolvable": true,
+        "targetBase": "https://api.example.test/v2"
+      },
+      "requirements": [],
+      "basis": "A declared enum constrains a SUPPLIED value; the declared default is used when none is supplied. Pinned so the predicate change cannot reopen the enum path."
+    },
+    {
+      "name": "sole-server-undeclared-template-variable",
+      "openapi": "3.0.0",
+      "rootServers": [
+        {
+          "url": "https://{subdomain}.auth.{region}.example.test/v1"
+        }
+      ],
+      "operationServers": null,
+      "expect": {
+        "resolvable": false,
+        "targetBase": null
+      },
+      "requirements": [
+        "configuration.server"
+      ],
+      "basis": "The nhost/nhost shape at commit b711a092180f931f876350cc0068b753318889dc. The sole entry selects itself, but the OAS defines substitution only for variables the Server Object declares, so the braces survive and the string is not a URI under RFC 3986. The target address is undetermined until the consumer supplies one at the `server` point."
+    },
+    {
+      "name": "sole-server-partially-declared-template-variables",
+      "openapi": "3.0.3",
+      "rootServers": [
+        {
+          "url": "https://{subdomain}.{region}.example.test/v1",
+          "variables": {
+            "region": {
+              "default": "eu"
+            }
+          }
+        }
+      ],
+      "operationServers": null,
+      "expect": {
+        "resolvable": false,
+        "targetBase": null
+      },
+      "requirements": [
+        "configuration.server"
+      ],
+      "basis": "Declaring SOME of the URL's variables does not make the rest resolvable. `{subdomain}` survives substitution and the residue is still not a URI."
+    },
+    {
+      "name": "sole-server-empty-http-host",
+      "openapi": "3.1.0",
+      "rootServers": [
+        {
+          "url": "http://:8080"
+        }
+      ],
+      "operationServers": null,
+      "expect": {
+        "resolvable": false,
+        "targetBase": null
+      },
+      "requirements": [
+        "configuration.server"
+      ],
+      "basis": "The nixopus/nixopus shape at commit cf05d97a352f364bbe02870b140f2ccceba298d2. RFC 3986 admits the string, RFC 9110 Section 4.2.1 requires a recipient to reject it as invalid, so it names no origin server and the `server` point must supply one."
+    },
+    {
+      "name": "several-servers-no-selection",
+      "openapi": "3.0.0",
+      "rootServers": [
+        {
+          "url": "https://api.example.test/v1"
+        },
+        {
+          "url": "https://staging.example.test/v1"
+        }
+      ],
+      "operationServers": null,
+      "expect": {
+        "resolvable": false,
+        "targetBase": null
+      },
+      "requirements": [
+        "configuration.server"
+      ],
+      "basis": "openbindings.openapi@1 Section 9.3: \"With more than one, the artifact has declared alternatives without a preference and the server point is required.\" Both entries are individually usable; multiplicity alone is the trigger."
+    },
+    {
+      "name": "several-servers-first-defective",
+      "openapi": "3.1.0",
+      "rootServers": [
+        {
+          "url": "http://:8080"
+        },
+        {
+          "url": "https://api.example.test/v1"
+        }
+      ],
+      "operationServers": null,
+      "expect": {
+        "resolvable": false,
+        "targetBase": null
+      },
+      "requirements": [
+        "configuration.server"
+      ],
+      "basis": "Multiplicity requires a selection whatever the members look like; the engine never silently drops a defective alternative to make a sole usable one appear."
+    },
+    {
+      "name": "operation-servers-override-defective-root",
+      "openapi": "3.1.0",
+      "rootServers": [
+        {
+          "url": "http://:8080"
+        }
+      ],
+      "operationServers": [
+        {
+          "url": "https://ops.example.test/v1"
+        }
+      ],
+      "expect": {
+        "resolvable": true,
+        "targetBase": "https://ops.example.test/v1"
+      },
+      "requirements": [],
+      "basis": "The effective server list is the operation's when it declares one, so a defective document-level entry is never consulted and never raises a requirement. This is the case that proves the predicate is applied to the EFFECTIVE entry rather than to every declared server."
+    },
+    {
+      "name": "operation-servers-defective-over-usable-root",
+      "openapi": "3.1.0",
+      "rootServers": [
+        {
+          "url": "https://api.example.test/v1"
+        }
+      ],
+      "operationServers": [
+        {
+          "url": "https://{tenant}.example.test/v1"
+        }
+      ],
+      "expect": {
+        "resolvable": false,
+        "targetBase": null
+      },
+      "requirements": [
+        "configuration.server"
+      ],
+      "basis": "The converse: a usable document-level entry does not rescue a defective operation-level one, because the operation's list REPLACES the document's rather than extending it."
+    },
+    {
+      "name": "sole-server-declared-variable-without-default",
+      "openapi": "3.0.0",
+      "rootServers": [
+        {
+          "url": "https://{region}.api.example.test/v1",
+          "variables": {
+            "region": {
+              "enum": [
+                "eu",
+                "us"
+              ]
+            }
+          }
+        }
+      ],
+      "operationServers": null,
+      "expect": {
+        "resolvable": false,
+        "targetBase": null
+      },
+      "requirements": [
+        "configuration.server"
+      ],
+      "basis": "`default` is REQUIRED on a Server Variable Object in every accepted edition (verified in all eight); an artifact omitting it has declared a variable with no value, so the consumer must supply one. Unchanged behaviour, pinned so the predicate change cannot absorb it."
+    },
+    {
+      "name": "no-servers-declared-no-base-uri",
+      "openapi": "3.0.0",
+      "rootServers": null,
+      "operationServers": null,
+      "expect": {
+        "resolvable": false,
+        "targetBase": null
+      },
+      "requirements": [
+        "configuration.server"
+      ],
+      "basis": "openbindings.openapi@1 Section 9.3: the effective list falls back to the OAS-defined implied server of url \"/\", which is a relative reference and has no base URI to resolve against when the source carries embedded content and no location."
+    },
+    {
+      "name": "sole-relative-server-no-base-uri",
+      "openapi": "3.0.0",
+      "rootServers": [
+        {
+          "url": "/api/v1"
+        }
+      ],
+      "operationServers": null,
+      "expect": {
+        "resolvable": false,
+        "targetBase": null
+      },
+      "requirements": [
+        "configuration.server"
+      ],
+      "basis": "A relative effective-server URL resolves against the artifact's base URI per RFC 3986; with no base there is no address. Unchanged behaviour, pinned because the predicate now decides the absolute/relative split."
+    }
+  ]
+}
