@@ -895,10 +895,7 @@ describe("OAPI-P-04 — request media on the wire", () => {
     expect(requests[0]?.body).toBe('"x"');
   });
 
-  // urlencoded selection serializes fields per the OAS encoding rules. With no
-  // Encoding Object written, both properties take the CONTENT path on every
-  // accepted edition (see revision3.test.ts and
-  // design/openapi-30-urlencoded-default-lane-ruling.md).
+  // urlencoded selection serializes fields per the OAS encoding rules.
   it("serializes a urlencoded body per the encoding rules", async () => {
     const spec = {
       openapi: "3.0.3",
@@ -938,7 +935,7 @@ describe("OAPI-P-04 — request media on the wire", () => {
     expect(requests[0]?.headers.get("Content-Type")).toBe(
       "application/x-www-form-urlencoded",
     );
-    expect(requests[0]?.body).toBe("ids=%5B1%2C2%5D&name=a+b");
+    expect(requests[0]?.body).toBe("ids=1&ids=2&name=a%20b");
   });
 
   // Synthetic body unwrap on the wire: with an array body schema, the

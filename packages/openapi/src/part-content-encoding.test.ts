@@ -20,7 +20,7 @@ import type { OpenAPIDocument, OpenAPIMediaType, OpenAPIOperation } from "./type
 // openbindings-go/formats/openapi/testdata, openapi-client/go/testdata and
 // openapi-client/typescript/src/testdata.
 export const PART_CONTENT_ENCODING_CASES_DIGEST =
-  "f0695cb733cfd57367090566d629dbc7c9ee23d28ab83931167bf3407d21baae";
+  "684cb472986b2790e3d8b0b5ece9d2c85a1eb5c473ca8776ea611575e92b8720";
 
 export interface PartContentEncodingCase {
   name: string;
