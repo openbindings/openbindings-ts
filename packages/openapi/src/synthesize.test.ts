@@ -157,10 +157,20 @@ describe("convertToInterface", () => {
     expect(iface.sources?.["openapi"]?.bindingSpec).toBe("openbindings.openapi@1");
   });
 
-  it("handles specs with no paths", async () => {
-    const iface = await convertToInterface(undefined, {
+  it("refuses a 3.0 spec with no paths (§3 part 2) and accepts a 3.1 components-only spec", async () => {
+    // The 3.0 line makes `paths` REQUIRED: no position from which any
+    // target can be addressed remains, so the whole source refuses.
+    await expect(convertToInterface(undefined, {
       openapi: "3.0.0",
       info: { title: "Empty" },
+    })).rejects.toThrow(/whole-source refusal/);
+    // The 3.1 line requires only one of paths/components/webhooks: a
+    // components-only document conformantly declares no target and yields
+    // an empty interface (the emptiness carve-out).
+    const iface = await convertToInterface(undefined, {
+      openapi: "3.1.0",
+      info: { title: "Empty" },
+      components: { schemas: { Thing: { type: "object" } } },
     });
     expect(Object.keys(iface.operations)).toHaveLength(0);
   });

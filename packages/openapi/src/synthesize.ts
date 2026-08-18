@@ -50,6 +50,12 @@ import {
   uniqueKey,
 } from "./util.js";
 import { isSupportedOpenAPISchemaDialect } from "./ref-siblings.js";
+import {
+  computeAcceptanceFloor,
+  floorInvalidTargetMessage,
+  floorOpVerdict,
+  type AcceptanceFloor,
+} from "@openbindings/openapi-client/analysis";
 
 /**
  * A paths operation admitted by the artifact but unrepresentable under
@@ -91,6 +97,7 @@ export async function convertToInterface(
   onDocument?: (document: OpenAPIDocument) => void,
   onUnrealizable?: (target: UnrealizableTarget) => void,
   bindingSpec: string = BINDING_SPEC,
+  onFloor?: (floor: AcceptanceFloor | undefined) => void,
 ): Promise<OBInterface> {
   // loadOpenAPIDocument fully dereferences (every $ref, internal and
   // external, matching Go's kin-openapi loader), so extracted schemas are
@@ -102,6 +109,12 @@ export async function convertToInterface(
   // pointer is what names them.
   const resources: LoadedResource[] = [];
   const addressed: AddressedNode[] = [];
+  // The invalid-artifact acceptance floor (openbindings.openapi@1 §3),
+  // computed over the entry document's raw image before normalization and
+  // dereference. An internal reference identifying no location is tolerated
+  // at load: the floor invalidates each unit whose closure reaches it, so a
+  // tolerated node is never read by synthesis.
+  let floor: AcceptanceFloor | undefined;
   const doc = await loadOpenAPIDocument(
     location,
     content,
@@ -111,9 +124,17 @@ export async function convertToInterface(
       onRefTarget: (node, declaringRoot, pointer) => {
         addressed.push({ node, declaringRoot, pointer });
       },
+      onRawDocument: (raw) => {
+        floor = computeAcceptanceFloor(raw);
+      },
+      tolerateUnresolvableInternalRefs: true,
     },
     options?.fetch,
   );
+  // §3 part 2's single derived whole-source refusal fires here, on every
+  // synthesis surface.
+  if (floor && floor.refusal) throw new Error(floor.refusal);
+  onFloor?.(floor);
   // The artifact's own address as the loader used it: a qualified cut-point
   // name is relative to it.
   const artifactBase = resources[0]?.baseURI ?? location;
@@ -160,6 +181,16 @@ export async function convertToInterface(
       const op = pathItem[method];
       if (!op || typeof op !== "object") continue;
       const opObj = op as OpenAPIOperation;
+
+      // The acceptance floor (openbindings.openapi@1 §3): a ladder-invalid
+      // target is not addressed. Tolerant surfaces skip it (its invalid
+      // coverage entry is emitted by the coverage walk); the strict surface
+      // throws. Skipped BEFORE key derivation, in every engine identically.
+      const floorVerdict = floorOpVerdict(floor, buildJsonPointerRef(pathStr, method));
+      if (floorVerdict && floorVerdict.disposition === "invalid") {
+        if (onUnrealizable) continue;
+        throw new Error(`cannot synthesize OpenAPI operation at ${JSON.stringify(buildJsonPointerRef(pathStr, method))}: ${floorInvalidTargetMessage(floorVerdict.defects.length)}; synthesis would return a statically unbindable partial interface`);
+      }
 
       const opKey = deriveOperationKey(opObj, pathStr, method, usedKeys);
       usedKeys.add(opKey);

@@ -22,6 +22,16 @@ import {
 } from "./util.js";
 import { resolveServer } from "./servers.js";
 import {
+  INVALID_UNIT_REASON_CODE,
+  floorDefectDetails,
+  floorInvalidAlternativeMessage,
+  floorInvalidTargetMessage,
+  floorOpVerdict,
+  floorProjectionMessage,
+  type AcceptanceFloor,
+  type FloorOp,
+} from "@openbindings/openapi-client/analysis";
+import {
   BINDING_SPEC,
   hasMediaFidelity,
   hasRoutedInputs,
@@ -39,6 +49,7 @@ export function openAPISynthesisCoverage(
   doc: OpenAPIDocument | undefined,
   iface: OBInterface,
   unrealizable?: ReadonlyMap<string, UnrealizableTarget>,
+  floor?: AcceptanceFloor,
 ): SynthesisCoverageEntry[] {
   if (!doc) return [];
   const byRef = new Map<string, { operationKey: string; ref: string }>();
@@ -55,15 +66,47 @@ export function openAPISynthesisCoverage(
   const sourceLocation = source?.location ?? "";
   const bindingSpec = source?.bindingSpec ?? BINDING_SPEC;
 
+  // The walk is driven from the UNION of the loaded document's path×method
+  // inventory and the acceptance floor's raw-tree inventory (block 8d design
+  // §3): a ladder-invalid operation may be absent from the loaded document
+  // (confined) or present (a loadable defect); either way its invalid entry
+  // is owed. Deterministic order: sorted paths × the HTTP_METHODS order.
+  const pathSet = new Set<string>();
+  for (const path of Object.keys(doc.paths ?? {})) pathSet.add(path);
+  if (floor) for (const ref of floor.opOrder) pathSet.add(floor.ops.get(ref)!.path);
+
   const entries: SynthesisCoverageEntry[] = [];
-  for (const [path, rawPathItem] of sortedEntries(doc.paths)) {
-    if (!rawPathItem || typeof rawPathItem !== "object") continue;
-    const pathItem: OpenAPIPathItem = rawPathItem;
+  for (const path of [...pathSet].sort(codePointCompare)) {
+    const rawPathItem = doc.paths?.[path];
+    const pathItem: OpenAPIPathItem | undefined = rawPathItem && typeof rawPathItem === "object" ? rawPathItem : undefined;
     for (const method of HTTP_METHODS) {
-      const rawOperation = pathItem[method];
-      if (!rawOperation || typeof rawOperation !== "object") continue;
-      const operation = rawOperation as OpenAPIOperation;
+      const rawOperation = pathItem?.[method];
+      const loadedOperation = rawOperation && typeof rawOperation === "object" ? (rawOperation as OpenAPIOperation) : undefined;
       const ref = buildJsonPointerRef(path, method);
+      const verdict = floorOpVerdict(floor, ref);
+      if (!loadedOperation && !verdict) continue;
+      if (verdict && verdict.disposition === "invalid") {
+        // A ladder-invalid target: one invalid target entry carrying the
+        // owning unit and its defects, then the operation's projection
+        // entries.
+        entries.push({
+          sourceIndex: 0,
+          sourceRef: ref,
+          scope: "target",
+          status: "invalid",
+          reasonCode: INVALID_UNIT_REASON_CODE,
+          message: floorInvalidTargetMessage(verdict.defects.length),
+          details: { defects: floorDefectDetails(verdict.defects) },
+        });
+        entries.push(...floorProjectionEntries(verdict));
+        continue;
+      }
+      if (!loadedOperation) {
+        // Raw-inventory-only and not ladder-invalid: nothing the loaded
+        // document can account further.
+        continue;
+      }
+      const operation = loadedOperation;
       const identity = byRef.get(ref);
       if (!identity) {
         // Tolerant synthesis skipped this operation with a recorded,
@@ -71,24 +114,31 @@ export function openAPISynthesisCoverage(
         // implementation defect. Anything else genuinely missing remains
         // an implementation invariant violation.
         const skipped = unrealizable?.get(ref);
-        entries.push(skipped
-          ? {
-              sourceIndex: 0,
-              sourceRef: ref,
-              scope: "target",
-              status: "excluded",
-              reasonCode: skipped.reasonCode,
-              rule: skipped.rule,
-              message: skipped.message,
-            }
-          : {
-              sourceIndex: 0,
-              sourceRef: ref,
-              scope: "target",
-              status: "implementation-unsupported",
-              reasonCode: "openapi.missing_emitted_binding",
-              message: "the synthesizer returned without emitting this admitted paths operation",
-            });
+        if (skipped) {
+          entries.push({
+            sourceIndex: 0,
+            sourceRef: ref,
+            scope: "target",
+            status: "excluded",
+            reasonCode: skipped.reasonCode,
+            rule: skipped.rule,
+            message: skipped.message,
+          });
+          // An excluded target is still ADDRESSED; its ladder-invalid
+          // request media alternatives and projection entries are owed
+          // regardless.
+          entries.push(...floorInvalidAlternativeEntries(verdict));
+          entries.push(...floorProjectionEntries(verdict));
+        } else {
+          entries.push({
+            sourceIndex: 0,
+            sourceRef: ref,
+            scope: "target",
+            status: "implementation-unsupported",
+            reasonCode: "openapi.missing_emitted_binding",
+            message: "the synthesizer returned without emitting this admitted paths operation",
+          });
+        }
         continue;
       }
       entries.push({
@@ -99,16 +149,61 @@ export function openAPISynthesisCoverage(
         operationKey: identity.operationKey,
         bindingRef: identity.ref,
         requirements: [
-          ...serverRequirements(doc, pathItem, operation, sourceLocation),
-          ...requestMediaTargetRequirements(operation, pathItem, bindingSpec, doc.openapi),
+          ...serverRequirements(doc, pathItem!, operation, sourceLocation),
+          ...requestMediaTargetRequirements(operation, pathItem!, bindingSpec, doc.openapi),
         ],
       });
-      entries.push(...requestMediaCoverage(operation, pathItem, identity, bindingSpec, doc.openapi));
+      entries.push(...requestMediaCoverage(operation, pathItem!, identity, bindingSpec, doc.openapi, verdict));
+      entries.push(...floorProjectionEntries(verdict));
       entries.push(...callbackCoverage(operation, ref));
     }
   }
   entries.push(...webhookCoverage(doc));
   return entries;
+}
+
+/** Renders a ladder-invalid or excluded operation's invalid request media alternatives. */
+function floorInvalidAlternativeEntries(verdict: FloorOp | undefined): SynthesisCoverageEntry[] {
+  if (!verdict || verdict.altOrder.length === 0) return [];
+  return verdict.altOrder.map((altRef): SynthesisCoverageEntry => {
+    const defects = verdict.invalidAlternatives.get(altRef) ?? [];
+    return {
+      sourceIndex: 0,
+      sourceRef: altRef,
+      scope: "alternative",
+      status: "invalid",
+      reasonCode: INVALID_UNIT_REASON_CODE,
+      message: floorInvalidAlternativeMessage(defects.length),
+      details: {
+        defects: floorDefectDetails(defects),
+        mediaType: unescapeJSONPointerToken(altRef.slice(altRef.lastIndexOf("/") + 1)),
+      },
+    };
+  });
+}
+
+/**
+ * Renders one projection-scope entry per unit whose emitted closure reaches,
+ * or whose response rungs record, invalid positions that cost it nothing.
+ */
+function floorProjectionEntries(verdict: FloorOp | undefined): SynthesisCoverageEntry[] {
+  if (!verdict || verdict.projOrder.length === 0) return [];
+  return verdict.projOrder.map((unit): SynthesisCoverageEntry => {
+    const defects = verdict.projections.get(unit) ?? [];
+    return {
+      sourceIndex: 0,
+      sourceRef: unit,
+      scope: "projection",
+      status: "invalid",
+      reasonCode: INVALID_UNIT_REASON_CODE,
+      message: floorProjectionMessage(defects.length),
+      details: { defects: floorDefectDetails(defects) },
+    };
+  });
+}
+
+function unescapeJSONPointerToken(value: string): string {
+  return value.replaceAll("~1", "/").replaceAll("~0", "~");
 }
 
 function requestMediaTargetRequirements(
@@ -150,6 +245,7 @@ function requestMediaCoverage(
   identity: { operationKey: string; ref: string },
   bindingSpec: string,
   openapiVersion: string | undefined,
+  verdict: FloorOp | undefined,
 ): SynthesisCoverageEntry[] {
   const content = operation.requestBody?.content;
   if (!content || Object.keys(content).length === 0) return [];
@@ -169,6 +265,24 @@ function requestMediaCoverage(
   );
   return Object.keys(content).sort(codePointCompare).map((mediaType): SynthesisCoverageEntry => {
     const sourceRef = `${identity.ref}/requestBody/content/${escapeJSONPointerToken(mediaType)}`;
+    const invalidDefects = verdict?.invalidAlternatives.get(sourceRef);
+    if (invalidDefects) {
+      // The ladder invalidates this alternative: `invalid`, not `excluded`
+      // -- the unit is malformed under its upstream authority, not declined
+      // by the revision.
+      return {
+        sourceIndex: 0,
+        sourceRef,
+        scope: "alternative",
+        status: "invalid",
+        reasonCode: INVALID_UNIT_REASON_CODE,
+        message: floorInvalidAlternativeMessage(invalidDefects.length),
+        details: {
+          defects: floorDefectDetails(invalidDefects),
+          mediaType,
+        },
+      };
+    }
     if (represented.has(mediaType)) {
       const entry: SynthesisCoverageEntry = {
         sourceIndex: 0,
