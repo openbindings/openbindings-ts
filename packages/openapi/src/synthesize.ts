@@ -55,6 +55,7 @@ import {
   floorInvalidTargetMessage,
   floorOpVerdict,
   type AcceptanceFloor,
+  type FloorOp,
 } from "@openbindings/openapi-client/analysis";
 
 /**
@@ -286,7 +287,21 @@ export async function convertToInterface(
         let planError: unknown;
         let plannedCount = 0;
         try {
-          const plans = planRequestBodies(opObj, { profile: profileForBindingSpec(bindingSpec), openapiVersion: doc.openapi });
+          // The acceptance floor (openbindings.openapi@1 §3): a ladder-invalid
+          // request media ALTERNATIVE is a unit that is malformed under its
+          // upstream authority, so it is not a candidate the operation may
+          // carry. It never climbs -- the operation survives on its remaining
+          // alternatives, and a REQUIRED body left with none falls to the
+          // existing unresolvable-request-body exclusion below (OAPI-P-04),
+          // carried and not reopened. Applied BEFORE the candidate count the
+          // exclusion reason is chosen from, so a body whose only alternative
+          // the ladder invalidated is not misreported as a flattening
+          // collision.
+          const plans = filterLadderInvalidAlternatives(
+            planRequestBodies(opObj, { profile: profileForBindingSpec(bindingSpec), openapiVersion: doc.openapi }),
+            floorVerdict,
+            ref,
+          );
           plannedCount = plans.length;
           requestPlans = plans.filter((plan) => hasRoutedInputs(bindingSpec) || !candidateCollides(params, plan));
         } catch (error: unknown) {
@@ -1064,4 +1079,21 @@ function majorMinor(version: string): string {
   const parts = version.split(".");
   if (parts.length >= 2) return `${parts[0]}.${parts[1]}`;
   return version;
+}
+
+/**
+ * Drops the request media candidates whose alternative the ladder judged
+ * invalid. The alternative is the unit that carries the defect and it never
+ * climbs, so the operation keeps whatever alternatives remain; only a REQUIRED
+ * body left with none is excluded, by the existing unresolvable-request-body
+ * rule. A synthetic (undeclared) candidate occupies no declared position and is
+ * never a ladder unit. Mirrors the Go SDK's filterLadderInvalidAlternatives
+ * (formats/openapi/acceptance_floor.go).
+ */
+function filterLadderInvalidAlternatives(plans: BodyPlan[], verdict: FloorOp | undefined, opRef: string): BodyPlan[] {
+  if (!verdict || verdict.invalidAlternatives.size === 0) return plans;
+  return plans.filter((plan) => {
+    if (!plan.declared) return true;
+    return !verdict.invalidAlternatives.has(`${opRef}/requestBody/content/${escapePointerSegment(plan.mediaKey)}`);
+  });
 }
