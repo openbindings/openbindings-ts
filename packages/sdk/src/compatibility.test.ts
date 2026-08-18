@@ -101,6 +101,51 @@ describe("checkInterfaceCompatibility", () => {
     });
   });
 
+  describe("boolean schemas", () => {
+    // `false` is the spec's spelling for "carries no input" / "emits no
+    // output" — a call-convention fact, compatible exactly with itself. Its
+    // object spelling ({"not": {}}) is outside the schema profile, so it
+    // must short-circuit BEFORE normalization (regression: a no-input
+    // operation resolved `unavailable` with `outside profile at <root>:
+    // keyword "not"`).
+    it("input false vs input false -> compatible", async () => {
+      const required = makeInterface({ op: { input: false } });
+      const provided = makeInterface({ op: { input: false } });
+      expect(await checkInterfaceCompatibility(required, provided)).toEqual([]);
+    });
+
+    it("input false vs input object -> input_incompatible (both directions)", async () => {
+      const noInput = makeInterface({ op: { input: false } });
+      const withInput = makeInterface({ op: { input: { type: ["object"] } } });
+      const a = await checkInterfaceCompatibility(noInput, withInput);
+      expect(a).toHaveLength(1);
+      expect(a[0]?.kind).toBe("input_incompatible");
+      const b = await checkInterfaceCompatibility(withInput, noInput);
+      expect(b).toHaveLength(1);
+      expect(b[0]?.kind).toBe("input_incompatible");
+    });
+
+    it("input true vs input {} -> compatible (true is the empty schema)", async () => {
+      const required = makeInterface({ op: { input: true } });
+      const provided = makeInterface({ op: { input: {} } });
+      expect(await checkInterfaceCompatibility(required, provided)).toEqual([]);
+    });
+
+    it("output false vs output false -> compatible", async () => {
+      const required = makeInterface({ op: { output: false } });
+      const provided = makeInterface({ op: { output: false } });
+      expect(await checkInterfaceCompatibility(required, provided)).toEqual([]);
+    });
+
+    it("output false vs output object -> output_incompatible", async () => {
+      const required = makeInterface({ op: { output: false } });
+      const provided = makeInterface({ op: { output: { type: ["string"] } } });
+      const issues = await checkInterfaceCompatibility(required, provided);
+      expect(issues).toHaveLength(1);
+      expect(issues[0]?.kind).toBe("output_incompatible");
+    });
+  });
+
   describe("issue ordering", () => {
     it("orders issues by sorted operation key, output before input within an operation", async () => {
       // Pins the issue-ordering contract, mirrored byte-for-byte in the Go

@@ -1,8 +1,15 @@
 import type { OBInterface } from "./types.js";
 import { schemaObjectForm } from "./types.js";
 import { OperationNotFoundError } from "./errors.js";
-import { allOperationIdentifiers, resolveOperation } from "./resolve-operation.js";
-import { Normalizer, inputCompatible, outputCompatible } from "./schema-profile/index.js";
+import {
+  allOperationIdentifiers,
+  resolveOperation,
+} from "./resolve-operation.js";
+import {
+  Normalizer,
+  inputCompatible,
+  outputCompatible,
+} from "./schema-profile/index.js";
 
 export type CompatibilityIssue = {
   operation: string;
@@ -64,7 +71,10 @@ export async function checkOperationCompatibility(
 ): Promise<CompatibilityIssue[]> {
   const resolved = resolveOperation(required, operation);
   if (!resolved) {
-    throw new OperationNotFoundError(operation, allOperationIdentifiers(required));
+    throw new OperationNotFoundError(
+      operation,
+      allOperationIdentifiers(required),
+    );
   }
   return checkCompatibility(
     required,
@@ -81,8 +91,12 @@ async function checkCompatibility(
   const issues: CompatibilityIssue[] = [];
 
   // Normalizers resolve $refs against their respective interface's schemas.
-  const reqNorm = new Normalizer({ root: required as unknown as Record<string, unknown> });
-  const provNorm = new Normalizer({ root: provided as unknown as Record<string, unknown> });
+  const reqNorm = new Normalizer({
+    root: required as unknown as Record<string, unknown>,
+  });
+  const provNorm = new Normalizer({
+    root: provided as unknown as Record<string, unknown>,
+  });
 
   for (const { name: opKey, operation: requiredOp } of requiredOperations) {
     const providedOp = resolveOperation(provided, opKey)?.operation;
@@ -93,50 +107,78 @@ async function checkCompatibility(
 
     // Per spec: absent/null schemas are "unspecified" (skip in
     // compatibility); {} and boolean schemas are specified and must be
-    // checked. Boolean schemas take their equivalent object spellings
-    // (true = {}, false = {"not": {}}) so the profile normalizer sees one
-    // form.
+    // checked. `true` is identical to {} and flows through the normal
+    // check via schemaObjectForm. `false` — the spec's spelling for
+    // "carries no input" / "emits no output" — is a call-convention fact,
+    // not a value set the profile can express (its object spelling is
+    // {"not": {}}, outside the profile), so it short-circuits: compatible
+    // exactly with itself.
     if (requiredOp.output != null && providedOp.output != null) {
-      const reqOutObj = schemaObjectForm(requiredOp.output);
-      const provOutObj = schemaObjectForm(providedOp.output);
-      if (reqOutObj === undefined || provOutObj === undefined) {
-        issues.push({
-          operation: opKey,
-          kind: "output_incompatible",
-          detail: "output schema check failed: schema is not a JSON Schema object or boolean",
-        });
-      } else {
-        try {
-          const reqOutput = await reqNorm.normalize(reqOutObj);
-          const provOutput = await provNorm.normalize(provOutObj);
-          const outputResult = outputCompatible(reqOutput, provOutput);
-          if (!outputResult.compatible) {
-            issues.push({
-              operation: opKey,
-              kind: "output_incompatible",
-              detail: outputResult.reason
-                ? `provided output does not satisfy the required output schema: ${outputResult.reason}`
-                : "provided output does not satisfy the required output schema",
-            });
-          }
-        } catch (e: unknown) {
+      if (requiredOp.output === false || providedOp.output === false) {
+        if (requiredOp.output !== providedOp.output) {
           issues.push({
             operation: opKey,
             kind: "output_incompatible",
-            detail: `output schema check failed: ${e instanceof Error ? e.message : String(e)}`,
+            detail:
+              "output schema `false` (emits no output) is compatible only with `false`",
           });
+        }
+        // both false: compatible; fall through to the input check either way
+      } else {
+        const reqOutObj = schemaObjectForm(requiredOp.output);
+        const provOutObj = schemaObjectForm(providedOp.output);
+        if (reqOutObj === undefined || provOutObj === undefined) {
+          issues.push({
+            operation: opKey,
+            kind: "output_incompatible",
+            detail:
+              "output schema check failed: schema is not a JSON Schema object or boolean",
+          });
+        } else {
+          try {
+            const reqOutput = await reqNorm.normalize(reqOutObj);
+            const provOutput = await provNorm.normalize(provOutObj);
+            const outputResult = outputCompatible(reqOutput, provOutput);
+            if (!outputResult.compatible) {
+              issues.push({
+                operation: opKey,
+                kind: "output_incompatible",
+                detail: outputResult.reason
+                  ? `provided output does not satisfy the required output schema: ${outputResult.reason}`
+                  : "provided output does not satisfy the required output schema",
+              });
+            }
+          } catch (e: unknown) {
+            issues.push({
+              operation: opKey,
+              kind: "output_incompatible",
+              detail: `output schema check failed: ${e instanceof Error ? e.message : String(e)}`,
+            });
+          }
         }
       }
     }
 
     if (requiredOp.input != null && providedOp.input != null) {
+      if (requiredOp.input === false || providedOp.input === false) {
+        if (requiredOp.input !== providedOp.input) {
+          issues.push({
+            operation: opKey,
+            kind: "input_incompatible",
+            detail:
+              "input schema `false` (carries no input) is compatible only with `false`",
+          });
+        }
+        continue;
+      }
       const reqInObj = schemaObjectForm(requiredOp.input);
       const provInObj = schemaObjectForm(providedOp.input);
       if (reqInObj === undefined || provInObj === undefined) {
         issues.push({
           operation: opKey,
           kind: "input_incompatible",
-          detail: "input schema check failed: schema is not a JSON Schema object or boolean",
+          detail:
+            "input schema check failed: schema is not a JSON Schema object or boolean",
         });
         continue;
       }
