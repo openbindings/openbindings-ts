@@ -913,7 +913,20 @@ describe("openbindings.openapi@1 request carriage", () => {
     );
   });
 
-  it("preserves the older OAS 3.0.3 form defaults when encoding fields are absent", async () => {
+  // A 3.0.3 artifact writing no Encoding Object puts both properties on the
+  // CONTENT path, exactly as 3.0.4 and the 3.1 line do: `name` takes the string
+  // row's text/plain and rides as-is with its space spelled `+` per RFC 1866
+  // section 8.2.1, and `ids` takes the array row and rides as one field
+  // carrying its JSON image. Until 2026-08-17 a legacyOpenAPIFormEncoding
+  // predicate put 3.0.0-3.0.3 on the RFC6570-style path instead and this test
+  // expected `ids=1&ids=2&name=a%20b`; each of those editions' own section 4.1
+  // tells tooling to make no distinction between the patch versions of the 3.0
+  // line, and 3.0.4 states that with all three RFC6570-style fields absent
+  // "Encoding is to be based on contentType alone". See
+  // design/openapi-30-urlencoded-default-lane-ruling.md. The array's
+  // application/json default is the engines' own convention on an open cell,
+  // pinned here as observed rather than claimed as authority.
+  it("puts a 3.0.3 form body with no Encoding Object on the content path", async () => {
     const spec = document("3.0.3", {
       "application/x-www-form-urlencoded": {
         schema: {
@@ -927,7 +940,7 @@ describe("openbindings.openapi@1 request carriage", () => {
     });
     const result = await invoke(spec, { ids: [1, 2], name: "a b" });
     expect(result.error).toBeUndefined();
-    expect(result.requests[0]?.body).toBe("ids=1&ids=2&name=a%20b");
+    expect(result.requests[0]?.body).toBe("ids=%5B1%2C2%5D&name=a+b");
   });
 
   it("uses RFC6570 percent encoding for explicit urlencoded style fields", async () => {

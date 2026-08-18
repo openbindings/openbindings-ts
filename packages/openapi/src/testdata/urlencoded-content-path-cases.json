@@ -1,0 +1,1525 @@
+{
+  "$comment": "Urlencoded CONTENT-PATH body case table, shared byte-for-byte by the three engines that build an\nOpenAPI application/x-www-form-urlencoded request body: openbindings-go/formats/openapi,\nopenapi-client/go, and openapi-client/typescript/src (which openbindings-ts/packages/openapi\nre-exports).\n\nWHAT THIS TABLE GUARDS, and why it is separate from its two siblings.\nurlencoded-lane-partition-cases.json pins WHICH path an Encoding Object shape takes, with one\nobject-valued probe. urlencoded-escaper-cases.json pins WHICH CHARACTERS each path leaves literal.\nThis table pins the EMITTED BODY for each declaration SHAPE, on each of the eight accepted\neditions -- the layer between them, and the one no corpus aggregate can observe, because no\nevaluation report records request bytes.\n\nTen shapes x eight editions = 80 cells. Every case is rendered as a WHOLE OpenAPI document and\nloaded through each engine's own loader, so the table exercises the shipped path rather than a\nhand-built typed model. Every cell was OBSERVED in all three engines -- openapi-client/go,\nopenbindings-go/formats/openapi and openapi-client/typescript, agreeing on all 80 -- before any\nexpectation was written down, and each cell's \"basis\" states the authority that decides it.\n\nWHAT IT SHOWS AT A GLANCE. Eight of the ten shapes emit identical bytes on all eight editions.\nThe ONE genuine edition difference is the type-absent part default, and it is a LINE split\n(3.0.0-3.0.4 versus 3.1.0-3.1.2) that each line's own text states, never a patch split. That is\nthe shape openbindings.openapi@1 section 2's patch-uniformity reading predicts.\n\nWHAT IT REPLACED, MEASURED RATHER THAN ASSERTED. Until 2026-08-17 the three engines carried a\nlegacyOpenAPIFormEncoding(3.0.0|3.0.1|3.0.2|3.0.3) predicate routing those four editions'\ncontrol-free properties onto the RFC6570-style path -- the only patch-version-keyed behavioural\nswitch in any of them. Reverting only the implementation and re-running this table through all\nthree engines moves EXACTLY 32 of the 80 cells: the eight control-free shapes on each of the four\nlegacy editions. The two explicit-control shapes do not move, which is what scopes the change.\nAll three engines agreed with each other BEFORE the change as well as after, so the 32 are a\nbehaviour change and not a divergence. Per shape, on 3.0.0, 3.0.1, 3.0.2 and 3.0.3:\n\n  object                  street=main%20st              -> p=%7B%22street%22%3A%22main+st%22%7D\n  explicit-content-type   street=main%20st              -> p=%7B%22street%22%3A%22main+st%22%7D\n      (the property name \"p\" was GONE from the wire, and in the second an explicitly written\n       encoding.contentType was silently discarded)\n  array-of-objects        error                         -> p=%5B%7B%22id%22%3A7%7D%5D\n      (RFC 6570 §3.2.1 defines no expansion for a composite list member, so the style path\n       admitted a declaration its own encoder could not serve)\n  array-of-strings        p=a&p=b%20c                   -> p=%5B%22a%22%2C%22b+c%22%5D\n  primitive-with-space    p=main%20st                   -> p=main+st\n  typeless-with-members   p=main%20st                   -> p=main+st\n  unconstrained           p=main%20st                   -> p=main+st\n      (the style path never consults a part content type at all)\n  non-collapsing-anyOf    admitted;emit=p=main%20st     -> refused\n      (an anyOf that section 9.2 refuses was being served)\n\nRuling: design/openapi-30-urlencoded-default-lane-ruling.md. Specification: openbindings.openapi@1\nsection 2 (patch uniformity) and section 9.2 (the path-selection predicate, now stated for all\neight editions).\n\nONE CELL IS DELIBERATELY OPEN. array-of-strings pins what the engines emit for an array of\nprimitives on the content path, which rests on an UNLABELLED implementation convention\n(application/json for any array) against an items-derived authority row. The lane ruling carried\nthat convention forward unchanged and settled nothing about it; the cell exists so its cost stays\nvisible. See that cell's \"basis\" and queue item 20.\n\nShape of every case: one urlencoded request body whose schema is\n{type: object, properties: {p: <propertySchema>}}, with the case's `encoding` (when non-null)\nwritten as encoding.p, invoked with {\"p\": <value>}. `expect` is the WHOLE emitted body, or\n\"refused\" when the request plan refuses before dispatch, or \"error\" when admission accepted the\ndeclaration and the encoder could not serve it.",
+  "cases": [
+    {
+      "name": "3.0.0|object",
+      "openapi": "3.0.0",
+      "shape": "object",
+      "path": "content",
+      "propertySchema": {
+        "type": "object",
+        "properties": {
+          "street": {
+            "type": "string"
+          }
+        }
+      },
+      "encoding": null,
+      "value": {
+        "street": "main st"
+      },
+      "expect": "admitted;emit=p=%7B%22street%22%3A%22main+st%22%7D",
+      "basis": "The Encoding Object writes no style, explode or allowReserved, so the CONTENT path governs. Edition 3.0.0 states no lane-selection rule of its own; the rule reaching it is that edition's OWN §4.1 — \"Tooling which supports OAS 3.0 SHOULD be compatible with all OAS 3.0.* versions. The patch version SHOULD NOT be considered by tooling, making no distinction between 3.0.0 and 3.0.1 for example\" — together with 3.0.4, a 3.0.* version, whose §4.7.15.1.2 states that with all three fields absent \"Encoding is to be based on contentType alone\". The part declares type: object, whose contentType default is application/json in every accepted edition, so the value's JSON image rides as one field under the property's own name. The space inside it is + because the content path percent-encodes under RFC 1866 §8.2.1, whose escaping defers to RFC 1738 — see urlencoded-escaper-cases.json for that boundary in full."
+    },
+    {
+      "name": "3.0.0|array-of-objects",
+      "openapi": "3.0.0",
+      "shape": "array-of-objects",
+      "path": "content",
+      "propertySchema": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "integer"
+            }
+          }
+        }
+      },
+      "encoding": null,
+      "value": [
+        {
+          "id": 7
+        }
+      ],
+      "expect": "admitted;emit=p=%5B%7B%22id%22%3A7%7D%5D",
+      "basis": "The Encoding Object writes no style, explode or allowReserved, so the CONTENT path governs. Edition 3.0.0 states no lane-selection rule of its own; the rule reaching it is that edition's OWN §4.1 — \"Tooling which supports OAS 3.0 SHOULD be compatible with all OAS 3.0.* versions. The patch version SHOULD NOT be considered by tooling, making no distinction between 3.0.0 and 3.0.1 for example\" — together with 3.0.4, a 3.0.* version, whose §4.7.15.1.2 states that with all three fields absent \"Encoding is to be based on contentType alone\". The part declares type: array with OBJECT items. Every accepted edition derives an array's default from its items (\"for array – the default is defined based on the inner type\" on 3.0.0-3.0.3; \"according to the type and format of the items schema\" in 3.0.4 and the 3.1 default tables), and for object items that is application/json under any reading, so this cell is undisputed. It is also the shape of all eleven style-path composite-array cells the corpus carried before 2026-08-17, which RFC 6570 §3.2.1 defines no expansion for and which the engines therefore refused at encode time; on the content path they are servable."
+    },
+    {
+      "name": "3.0.0|array-of-strings",
+      "openapi": "3.0.0",
+      "shape": "array-of-strings",
+      "path": "content",
+      "propertySchema": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "encoding": null,
+      "value": [
+        "a",
+        "b c"
+      ],
+      "expect": "admitted;emit=p=%5B%22a%22%2C%22b+c%22%5D",
+      "basis": "The Encoding Object writes no style, explode or allowReserved, so the CONTENT path governs. Edition 3.0.0 states no lane-selection rule of its own; the rule reaching it is that edition's OWN §4.1 — \"Tooling which supports OAS 3.0 SHOULD be compatible with all OAS 3.0.* versions. The patch version SHOULD NOT be considered by tooling, making no distinction between 3.0.0 and 3.0.1 for example\" — together with 3.0.4, a 3.0.* version, whose §4.7.15.1.2 states that with all three fields absent \"Encoding is to be based on contentType alone\". OPEN CELL, PINNED AS OBSERVED, AND DECIDED BY NOTHING HERE. The part declares type: array with PRIMITIVE items. The engines return application/json for any array; the accepted editions derive the default from the items schema, which for a primitive item is text/plain, and no edition states what a JSON array under text/plain looks like inside a urlencoded body. That gap is the array-items part default (queue item 20). The 2026-08-17 lane ruling carried the engines' convention forward UNCHANGED and expressly settled nothing about it; this cell exists so the convention's bytes are visible rather than absorbed, since the lane move took the disputed sub-cell from 3 properties to 19 and its population from 1 artifact to 8."
+    },
+    {
+      "name": "3.0.0|primitive-with-space",
+      "openapi": "3.0.0",
+      "shape": "primitive-with-space",
+      "path": "content",
+      "propertySchema": {
+        "type": "string"
+      },
+      "encoding": null,
+      "value": "main st",
+      "expect": "admitted;emit=p=main+st",
+      "basis": "The Encoding Object writes no style, explode or allowReserved, so the CONTENT path governs. Edition 3.0.0 states no lane-selection rule of its own; the rule reaching it is that edition's OWN §4.1 — \"Tooling which supports OAS 3.0 SHOULD be compatible with all OAS 3.0.* versions. The patch version SHOULD NOT be considered by tooling, making no distinction between 3.0.0 and 3.0.1 for example\" — together with 3.0.4, a 3.0.* version, whose §4.7.15.1.2 states that with all three fields absent \"Encoding is to be based on contentType alone\". The part declares type: string, whose contentType default is text/plain in every accepted edition, and 3.0.4 §4.7.15.2.1 notes of exactly this case that the value \"is serialized as-is\". The space is + because the CONTENT path percent-encodes under RFC 1866 §8.2.1 / RFC 1738, where the style path would spell it %20 — the two paths are supposed to differ, and urlencoded-escaper-cases.json pins the whole boundary."
+    },
+    {
+      "name": "3.0.0|explicit-content-type",
+      "openapi": "3.0.0",
+      "shape": "explicit-content-type",
+      "path": "content",
+      "propertySchema": {
+        "type": "object",
+        "properties": {
+          "street": {
+            "type": "string"
+          }
+        }
+      },
+      "encoding": {
+        "contentType": "application/json"
+      },
+      "value": {
+        "street": "main st"
+      },
+      "expect": "admitted;emit=p=%7B%22street%22%3A%22main+st%22%7D",
+      "basis": "The Encoding Object writes no style, explode or allowReserved, so the CONTENT path governs. Edition 3.0.0 states no lane-selection rule of its own; the rule reaching it is that edition's OWN §4.1 — \"Tooling which supports OAS 3.0 SHOULD be compatible with all OAS 3.0.* versions. The patch version SHOULD NOT be considered by tooling, making no distinction between 3.0.0 and 3.0.1 for example\" — together with 3.0.4, a 3.0.* version, whose §4.7.15.1.2 states that with all three fields absent \"Encoding is to be based on contentType alone\". contentType is not a serialization control, so it selects nothing: it supplies the CONTENT path's media type, which here is what the object row's default would have been anyway. This cell is the sharpest one in the table for the 3.0 line, because before 2026-08-17 those four editions DISCARDED this explicitly written declaration and emitted street=main%20st — losing the field name the artifact named and promoting the object's members to top level. Two corpus artifacts write exactly this (dart-ogurets/dart-openapi-maven at 3.0.1, qbittorrent-ecosystem/webui-api-openapi at 3.0.3) and both were served wrongly."
+    },
+    {
+      "name": "3.0.0|explicit-style-only",
+      "openapi": "3.0.0",
+      "shape": "explicit-style-only",
+      "path": "style",
+      "propertySchema": {
+        "type": "object",
+        "properties": {
+          "street": {
+            "type": "string"
+          }
+        }
+      },
+      "encoding": {
+        "style": "form"
+      },
+      "value": {
+        "street": "main st"
+      },
+      "expect": "admitted;emit=street=main%20st",
+      "basis": "An explicit RFC6570-style control is written, so the STYLE path governs on every accepted edition, and the property's own name disappears into its expanded members. The predicate is PRESENCE, not truthiness: 3.0.4/3.1.1/3.1.2 say \"with an explicit value\" and 3.1.0 says \"If a value is explicitly defined\". A space rides as %20 here because the style path percent-encodes under RFC 6570 / RFC 3986, which the OAS's own normatively-cited-standards table notes \"does not use + for form-urlencoded\". An explicitly written style is an explicit value on every accepted edition, so this cell does not move with the lane rule and is here as the control that proves the change is scoped to control-free properties."
+    },
+    {
+      "name": "3.0.0|explicit-allow-reserved-false",
+      "openapi": "3.0.0",
+      "shape": "explicit-allow-reserved-false",
+      "path": "style",
+      "propertySchema": {
+        "type": "object",
+        "properties": {
+          "street": {
+            "type": "string"
+          }
+        }
+      },
+      "encoding": {
+        "allowReserved": false
+      },
+      "value": {
+        "street": "main st"
+      },
+      "expect": "admitted;emit=street=main%20st",
+      "basis": "An explicit RFC6570-style control is written, so the STYLE path governs on every accepted edition, and the property's own name disappears into its expanded members. The predicate is PRESENCE, not truthiness: 3.0.4/3.1.1/3.1.2 say \"with an explicit value\" and 3.1.0 says \"If a value is explicitly defined\". A space rides as %20 here because the style path percent-encodes under RFC 6570 / RFC 3986, which the OAS's own normatively-cited-standards table notes \"does not use + for form-urlencoded\". The presence-not-truthiness class. allowReserved: false writes a value equal to the field's own default, so a typed model storing it as a plain boolean cannot tell it from an absent field; it is nonetheless an explicit value and selects the style path. Pinned independently by OAPI-PS-53 and by urlencoded-escaper-cases.json."
+    },
+    {
+      "name": "3.0.0|typeless-with-members",
+      "openapi": "3.0.0",
+      "shape": "typeless-with-members",
+      "path": "content",
+      "propertySchema": {
+        "description": "no type declared"
+      },
+      "encoding": null,
+      "value": "main st",
+      "expect": "admitted;emit=p=main+st",
+      "basis": "The Encoding Object writes no style, explode or allowReserved, so the CONTENT path governs. Edition 3.0.0 states no lane-selection rule of its own; the rule reaching it is that edition's OWN §4.1 — \"Tooling which supports OAS 3.0 SHOULD be compatible with all OAS 3.0.* versions. The patch version SHOULD NOT be considered by tooling, making no distinction between 3.0.0 and 3.0.1 for example\" — together with 3.0.4, a 3.0.* version, whose §4.7.15.1.2 states that with all three fields absent \"Encoding is to be based on contentType alone\". A resolved part schema declaring NO type. This is the one genuine edition difference in this table, and it is a LINE split rather than a patch split. On 3.0.0-3.0.4 no edition states a row for a type-absent part, and openbindings.openapi@1 §9.2's own convention — which covers exactly those five editions — keys the default from the supplied value's JSON application type, so a string selects text/plain. On 3.1.0, 3.1.1 and 3.1.2 the edition states application/octet-stream for that part (tabulated as the type-absent row in 3.1.1/3.1.2, reached through the closing catch-all in 3.1.0), this specification defines no JSON-to-octets part boundary, and the part refuses before dispatch. On the urlencoded lane these cells were UNREACHABLE on 3.0.0-3.0.3 before 2026-08-17, because the style path never consults a part content type at all; the lane move grows that convention's reach on this lane from zero to 17 corpus properties. Recorded, not reopened."
+    },
+    {
+      "name": "3.0.0|unconstrained",
+      "openapi": "3.0.0",
+      "shape": "unconstrained",
+      "path": "content",
+      "propertySchema": {},
+      "encoding": null,
+      "value": "main st",
+      "expect": "admitted;emit=p=main+st",
+      "basis": "The Encoding Object writes no style, explode or allowReserved, so the CONTENT path governs. Edition 3.0.0 states no lane-selection rule of its own; the rule reaching it is that edition's OWN §4.1 — \"Tooling which supports OAS 3.0 SHOULD be compatible with all OAS 3.0.* versions. The patch version SHOULD NOT be considered by tooling, making no distinction between 3.0.0 and 3.0.1 for example\" — together with 3.0.4, a 3.0.* version, whose §4.7.15.1.2 states that with all three fields absent \"Encoding is to be based on contentType alone\". A memberless Schema Object. §9.2 reads a memberless schema as asserting nothing for a MEDIA TYPE OBJECT's own schema, but says in as many words that the reading \"does not descend to a form part\": a part declaring no type is the type-absent cell, answered per edition exactly as the typeless-with-members cell above. This cell exists because the two reach the engines through different code paths (a memberless schema versus a schema with members but no type) and an engine may answer one and not the other."
+    },
+    {
+      "name": "3.0.0|non-collapsing-anyOf",
+      "openapi": "3.0.0",
+      "shape": "non-collapsing-anyOf",
+      "path": "content",
+      "propertySchema": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        ]
+      },
+      "encoding": null,
+      "value": "main st",
+      "expect": "refused",
+      "basis": "The Encoding Object writes no style, explode or allowReserved, so the CONTENT path governs. Edition 3.0.0 states no lane-selection rule of its own; the rule reaching it is that edition's OWN §4.1 — \"Tooling which supports OAS 3.0 SHOULD be compatible with all OAS 3.0.* versions. The patch version SHOULD NOT be considered by tooling, making no distinction between 3.0.0 and 3.0.1 for example\" — together with 3.0.4, a 3.0.* version, whose §4.7.15.1.2 states that with all three fields absent \"Encoding is to be based on contentType alone\". Two non-null branches declare value-dependent alternatives and leave no single faithful form carriage, so §9.2 refuses the alternative before dispatch on every accepted edition. Before 2026-08-17 the 3.0.0-3.0.3 rows ADMITTED it, because the style path checks only that a coherent serialization method exists and never resolves a part carriage. This is the class MISP/MISP's POST /warninglists/toggleEnable falls in — WarninglistsIdFilter and WarninglistsNameFilter are each anyOf of a scalar and an array of it — and its urlencoded alternative moving represented -> excluded is the SOLE corpus movement of the lane ruling. A coverage fall of exactly one entry is the intended outcome here, not a regression."
+    },
+    {
+      "name": "3.0.1|object",
+      "openapi": "3.0.1",
+      "shape": "object",
+      "path": "content",
+      "propertySchema": {
+        "type": "object",
+        "properties": {
+          "street": {
+            "type": "string"
+          }
+        }
+      },
+      "encoding": null,
+      "value": {
+        "street": "main st"
+      },
+      "expect": "admitted;emit=p=%7B%22street%22%3A%22main+st%22%7D",
+      "basis": "The Encoding Object writes no style, explode or allowReserved, so the CONTENT path governs. Edition 3.0.1 states no lane-selection rule of its own; the rule reaching it is that edition's OWN §4.1 — \"Tooling which supports OAS 3.0 SHOULD be compatible with all OAS 3.0.* versions. The patch version SHOULD NOT be considered by tooling, making no distinction between 3.0.0 and 3.0.1 for example\" — together with 3.0.4, a 3.0.* version, whose §4.7.15.1.2 states that with all three fields absent \"Encoding is to be based on contentType alone\". The part declares type: object, whose contentType default is application/json in every accepted edition, so the value's JSON image rides as one field under the property's own name. The space inside it is + because the content path percent-encodes under RFC 1866 §8.2.1, whose escaping defers to RFC 1738 — see urlencoded-escaper-cases.json for that boundary in full."
+    },
+    {
+      "name": "3.0.1|array-of-objects",
+      "openapi": "3.0.1",
+      "shape": "array-of-objects",
+      "path": "content",
+      "propertySchema": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "integer"
+            }
+          }
+        }
+      },
+      "encoding": null,
+      "value": [
+        {
+          "id": 7
+        }
+      ],
+      "expect": "admitted;emit=p=%5B%7B%22id%22%3A7%7D%5D",
+      "basis": "The Encoding Object writes no style, explode or allowReserved, so the CONTENT path governs. Edition 3.0.1 states no lane-selection rule of its own; the rule reaching it is that edition's OWN §4.1 — \"Tooling which supports OAS 3.0 SHOULD be compatible with all OAS 3.0.* versions. The patch version SHOULD NOT be considered by tooling, making no distinction between 3.0.0 and 3.0.1 for example\" — together with 3.0.4, a 3.0.* version, whose §4.7.15.1.2 states that with all three fields absent \"Encoding is to be based on contentType alone\". The part declares type: array with OBJECT items. Every accepted edition derives an array's default from its items (\"for array – the default is defined based on the inner type\" on 3.0.0-3.0.3; \"according to the type and format of the items schema\" in 3.0.4 and the 3.1 default tables), and for object items that is application/json under any reading, so this cell is undisputed. It is also the shape of all eleven style-path composite-array cells the corpus carried before 2026-08-17, which RFC 6570 §3.2.1 defines no expansion for and which the engines therefore refused at encode time; on the content path they are servable."
+    },
+    {
+      "name": "3.0.1|array-of-strings",
+      "openapi": "3.0.1",
+      "shape": "array-of-strings",
+      "path": "content",
+      "propertySchema": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "encoding": null,
+      "value": [
+        "a",
+        "b c"
+      ],
+      "expect": "admitted;emit=p=%5B%22a%22%2C%22b+c%22%5D",
+      "basis": "The Encoding Object writes no style, explode or allowReserved, so the CONTENT path governs. Edition 3.0.1 states no lane-selection rule of its own; the rule reaching it is that edition's OWN §4.1 — \"Tooling which supports OAS 3.0 SHOULD be compatible with all OAS 3.0.* versions. The patch version SHOULD NOT be considered by tooling, making no distinction between 3.0.0 and 3.0.1 for example\" — together with 3.0.4, a 3.0.* version, whose §4.7.15.1.2 states that with all three fields absent \"Encoding is to be based on contentType alone\". OPEN CELL, PINNED AS OBSERVED, AND DECIDED BY NOTHING HERE. The part declares type: array with PRIMITIVE items. The engines return application/json for any array; the accepted editions derive the default from the items schema, which for a primitive item is text/plain, and no edition states what a JSON array under text/plain looks like inside a urlencoded body. That gap is the array-items part default (queue item 20). The 2026-08-17 lane ruling carried the engines' convention forward UNCHANGED and expressly settled nothing about it; this cell exists so the convention's bytes are visible rather than absorbed, since the lane move took the disputed sub-cell from 3 properties to 19 and its population from 1 artifact to 8."
+    },
+    {
+      "name": "3.0.1|primitive-with-space",
+      "openapi": "3.0.1",
+      "shape": "primitive-with-space",
+      "path": "content",
+      "propertySchema": {
+        "type": "string"
+      },
+      "encoding": null,
+      "value": "main st",
+      "expect": "admitted;emit=p=main+st",
+      "basis": "The Encoding Object writes no style, explode or allowReserved, so the CONTENT path governs. Edition 3.0.1 states no lane-selection rule of its own; the rule reaching it is that edition's OWN §4.1 — \"Tooling which supports OAS 3.0 SHOULD be compatible with all OAS 3.0.* versions. The patch version SHOULD NOT be considered by tooling, making no distinction between 3.0.0 and 3.0.1 for example\" — together with 3.0.4, a 3.0.* version, whose §4.7.15.1.2 states that with all three fields absent \"Encoding is to be based on contentType alone\". The part declares type: string, whose contentType default is text/plain in every accepted edition, and 3.0.4 §4.7.15.2.1 notes of exactly this case that the value \"is serialized as-is\". The space is + because the CONTENT path percent-encodes under RFC 1866 §8.2.1 / RFC 1738, where the style path would spell it %20 — the two paths are supposed to differ, and urlencoded-escaper-cases.json pins the whole boundary."
+    },
+    {
+      "name": "3.0.1|explicit-content-type",
+      "openapi": "3.0.1",
+      "shape": "explicit-content-type",
+      "path": "content",
+      "propertySchema": {
+        "type": "object",
+        "properties": {
+          "street": {
+            "type": "string"
+          }
+        }
+      },
+      "encoding": {
+        "contentType": "application/json"
+      },
+      "value": {
+        "street": "main st"
+      },
+      "expect": "admitted;emit=p=%7B%22street%22%3A%22main+st%22%7D",
+      "basis": "The Encoding Object writes no style, explode or allowReserved, so the CONTENT path governs. Edition 3.0.1 states no lane-selection rule of its own; the rule reaching it is that edition's OWN §4.1 — \"Tooling which supports OAS 3.0 SHOULD be compatible with all OAS 3.0.* versions. The patch version SHOULD NOT be considered by tooling, making no distinction between 3.0.0 and 3.0.1 for example\" — together with 3.0.4, a 3.0.* version, whose §4.7.15.1.2 states that with all three fields absent \"Encoding is to be based on contentType alone\". contentType is not a serialization control, so it selects nothing: it supplies the CONTENT path's media type, which here is what the object row's default would have been anyway. This cell is the sharpest one in the table for the 3.0 line, because before 2026-08-17 those four editions DISCARDED this explicitly written declaration and emitted street=main%20st — losing the field name the artifact named and promoting the object's members to top level. Two corpus artifacts write exactly this (dart-ogurets/dart-openapi-maven at 3.0.1, qbittorrent-ecosystem/webui-api-openapi at 3.0.3) and both were served wrongly."
+    },
+    {
+      "name": "3.0.1|explicit-style-only",
+      "openapi": "3.0.1",
+      "shape": "explicit-style-only",
+      "path": "style",
+      "propertySchema": {
+        "type": "object",
+        "properties": {
+          "street": {
+            "type": "string"
+          }
+        }
+      },
+      "encoding": {
+        "style": "form"
+      },
+      "value": {
+        "street": "main st"
+      },
+      "expect": "admitted;emit=street=main%20st",
+      "basis": "An explicit RFC6570-style control is written, so the STYLE path governs on every accepted edition, and the property's own name disappears into its expanded members. The predicate is PRESENCE, not truthiness: 3.0.4/3.1.1/3.1.2 say \"with an explicit value\" and 3.1.0 says \"If a value is explicitly defined\". A space rides as %20 here because the style path percent-encodes under RFC 6570 / RFC 3986, which the OAS's own normatively-cited-standards table notes \"does not use + for form-urlencoded\". An explicitly written style is an explicit value on every accepted edition, so this cell does not move with the lane rule and is here as the control that proves the change is scoped to control-free properties."
+    },
+    {
+      "name": "3.0.1|explicit-allow-reserved-false",
+      "openapi": "3.0.1",
+      "shape": "explicit-allow-reserved-false",
+      "path": "style",
+      "propertySchema": {
+        "type": "object",
+        "properties": {
+          "street": {
+            "type": "string"
+          }
+        }
+      },
+      "encoding": {
+        "allowReserved": false
+      },
+      "value": {
+        "street": "main st"
+      },
+      "expect": "admitted;emit=street=main%20st",
+      "basis": "An explicit RFC6570-style control is written, so the STYLE path governs on every accepted edition, and the property's own name disappears into its expanded members. The predicate is PRESENCE, not truthiness: 3.0.4/3.1.1/3.1.2 say \"with an explicit value\" and 3.1.0 says \"If a value is explicitly defined\". A space rides as %20 here because the style path percent-encodes under RFC 6570 / RFC 3986, which the OAS's own normatively-cited-standards table notes \"does not use + for form-urlencoded\". The presence-not-truthiness class. allowReserved: false writes a value equal to the field's own default, so a typed model storing it as a plain boolean cannot tell it from an absent field; it is nonetheless an explicit value and selects the style path. Pinned independently by OAPI-PS-53 and by urlencoded-escaper-cases.json."
+    },
+    {
+      "name": "3.0.1|typeless-with-members",
+      "openapi": "3.0.1",
+      "shape": "typeless-with-members",
+      "path": "content",
+      "propertySchema": {
+        "description": "no type declared"
+      },
+      "encoding": null,
+      "value": "main st",
+      "expect": "admitted;emit=p=main+st",
+      "basis": "The Encoding Object writes no style, explode or allowReserved, so the CONTENT path governs. Edition 3.0.1 states no lane-selection rule of its own; the rule reaching it is that edition's OWN §4.1 — \"Tooling which supports OAS 3.0 SHOULD be compatible with all OAS 3.0.* versions. The patch version SHOULD NOT be considered by tooling, making no distinction between 3.0.0 and 3.0.1 for example\" — together with 3.0.4, a 3.0.* version, whose §4.7.15.1.2 states that with all three fields absent \"Encoding is to be based on contentType alone\". A resolved part schema declaring NO type. This is the one genuine edition difference in this table, and it is a LINE split rather than a patch split. On 3.0.0-3.0.4 no edition states a row for a type-absent part, and openbindings.openapi@1 §9.2's own convention — which covers exactly those five editions — keys the default from the supplied value's JSON application type, so a string selects text/plain. On 3.1.0, 3.1.1 and 3.1.2 the edition states application/octet-stream for that part (tabulated as the type-absent row in 3.1.1/3.1.2, reached through the closing catch-all in 3.1.0), this specification defines no JSON-to-octets part boundary, and the part refuses before dispatch. On the urlencoded lane these cells were UNREACHABLE on 3.0.0-3.0.3 before 2026-08-17, because the style path never consults a part content type at all; the lane move grows that convention's reach on this lane from zero to 17 corpus properties. Recorded, not reopened."
+    },
+    {
+      "name": "3.0.1|unconstrained",
+      "openapi": "3.0.1",
+      "shape": "unconstrained",
+      "path": "content",
+      "propertySchema": {},
+      "encoding": null,
+      "value": "main st",
+      "expect": "admitted;emit=p=main+st",
+      "basis": "The Encoding Object writes no style, explode or allowReserved, so the CONTENT path governs. Edition 3.0.1 states no lane-selection rule of its own; the rule reaching it is that edition's OWN §4.1 — \"Tooling which supports OAS 3.0 SHOULD be compatible with all OAS 3.0.* versions. The patch version SHOULD NOT be considered by tooling, making no distinction between 3.0.0 and 3.0.1 for example\" — together with 3.0.4, a 3.0.* version, whose §4.7.15.1.2 states that with all three fields absent \"Encoding is to be based on contentType alone\". A memberless Schema Object. §9.2 reads a memberless schema as asserting nothing for a MEDIA TYPE OBJECT's own schema, but says in as many words that the reading \"does not descend to a form part\": a part declaring no type is the type-absent cell, answered per edition exactly as the typeless-with-members cell above. This cell exists because the two reach the engines through different code paths (a memberless schema versus a schema with members but no type) and an engine may answer one and not the other."
+    },
+    {
+      "name": "3.0.1|non-collapsing-anyOf",
+      "openapi": "3.0.1",
+      "shape": "non-collapsing-anyOf",
+      "path": "content",
+      "propertySchema": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        ]
+      },
+      "encoding": null,
+      "value": "main st",
+      "expect": "refused",
+      "basis": "The Encoding Object writes no style, explode or allowReserved, so the CONTENT path governs. Edition 3.0.1 states no lane-selection rule of its own; the rule reaching it is that edition's OWN §4.1 — \"Tooling which supports OAS 3.0 SHOULD be compatible with all OAS 3.0.* versions. The patch version SHOULD NOT be considered by tooling, making no distinction between 3.0.0 and 3.0.1 for example\" — together with 3.0.4, a 3.0.* version, whose §4.7.15.1.2 states that with all three fields absent \"Encoding is to be based on contentType alone\". Two non-null branches declare value-dependent alternatives and leave no single faithful form carriage, so §9.2 refuses the alternative before dispatch on every accepted edition. Before 2026-08-17 the 3.0.0-3.0.3 rows ADMITTED it, because the style path checks only that a coherent serialization method exists and never resolves a part carriage. This is the class MISP/MISP's POST /warninglists/toggleEnable falls in — WarninglistsIdFilter and WarninglistsNameFilter are each anyOf of a scalar and an array of it — and its urlencoded alternative moving represented -> excluded is the SOLE corpus movement of the lane ruling. A coverage fall of exactly one entry is the intended outcome here, not a regression."
+    },
+    {
+      "name": "3.0.2|object",
+      "openapi": "3.0.2",
+      "shape": "object",
+      "path": "content",
+      "propertySchema": {
+        "type": "object",
+        "properties": {
+          "street": {
+            "type": "string"
+          }
+        }
+      },
+      "encoding": null,
+      "value": {
+        "street": "main st"
+      },
+      "expect": "admitted;emit=p=%7B%22street%22%3A%22main+st%22%7D",
+      "basis": "The Encoding Object writes no style, explode or allowReserved, so the CONTENT path governs. Edition 3.0.2 states no lane-selection rule of its own; the rule reaching it is that edition's OWN §4.1 — \"Tooling which supports OAS 3.0 SHOULD be compatible with all OAS 3.0.* versions. The patch version SHOULD NOT be considered by tooling, making no distinction between 3.0.0 and 3.0.1 for example\" — together with 3.0.4, a 3.0.* version, whose §4.7.15.1.2 states that with all three fields absent \"Encoding is to be based on contentType alone\". The part declares type: object, whose contentType default is application/json in every accepted edition, so the value's JSON image rides as one field under the property's own name. The space inside it is + because the content path percent-encodes under RFC 1866 §8.2.1, whose escaping defers to RFC 1738 — see urlencoded-escaper-cases.json for that boundary in full."
+    },
+    {
+      "name": "3.0.2|array-of-objects",
+      "openapi": "3.0.2",
+      "shape": "array-of-objects",
+      "path": "content",
+      "propertySchema": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "integer"
+            }
+          }
+        }
+      },
+      "encoding": null,
+      "value": [
+        {
+          "id": 7
+        }
+      ],
+      "expect": "admitted;emit=p=%5B%7B%22id%22%3A7%7D%5D",
+      "basis": "The Encoding Object writes no style, explode or allowReserved, so the CONTENT path governs. Edition 3.0.2 states no lane-selection rule of its own; the rule reaching it is that edition's OWN §4.1 — \"Tooling which supports OAS 3.0 SHOULD be compatible with all OAS 3.0.* versions. The patch version SHOULD NOT be considered by tooling, making no distinction between 3.0.0 and 3.0.1 for example\" — together with 3.0.4, a 3.0.* version, whose §4.7.15.1.2 states that with all three fields absent \"Encoding is to be based on contentType alone\". The part declares type: array with OBJECT items. Every accepted edition derives an array's default from its items (\"for array – the default is defined based on the inner type\" on 3.0.0-3.0.3; \"according to the type and format of the items schema\" in 3.0.4 and the 3.1 default tables), and for object items that is application/json under any reading, so this cell is undisputed. It is also the shape of all eleven style-path composite-array cells the corpus carried before 2026-08-17, which RFC 6570 §3.2.1 defines no expansion for and which the engines therefore refused at encode time; on the content path they are servable."
+    },
+    {
+      "name": "3.0.2|array-of-strings",
+      "openapi": "3.0.2",
+      "shape": "array-of-strings",
+      "path": "content",
+      "propertySchema": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "encoding": null,
+      "value": [
+        "a",
+        "b c"
+      ],
+      "expect": "admitted;emit=p=%5B%22a%22%2C%22b+c%22%5D",
+      "basis": "The Encoding Object writes no style, explode or allowReserved, so the CONTENT path governs. Edition 3.0.2 states no lane-selection rule of its own; the rule reaching it is that edition's OWN §4.1 — \"Tooling which supports OAS 3.0 SHOULD be compatible with all OAS 3.0.* versions. The patch version SHOULD NOT be considered by tooling, making no distinction between 3.0.0 and 3.0.1 for example\" — together with 3.0.4, a 3.0.* version, whose §4.7.15.1.2 states that with all three fields absent \"Encoding is to be based on contentType alone\". OPEN CELL, PINNED AS OBSERVED, AND DECIDED BY NOTHING HERE. The part declares type: array with PRIMITIVE items. The engines return application/json for any array; the accepted editions derive the default from the items schema, which for a primitive item is text/plain, and no edition states what a JSON array under text/plain looks like inside a urlencoded body. That gap is the array-items part default (queue item 20). The 2026-08-17 lane ruling carried the engines' convention forward UNCHANGED and expressly settled nothing about it; this cell exists so the convention's bytes are visible rather than absorbed, since the lane move took the disputed sub-cell from 3 properties to 19 and its population from 1 artifact to 8."
+    },
+    {
+      "name": "3.0.2|primitive-with-space",
+      "openapi": "3.0.2",
+      "shape": "primitive-with-space",
+      "path": "content",
+      "propertySchema": {
+        "type": "string"
+      },
+      "encoding": null,
+      "value": "main st",
+      "expect": "admitted;emit=p=main+st",
+      "basis": "The Encoding Object writes no style, explode or allowReserved, so the CONTENT path governs. Edition 3.0.2 states no lane-selection rule of its own; the rule reaching it is that edition's OWN §4.1 — \"Tooling which supports OAS 3.0 SHOULD be compatible with all OAS 3.0.* versions. The patch version SHOULD NOT be considered by tooling, making no distinction between 3.0.0 and 3.0.1 for example\" — together with 3.0.4, a 3.0.* version, whose §4.7.15.1.2 states that with all three fields absent \"Encoding is to be based on contentType alone\". The part declares type: string, whose contentType default is text/plain in every accepted edition, and 3.0.4 §4.7.15.2.1 notes of exactly this case that the value \"is serialized as-is\". The space is + because the CONTENT path percent-encodes under RFC 1866 §8.2.1 / RFC 1738, where the style path would spell it %20 — the two paths are supposed to differ, and urlencoded-escaper-cases.json pins the whole boundary."
+    },
+    {
+      "name": "3.0.2|explicit-content-type",
+      "openapi": "3.0.2",
+      "shape": "explicit-content-type",
+      "path": "content",
+      "propertySchema": {
+        "type": "object",
+        "properties": {
+          "street": {
+            "type": "string"
+          }
+        }
+      },
+      "encoding": {
+        "contentType": "application/json"
+      },
+      "value": {
+        "street": "main st"
+      },
+      "expect": "admitted;emit=p=%7B%22street%22%3A%22main+st%22%7D",
+      "basis": "The Encoding Object writes no style, explode or allowReserved, so the CONTENT path governs. Edition 3.0.2 states no lane-selection rule of its own; the rule reaching it is that edition's OWN §4.1 — \"Tooling which supports OAS 3.0 SHOULD be compatible with all OAS 3.0.* versions. The patch version SHOULD NOT be considered by tooling, making no distinction between 3.0.0 and 3.0.1 for example\" — together with 3.0.4, a 3.0.* version, whose §4.7.15.1.2 states that with all three fields absent \"Encoding is to be based on contentType alone\". contentType is not a serialization control, so it selects nothing: it supplies the CONTENT path's media type, which here is what the object row's default would have been anyway. This cell is the sharpest one in the table for the 3.0 line, because before 2026-08-17 those four editions DISCARDED this explicitly written declaration and emitted street=main%20st — losing the field name the artifact named and promoting the object's members to top level. Two corpus artifacts write exactly this (dart-ogurets/dart-openapi-maven at 3.0.1, qbittorrent-ecosystem/webui-api-openapi at 3.0.3) and both were served wrongly."
+    },
+    {
+      "name": "3.0.2|explicit-style-only",
+      "openapi": "3.0.2",
+      "shape": "explicit-style-only",
+      "path": "style",
+      "propertySchema": {
+        "type": "object",
+        "properties": {
+          "street": {
+            "type": "string"
+          }
+        }
+      },
+      "encoding": {
+        "style": "form"
+      },
+      "value": {
+        "street": "main st"
+      },
+      "expect": "admitted;emit=street=main%20st",
+      "basis": "An explicit RFC6570-style control is written, so the STYLE path governs on every accepted edition, and the property's own name disappears into its expanded members. The predicate is PRESENCE, not truthiness: 3.0.4/3.1.1/3.1.2 say \"with an explicit value\" and 3.1.0 says \"If a value is explicitly defined\". A space rides as %20 here because the style path percent-encodes under RFC 6570 / RFC 3986, which the OAS's own normatively-cited-standards table notes \"does not use + for form-urlencoded\". An explicitly written style is an explicit value on every accepted edition, so this cell does not move with the lane rule and is here as the control that proves the change is scoped to control-free properties."
+    },
+    {
+      "name": "3.0.2|explicit-allow-reserved-false",
+      "openapi": "3.0.2",
+      "shape": "explicit-allow-reserved-false",
+      "path": "style",
+      "propertySchema": {
+        "type": "object",
+        "properties": {
+          "street": {
+            "type": "string"
+          }
+        }
+      },
+      "encoding": {
+        "allowReserved": false
+      },
+      "value": {
+        "street": "main st"
+      },
+      "expect": "admitted;emit=street=main%20st",
+      "basis": "An explicit RFC6570-style control is written, so the STYLE path governs on every accepted edition, and the property's own name disappears into its expanded members. The predicate is PRESENCE, not truthiness: 3.0.4/3.1.1/3.1.2 say \"with an explicit value\" and 3.1.0 says \"If a value is explicitly defined\". A space rides as %20 here because the style path percent-encodes under RFC 6570 / RFC 3986, which the OAS's own normatively-cited-standards table notes \"does not use + for form-urlencoded\". The presence-not-truthiness class. allowReserved: false writes a value equal to the field's own default, so a typed model storing it as a plain boolean cannot tell it from an absent field; it is nonetheless an explicit value and selects the style path. Pinned independently by OAPI-PS-53 and by urlencoded-escaper-cases.json."
+    },
+    {
+      "name": "3.0.2|typeless-with-members",
+      "openapi": "3.0.2",
+      "shape": "typeless-with-members",
+      "path": "content",
+      "propertySchema": {
+        "description": "no type declared"
+      },
+      "encoding": null,
+      "value": "main st",
+      "expect": "admitted;emit=p=main+st",
+      "basis": "The Encoding Object writes no style, explode or allowReserved, so the CONTENT path governs. Edition 3.0.2 states no lane-selection rule of its own; the rule reaching it is that edition's OWN §4.1 — \"Tooling which supports OAS 3.0 SHOULD be compatible with all OAS 3.0.* versions. The patch version SHOULD NOT be considered by tooling, making no distinction between 3.0.0 and 3.0.1 for example\" — together with 3.0.4, a 3.0.* version, whose §4.7.15.1.2 states that with all three fields absent \"Encoding is to be based on contentType alone\". A resolved part schema declaring NO type. This is the one genuine edition difference in this table, and it is a LINE split rather than a patch split. On 3.0.0-3.0.4 no edition states a row for a type-absent part, and openbindings.openapi@1 §9.2's own convention — which covers exactly those five editions — keys the default from the supplied value's JSON application type, so a string selects text/plain. On 3.1.0, 3.1.1 and 3.1.2 the edition states application/octet-stream for that part (tabulated as the type-absent row in 3.1.1/3.1.2, reached through the closing catch-all in 3.1.0), this specification defines no JSON-to-octets part boundary, and the part refuses before dispatch. On the urlencoded lane these cells were UNREACHABLE on 3.0.0-3.0.3 before 2026-08-17, because the style path never consults a part content type at all; the lane move grows that convention's reach on this lane from zero to 17 corpus properties. Recorded, not reopened."
+    },
+    {
+      "name": "3.0.2|unconstrained",
+      "openapi": "3.0.2",
+      "shape": "unconstrained",
+      "path": "content",
+      "propertySchema": {},
+      "encoding": null,
+      "value": "main st",
+      "expect": "admitted;emit=p=main+st",
+      "basis": "The Encoding Object writes no style, explode or allowReserved, so the CONTENT path governs. Edition 3.0.2 states no lane-selection rule of its own; the rule reaching it is that edition's OWN §4.1 — \"Tooling which supports OAS 3.0 SHOULD be compatible with all OAS 3.0.* versions. The patch version SHOULD NOT be considered by tooling, making no distinction between 3.0.0 and 3.0.1 for example\" — together with 3.0.4, a 3.0.* version, whose §4.7.15.1.2 states that with all three fields absent \"Encoding is to be based on contentType alone\". A memberless Schema Object. §9.2 reads a memberless schema as asserting nothing for a MEDIA TYPE OBJECT's own schema, but says in as many words that the reading \"does not descend to a form part\": a part declaring no type is the type-absent cell, answered per edition exactly as the typeless-with-members cell above. This cell exists because the two reach the engines through different code paths (a memberless schema versus a schema with members but no type) and an engine may answer one and not the other."
+    },
+    {
+      "name": "3.0.2|non-collapsing-anyOf",
+      "openapi": "3.0.2",
+      "shape": "non-collapsing-anyOf",
+      "path": "content",
+      "propertySchema": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        ]
+      },
+      "encoding": null,
+      "value": "main st",
+      "expect": "refused",
+      "basis": "The Encoding Object writes no style, explode or allowReserved, so the CONTENT path governs. Edition 3.0.2 states no lane-selection rule of its own; the rule reaching it is that edition's OWN §4.1 — \"Tooling which supports OAS 3.0 SHOULD be compatible with all OAS 3.0.* versions. The patch version SHOULD NOT be considered by tooling, making no distinction between 3.0.0 and 3.0.1 for example\" — together with 3.0.4, a 3.0.* version, whose §4.7.15.1.2 states that with all three fields absent \"Encoding is to be based on contentType alone\". Two non-null branches declare value-dependent alternatives and leave no single faithful form carriage, so §9.2 refuses the alternative before dispatch on every accepted edition. Before 2026-08-17 the 3.0.0-3.0.3 rows ADMITTED it, because the style path checks only that a coherent serialization method exists and never resolves a part carriage. This is the class MISP/MISP's POST /warninglists/toggleEnable falls in — WarninglistsIdFilter and WarninglistsNameFilter are each anyOf of a scalar and an array of it — and its urlencoded alternative moving represented -> excluded is the SOLE corpus movement of the lane ruling. A coverage fall of exactly one entry is the intended outcome here, not a regression."
+    },
+    {
+      "name": "3.0.3|object",
+      "openapi": "3.0.3",
+      "shape": "object",
+      "path": "content",
+      "propertySchema": {
+        "type": "object",
+        "properties": {
+          "street": {
+            "type": "string"
+          }
+        }
+      },
+      "encoding": null,
+      "value": {
+        "street": "main st"
+      },
+      "expect": "admitted;emit=p=%7B%22street%22%3A%22main+st%22%7D",
+      "basis": "The Encoding Object writes no style, explode or allowReserved, so the CONTENT path governs. Edition 3.0.3 states no lane-selection rule of its own; the rule reaching it is that edition's OWN §4.1 — \"Tooling which supports OAS 3.0 SHOULD be compatible with all OAS 3.0.* versions. The patch version SHOULD NOT be considered by tooling, making no distinction between 3.0.0 and 3.0.1 for example\" — together with 3.0.4, a 3.0.* version, whose §4.7.15.1.2 states that with all three fields absent \"Encoding is to be based on contentType alone\". The part declares type: object, whose contentType default is application/json in every accepted edition, so the value's JSON image rides as one field under the property's own name. The space inside it is + because the content path percent-encodes under RFC 1866 §8.2.1, whose escaping defers to RFC 1738 — see urlencoded-escaper-cases.json for that boundary in full."
+    },
+    {
+      "name": "3.0.3|array-of-objects",
+      "openapi": "3.0.3",
+      "shape": "array-of-objects",
+      "path": "content",
+      "propertySchema": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "integer"
+            }
+          }
+        }
+      },
+      "encoding": null,
+      "value": [
+        {
+          "id": 7
+        }
+      ],
+      "expect": "admitted;emit=p=%5B%7B%22id%22%3A7%7D%5D",
+      "basis": "The Encoding Object writes no style, explode or allowReserved, so the CONTENT path governs. Edition 3.0.3 states no lane-selection rule of its own; the rule reaching it is that edition's OWN §4.1 — \"Tooling which supports OAS 3.0 SHOULD be compatible with all OAS 3.0.* versions. The patch version SHOULD NOT be considered by tooling, making no distinction between 3.0.0 and 3.0.1 for example\" — together with 3.0.4, a 3.0.* version, whose §4.7.15.1.2 states that with all three fields absent \"Encoding is to be based on contentType alone\". The part declares type: array with OBJECT items. Every accepted edition derives an array's default from its items (\"for array – the default is defined based on the inner type\" on 3.0.0-3.0.3; \"according to the type and format of the items schema\" in 3.0.4 and the 3.1 default tables), and for object items that is application/json under any reading, so this cell is undisputed. It is also the shape of all eleven style-path composite-array cells the corpus carried before 2026-08-17, which RFC 6570 §3.2.1 defines no expansion for and which the engines therefore refused at encode time; on the content path they are servable."
+    },
+    {
+      "name": "3.0.3|array-of-strings",
+      "openapi": "3.0.3",
+      "shape": "array-of-strings",
+      "path": "content",
+      "propertySchema": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "encoding": null,
+      "value": [
+        "a",
+        "b c"
+      ],
+      "expect": "admitted;emit=p=%5B%22a%22%2C%22b+c%22%5D",
+      "basis": "The Encoding Object writes no style, explode or allowReserved, so the CONTENT path governs. Edition 3.0.3 states no lane-selection rule of its own; the rule reaching it is that edition's OWN §4.1 — \"Tooling which supports OAS 3.0 SHOULD be compatible with all OAS 3.0.* versions. The patch version SHOULD NOT be considered by tooling, making no distinction between 3.0.0 and 3.0.1 for example\" — together with 3.0.4, a 3.0.* version, whose §4.7.15.1.2 states that with all three fields absent \"Encoding is to be based on contentType alone\". OPEN CELL, PINNED AS OBSERVED, AND DECIDED BY NOTHING HERE. The part declares type: array with PRIMITIVE items. The engines return application/json for any array; the accepted editions derive the default from the items schema, which for a primitive item is text/plain, and no edition states what a JSON array under text/plain looks like inside a urlencoded body. That gap is the array-items part default (queue item 20). The 2026-08-17 lane ruling carried the engines' convention forward UNCHANGED and expressly settled nothing about it; this cell exists so the convention's bytes are visible rather than absorbed, since the lane move took the disputed sub-cell from 3 properties to 19 and its population from 1 artifact to 8."
+    },
+    {
+      "name": "3.0.3|primitive-with-space",
+      "openapi": "3.0.3",
+      "shape": "primitive-with-space",
+      "path": "content",
+      "propertySchema": {
+        "type": "string"
+      },
+      "encoding": null,
+      "value": "main st",
+      "expect": "admitted;emit=p=main+st",
+      "basis": "The Encoding Object writes no style, explode or allowReserved, so the CONTENT path governs. Edition 3.0.3 states no lane-selection rule of its own; the rule reaching it is that edition's OWN §4.1 — \"Tooling which supports OAS 3.0 SHOULD be compatible with all OAS 3.0.* versions. The patch version SHOULD NOT be considered by tooling, making no distinction between 3.0.0 and 3.0.1 for example\" — together with 3.0.4, a 3.0.* version, whose §4.7.15.1.2 states that with all three fields absent \"Encoding is to be based on contentType alone\". The part declares type: string, whose contentType default is text/plain in every accepted edition, and 3.0.4 §4.7.15.2.1 notes of exactly this case that the value \"is serialized as-is\". The space is + because the CONTENT path percent-encodes under RFC 1866 §8.2.1 / RFC 1738, where the style path would spell it %20 — the two paths are supposed to differ, and urlencoded-escaper-cases.json pins the whole boundary."
+    },
+    {
+      "name": "3.0.3|explicit-content-type",
+      "openapi": "3.0.3",
+      "shape": "explicit-content-type",
+      "path": "content",
+      "propertySchema": {
+        "type": "object",
+        "properties": {
+          "street": {
+            "type": "string"
+          }
+        }
+      },
+      "encoding": {
+        "contentType": "application/json"
+      },
+      "value": {
+        "street": "main st"
+      },
+      "expect": "admitted;emit=p=%7B%22street%22%3A%22main+st%22%7D",
+      "basis": "The Encoding Object writes no style, explode or allowReserved, so the CONTENT path governs. Edition 3.0.3 states no lane-selection rule of its own; the rule reaching it is that edition's OWN §4.1 — \"Tooling which supports OAS 3.0 SHOULD be compatible with all OAS 3.0.* versions. The patch version SHOULD NOT be considered by tooling, making no distinction between 3.0.0 and 3.0.1 for example\" — together with 3.0.4, a 3.0.* version, whose §4.7.15.1.2 states that with all three fields absent \"Encoding is to be based on contentType alone\". contentType is not a serialization control, so it selects nothing: it supplies the CONTENT path's media type, which here is what the object row's default would have been anyway. This cell is the sharpest one in the table for the 3.0 line, because before 2026-08-17 those four editions DISCARDED this explicitly written declaration and emitted street=main%20st — losing the field name the artifact named and promoting the object's members to top level. Two corpus artifacts write exactly this (dart-ogurets/dart-openapi-maven at 3.0.1, qbittorrent-ecosystem/webui-api-openapi at 3.0.3) and both were served wrongly."
+    },
+    {
+      "name": "3.0.3|explicit-style-only",
+      "openapi": "3.0.3",
+      "shape": "explicit-style-only",
+      "path": "style",
+      "propertySchema": {
+        "type": "object",
+        "properties": {
+          "street": {
+            "type": "string"
+          }
+        }
+      },
+      "encoding": {
+        "style": "form"
+      },
+      "value": {
+        "street": "main st"
+      },
+      "expect": "admitted;emit=street=main%20st",
+      "basis": "An explicit RFC6570-style control is written, so the STYLE path governs on every accepted edition, and the property's own name disappears into its expanded members. The predicate is PRESENCE, not truthiness: 3.0.4/3.1.1/3.1.2 say \"with an explicit value\" and 3.1.0 says \"If a value is explicitly defined\". A space rides as %20 here because the style path percent-encodes under RFC 6570 / RFC 3986, which the OAS's own normatively-cited-standards table notes \"does not use + for form-urlencoded\". An explicitly written style is an explicit value on every accepted edition, so this cell does not move with the lane rule and is here as the control that proves the change is scoped to control-free properties."
+    },
+    {
+      "name": "3.0.3|explicit-allow-reserved-false",
+      "openapi": "3.0.3",
+      "shape": "explicit-allow-reserved-false",
+      "path": "style",
+      "propertySchema": {
+        "type": "object",
+        "properties": {
+          "street": {
+            "type": "string"
+          }
+        }
+      },
+      "encoding": {
+        "allowReserved": false
+      },
+      "value": {
+        "street": "main st"
+      },
+      "expect": "admitted;emit=street=main%20st",
+      "basis": "An explicit RFC6570-style control is written, so the STYLE path governs on every accepted edition, and the property's own name disappears into its expanded members. The predicate is PRESENCE, not truthiness: 3.0.4/3.1.1/3.1.2 say \"with an explicit value\" and 3.1.0 says \"If a value is explicitly defined\". A space rides as %20 here because the style path percent-encodes under RFC 6570 / RFC 3986, which the OAS's own normatively-cited-standards table notes \"does not use + for form-urlencoded\". The presence-not-truthiness class. allowReserved: false writes a value equal to the field's own default, so a typed model storing it as a plain boolean cannot tell it from an absent field; it is nonetheless an explicit value and selects the style path. Pinned independently by OAPI-PS-53 and by urlencoded-escaper-cases.json."
+    },
+    {
+      "name": "3.0.3|typeless-with-members",
+      "openapi": "3.0.3",
+      "shape": "typeless-with-members",
+      "path": "content",
+      "propertySchema": {
+        "description": "no type declared"
+      },
+      "encoding": null,
+      "value": "main st",
+      "expect": "admitted;emit=p=main+st",
+      "basis": "The Encoding Object writes no style, explode or allowReserved, so the CONTENT path governs. Edition 3.0.3 states no lane-selection rule of its own; the rule reaching it is that edition's OWN §4.1 — \"Tooling which supports OAS 3.0 SHOULD be compatible with all OAS 3.0.* versions. The patch version SHOULD NOT be considered by tooling, making no distinction between 3.0.0 and 3.0.1 for example\" — together with 3.0.4, a 3.0.* version, whose §4.7.15.1.2 states that with all three fields absent \"Encoding is to be based on contentType alone\". A resolved part schema declaring NO type. This is the one genuine edition difference in this table, and it is a LINE split rather than a patch split. On 3.0.0-3.0.4 no edition states a row for a type-absent part, and openbindings.openapi@1 §9.2's own convention — which covers exactly those five editions — keys the default from the supplied value's JSON application type, so a string selects text/plain. On 3.1.0, 3.1.1 and 3.1.2 the edition states application/octet-stream for that part (tabulated as the type-absent row in 3.1.1/3.1.2, reached through the closing catch-all in 3.1.0), this specification defines no JSON-to-octets part boundary, and the part refuses before dispatch. On the urlencoded lane these cells were UNREACHABLE on 3.0.0-3.0.3 before 2026-08-17, because the style path never consults a part content type at all; the lane move grows that convention's reach on this lane from zero to 17 corpus properties. Recorded, not reopened."
+    },
+    {
+      "name": "3.0.3|unconstrained",
+      "openapi": "3.0.3",
+      "shape": "unconstrained",
+      "path": "content",
+      "propertySchema": {},
+      "encoding": null,
+      "value": "main st",
+      "expect": "admitted;emit=p=main+st",
+      "basis": "The Encoding Object writes no style, explode or allowReserved, so the CONTENT path governs. Edition 3.0.3 states no lane-selection rule of its own; the rule reaching it is that edition's OWN §4.1 — \"Tooling which supports OAS 3.0 SHOULD be compatible with all OAS 3.0.* versions. The patch version SHOULD NOT be considered by tooling, making no distinction between 3.0.0 and 3.0.1 for example\" — together with 3.0.4, a 3.0.* version, whose §4.7.15.1.2 states that with all three fields absent \"Encoding is to be based on contentType alone\". A memberless Schema Object. §9.2 reads a memberless schema as asserting nothing for a MEDIA TYPE OBJECT's own schema, but says in as many words that the reading \"does not descend to a form part\": a part declaring no type is the type-absent cell, answered per edition exactly as the typeless-with-members cell above. This cell exists because the two reach the engines through different code paths (a memberless schema versus a schema with members but no type) and an engine may answer one and not the other."
+    },
+    {
+      "name": "3.0.3|non-collapsing-anyOf",
+      "openapi": "3.0.3",
+      "shape": "non-collapsing-anyOf",
+      "path": "content",
+      "propertySchema": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        ]
+      },
+      "encoding": null,
+      "value": "main st",
+      "expect": "refused",
+      "basis": "The Encoding Object writes no style, explode or allowReserved, so the CONTENT path governs. Edition 3.0.3 states no lane-selection rule of its own; the rule reaching it is that edition's OWN §4.1 — \"Tooling which supports OAS 3.0 SHOULD be compatible with all OAS 3.0.* versions. The patch version SHOULD NOT be considered by tooling, making no distinction between 3.0.0 and 3.0.1 for example\" — together with 3.0.4, a 3.0.* version, whose §4.7.15.1.2 states that with all three fields absent \"Encoding is to be based on contentType alone\". Two non-null branches declare value-dependent alternatives and leave no single faithful form carriage, so §9.2 refuses the alternative before dispatch on every accepted edition. Before 2026-08-17 the 3.0.0-3.0.3 rows ADMITTED it, because the style path checks only that a coherent serialization method exists and never resolves a part carriage. This is the class MISP/MISP's POST /warninglists/toggleEnable falls in — WarninglistsIdFilter and WarninglistsNameFilter are each anyOf of a scalar and an array of it — and its urlencoded alternative moving represented -> excluded is the SOLE corpus movement of the lane ruling. A coverage fall of exactly one entry is the intended outcome here, not a regression."
+    },
+    {
+      "name": "3.0.4|object",
+      "openapi": "3.0.4",
+      "shape": "object",
+      "path": "content",
+      "propertySchema": {
+        "type": "object",
+        "properties": {
+          "street": {
+            "type": "string"
+          }
+        }
+      },
+      "encoding": null,
+      "value": {
+        "street": "main st"
+      },
+      "expect": "admitted;emit=p=%7B%22street%22%3A%22main+st%22%7D",
+      "basis": "The Encoding Object writes no style, explode or allowReserved, so the CONTENT path governs. §4.7.15.1.2: \"if all three of style, explode, and allowReserved fields are absent, it is RECOMMENDED that: All three keywords are to be entirely ignored, rather than treated as having their default values; Encoding is to be based on contentType alone\". The part declares type: object, whose contentType default is application/json in every accepted edition, so the value's JSON image rides as one field under the property's own name. The space inside it is + because the content path percent-encodes under RFC 1866 §8.2.1, whose escaping defers to RFC 1738 — see urlencoded-escaper-cases.json for that boundary in full."
+    },
+    {
+      "name": "3.0.4|array-of-objects",
+      "openapi": "3.0.4",
+      "shape": "array-of-objects",
+      "path": "content",
+      "propertySchema": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "integer"
+            }
+          }
+        }
+      },
+      "encoding": null,
+      "value": [
+        {
+          "id": 7
+        }
+      ],
+      "expect": "admitted;emit=p=%5B%7B%22id%22%3A7%7D%5D",
+      "basis": "The Encoding Object writes no style, explode or allowReserved, so the CONTENT path governs. §4.7.15.1.2: \"if all three of style, explode, and allowReserved fields are absent, it is RECOMMENDED that: All three keywords are to be entirely ignored, rather than treated as having their default values; Encoding is to be based on contentType alone\". The part declares type: array with OBJECT items. Every accepted edition derives an array's default from its items (\"for array – the default is defined based on the inner type\" on 3.0.0-3.0.3; \"according to the type and format of the items schema\" in 3.0.4 and the 3.1 default tables), and for object items that is application/json under any reading, so this cell is undisputed. It is also the shape of all eleven style-path composite-array cells the corpus carried before 2026-08-17, which RFC 6570 §3.2.1 defines no expansion for and which the engines therefore refused at encode time; on the content path they are servable."
+    },
+    {
+      "name": "3.0.4|array-of-strings",
+      "openapi": "3.0.4",
+      "shape": "array-of-strings",
+      "path": "content",
+      "propertySchema": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "encoding": null,
+      "value": [
+        "a",
+        "b c"
+      ],
+      "expect": "admitted;emit=p=%5B%22a%22%2C%22b+c%22%5D",
+      "basis": "The Encoding Object writes no style, explode or allowReserved, so the CONTENT path governs. §4.7.15.1.2: \"if all three of style, explode, and allowReserved fields are absent, it is RECOMMENDED that: All three keywords are to be entirely ignored, rather than treated as having their default values; Encoding is to be based on contentType alone\". OPEN CELL, PINNED AS OBSERVED, AND DECIDED BY NOTHING HERE. The part declares type: array with PRIMITIVE items. The engines return application/json for any array; the accepted editions derive the default from the items schema, which for a primitive item is text/plain, and no edition states what a JSON array under text/plain looks like inside a urlencoded body. That gap is the array-items part default (queue item 20). The 2026-08-17 lane ruling carried the engines' convention forward UNCHANGED and expressly settled nothing about it; this cell exists so the convention's bytes are visible rather than absorbed, since the lane move took the disputed sub-cell from 3 properties to 19 and its population from 1 artifact to 8."
+    },
+    {
+      "name": "3.0.4|primitive-with-space",
+      "openapi": "3.0.4",
+      "shape": "primitive-with-space",
+      "path": "content",
+      "propertySchema": {
+        "type": "string"
+      },
+      "encoding": null,
+      "value": "main st",
+      "expect": "admitted;emit=p=main+st",
+      "basis": "The Encoding Object writes no style, explode or allowReserved, so the CONTENT path governs. §4.7.15.1.2: \"if all three of style, explode, and allowReserved fields are absent, it is RECOMMENDED that: All three keywords are to be entirely ignored, rather than treated as having their default values; Encoding is to be based on contentType alone\". The part declares type: string, whose contentType default is text/plain in every accepted edition, and 3.0.4 §4.7.15.2.1 notes of exactly this case that the value \"is serialized as-is\". The space is + because the CONTENT path percent-encodes under RFC 1866 §8.2.1 / RFC 1738, where the style path would spell it %20 — the two paths are supposed to differ, and urlencoded-escaper-cases.json pins the whole boundary."
+    },
+    {
+      "name": "3.0.4|explicit-content-type",
+      "openapi": "3.0.4",
+      "shape": "explicit-content-type",
+      "path": "content",
+      "propertySchema": {
+        "type": "object",
+        "properties": {
+          "street": {
+            "type": "string"
+          }
+        }
+      },
+      "encoding": {
+        "contentType": "application/json"
+      },
+      "value": {
+        "street": "main st"
+      },
+      "expect": "admitted;emit=p=%7B%22street%22%3A%22main+st%22%7D",
+      "basis": "The Encoding Object writes no style, explode or allowReserved, so the CONTENT path governs. §4.7.15.1.2: \"if all three of style, explode, and allowReserved fields are absent, it is RECOMMENDED that: All three keywords are to be entirely ignored, rather than treated as having their default values; Encoding is to be based on contentType alone\". contentType is not a serialization control, so it selects nothing: it supplies the CONTENT path's media type, which here is what the object row's default would have been anyway. This cell is the sharpest one in the table for the 3.0 line, because before 2026-08-17 those four editions DISCARDED this explicitly written declaration and emitted street=main%20st — losing the field name the artifact named and promoting the object's members to top level. Two corpus artifacts write exactly this (dart-ogurets/dart-openapi-maven at 3.0.1, qbittorrent-ecosystem/webui-api-openapi at 3.0.3) and both were served wrongly."
+    },
+    {
+      "name": "3.0.4|explicit-style-only",
+      "openapi": "3.0.4",
+      "shape": "explicit-style-only",
+      "path": "style",
+      "propertySchema": {
+        "type": "object",
+        "properties": {
+          "street": {
+            "type": "string"
+          }
+        }
+      },
+      "encoding": {
+        "style": "form"
+      },
+      "value": {
+        "street": "main st"
+      },
+      "expect": "admitted;emit=street=main%20st",
+      "basis": "An explicit RFC6570-style control is written, so the STYLE path governs on every accepted edition, and the property's own name disappears into its expanded members. The predicate is PRESENCE, not truthiness: 3.0.4/3.1.1/3.1.2 say \"with an explicit value\" and 3.1.0 says \"If a value is explicitly defined\". A space rides as %20 here because the style path percent-encodes under RFC 6570 / RFC 3986, which the OAS's own normatively-cited-standards table notes \"does not use + for form-urlencoded\". An explicitly written style is an explicit value on every accepted edition, so this cell does not move with the lane rule and is here as the control that proves the change is scoped to control-free properties."
+    },
+    {
+      "name": "3.0.4|explicit-allow-reserved-false",
+      "openapi": "3.0.4",
+      "shape": "explicit-allow-reserved-false",
+      "path": "style",
+      "propertySchema": {
+        "type": "object",
+        "properties": {
+          "street": {
+            "type": "string"
+          }
+        }
+      },
+      "encoding": {
+        "allowReserved": false
+      },
+      "value": {
+        "street": "main st"
+      },
+      "expect": "admitted;emit=street=main%20st",
+      "basis": "An explicit RFC6570-style control is written, so the STYLE path governs on every accepted edition, and the property's own name disappears into its expanded members. The predicate is PRESENCE, not truthiness: 3.0.4/3.1.1/3.1.2 say \"with an explicit value\" and 3.1.0 says \"If a value is explicitly defined\". A space rides as %20 here because the style path percent-encodes under RFC 6570 / RFC 3986, which the OAS's own normatively-cited-standards table notes \"does not use + for form-urlencoded\". The presence-not-truthiness class. allowReserved: false writes a value equal to the field's own default, so a typed model storing it as a plain boolean cannot tell it from an absent field; it is nonetheless an explicit value and selects the style path. Pinned independently by OAPI-PS-53 and by urlencoded-escaper-cases.json."
+    },
+    {
+      "name": "3.0.4|typeless-with-members",
+      "openapi": "3.0.4",
+      "shape": "typeless-with-members",
+      "path": "content",
+      "propertySchema": {
+        "description": "no type declared"
+      },
+      "encoding": null,
+      "value": "main st",
+      "expect": "admitted;emit=p=main+st",
+      "basis": "The Encoding Object writes no style, explode or allowReserved, so the CONTENT path governs. §4.7.15.1.2: \"if all three of style, explode, and allowReserved fields are absent, it is RECOMMENDED that: All three keywords are to be entirely ignored, rather than treated as having their default values; Encoding is to be based on contentType alone\". A resolved part schema declaring NO type. This is the one genuine edition difference in this table, and it is a LINE split rather than a patch split. On 3.0.0-3.0.4 no edition states a row for a type-absent part, and openbindings.openapi@1 §9.2's own convention — which covers exactly those five editions — keys the default from the supplied value's JSON application type, so a string selects text/plain. On 3.1.0, 3.1.1 and 3.1.2 the edition states application/octet-stream for that part (tabulated as the type-absent row in 3.1.1/3.1.2, reached through the closing catch-all in 3.1.0), this specification defines no JSON-to-octets part boundary, and the part refuses before dispatch. On the urlencoded lane these cells were UNREACHABLE on 3.0.0-3.0.3 before 2026-08-17, because the style path never consults a part content type at all; the lane move grows that convention's reach on this lane from zero to 17 corpus properties. Recorded, not reopened."
+    },
+    {
+      "name": "3.0.4|unconstrained",
+      "openapi": "3.0.4",
+      "shape": "unconstrained",
+      "path": "content",
+      "propertySchema": {},
+      "encoding": null,
+      "value": "main st",
+      "expect": "admitted;emit=p=main+st",
+      "basis": "The Encoding Object writes no style, explode or allowReserved, so the CONTENT path governs. §4.7.15.1.2: \"if all three of style, explode, and allowReserved fields are absent, it is RECOMMENDED that: All three keywords are to be entirely ignored, rather than treated as having their default values; Encoding is to be based on contentType alone\". A memberless Schema Object. §9.2 reads a memberless schema as asserting nothing for a MEDIA TYPE OBJECT's own schema, but says in as many words that the reading \"does not descend to a form part\": a part declaring no type is the type-absent cell, answered per edition exactly as the typeless-with-members cell above. This cell exists because the two reach the engines through different code paths (a memberless schema versus a schema with members but no type) and an engine may answer one and not the other."
+    },
+    {
+      "name": "3.0.4|non-collapsing-anyOf",
+      "openapi": "3.0.4",
+      "shape": "non-collapsing-anyOf",
+      "path": "content",
+      "propertySchema": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        ]
+      },
+      "encoding": null,
+      "value": "main st",
+      "expect": "refused",
+      "basis": "The Encoding Object writes no style, explode or allowReserved, so the CONTENT path governs. §4.7.15.1.2: \"if all three of style, explode, and allowReserved fields are absent, it is RECOMMENDED that: All three keywords are to be entirely ignored, rather than treated as having their default values; Encoding is to be based on contentType alone\". Two non-null branches declare value-dependent alternatives and leave no single faithful form carriage, so §9.2 refuses the alternative before dispatch on every accepted edition. Before 2026-08-17 the 3.0.0-3.0.3 rows ADMITTED it, because the style path checks only that a coherent serialization method exists and never resolves a part carriage. This is the class MISP/MISP's POST /warninglists/toggleEnable falls in — WarninglistsIdFilter and WarninglistsNameFilter are each anyOf of a scalar and an array of it — and its urlencoded alternative moving represented -> excluded is the SOLE corpus movement of the lane ruling. A coverage fall of exactly one entry is the intended outcome here, not a regression."
+    },
+    {
+      "name": "3.1.0|object",
+      "openapi": "3.1.0",
+      "shape": "object",
+      "path": "content",
+      "propertySchema": {
+        "type": "object",
+        "properties": {
+          "street": {
+            "type": "string"
+          }
+        }
+      },
+      "encoding": null,
+      "value": {
+        "street": "main st"
+      },
+      "expect": "admitted;emit=p=%7B%22street%22%3A%22main+st%22%7D",
+      "basis": "The Encoding Object writes no style, explode or allowReserved, so the CONTENT path governs. §4.8.15.1 conditions displacement on explicitness — \"If a value is explicitly defined, then the value of contentType (implicit or explicit) SHALL be ignored\" — so with none written contentType governs. The part declares type: object, whose contentType default is application/json in every accepted edition, so the value's JSON image rides as one field under the property's own name. The space inside it is + because the content path percent-encodes under RFC 1866 §8.2.1, whose escaping defers to RFC 1738 — see urlencoded-escaper-cases.json for that boundary in full."
+    },
+    {
+      "name": "3.1.0|array-of-objects",
+      "openapi": "3.1.0",
+      "shape": "array-of-objects",
+      "path": "content",
+      "propertySchema": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "integer"
+            }
+          }
+        }
+      },
+      "encoding": null,
+      "value": [
+        {
+          "id": 7
+        }
+      ],
+      "expect": "admitted;emit=p=%5B%7B%22id%22%3A7%7D%5D",
+      "basis": "The Encoding Object writes no style, explode or allowReserved, so the CONTENT path governs. §4.8.15.1 conditions displacement on explicitness — \"If a value is explicitly defined, then the value of contentType (implicit or explicit) SHALL be ignored\" — so with none written contentType governs. The part declares type: array with OBJECT items. Every accepted edition derives an array's default from its items (\"for array – the default is defined based on the inner type\" on 3.0.0-3.0.3; \"according to the type and format of the items schema\" in 3.0.4 and the 3.1 default tables), and for object items that is application/json under any reading, so this cell is undisputed. It is also the shape of all eleven style-path composite-array cells the corpus carried before 2026-08-17, which RFC 6570 §3.2.1 defines no expansion for and which the engines therefore refused at encode time; on the content path they are servable."
+    },
+    {
+      "name": "3.1.0|array-of-strings",
+      "openapi": "3.1.0",
+      "shape": "array-of-strings",
+      "path": "content",
+      "propertySchema": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "encoding": null,
+      "value": [
+        "a",
+        "b c"
+      ],
+      "expect": "admitted;emit=p=%5B%22a%22%2C%22b+c%22%5D",
+      "basis": "The Encoding Object writes no style, explode or allowReserved, so the CONTENT path governs. §4.8.15.1 conditions displacement on explicitness — \"If a value is explicitly defined, then the value of contentType (implicit or explicit) SHALL be ignored\" — so with none written contentType governs. OPEN CELL, PINNED AS OBSERVED, AND DECIDED BY NOTHING HERE. The part declares type: array with PRIMITIVE items. The engines return application/json for any array; the accepted editions derive the default from the items schema, which for a primitive item is text/plain, and no edition states what a JSON array under text/plain looks like inside a urlencoded body. That gap is the array-items part default (queue item 20). The 2026-08-17 lane ruling carried the engines' convention forward UNCHANGED and expressly settled nothing about it; this cell exists so the convention's bytes are visible rather than absorbed, since the lane move took the disputed sub-cell from 3 properties to 19 and its population from 1 artifact to 8."
+    },
+    {
+      "name": "3.1.0|primitive-with-space",
+      "openapi": "3.1.0",
+      "shape": "primitive-with-space",
+      "path": "content",
+      "propertySchema": {
+        "type": "string"
+      },
+      "encoding": null,
+      "value": "main st",
+      "expect": "admitted;emit=p=main+st",
+      "basis": "The Encoding Object writes no style, explode or allowReserved, so the CONTENT path governs. §4.8.15.1 conditions displacement on explicitness — \"If a value is explicitly defined, then the value of contentType (implicit or explicit) SHALL be ignored\" — so with none written contentType governs. The part declares type: string, whose contentType default is text/plain in every accepted edition, and 3.0.4 §4.7.15.2.1 notes of exactly this case that the value \"is serialized as-is\". The space is + because the CONTENT path percent-encodes under RFC 1866 §8.2.1 / RFC 1738, where the style path would spell it %20 — the two paths are supposed to differ, and urlencoded-escaper-cases.json pins the whole boundary."
+    },
+    {
+      "name": "3.1.0|explicit-content-type",
+      "openapi": "3.1.0",
+      "shape": "explicit-content-type",
+      "path": "content",
+      "propertySchema": {
+        "type": "object",
+        "properties": {
+          "street": {
+            "type": "string"
+          }
+        }
+      },
+      "encoding": {
+        "contentType": "application/json"
+      },
+      "value": {
+        "street": "main st"
+      },
+      "expect": "admitted;emit=p=%7B%22street%22%3A%22main+st%22%7D",
+      "basis": "The Encoding Object writes no style, explode or allowReserved, so the CONTENT path governs. §4.8.15.1 conditions displacement on explicitness — \"If a value is explicitly defined, then the value of contentType (implicit or explicit) SHALL be ignored\" — so with none written contentType governs. contentType is not a serialization control, so it selects nothing: it supplies the CONTENT path's media type, which here is what the object row's default would have been anyway. This cell is the sharpest one in the table for the 3.0 line, because before 2026-08-17 those four editions DISCARDED this explicitly written declaration and emitted street=main%20st — losing the field name the artifact named and promoting the object's members to top level. Two corpus artifacts write exactly this (dart-ogurets/dart-openapi-maven at 3.0.1, qbittorrent-ecosystem/webui-api-openapi at 3.0.3) and both were served wrongly."
+    },
+    {
+      "name": "3.1.0|explicit-style-only",
+      "openapi": "3.1.0",
+      "shape": "explicit-style-only",
+      "path": "style",
+      "propertySchema": {
+        "type": "object",
+        "properties": {
+          "street": {
+            "type": "string"
+          }
+        }
+      },
+      "encoding": {
+        "style": "form"
+      },
+      "value": {
+        "street": "main st"
+      },
+      "expect": "admitted;emit=street=main%20st",
+      "basis": "An explicit RFC6570-style control is written, so the STYLE path governs on every accepted edition, and the property's own name disappears into its expanded members. The predicate is PRESENCE, not truthiness: 3.0.4/3.1.1/3.1.2 say \"with an explicit value\" and 3.1.0 says \"If a value is explicitly defined\". A space rides as %20 here because the style path percent-encodes under RFC 6570 / RFC 3986, which the OAS's own normatively-cited-standards table notes \"does not use + for form-urlencoded\". An explicitly written style is an explicit value on every accepted edition, so this cell does not move with the lane rule and is here as the control that proves the change is scoped to control-free properties."
+    },
+    {
+      "name": "3.1.0|explicit-allow-reserved-false",
+      "openapi": "3.1.0",
+      "shape": "explicit-allow-reserved-false",
+      "path": "style",
+      "propertySchema": {
+        "type": "object",
+        "properties": {
+          "street": {
+            "type": "string"
+          }
+        }
+      },
+      "encoding": {
+        "allowReserved": false
+      },
+      "value": {
+        "street": "main st"
+      },
+      "expect": "admitted;emit=street=main%20st",
+      "basis": "An explicit RFC6570-style control is written, so the STYLE path governs on every accepted edition, and the property's own name disappears into its expanded members. The predicate is PRESENCE, not truthiness: 3.0.4/3.1.1/3.1.2 say \"with an explicit value\" and 3.1.0 says \"If a value is explicitly defined\". A space rides as %20 here because the style path percent-encodes under RFC 6570 / RFC 3986, which the OAS's own normatively-cited-standards table notes \"does not use + for form-urlencoded\". The presence-not-truthiness class. allowReserved: false writes a value equal to the field's own default, so a typed model storing it as a plain boolean cannot tell it from an absent field; it is nonetheless an explicit value and selects the style path. Pinned independently by OAPI-PS-53 and by urlencoded-escaper-cases.json."
+    },
+    {
+      "name": "3.1.0|typeless-with-members",
+      "openapi": "3.1.0",
+      "shape": "typeless-with-members",
+      "path": "content",
+      "propertySchema": {
+        "description": "no type declared"
+      },
+      "encoding": null,
+      "value": "main st",
+      "expect": "refused",
+      "basis": "The Encoding Object writes no style, explode or allowReserved, so the CONTENT path governs. §4.8.15.1 conditions displacement on explicitness — \"If a value is explicitly defined, then the value of contentType (implicit or explicit) SHALL be ignored\" — so with none written contentType governs. A resolved part schema declaring NO type. This is the one genuine edition difference in this table, and it is a LINE split rather than a patch split. On 3.0.0-3.0.4 no edition states a row for a type-absent part, and openbindings.openapi@1 §9.2's own convention — which covers exactly those five editions — keys the default from the supplied value's JSON application type, so a string selects text/plain. On 3.1.0, 3.1.1 and 3.1.2 the edition states application/octet-stream for that part (tabulated as the type-absent row in 3.1.1/3.1.2, reached through the closing catch-all in 3.1.0), this specification defines no JSON-to-octets part boundary, and the part refuses before dispatch. On the urlencoded lane these cells were UNREACHABLE on 3.0.0-3.0.3 before 2026-08-17, because the style path never consults a part content type at all; the lane move grows that convention's reach on this lane from zero to 17 corpus properties. Recorded, not reopened."
+    },
+    {
+      "name": "3.1.0|unconstrained",
+      "openapi": "3.1.0",
+      "shape": "unconstrained",
+      "path": "content",
+      "propertySchema": {},
+      "encoding": null,
+      "value": "main st",
+      "expect": "refused",
+      "basis": "The Encoding Object writes no style, explode or allowReserved, so the CONTENT path governs. §4.8.15.1 conditions displacement on explicitness — \"If a value is explicitly defined, then the value of contentType (implicit or explicit) SHALL be ignored\" — so with none written contentType governs. A memberless Schema Object. §9.2 reads a memberless schema as asserting nothing for a MEDIA TYPE OBJECT's own schema, but says in as many words that the reading \"does not descend to a form part\": a part declaring no type is the type-absent cell, answered per edition exactly as the typeless-with-members cell above. This cell exists because the two reach the engines through different code paths (a memberless schema versus a schema with members but no type) and an engine may answer one and not the other."
+    },
+    {
+      "name": "3.1.0|non-collapsing-anyOf",
+      "openapi": "3.1.0",
+      "shape": "non-collapsing-anyOf",
+      "path": "content",
+      "propertySchema": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        ]
+      },
+      "encoding": null,
+      "value": "main st",
+      "expect": "refused",
+      "basis": "The Encoding Object writes no style, explode or allowReserved, so the CONTENT path governs. §4.8.15.1 conditions displacement on explicitness — \"If a value is explicitly defined, then the value of contentType (implicit or explicit) SHALL be ignored\" — so with none written contentType governs. Two non-null branches declare value-dependent alternatives and leave no single faithful form carriage, so §9.2 refuses the alternative before dispatch on every accepted edition. Before 2026-08-17 the 3.0.0-3.0.3 rows ADMITTED it, because the style path checks only that a coherent serialization method exists and never resolves a part carriage. This is the class MISP/MISP's POST /warninglists/toggleEnable falls in — WarninglistsIdFilter and WarninglistsNameFilter are each anyOf of a scalar and an array of it — and its urlencoded alternative moving represented -> excluded is the SOLE corpus movement of the lane ruling. A coverage fall of exactly one entry is the intended outcome here, not a regression."
+    },
+    {
+      "name": "3.1.1|object",
+      "openapi": "3.1.1",
+      "shape": "object",
+      "path": "content",
+      "propertySchema": {
+        "type": "object",
+        "properties": {
+          "street": {
+            "type": "string"
+          }
+        }
+      },
+      "encoding": null,
+      "value": {
+        "street": "main st"
+      },
+      "expect": "admitted;emit=p=%7B%22street%22%3A%22main+st%22%7D",
+      "basis": "The Encoding Object writes no style, explode or allowReserved, so the CONTENT path governs. §4.8.15.1.2 (\"Fixed Fields for RFC6570-style Serialization\") carries \"If a value is explicitly defined, then the value of contentType (implicit or explicit) SHALL be ignored\" on each of the three fields. The part declares type: object, whose contentType default is application/json in every accepted edition, so the value's JSON image rides as one field under the property's own name. The space inside it is + because the content path percent-encodes under RFC 1866 §8.2.1, whose escaping defers to RFC 1738 — see urlencoded-escaper-cases.json for that boundary in full."
+    },
+    {
+      "name": "3.1.1|array-of-objects",
+      "openapi": "3.1.1",
+      "shape": "array-of-objects",
+      "path": "content",
+      "propertySchema": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "integer"
+            }
+          }
+        }
+      },
+      "encoding": null,
+      "value": [
+        {
+          "id": 7
+        }
+      ],
+      "expect": "admitted;emit=p=%5B%7B%22id%22%3A7%7D%5D",
+      "basis": "The Encoding Object writes no style, explode or allowReserved, so the CONTENT path governs. §4.8.15.1.2 (\"Fixed Fields for RFC6570-style Serialization\") carries \"If a value is explicitly defined, then the value of contentType (implicit or explicit) SHALL be ignored\" on each of the three fields. The part declares type: array with OBJECT items. Every accepted edition derives an array's default from its items (\"for array – the default is defined based on the inner type\" on 3.0.0-3.0.3; \"according to the type and format of the items schema\" in 3.0.4 and the 3.1 default tables), and for object items that is application/json under any reading, so this cell is undisputed. It is also the shape of all eleven style-path composite-array cells the corpus carried before 2026-08-17, which RFC 6570 §3.2.1 defines no expansion for and which the engines therefore refused at encode time; on the content path they are servable."
+    },
+    {
+      "name": "3.1.1|array-of-strings",
+      "openapi": "3.1.1",
+      "shape": "array-of-strings",
+      "path": "content",
+      "propertySchema": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "encoding": null,
+      "value": [
+        "a",
+        "b c"
+      ],
+      "expect": "admitted;emit=p=%5B%22a%22%2C%22b+c%22%5D",
+      "basis": "The Encoding Object writes no style, explode or allowReserved, so the CONTENT path governs. §4.8.15.1.2 (\"Fixed Fields for RFC6570-style Serialization\") carries \"If a value is explicitly defined, then the value of contentType (implicit or explicit) SHALL be ignored\" on each of the three fields. OPEN CELL, PINNED AS OBSERVED, AND DECIDED BY NOTHING HERE. The part declares type: array with PRIMITIVE items. The engines return application/json for any array; the accepted editions derive the default from the items schema, which for a primitive item is text/plain, and no edition states what a JSON array under text/plain looks like inside a urlencoded body. That gap is the array-items part default (queue item 20). The 2026-08-17 lane ruling carried the engines' convention forward UNCHANGED and expressly settled nothing about it; this cell exists so the convention's bytes are visible rather than absorbed, since the lane move took the disputed sub-cell from 3 properties to 19 and its population from 1 artifact to 8."
+    },
+    {
+      "name": "3.1.1|primitive-with-space",
+      "openapi": "3.1.1",
+      "shape": "primitive-with-space",
+      "path": "content",
+      "propertySchema": {
+        "type": "string"
+      },
+      "encoding": null,
+      "value": "main st",
+      "expect": "admitted;emit=p=main+st",
+      "basis": "The Encoding Object writes no style, explode or allowReserved, so the CONTENT path governs. §4.8.15.1.2 (\"Fixed Fields for RFC6570-style Serialization\") carries \"If a value is explicitly defined, then the value of contentType (implicit or explicit) SHALL be ignored\" on each of the three fields. The part declares type: string, whose contentType default is text/plain in every accepted edition, and 3.0.4 §4.7.15.2.1 notes of exactly this case that the value \"is serialized as-is\". The space is + because the CONTENT path percent-encodes under RFC 1866 §8.2.1 / RFC 1738, where the style path would spell it %20 — the two paths are supposed to differ, and urlencoded-escaper-cases.json pins the whole boundary."
+    },
+    {
+      "name": "3.1.1|explicit-content-type",
+      "openapi": "3.1.1",
+      "shape": "explicit-content-type",
+      "path": "content",
+      "propertySchema": {
+        "type": "object",
+        "properties": {
+          "street": {
+            "type": "string"
+          }
+        }
+      },
+      "encoding": {
+        "contentType": "application/json"
+      },
+      "value": {
+        "street": "main st"
+      },
+      "expect": "admitted;emit=p=%7B%22street%22%3A%22main+st%22%7D",
+      "basis": "The Encoding Object writes no style, explode or allowReserved, so the CONTENT path governs. §4.8.15.1.2 (\"Fixed Fields for RFC6570-style Serialization\") carries \"If a value is explicitly defined, then the value of contentType (implicit or explicit) SHALL be ignored\" on each of the three fields. contentType is not a serialization control, so it selects nothing: it supplies the CONTENT path's media type, which here is what the object row's default would have been anyway. This cell is the sharpest one in the table for the 3.0 line, because before 2026-08-17 those four editions DISCARDED this explicitly written declaration and emitted street=main%20st — losing the field name the artifact named and promoting the object's members to top level. Two corpus artifacts write exactly this (dart-ogurets/dart-openapi-maven at 3.0.1, qbittorrent-ecosystem/webui-api-openapi at 3.0.3) and both were served wrongly."
+    },
+    {
+      "name": "3.1.1|explicit-style-only",
+      "openapi": "3.1.1",
+      "shape": "explicit-style-only",
+      "path": "style",
+      "propertySchema": {
+        "type": "object",
+        "properties": {
+          "street": {
+            "type": "string"
+          }
+        }
+      },
+      "encoding": {
+        "style": "form"
+      },
+      "value": {
+        "street": "main st"
+      },
+      "expect": "admitted;emit=street=main%20st",
+      "basis": "An explicit RFC6570-style control is written, so the STYLE path governs on every accepted edition, and the property's own name disappears into its expanded members. The predicate is PRESENCE, not truthiness: 3.0.4/3.1.1/3.1.2 say \"with an explicit value\" and 3.1.0 says \"If a value is explicitly defined\". A space rides as %20 here because the style path percent-encodes under RFC 6570 / RFC 3986, which the OAS's own normatively-cited-standards table notes \"does not use + for form-urlencoded\". An explicitly written style is an explicit value on every accepted edition, so this cell does not move with the lane rule and is here as the control that proves the change is scoped to control-free properties."
+    },
+    {
+      "name": "3.1.1|explicit-allow-reserved-false",
+      "openapi": "3.1.1",
+      "shape": "explicit-allow-reserved-false",
+      "path": "style",
+      "propertySchema": {
+        "type": "object",
+        "properties": {
+          "street": {
+            "type": "string"
+          }
+        }
+      },
+      "encoding": {
+        "allowReserved": false
+      },
+      "value": {
+        "street": "main st"
+      },
+      "expect": "admitted;emit=street=main%20st",
+      "basis": "An explicit RFC6570-style control is written, so the STYLE path governs on every accepted edition, and the property's own name disappears into its expanded members. The predicate is PRESENCE, not truthiness: 3.0.4/3.1.1/3.1.2 say \"with an explicit value\" and 3.1.0 says \"If a value is explicitly defined\". A space rides as %20 here because the style path percent-encodes under RFC 6570 / RFC 3986, which the OAS's own normatively-cited-standards table notes \"does not use + for form-urlencoded\". The presence-not-truthiness class. allowReserved: false writes a value equal to the field's own default, so a typed model storing it as a plain boolean cannot tell it from an absent field; it is nonetheless an explicit value and selects the style path. Pinned independently by OAPI-PS-53 and by urlencoded-escaper-cases.json."
+    },
+    {
+      "name": "3.1.1|typeless-with-members",
+      "openapi": "3.1.1",
+      "shape": "typeless-with-members",
+      "path": "content",
+      "propertySchema": {
+        "description": "no type declared"
+      },
+      "encoding": null,
+      "value": "main st",
+      "expect": "refused",
+      "basis": "The Encoding Object writes no style, explode or allowReserved, so the CONTENT path governs. §4.8.15.1.2 (\"Fixed Fields for RFC6570-style Serialization\") carries \"If a value is explicitly defined, then the value of contentType (implicit or explicit) SHALL be ignored\" on each of the three fields. A resolved part schema declaring NO type. This is the one genuine edition difference in this table, and it is a LINE split rather than a patch split. On 3.0.0-3.0.4 no edition states a row for a type-absent part, and openbindings.openapi@1 §9.2's own convention — which covers exactly those five editions — keys the default from the supplied value's JSON application type, so a string selects text/plain. On 3.1.0, 3.1.1 and 3.1.2 the edition states application/octet-stream for that part (tabulated as the type-absent row in 3.1.1/3.1.2, reached through the closing catch-all in 3.1.0), this specification defines no JSON-to-octets part boundary, and the part refuses before dispatch. On the urlencoded lane these cells were UNREACHABLE on 3.0.0-3.0.3 before 2026-08-17, because the style path never consults a part content type at all; the lane move grows that convention's reach on this lane from zero to 17 corpus properties. Recorded, not reopened."
+    },
+    {
+      "name": "3.1.1|unconstrained",
+      "openapi": "3.1.1",
+      "shape": "unconstrained",
+      "path": "content",
+      "propertySchema": {},
+      "encoding": null,
+      "value": "main st",
+      "expect": "refused",
+      "basis": "The Encoding Object writes no style, explode or allowReserved, so the CONTENT path governs. §4.8.15.1.2 (\"Fixed Fields for RFC6570-style Serialization\") carries \"If a value is explicitly defined, then the value of contentType (implicit or explicit) SHALL be ignored\" on each of the three fields. A memberless Schema Object. §9.2 reads a memberless schema as asserting nothing for a MEDIA TYPE OBJECT's own schema, but says in as many words that the reading \"does not descend to a form part\": a part declaring no type is the type-absent cell, answered per edition exactly as the typeless-with-members cell above. This cell exists because the two reach the engines through different code paths (a memberless schema versus a schema with members but no type) and an engine may answer one and not the other."
+    },
+    {
+      "name": "3.1.1|non-collapsing-anyOf",
+      "openapi": "3.1.1",
+      "shape": "non-collapsing-anyOf",
+      "path": "content",
+      "propertySchema": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        ]
+      },
+      "encoding": null,
+      "value": "main st",
+      "expect": "refused",
+      "basis": "The Encoding Object writes no style, explode or allowReserved, so the CONTENT path governs. §4.8.15.1.2 (\"Fixed Fields for RFC6570-style Serialization\") carries \"If a value is explicitly defined, then the value of contentType (implicit or explicit) SHALL be ignored\" on each of the three fields. Two non-null branches declare value-dependent alternatives and leave no single faithful form carriage, so §9.2 refuses the alternative before dispatch on every accepted edition. Before 2026-08-17 the 3.0.0-3.0.3 rows ADMITTED it, because the style path checks only that a coherent serialization method exists and never resolves a part carriage. This is the class MISP/MISP's POST /warninglists/toggleEnable falls in — WarninglistsIdFilter and WarninglistsNameFilter are each anyOf of a scalar and an array of it — and its urlencoded alternative moving represented -> excluded is the SOLE corpus movement of the lane ruling. A coverage fall of exactly one entry is the intended outcome here, not a regression."
+    },
+    {
+      "name": "3.1.2|object",
+      "openapi": "3.1.2",
+      "shape": "object",
+      "path": "content",
+      "propertySchema": {
+        "type": "object",
+        "properties": {
+          "street": {
+            "type": "string"
+          }
+        }
+      },
+      "encoding": null,
+      "value": {
+        "street": "main st"
+      },
+      "expect": "admitted;emit=p=%7B%22street%22%3A%22main+st%22%7D",
+      "basis": "The Encoding Object writes no style, explode or allowReserved, so the CONTENT path governs. §4.8.15.1.2 carries \"If a value is explicitly defined, then the value of contentType (implicit or explicit) SHALL be ignored\" on each of the three fields. The part declares type: object, whose contentType default is application/json in every accepted edition, so the value's JSON image rides as one field under the property's own name. The space inside it is + because the content path percent-encodes under RFC 1866 §8.2.1, whose escaping defers to RFC 1738 — see urlencoded-escaper-cases.json for that boundary in full."
+    },
+    {
+      "name": "3.1.2|array-of-objects",
+      "openapi": "3.1.2",
+      "shape": "array-of-objects",
+      "path": "content",
+      "propertySchema": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "integer"
+            }
+          }
+        }
+      },
+      "encoding": null,
+      "value": [
+        {
+          "id": 7
+        }
+      ],
+      "expect": "admitted;emit=p=%5B%7B%22id%22%3A7%7D%5D",
+      "basis": "The Encoding Object writes no style, explode or allowReserved, so the CONTENT path governs. §4.8.15.1.2 carries \"If a value is explicitly defined, then the value of contentType (implicit or explicit) SHALL be ignored\" on each of the three fields. The part declares type: array with OBJECT items. Every accepted edition derives an array's default from its items (\"for array – the default is defined based on the inner type\" on 3.0.0-3.0.3; \"according to the type and format of the items schema\" in 3.0.4 and the 3.1 default tables), and for object items that is application/json under any reading, so this cell is undisputed. It is also the shape of all eleven style-path composite-array cells the corpus carried before 2026-08-17, which RFC 6570 §3.2.1 defines no expansion for and which the engines therefore refused at encode time; on the content path they are servable."
+    },
+    {
+      "name": "3.1.2|array-of-strings",
+      "openapi": "3.1.2",
+      "shape": "array-of-strings",
+      "path": "content",
+      "propertySchema": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "encoding": null,
+      "value": [
+        "a",
+        "b c"
+      ],
+      "expect": "admitted;emit=p=%5B%22a%22%2C%22b+c%22%5D",
+      "basis": "The Encoding Object writes no style, explode or allowReserved, so the CONTENT path governs. §4.8.15.1.2 carries \"If a value is explicitly defined, then the value of contentType (implicit or explicit) SHALL be ignored\" on each of the three fields. OPEN CELL, PINNED AS OBSERVED, AND DECIDED BY NOTHING HERE. The part declares type: array with PRIMITIVE items. The engines return application/json for any array; the accepted editions derive the default from the items schema, which for a primitive item is text/plain, and no edition states what a JSON array under text/plain looks like inside a urlencoded body. That gap is the array-items part default (queue item 20). The 2026-08-17 lane ruling carried the engines' convention forward UNCHANGED and expressly settled nothing about it; this cell exists so the convention's bytes are visible rather than absorbed, since the lane move took the disputed sub-cell from 3 properties to 19 and its population from 1 artifact to 8."
+    },
+    {
+      "name": "3.1.2|primitive-with-space",
+      "openapi": "3.1.2",
+      "shape": "primitive-with-space",
+      "path": "content",
+      "propertySchema": {
+        "type": "string"
+      },
+      "encoding": null,
+      "value": "main st",
+      "expect": "admitted;emit=p=main+st",
+      "basis": "The Encoding Object writes no style, explode or allowReserved, so the CONTENT path governs. §4.8.15.1.2 carries \"If a value is explicitly defined, then the value of contentType (implicit or explicit) SHALL be ignored\" on each of the three fields. The part declares type: string, whose contentType default is text/plain in every accepted edition, and 3.0.4 §4.7.15.2.1 notes of exactly this case that the value \"is serialized as-is\". The space is + because the CONTENT path percent-encodes under RFC 1866 §8.2.1 / RFC 1738, where the style path would spell it %20 — the two paths are supposed to differ, and urlencoded-escaper-cases.json pins the whole boundary."
+    },
+    {
+      "name": "3.1.2|explicit-content-type",
+      "openapi": "3.1.2",
+      "shape": "explicit-content-type",
+      "path": "content",
+      "propertySchema": {
+        "type": "object",
+        "properties": {
+          "street": {
+            "type": "string"
+          }
+        }
+      },
+      "encoding": {
+        "contentType": "application/json"
+      },
+      "value": {
+        "street": "main st"
+      },
+      "expect": "admitted;emit=p=%7B%22street%22%3A%22main+st%22%7D",
+      "basis": "The Encoding Object writes no style, explode or allowReserved, so the CONTENT path governs. §4.8.15.1.2 carries \"If a value is explicitly defined, then the value of contentType (implicit or explicit) SHALL be ignored\" on each of the three fields. contentType is not a serialization control, so it selects nothing: it supplies the CONTENT path's media type, which here is what the object row's default would have been anyway. This cell is the sharpest one in the table for the 3.0 line, because before 2026-08-17 those four editions DISCARDED this explicitly written declaration and emitted street=main%20st — losing the field name the artifact named and promoting the object's members to top level. Two corpus artifacts write exactly this (dart-ogurets/dart-openapi-maven at 3.0.1, qbittorrent-ecosystem/webui-api-openapi at 3.0.3) and both were served wrongly."
+    },
+    {
+      "name": "3.1.2|explicit-style-only",
+      "openapi": "3.1.2",
+      "shape": "explicit-style-only",
+      "path": "style",
+      "propertySchema": {
+        "type": "object",
+        "properties": {
+          "street": {
+            "type": "string"
+          }
+        }
+      },
+      "encoding": {
+        "style": "form"
+      },
+      "value": {
+        "street": "main st"
+      },
+      "expect": "admitted;emit=street=main%20st",
+      "basis": "An explicit RFC6570-style control is written, so the STYLE path governs on every accepted edition, and the property's own name disappears into its expanded members. The predicate is PRESENCE, not truthiness: 3.0.4/3.1.1/3.1.2 say \"with an explicit value\" and 3.1.0 says \"If a value is explicitly defined\". A space rides as %20 here because the style path percent-encodes under RFC 6570 / RFC 3986, which the OAS's own normatively-cited-standards table notes \"does not use + for form-urlencoded\". An explicitly written style is an explicit value on every accepted edition, so this cell does not move with the lane rule and is here as the control that proves the change is scoped to control-free properties."
+    },
+    {
+      "name": "3.1.2|explicit-allow-reserved-false",
+      "openapi": "3.1.2",
+      "shape": "explicit-allow-reserved-false",
+      "path": "style",
+      "propertySchema": {
+        "type": "object",
+        "properties": {
+          "street": {
+            "type": "string"
+          }
+        }
+      },
+      "encoding": {
+        "allowReserved": false
+      },
+      "value": {
+        "street": "main st"
+      },
+      "expect": "admitted;emit=street=main%20st",
+      "basis": "An explicit RFC6570-style control is written, so the STYLE path governs on every accepted edition, and the property's own name disappears into its expanded members. The predicate is PRESENCE, not truthiness: 3.0.4/3.1.1/3.1.2 say \"with an explicit value\" and 3.1.0 says \"If a value is explicitly defined\". A space rides as %20 here because the style path percent-encodes under RFC 6570 / RFC 3986, which the OAS's own normatively-cited-standards table notes \"does not use + for form-urlencoded\". The presence-not-truthiness class. allowReserved: false writes a value equal to the field's own default, so a typed model storing it as a plain boolean cannot tell it from an absent field; it is nonetheless an explicit value and selects the style path. Pinned independently by OAPI-PS-53 and by urlencoded-escaper-cases.json."
+    },
+    {
+      "name": "3.1.2|typeless-with-members",
+      "openapi": "3.1.2",
+      "shape": "typeless-with-members",
+      "path": "content",
+      "propertySchema": {
+        "description": "no type declared"
+      },
+      "encoding": null,
+      "value": "main st",
+      "expect": "refused",
+      "basis": "The Encoding Object writes no style, explode or allowReserved, so the CONTENT path governs. §4.8.15.1.2 carries \"If a value is explicitly defined, then the value of contentType (implicit or explicit) SHALL be ignored\" on each of the three fields. A resolved part schema declaring NO type. This is the one genuine edition difference in this table, and it is a LINE split rather than a patch split. On 3.0.0-3.0.4 no edition states a row for a type-absent part, and openbindings.openapi@1 §9.2's own convention — which covers exactly those five editions — keys the default from the supplied value's JSON application type, so a string selects text/plain. On 3.1.0, 3.1.1 and 3.1.2 the edition states application/octet-stream for that part (tabulated as the type-absent row in 3.1.1/3.1.2, reached through the closing catch-all in 3.1.0), this specification defines no JSON-to-octets part boundary, and the part refuses before dispatch. On the urlencoded lane these cells were UNREACHABLE on 3.0.0-3.0.3 before 2026-08-17, because the style path never consults a part content type at all; the lane move grows that convention's reach on this lane from zero to 17 corpus properties. Recorded, not reopened."
+    },
+    {
+      "name": "3.1.2|unconstrained",
+      "openapi": "3.1.2",
+      "shape": "unconstrained",
+      "path": "content",
+      "propertySchema": {},
+      "encoding": null,
+      "value": "main st",
+      "expect": "refused",
+      "basis": "The Encoding Object writes no style, explode or allowReserved, so the CONTENT path governs. §4.8.15.1.2 carries \"If a value is explicitly defined, then the value of contentType (implicit or explicit) SHALL be ignored\" on each of the three fields. A memberless Schema Object. §9.2 reads a memberless schema as asserting nothing for a MEDIA TYPE OBJECT's own schema, but says in as many words that the reading \"does not descend to a form part\": a part declaring no type is the type-absent cell, answered per edition exactly as the typeless-with-members cell above. This cell exists because the two reach the engines through different code paths (a memberless schema versus a schema with members but no type) and an engine may answer one and not the other."
+    },
+    {
+      "name": "3.1.2|non-collapsing-anyOf",
+      "openapi": "3.1.2",
+      "shape": "non-collapsing-anyOf",
+      "path": "content",
+      "propertySchema": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        ]
+      },
+      "encoding": null,
+      "value": "main st",
+      "expect": "refused",
+      "basis": "The Encoding Object writes no style, explode or allowReserved, so the CONTENT path governs. §4.8.15.1.2 carries \"If a value is explicitly defined, then the value of contentType (implicit or explicit) SHALL be ignored\" on each of the three fields. Two non-null branches declare value-dependent alternatives and leave no single faithful form carriage, so §9.2 refuses the alternative before dispatch on every accepted edition. Before 2026-08-17 the 3.0.0-3.0.3 rows ADMITTED it, because the style path checks only that a coherent serialization method exists and never resolves a part carriage. This is the class MISP/MISP's POST /warninglists/toggleEnable falls in — WarninglistsIdFilter and WarninglistsNameFilter are each anyOf of a scalar and an array of it — and its urlencoded alternative moving represented -> excluded is the SOLE corpus movement of the lane ruling. A coverage fall of exactly one entry is the intended outcome here, not a regression."
+    }
+  ]
+}

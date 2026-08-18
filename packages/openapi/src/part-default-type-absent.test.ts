@@ -19,7 +19,7 @@ import type { OpenAPIDocument, OpenAPIMediaType, OpenAPIOperation } from "./type
 // openbindings-go/formats/openapi/testdata, openapi-client/go/testdata and
 // openapi-client/typescript/src/testdata.
 export const PART_DEFAULT_TYPE_ABSENT_CASES_DIGEST =
-  "7bed2d6f962c776724e94dbfa298437d7a3ad0cb8d45f187116a42368acd886b";
+  "0750e5d5ed6bf8ca8bdb06d35b23e88145dc70ceaf2abedcd157e0750c792b69";
 
 export interface PartDefaultTypeAbsentCase {
   name: string;
