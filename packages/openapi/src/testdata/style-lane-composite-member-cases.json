@@ -1,0 +1,670 @@
+{
+  "$comment": "Shared style-lane composite-member case table. Byte-identical copies live in\nopenbindings-go/formats/openapi/testdata, openapi-client/go/testdata,\nopenapi-client/typescript/src/testdata and\nopenbindings-ts/packages/openapi/src/testdata. Each cell pins the ADMISSION\ndecision all four engines must reach for one style-lane declaration.\n\nexpect is \"admitted\" or \"refused\". Every engine asserts it. The two\nopenapi-client engines additionally assert member, which is the offending\nmember the shipped predicate names: for a parameter cell the full\n\"<parameter><path>\", for a body cell the \"<path>\" alone, where a path is\n\"[]\" for an array's items and \".<name>\" for an object's property.\n\nThe parameter is always named \"filter\" and the body property always \"field\".\nbasis records the authority the cell rests on, read at the pinned bytes\nrecorded in corpus-lab/OPENAPI-RUNTIME-INDEX.md.\n\nPackage: design/openapi-style-lane-composite-member-ruling.md, RULED\n2026-08-18. Record: corpus-lab/openapi-runtime/70-*.md.",
+  "cases": [
+    {
+      "name": "deepObject object with scalar members only",
+      "openapi": "3.0.3",
+      "position": "parameter",
+      "in": "query",
+      "style": "deepObject",
+      "explode": true,
+      "schema": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          }
+        }
+      },
+      "expect": "admitted",
+      "member": null,
+      "basis": "OAS 3.0.3 4.7.12.3 deepObject row; every declared member is a scalar, which the row's own worked example shows."
+    },
+    {
+      "name": "deepObject object with an object member",
+      "openapi": "3.0.3",
+      "position": "parameter",
+      "in": "query",
+      "style": "deepObject",
+      "explode": true,
+      "schema": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "integer"
+          },
+          "where": {
+            "type": "object"
+          }
+        }
+      },
+      "expect": "refused",
+      "member": "filter.where",
+      "basis": "OAS 3.0.3 4.7.12.3 governs deepObject and defines no representation for an object property."
+    },
+    {
+      "name": "deepObject object with an array member",
+      "openapi": "3.0.0",
+      "position": "parameter",
+      "in": "query",
+      "style": "deepObject",
+      "explode": true,
+      "schema": {
+        "type": "object",
+        "properties": {
+          "and": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "expect": "refused",
+      "member": "filter.and",
+      "basis": "OAS 3.0.0 4.7.12.3 governs deepObject and defines no representation for an array property."
+    },
+    {
+      "name": "deepObject object with an array-of-objects member",
+      "openapi": "3.1.0",
+      "position": "parameter",
+      "in": "query",
+      "style": "deepObject",
+      "explode": true,
+      "schema": {
+        "type": "object",
+        "properties": {
+          "or": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          }
+        }
+      },
+      "expect": "refused",
+      "member": "filter.or",
+      "basis": "OAS 3.1.0 4.8.12.3 carries the same undefined-representation deepObject row as the 3.0 line."
+    },
+    {
+      "name": "deepObject object with an object member, edition that states it",
+      "openapi": "3.1.2",
+      "position": "parameter",
+      "in": "query",
+      "style": "deepObject",
+      "explode": true,
+      "schema": {
+        "type": "object",
+        "properties": {
+          "where": {
+            "type": "object"
+          }
+        }
+      },
+      "expect": "refused",
+      "member": "filter.where",
+      "basis": "OAS 3.1.2 4.8.12.3: \"The representation of array or object properties is not defined.\""
+    },
+    {
+      "name": "deepObject object with an object member, 3.0.4",
+      "openapi": "3.0.4",
+      "position": "parameter",
+      "in": "query",
+      "style": "deepObject",
+      "explode": true,
+      "schema": {
+        "type": "object",
+        "properties": {
+          "where": {
+            "type": "object"
+          }
+        }
+      },
+      "expect": "refused",
+      "member": "filter.where",
+      "basis": "OAS 3.0.4 4.7.12.3 states the same sentence as the 3.1.1 and 3.1.2 rows."
+    },
+    {
+      "name": "deepObject object declaring no members at all",
+      "openapi": "3.0.0",
+      "position": "parameter",
+      "in": "query",
+      "style": "deepObject",
+      "explode": true,
+      "schema": {
+        "type": "object"
+      },
+      "expect": "admitted",
+      "member": null,
+      "basis": "A bare object declares no member kind. Its runtime members may all be scalars, so a declaration-keyed refusal must not reach it."
+    },
+    {
+      "name": "deepObject object with a typeless member",
+      "openapi": "3.0.3",
+      "position": "parameter",
+      "in": "query",
+      "style": "deepObject",
+      "explode": true,
+      "schema": {
+        "type": "object",
+        "properties": {
+          "where": {}
+        }
+      },
+      "expect": "admitted",
+      "member": null,
+      "basis": "A typeless member is not composite by declaration; its runtime value may be a scalar."
+    },
+    {
+      "name": "deepObject object with a two-branch choice member",
+      "openapi": "3.1.1",
+      "position": "parameter",
+      "in": "query",
+      "style": "deepObject",
+      "explode": true,
+      "schema": {
+        "type": "object",
+        "properties": {
+          "where": {
+            "anyOf": [
+              {
+                "type": "object"
+              },
+              {
+                "type": "string"
+              }
+            ]
+          }
+        }
+      },
+      "expect": "admitted",
+      "member": null,
+      "basis": "Two non-null branches do not collapse, and the declaration admits a scalar value."
+    },
+    {
+      "name": "deepObject object with a nullable-choice object member",
+      "openapi": "3.1.1",
+      "position": "parameter",
+      "in": "query",
+      "style": "deepObject",
+      "explode": true,
+      "schema": {
+        "type": "object",
+        "properties": {
+          "where": {
+            "anyOf": [
+              {
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "expect": "refused",
+      "member": "filter.where",
+      "basis": "Section 9.2's single-non-null-branch collapse: the artifact declared exactly one carriage and it is an object."
+    },
+    {
+      "name": "deepObject object with a union-typed object member on the 3.1 line",
+      "openapi": "3.1.1",
+      "position": "parameter",
+      "in": "query",
+      "style": "deepObject",
+      "explode": true,
+      "schema": {
+        "type": "object",
+        "properties": {
+          "where": {
+            "type": [
+              "object",
+              "null"
+            ]
+          }
+        }
+      },
+      "expect": "refused",
+      "member": "filter.where",
+      "basis": "JSON Schema 2020-12 6.1.1 makes the union spelling the same declaration as the nullable choice; the 3.1 line adopts that dialect."
+    },
+    {
+      "name": "deepObject object with a union-typed object member on the 3.0 line",
+      "openapi": "3.0.3",
+      "position": "parameter",
+      "in": "query",
+      "style": "deepObject",
+      "explode": true,
+      "schema": {
+        "type": "object",
+        "properties": {
+          "where": {
+            "type": [
+              "object",
+              "null"
+            ]
+          }
+        }
+      },
+      "expect": "admitted",
+      "member": null,
+      "basis": "Every 3.0 edition states \"type - Value MUST be a string. Multiple types via an array are not supported\", so there is no union declaration to collapse."
+    },
+    {
+      "name": "deepObject object with a two-non-null union member",
+      "openapi": "3.1.2",
+      "position": "parameter",
+      "in": "query",
+      "style": "deepObject",
+      "explode": true,
+      "schema": {
+        "type": "object",
+        "properties": {
+          "where": {
+            "type": [
+              "object",
+              "array"
+            ]
+          }
+        }
+      },
+      "expect": "admitted",
+      "member": null,
+      "basis": "Two non-null members declare value-dependent alternatives and do not collapse to one declared kind."
+    },
+    {
+      "name": "deepObject object whose offending member is contributed by allOf",
+      "openapi": "3.0.3",
+      "position": "parameter",
+      "in": "query",
+      "style": "deepObject",
+      "explode": true,
+      "schema": {
+        "allOf": [
+          {
+            "type": "object",
+            "properties": {
+              "where": {
+                "type": "object"
+              }
+            }
+          }
+        ]
+      },
+      "expect": "refused",
+      "member": "filter.where",
+      "basis": "A resolved property schema includes the allOf contributions, which is the family's own notion of resolution."
+    },
+    {
+      "name": "deepObject object with two offending members",
+      "openapi": "3.0.3",
+      "position": "parameter",
+      "in": "query",
+      "style": "deepObject",
+      "explode": true,
+      "schema": {
+        "type": "object",
+        "properties": {
+          "zeta": {
+            "type": "object"
+          },
+          "alpha": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "expect": "refused",
+      "member": "filter.alpha",
+      "basis": "Members are visited in code-point order so both engines name the same one."
+    },
+    {
+      "name": "form object with an object member, exploded",
+      "openapi": "3.0.3",
+      "position": "parameter",
+      "in": "query",
+      "style": "form",
+      "explode": true,
+      "schema": {
+        "type": "object",
+        "properties": {
+          "where": {
+            "type": "object"
+          }
+        }
+      },
+      "expect": "refused",
+      "member": "filter.where",
+      "basis": "The form row cites RFC 6570 Section 3.2.8; RFC 6570 2.4.2 expands each member as a separate variable and its expansions append member strings."
+    },
+    {
+      "name": "form object with an object member, unexploded",
+      "openapi": "3.0.3",
+      "position": "parameter",
+      "in": "query",
+      "style": "form",
+      "explode": false,
+      "schema": {
+        "type": "object",
+        "properties": {
+          "where": {
+            "type": "object"
+          }
+        }
+      },
+      "expect": "refused",
+      "member": "filter.where",
+      "basis": "The unexploded form expansion joins member names and member string values; a composite member has no string."
+    },
+    {
+      "name": "form array of objects",
+      "openapi": "3.0.3",
+      "position": "parameter",
+      "in": "query",
+      "style": "form",
+      "explode": false,
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "object"
+        }
+      },
+      "expect": "refused",
+      "member": "filter[]",
+      "basis": "RFC 6570 3.2.8 appends list members as strings."
+    },
+    {
+      "name": "form array of scalars",
+      "openapi": "3.0.3",
+      "position": "parameter",
+      "in": "query",
+      "style": "form",
+      "explode": false,
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "expect": "admitted",
+      "member": null,
+      "basis": "A scalar list member has the expansion RFC 6570 3.2.8 defines."
+    },
+    {
+      "name": "form array of arrays",
+      "openapi": "3.1.1",
+      "position": "parameter",
+      "in": "query",
+      "style": "form",
+      "explode": true,
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "expect": "refused",
+      "member": "filter[]",
+      "basis": "A nested list is a composite member with no expansion."
+    },
+    {
+      "name": "form array with typeless items",
+      "openapi": "3.0.3",
+      "position": "parameter",
+      "in": "query",
+      "style": "form",
+      "explode": false,
+      "schema": {
+        "type": "array",
+        "items": {}
+      },
+      "expect": "admitted",
+      "member": null,
+      "basis": "Typeless items are not composite by declaration."
+    },
+    {
+      "name": "spaceDelimited array of objects",
+      "openapi": "3.0.3",
+      "position": "parameter",
+      "in": "query",
+      "style": "spaceDelimited",
+      "explode": false,
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "object"
+        }
+      },
+      "expect": "refused",
+      "member": "filter[]",
+      "basis": "No accepted edition's style table cites an RFC section for spaceDelimited, and none defines a composite member's representation."
+    },
+    {
+      "name": "spaceDelimited array of scalars",
+      "openapi": "3.0.3",
+      "position": "parameter",
+      "in": "query",
+      "style": "spaceDelimited",
+      "explode": false,
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "integer"
+        }
+      },
+      "expect": "admitted",
+      "member": null,
+      "basis": "A scalar list member is what the row's own worked example carries."
+    },
+    {
+      "name": "pipeDelimited array of arrays",
+      "openapi": "3.1.2",
+      "position": "parameter",
+      "in": "query",
+      "style": "pipeDelimited",
+      "explode": false,
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "expect": "refused",
+      "member": "filter[]",
+      "basis": "Same as spaceDelimited: the row governs and defines nothing for a composite member."
+    },
+    {
+      "name": "cookie form object with an array member",
+      "openapi": "3.0.3",
+      "position": "parameter",
+      "in": "cookie",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "expect": "refused",
+      "member": "filter.tags",
+      "basis": "A cookie parameter defaults to form style, which is the same lane under the same RFC 6570 citation."
+    },
+    {
+      "name": "path simple object with an object member",
+      "openapi": "3.0.3",
+      "position": "parameter",
+      "in": "path",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "where": {
+            "type": "object"
+          }
+        }
+      },
+      "expect": "admitted",
+      "member": null,
+      "basis": "RESIDUE, NOT A RULING: the ruling covers form, spaceDelimited, pipeDelimited and deepObject. The path and header styles carry the same structural question and are not decided here."
+    },
+    {
+      "name": "header simple array of objects",
+      "openapi": "3.0.3",
+      "position": "parameter",
+      "in": "header",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "object"
+        }
+      },
+      "expect": "admitted",
+      "member": null,
+      "basis": "RESIDUE, NOT A RULING: same as the path row above."
+    },
+    {
+      "name": "content-form query parameter with an object member",
+      "openapi": "3.0.3",
+      "position": "parameter",
+      "in": "query",
+      "schema": null,
+      "expect": "admitted",
+      "member": null,
+      "basis": "A content-form parameter is not on the style lane at all: section 9.1 serializes it per its declared media type."
+    },
+    {
+      "name": "urlencoded style-lane array of objects",
+      "openapi": "3.0.3",
+      "position": "body",
+      "media": "application/x-www-form-urlencoded",
+      "encoding": {
+        "style": "form"
+      },
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "object"
+        }
+      },
+      "expect": "refused",
+      "member": "[]",
+      "basis": "An explicit style, explode or allowReserved selects the RFC6570-style lane on every accepted edition (section 9.2)."
+    },
+    {
+      "name": "urlencoded content-lane array of objects",
+      "openapi": "3.0.3",
+      "position": "body",
+      "media": "application/x-www-form-urlencoded",
+      "encoding": null,
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "object"
+        }
+      },
+      "expect": "admitted",
+      "member": null,
+      "basis": "With all three fields absent the property takes the CONTENT path, which carries its JSON image and is not this rule's business."
+    },
+    {
+      "name": "urlencoded style-lane object with an object member",
+      "openapi": "3.1.1",
+      "position": "body",
+      "media": "application/x-www-form-urlencoded",
+      "encoding": {
+        "explode": true
+      },
+      "schema": {
+        "type": "object",
+        "properties": {
+          "where": {
+            "type": "object"
+          }
+        }
+      },
+      "expect": "refused",
+      "member": ".where",
+      "basis": "An explicit explode alone selects the style lane."
+    },
+    {
+      "name": "urlencoded style-lane object with scalar members",
+      "openapi": "3.1.1",
+      "position": "body",
+      "media": "application/x-www-form-urlencoded",
+      "encoding": {
+        "explode": true
+      },
+      "schema": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "integer"
+          }
+        }
+      },
+      "expect": "admitted",
+      "member": null,
+      "basis": "Every declared member is a scalar."
+    },
+    {
+      "name": "multipart style-lane object with an array member",
+      "openapi": "3.0.3",
+      "position": "body",
+      "media": "multipart/form-data",
+      "encoding": {
+        "style": "form",
+        "explode": true
+      },
+      "schema": {
+        "type": "object",
+        "properties": {
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "expect": "refused",
+      "member": ".tags",
+      "basis": "The multipart style lane is the same lane under the same rows."
+    },
+    {
+      "name": "multipart content-lane object with an array member",
+      "openapi": "3.0.3",
+      "position": "body",
+      "media": "multipart/form-data",
+      "encoding": null,
+      "schema": {
+        "type": "object",
+        "properties": {
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "expect": "admitted",
+      "member": null,
+      "basis": "Without explicit controls the part takes the content path."
+    }
+  ]
+}
