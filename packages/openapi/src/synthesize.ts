@@ -28,7 +28,7 @@ import {
   planRequestBodies,
   type BodyPlan,
 } from "./media.js";
-import { effectiveParameters, unflattenableParam, validateParameterSerialization } from "./params.js";
+import { effectiveParameters, styleLaneUndefinedExpansionParam, unflattenableParam, validateParameterSerialization } from "./params.js";
 import { planAbstractInputRoutes, type AbstractInputRoutes } from "./input-routes-v2.js";
 import { translateSchemaDialect } from "./translate.js";
 import {
@@ -220,6 +220,34 @@ export async function convertToInterface(
           }
           throw unrealizableOperation(opKey, reason);
         }
+      }
+
+      // A style-lane parameter declaring a member with no defined expansion
+      // can never be populated faithfully: every value conforming to the
+      // declaration carries that member as a composite, and the governing OAS
+      // style row defines no representation for one. The refusal is decided by
+      // the DECLARATION, so the operation is excluded here with durable
+      // evidence rather than published as represented and refused at
+      // invocation. See styleLaneUndefinedExpansionMember in the client's
+      // media.ts for the per-edition authority reading.
+      const undefinedExpansionMember = styleLaneUndefinedExpansionParam(
+        params,
+        profileForBindingSpec(bindingSpec),
+        formatVersion.startsWith("3.0"),
+      );
+      if (undefinedExpansionMember !== null) {
+        const reason = `parameter member ${JSON.stringify(undefinedExpansionMember)} has no expansion defined by its governing OAS style row`;
+        if (onUnrealizable) {
+          onUnrealizable({
+            ref,
+            operationKey: opKey,
+            reasonCode: "openapi.parameter_style_expansion_excluded",
+            rule: "OAPI-P-02",
+            message: reason,
+          });
+          continue;
+        }
+        throw unrealizableOperation(opKey, reason);
       }
 
       let requestPlans: BodyPlan[] = [];

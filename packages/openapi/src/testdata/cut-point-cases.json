@@ -1785,10 +1785,12 @@
                   "in": "query",
                   "required": true,
                   "description": "a where clause",
-                  "style": "deepObject",
-                  "explode": true,
-                  "schema": {
-                    "$ref": "#/components/schemas/Selector"
+                  "content": {
+                    "application/json": {
+                      "schema": {
+                        "$ref": "#/components/schemas/Selector"
+                      }
+                    }
                   }
                 }
               ],

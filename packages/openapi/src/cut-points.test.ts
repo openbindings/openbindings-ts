@@ -17,6 +17,13 @@ import { OpenAPISynthesizer } from "./invoker.js";
  * about the graph a direction is about to emit, a cut point is a node the
  * artifact addressed that participates in a cycle there, and every participant
  * is hoisted.
+ *
+ * Both parameter cases declare `content` rather than `schema`. A cycle through
+ * an object parameter requires a composite member, and a style-lane parameter
+ * declaring one is excluded at synthesis
+ * (styleLaneUndefinedExpansionMember in the client's `media.ts`), so the style
+ * lane cannot carry a cyclic parameter at all. The content lane keeps the
+ * cut-point question the cases exist to ask.
  */
 
 interface CutPointCase {

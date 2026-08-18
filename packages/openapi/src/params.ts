@@ -16,6 +16,8 @@ export {
   asObject,
   encodePathValue,
   unflattenableParam,
+  styleLaneUndefinedExpansionParam,
+  parameterStyleLaneUndefinedExpansionMember,
   validateParameterSerialization,
   type RoutedInput,
 } from "@openbindings/openapi-client/analysis";
