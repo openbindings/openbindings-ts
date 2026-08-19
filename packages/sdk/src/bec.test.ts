@@ -15,6 +15,8 @@ import {
   contextBasicAuthFor,
   contextAccessTokenFor,
   contextString,
+  contextAnonymous,
+  buildAuthHeaders,
   contextSatisfies,
   storeContextResolver,
   OperationInvoker,
@@ -335,6 +337,38 @@ describe("contextSatisfies", () => {
     ).toBe(true);
   });
 
+  // An OAuth2 access token reaches the wire AS a Bearer credential, and
+  // credential application already falls back to the flat bearer token when no
+  // accessToken is present; the satisfaction check was the only half that
+  // disagreed, which made every oauth2-declaring artifact a dead end.
+  it("satisfies auth.oauth2 with a flat bearerToken, not only accessToken", () => {
+    const details: ContextRequiredDetails = {
+      target: "k",
+      alternatives: [{ requirements: [{ type: "auth.oauth2", name: "oauth" }] }],
+    };
+    expect(contextSatisfies({ bearerToken: "t" }, details)).toBe(true);
+    expect(contextSatisfies({ accessToken: "a" }, details)).toBe(true);
+    expect(contextSatisfies({ bearerToken: "" }, details)).toBe(false);
+    expect(contextSatisfies({}, details)).toBe(false);
+  });
+
+  it("does not apply a flat bearerToken to an ambiguous auth.oauth2 challenge", () => {
+    // Same unambiguity gate the other auth families use: two named oauth2
+    // schemes leave no way to tell which one the flat token belongs to.
+    const details: ContextRequiredDetails = {
+      target: "k",
+      alternatives: [
+        { requirements: [{ type: "auth.oauth2", name: "schemeA" }] },
+        { requirements: [{ type: "auth.oauth2", name: "schemeB" }] },
+      ],
+    };
+    expect(contextSatisfies({ bearerToken: "ambiguous" }, details)).toBe(false);
+    expect(contextSatisfies({ accessToken: "ambiguous" }, details)).toBe(false);
+    expect(
+      contextSatisfies({ credentials: { schemeB: { accessToken: "specific" } } }, details),
+    ).toBe(true);
+  });
+
   it("requires distinct named credentials for repeated standard families in one alternative", () => {
     const details: ContextRequiredDetails = {
       target: "k",
@@ -404,6 +438,146 @@ describe("contextSatisfies", () => {
     // A binding-specific resolver must understand the family before it can
     // select the alternative.
     expect(contextSatisfies({ "auth.http.digest": "present" }, details)).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Anonymous invocation
+// ---------------------------------------------------------------------------
+
+describe("contextAnonymous", () => {
+  it("reads only a literal boolean true", () => {
+    expect(contextAnonymous({ anonymous: true })).toBe(true);
+    expect(contextAnonymous({ anonymous: false })).toBe(false);
+    // A truthy non-boolean is not the assertion: asserting anonymity is an
+    // explicit act, so a stray string or number must not stand in for it.
+    expect(contextAnonymous({ anonymous: "true" })).toBe(false);
+    expect(contextAnonymous({ anonymous: 1 })).toBe(false);
+    expect(contextAnonymous({})).toBe(false);
+    expect(contextAnonymous(null)).toBe(false);
+    expect(contextAnonymous(undefined)).toBe(false);
+  });
+
+  it("is a top-level field, not a configuration point", () => {
+    // `anonymous` qualifies the whole invocation and sits beside
+    // `configuration`; nesting it inside is not the assertion.
+    expect(contextAnonymous({ configuration: { anonymous: true } })).toBe(false);
+  });
+});
+
+describe("contextSatisfies under an anonymous invocation", () => {
+  it("answers an auth requirement with no credential present", () => {
+    expect(contextSatisfies({ anonymous: true }, BEARER_OR_APIKEY)).toBe(true);
+  });
+
+  it("answers every auth.* family, including one with no built-in resolver", () => {
+    // The rule is the `auth.` prefix, not the standard family table: a
+    // surfaced-but-unmapped credential family is still a credential family,
+    // and "I have none" is a truthful answer to it.
+    for (const type of ["auth.bearer", "auth.apiKey", "auth.basic", "auth.oauth2", "auth.http.digest"]) {
+      expect(
+        contextSatisfies({ anonymous: true }, {
+          target: "k",
+          alternatives: [{ requirements: [{ type, name: "scheme" }] }],
+        }),
+      ).toBe(true);
+    }
+  });
+
+  it("answers ANDed named auth requirements one flat credential could not", () => {
+    const details: ContextRequiredDetails = {
+      target: "k",
+      alternatives: [{ requirements: [
+        { type: "auth.bearer", name: "first" },
+        { type: "auth.bearer", name: "second" },
+      ] }],
+    };
+    expect(contextSatisfies({ anonymous: true }, details)).toBe(true);
+  });
+
+  it("never answers a config.value requirement", () => {
+    // Which server to talk to, which request media to send: not credentials,
+    // and there is no anonymous reading of them.
+    const details: ContextRequiredDetails = {
+      target: "k",
+      alternatives: [{ requirements: [{ type: "config.value", point: "server", path: "/url" }] }],
+    };
+    expect(contextSatisfies({ anonymous: true }, details)).toBe(false);
+  });
+
+  it("still has to answer the configuration half of a mixed alternative", () => {
+    const details: ContextRequiredDetails = {
+      target: "k",
+      alternatives: [{ requirements: [
+        { type: "auth.basic" },
+        { type: "config.value", point: "server", path: "/url" },
+      ] }],
+    };
+    expect(contextSatisfies({ anonymous: true }, details)).toBe(false);
+    expect(
+      contextSatisfies(
+        { anonymous: true, configuration: { server: { url: "https://api.example.com" } } },
+        details,
+      ),
+    ).toBe(true);
+  });
+
+  it("does not answer a non-auth extension requirement", () => {
+    const details: ContextRequiredDetails = {
+      target: "k",
+      alternatives: [{ requirements: [{ type: "transport.session" }] }],
+    };
+    expect(contextSatisfies({ anonymous: true }, details)).toBe(false);
+  });
+
+  it("is not asserted by a merely truthy value", () => {
+    expect(contextSatisfies({ anonymous: "yes" }, BEARER_OR_APIKEY)).toBe(false);
+    expect(contextSatisfies({ anonymous: false }, BEARER_OR_APIKEY)).toBe(false);
+  });
+});
+
+describe("buildAuthHeaders", () => {
+  it("derives Authorization from the well-known credential fields", () => {
+    expect(buildAuthHeaders({ bearerToken: "t" })["Authorization"]).toBe("Bearer t");
+    expect(buildAuthHeaders({ apiKey: "k" })["Authorization"]).toBe("ApiKey k");
+    expect(buildAuthHeaders({ basic: { username: "u", password: "p" } })["Authorization"])
+      .toBe(`Basic ${btoa("u:p")}`);
+  });
+
+  // The security-relevant half of the anonymity assertion: it has to reach the
+  // wire, not only the negotiation. A credential left in context by an earlier
+  // call must not ride along on an invocation the caller declared anonymous.
+  it("derives no credential at all under an anonymous invocation", () => {
+    const stale = {
+      anonymous: true,
+      bearerToken: "left-over-from-an-earlier-call",
+      apiKey: "left-over-key",
+      accessToken: "left-over-access-token",
+      basic: { username: "u", password: "p" },
+    };
+    const headers = buildAuthHeaders(stale);
+    expect(headers["Authorization"]).toBeUndefined();
+    expect(headers["Cookie"]).toBeUndefined();
+    // Nothing derived from a credential field reaches any header, under any
+    // name — not just the one Authorization slot.
+    const emitted = JSON.stringify(headers);
+    for (const secret of ["left-over-from-an-earlier-call", "left-over-key", "left-over-access-token", btoa("u:p")]) {
+      expect(emitted).not.toContain(secret);
+    }
+  });
+
+  it("still merges headers and cookies the caller placed by hand", () => {
+    // Those are carriage the caller supplied explicitly, not credentials this
+    // helper derived, so anonymity does not silently drop them.
+    const headers = buildAuthHeaders({
+      anonymous: true,
+      bearerToken: "derived-and-suppressed",
+      headers: { "X-Trace": "abc" },
+      cookies: { session: "s1" },
+    });
+    expect(headers["X-Trace"]).toBe("abc");
+    expect(headers["Cookie"]).toBe("session=s1");
+    expect(headers["Authorization"]).toBeUndefined();
   });
 });
 
