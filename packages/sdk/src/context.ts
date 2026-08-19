@@ -20,7 +20,9 @@ import type { ContextResolver } from "./invokers.js";
  * auth.bearer  →  "bearerToken"
  * auth.apiKey  →  "apiKey"
  * auth.basic   →  "basic" (a { username, password } object)
- * auth.oauth2  →  "accessToken" (plus "refreshToken", "clientSecret")
+ * auth.oauth2  →  "accessToken" or "bearerToken" (plus "refreshToken",
+ *                 "clientSecret") — an access token rides the wire as a
+ *                 Bearer credential, so either spelling answers the family
  * ```
  *
  * so satisfying a bearer challenge for an origin is one call:
@@ -616,7 +618,14 @@ const REQUIREMENT_FAMILY_FIELDS: Record<string, string[]> = {
   "auth.bearer": ["bearerToken"],
   "auth.apiKey": ["apiKey", "apiKeys"],
   "auth.basic": ["basic"],
-  "auth.oauth2": ["accessToken", "refreshToken", "clientSecret"],
+  // `bearerToken` belongs here because requirementSatisfied's oauth2 arm
+  // accepts one. Without it the two rules in this file contradicted each
+  // other: the challenge validated against a stored bearer token and then
+  // scopeContext admitted nothing, so a caller supplied exactly what the
+  // error asked for, the scope gate dropped it, and the invoker re-challenged
+  // forever. A rule that says a value satisfies a requirement has to let that
+  // value through. Twin of openbindings-go/contextstore.go.
+  "auth.oauth2": ["accessToken", "bearerToken", "refreshToken", "clientSecret"],
 };
 
 /**
