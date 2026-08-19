@@ -244,31 +244,6 @@ export function contextString(ctx: Record<string, unknown> | null | undefined, k
 }
 
 /**
- * Reports whether the caller has asserted that this invocation carries no
- * credentials, via the well-known top-level `anonymous: true` field. It is a
- * sibling of `configuration`, not a point inside it: it qualifies the whole
- * invocation rather than any one configuration point.
- *
- * An OpenAPI document's `security` describes what the API ACCEPTS; the server
- * decides what it ENFORCES, and the two routinely disagree — public read
- * endpoints under a blanket document-level requirement are ordinary. Without
- * this, such an operation is unreachable: the challenge cannot be answered
- * truthfully (there is no credential) and answering it falsely is worse than
- * silence, because a rejected token earns a 401 where sending nothing would
- * have been served.
- *
- * The assertion is the caller supplying, for this invocation, exactly what OAS
- * itself spells as `security: []`. It is deliberately an explicit act rather
- * than a fallback: guessing that a declared requirement is decorative would
- * make every credentialed operation silently attempt an unauthenticated call
- * first.
- */
-export function contextAnonymous(ctx: Record<string, unknown> | null | undefined): boolean {
-  if (!ctx) return false;
-  return ctx["anonymous"] === true;
-}
-
-/**
  * Returns a shallow copy of ctx with well-known credential fields replaced
  * by "[REDACTED]". Returns null for null/undefined input. Other fields may
  * also contain secrets according to their binding specification or
@@ -417,32 +392,22 @@ function elideDefaultPort(scheme: string, host: string): string {
  * `bearerToken` wins over `apiKey` which wins over `basic`. Format
  * invokers that need scheme-aware placement (OpenAPI, AsyncAPI) should
  * resolve the security scheme themselves and not use this helper.
- *
- * An {@link contextAnonymous} invocation derives no `Authorization` header at
- * all — that is the point of asserting it: the caller is asking for the
- * request a client with no credentials would send. Deriving one anyway would
- * let a credential left in context from an earlier call ride along, so the
- * assertion has to reach the wire and not only the negotiation. Explicit
- * `headers` and `cookies` are still merged: those are carriage the caller
- * placed by hand, not credentials this helper derived.
  */
 export function buildAuthHeaders(ctx: Record<string, unknown> | null | undefined): Record<string, string> {
   const headers: Record<string, string> = {};
   if (!ctx) return headers;
 
-  if (!contextAnonymous(ctx)) {
-    const bearer = contextBearerToken(ctx);
-    if (bearer) {
-      headers["Authorization"] = `Bearer ${bearer}`;
+  const bearer = contextBearerToken(ctx);
+  if (bearer) {
+    headers["Authorization"] = `Bearer ${bearer}`;
+  } else {
+    const apiKey = contextApiKey(ctx);
+    if (apiKey) {
+      headers["Authorization"] = `ApiKey ${apiKey}`;
     } else {
-      const apiKey = contextApiKey(ctx);
-      if (apiKey) {
-        headers["Authorization"] = `ApiKey ${apiKey}`;
-      } else {
-        const basic = contextBasicAuth(ctx);
-        if (basic) {
-          headers["Authorization"] = `Basic ${btoa(`${basic.username}:${basic.password}`)}`;
-        }
+      const basic = contextBasicAuth(ctx);
+      if (basic) {
+        headers["Authorization"] = `Basic ${btoa(`${basic.username}:${basic.password}`)}`;
       }
     }
   }
@@ -493,11 +458,6 @@ function requirementSatisfied(
   req: ContextRequirement,
   allowFlatNamedCredential = true,
 ): boolean {
-  // Anonymity answers credential requirements and nothing else. A
-  // `config.value` point — which server to talk to, which request media to
-  // send — is not a credential and has no anonymous reading, so an alternative
-  // mixing the two still has to answer the configuration half.
-  if (contextAnonymous(ctx) && req.type.startsWith("auth.")) return true;
   const name = typeof req.name === "string" && req.name ? req.name : undefined;
   const named = contextNamedCredential(ctx, name);
   if (req.type === "auth.bearer") {
@@ -526,14 +486,11 @@ function requirementSatisfied(
     }
     if (!allowFlatNamedCredential) return false;
     // A flat bearer token counts here because an OAuth2 access token reaches
-    // the wire AS a Bearer credential, and the placement side already knows it:
-    // credential application falls back to the flat bearer token when no
-    // accessToken is present. Until these two agreed, an artifact declaring
-    // oauth2 was a dead end — the challenge asked for context, the remedy it
-    // printed stored a bearerToken, and the next attempt challenged
-    // identically because only `accessToken` counted. OAuth2 is among the most
-    // common schemes in real documents, so that disagreement closed off a
-    // large share of them.
+    // the wire AS a Bearer credential, and the placement side already knows
+    // it. Until these two agreed, an artifact declaring oauth2 was a dead end:
+    // the challenge asked for context, the remedy it printed stored a
+    // bearerToken, and the next attempt challenged identically because only
+    // `accessToken` counted. Twin of openbindings-go/contextstore.go.
     return contextString(ctx, "accessToken") !== "" || contextBearerToken(ctx) !== "";
   }
   if (req.type === "config.value") {
@@ -623,8 +580,7 @@ const REQUIREMENT_FAMILY_FIELDS: Record<string, string[]> = {
   // other: the challenge validated against a stored bearer token and then
   // scopeContext admitted nothing, so a caller supplied exactly what the
   // error asked for, the scope gate dropped it, and the invoker re-challenged
-  // forever. A rule that says a value satisfies a requirement has to let that
-  // value through. Twin of openbindings-go/contextstore.go.
+  // forever. Twin of openbindings-go/contextstore.go.
   "auth.oauth2": ["accessToken", "bearerToken", "refreshToken", "clientSecret"],
 };
 

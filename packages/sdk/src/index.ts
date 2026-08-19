@@ -75,7 +75,6 @@ export {
   contextBasicAuthFor,
   contextAccessTokenFor,
   contextString,
-  contextAnonymous,
   contextHeaders,
   contextCookies,
   contextEnvironment,
