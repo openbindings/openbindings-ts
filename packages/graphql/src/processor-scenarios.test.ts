@@ -2,17 +2,19 @@ import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  CONTEXT_REQUIRED,
   matchProcessorObservation,
-  OperationInvoker,
-  operationSignature,
-  type Invocation,
-  type InvocationError,
   type OBInterface,
   type ProcessorObservation,
   type ProcessorScenario,
   type ProcessorScenarioFile,
-} from "@openbindings/sdk";
+} from "@openbindings/core";
+import {
+  CONTEXT_REQUIRED,
+  OperationInvoker,
+  operationSignature,
+  type Invocation,
+  type InvocationError,
+} from "@openbindings/invoke";
 import { describe, expect, it } from "vitest";
 import type { GraphQLWebSocketInit } from "./configuration.js";
 import { GraphQLInvoker, GraphQLSynthesizer } from "./invoker.js";

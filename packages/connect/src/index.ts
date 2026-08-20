@@ -6,6 +6,7 @@ import sourceContextJSON from "protobufjs/google/protobuf/source_context.json" w
 import typeJSON from "protobufjs/google/protobuf/type.json" with { type: "json" };
 import { fromProtoJSON, toProtoJSON } from "./protojson.js";
 import { assertBoundMethodRange } from "./schema-range.js";
+import { type BindingSpecInfo } from "@openbindings/core";
 import {
   InvocationError,
   InvocationImpl,
@@ -28,9 +29,8 @@ import {
   ERR_VALIDATION_FAILED,
   type BindingInvocationArgs,
   type BindingInvoker,
-  type BindingSpecInfo,
   type Invocation,
-} from "@openbindings/sdk";
+} from "@openbindings/invoke";
 
 export const BINDING_SPEC = "openbindings.connect@1";
 

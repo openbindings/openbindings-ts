@@ -6,6 +6,10 @@ import { fileURLToPath } from "node:url";
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const packages = [
+  ["@openbindings/core", "core"],
+  ["@openbindings/compare", "compare"],
+  ["@openbindings/invoke", "invoke"],
+  ["@openbindings/synthesize", "synthesize"],
   ["@openbindings/sdk", "sdk"],
   ["@openbindings/openapi", "openapi"],
   ["@openbindings/asyncapi", "asyncapi"],
@@ -65,6 +69,19 @@ try {
           // sibling repository's packed artifact.
           "@openbindings/openapi-client": `file:${openAPIClientTarball}`,
           "@openbindings/asyncapi-client": `file:${asyncAPIClientTarball}`,
+          // The layered SDK packages are qualified from the same packed set:
+          // force every semver dependency between them to the local tarballs.
+          ...Object.fromEntries(
+            [
+              "@openbindings/core",
+              "@openbindings/compare",
+              "@openbindings/invoke",
+              "@openbindings/synthesize",
+            ].map(name => [
+              name,
+              `file:${tarballs[packages.findIndex(([n]) => n === name)]}`,
+            ]),
+          ),
         },
       },
     }, null, 2),

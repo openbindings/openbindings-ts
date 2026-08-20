@@ -1,7 +1,5 @@
-import type {
-  OBInterface,
-  SynthesisCoverageEntry,
-} from "@openbindings/sdk";
+import type { OBInterface } from "@openbindings/core";
+import type { SynthesisCoverageEntry } from "@openbindings/synthesize";
 import type {
   OpenAPIDocument,
   OpenAPIOperation,

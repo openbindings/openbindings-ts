@@ -4,6 +4,25 @@
 
 ### Changed
 
+- **The SDK is layered into `@openbindings/core`, `@openbindings/invoke`,
+  `@openbindings/synthesize`, and `@openbindings/compare`; `@openbindings/sdk`
+  becomes a facade** (no renames or behavior changes; every existing named
+  export keeps resolving from `@openbindings/sdk`). Placement follows the
+  authority source: what `openbindings.md` defines lives in `core` (document
+  model, validation, operation resolution, boundary schema validation,
+  versions/constants); the binding-invoker/operation-invoker realization in
+  `invoke`; the interface-synthesizer/source-inspector realization — including
+  `fetchInterface` and the synthesis-scenarios runner — in `synthesize`;
+  interface and operation compatibility checking with the schema profile in
+  `compare`. `core` imports none of the three; `invoke` depends on `core` and
+  `compare` only, with zero third-party runtime dependencies. `safeValidate`
+  joins the core barrel for the invocation runtime; `isOBInterface`,
+  `isHttpUrl`, and `BindingSpecInfo` are seated in core;
+  `isInterfaceSynthesizer`'s parameter generalizes from `BindingInvoker` to a
+  type parameter. All four packages version in lockstep at 0.2.0. Format
+  packages now consume the specific packages (peer dependencies follow); the
+  facade keeps existing consumers unbroken.
+
 - **The portable synthesis corpus runs at
   `openbindings.binding-spec-synthesis-scenarios@3`, and this runner checks the
   corpus revision at all.** It previously performed **no** runtime format check:

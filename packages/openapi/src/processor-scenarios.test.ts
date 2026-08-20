@@ -4,18 +4,20 @@ import { dirname, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import jsonata from "jsonata";
 import {
+  matchProcessorObservation,
+  type ProcessorObservation,
+  type ProcessorScenario,
+  type ProcessorScenarioFile,
+} from "@openbindings/core";
+import {
   CONTEXT_REQUIRED,
   ERR_INVALID_REF,
   ERR_REF_NOT_FOUND,
   ERR_SOURCE_LOAD_FAILED,
   OperationInvoker,
-  matchProcessorObservation,
   operationSignature,
   type InvocationError,
-  type ProcessorObservation,
-  type ProcessorScenario,
-  type ProcessorScenarioFile,
-} from "@openbindings/sdk";
+} from "@openbindings/invoke";
 import { OpenAPIInvoker, OpenAPISynthesizer } from "./invoker.js";
 
 const corpusRoot = process.env.OB_SPEC_CORPUS ?? resolve(dirname(fileURLToPath(import.meta.url)), "../../../../spec/conformance");

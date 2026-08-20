@@ -52,10 +52,14 @@
     "@openbindings/openapi-client": "^0.1.0"
   },
   "peerDependencies": {
-    "@openbindings/sdk": "^0.2.0"
+    "@openbindings/core": "^0.2.0",
+    "@openbindings/invoke": "^0.2.0",
+    "@openbindings/synthesize": "^0.2.0"
   },
   "devDependencies": {
-    "@openbindings/sdk": "workspace:*",
+    "@openbindings/core": "workspace:*",
+    "@openbindings/invoke": "workspace:*",
+    "@openbindings/synthesize": "workspace:*",
     "@types/json-schema": "^7.0.15",
     "@types/node": "^22.0.0",
     "jsonata": "2.1.1"

@@ -29,7 +29,6 @@
     "build": "tsup",
     "prepack": "tsup",
     "test": "vitest run",
-    "conformance": "node --import tsx scripts/run-conformance.ts",
     "lint": "tsc --noEmit && tsc -p tsconfig.test.json && eslint ."
   },
   "keywords": [
@@ -51,8 +50,9 @@
     "node": ">=18"
   },
   "dependencies": {
-    "canonicalize": "^2.1.0",
-    "json-schema-library": "^11.6.1",
-    "jsonata": "2.1.1"
+    "@openbindings/compare": "workspace:^",
+    "@openbindings/core": "workspace:^",
+    "@openbindings/invoke": "workspace:^",
+    "@openbindings/synthesize": "workspace:^"
   }
 }

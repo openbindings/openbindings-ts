@@ -15,14 +15,8 @@ import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
 import jsonata from "jsonata";
-import type {
-  BindingHandle,
-  BindingInvocationArgs,
-  BindingSpecInfo,
-  OBInterface,
-  Invocation,
-  TransformEvaluatorWithBindings,
-} from "@openbindings/sdk";
+import type { BindingSpecInfo, OBInterface } from "@openbindings/core";
+import type { BindingHandle, BindingInvocationArgs, Invocation, TransformEvaluatorWithBindings } from "@openbindings/invoke";
 import {
   ERR_OPERATION_GRAPH_EXIT,
   ERR_SOURCE_LOAD_FAILED,
@@ -30,7 +24,7 @@ import {
   InvocationImpl,
   OperationInvoker,
   single,
-} from "@openbindings/sdk";
+} from "@openbindings/invoke";
 import { BINDING_SPEC } from "./constants.js";
 import { OperationGraphInvoker } from "./invoker.js";
 import { validate } from "./validate.js";

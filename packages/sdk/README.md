@@ -1,6 +1,17 @@
 # @openbindings/sdk
 
-Core TypeScript SDK for the [OpenBindings](https://openbindings.com) specification. Parse, validate, resolve, and invoke OpenBindings interfaces.
+TypeScript SDK for the [OpenBindings](https://openbindings.com) specification. Parse, validate, resolve, and invoke OpenBindings interfaces.
+
+This package is a facade: every export re-exports from the layered package
+that owns it — [`@openbindings/core`](https://www.npmjs.com/package/@openbindings/core)
+(the spec-defined document model),
+[`@openbindings/invoke`](https://www.npmjs.com/package/@openbindings/invoke)
+(the binding-invoker / operation-invoker pattern),
+[`@openbindings/synthesize`](https://www.npmjs.com/package/@openbindings/synthesize)
+(the interface-synthesizer / source-inspector pattern), and
+[`@openbindings/compare`](https://www.npmjs.com/package/@openbindings/compare)
+(schema comparison under the OB-2020-12 profile). Import from here for one
+dependency and one import path, or depend on the specific layers you use.
 
 OpenBindings is an open standard. **One interface. Any binding.** Describe what a service does separately from how you access it. An OBI (OpenBindings Interface) document describes what operations a service offers and how to reach them, independent of protocol. See the [spec](https://github.com/openbindings/spec) and [guides](https://github.com/openbindings/spec/tree/main/guides) for details.
 

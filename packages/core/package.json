@@ -1,0 +1,56 @@
+{
+  "name": "@openbindings/core",
+  "version": "0.2.0",
+  "description": "OpenBindings core layer: the spec-defined document model — parse, validate, resolve, and verify OBI interfaces.",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsup",
+    "prepack": "tsup",
+    "test": "vitest run",
+    "conformance": "node --import tsx scripts/run-conformance.ts",
+    "lint": "tsc --noEmit && tsc -p tsconfig.test.json && eslint ."
+  },
+  "keywords": [
+    "openbindings",
+    "obi",
+    "api",
+    "sdk"
+  ],
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/openbindings/openbindings-ts.git",
+    "directory": "packages/core"
+  },
+  "homepage": "https://openbindings.com",
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "canonicalize": "^2.1.0",
+    "json-schema-library": "^11.6.1",
+    "jsonata": "2.1.1"
+  }
+}

@@ -10,7 +10,7 @@ import {
   ERR_REFUSED,
   ERR_SOURCE_CONFIG_ERROR,
   ERR_VALIDATION_FAILED,
-} from "@openbindings/sdk";
+} from "@openbindings/invoke";
 import { OpenAPIInvoker } from "./invoker.js";
 import { loadOpenAPIDocument } from "./util.js";
 

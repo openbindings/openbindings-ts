@@ -1,27 +1,20 @@
+import type { OBInterface, Source, BindingSpecInfo } from "@openbindings/core";
+import type { BindingInvoker, BindingInvocationArgs, ContextRequiredDetails, Invocation } from "@openbindings/invoke";
 import type {
-  BindingInvoker,
   CoverageSynthesizer,
   InterfaceSynthesizer,
   SourceInspector,
-  BindingInvocationArgs,
-  ContextRequiredDetails,
   SynthesizeInput,
-  Invocation,
-  OBInterface,
-  Source,
-  BindingSpecInfo,
   SourceInspection,
   SynthesizeResult,
-} from "@openbindings/sdk";
+} from "@openbindings/synthesize";
+import { InvocationError, InvocationImpl, isContextRequiredDetails } from "@openbindings/invoke";
 import {
-  InvocationError,
-  InvocationImpl,
   MultipleSourcesError,
-  isContextRequiredDetails,
   finalizeSynthesis,
   finalizeSynthesisCoverage,
   synthesisSkeleton,
-} from "@openbindings/sdk";
+} from "@openbindings/synthesize";
 import {
   ASYNCAPI_PROFILE_FULL,
   ASYNCAPI_USE_DEFAULT,

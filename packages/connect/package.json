@@ -9,19 +9,57 @@
   "sideEffects": false,
   "exports": {
     ".": {
-      "import": { "types": "./dist/index.d.ts", "default": "./dist/index.js" },
-      "require": { "types": "./dist/index.d.cts", "default": "./dist/index.cjs" }
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
     }
   },
-  "files": ["dist"],
-  "publishConfig": { "access": "public" },
-  "scripts": { "build": "tsup", "prepack": "tsup", "test": "vitest run", "lint": "tsc --noEmit && tsc -p tsconfig.test.json" },
-  "keywords": ["openbindings", "connectrpc", "protobuf", "invoker", "synthesizer"],
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsup",
+    "prepack": "tsup",
+    "test": "vitest run",
+    "lint": "tsc --noEmit && tsc -p tsconfig.test.json"
+  },
+  "keywords": [
+    "openbindings",
+    "connectrpc",
+    "protobuf",
+    "invoker",
+    "synthesizer"
+  ],
   "license": "Apache-2.0",
-  "repository": { "type": "git", "url": "https://github.com/openbindings/openbindings-ts.git", "directory": "packages/connect" },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/openbindings/openbindings-ts.git",
+    "directory": "packages/connect"
+  },
   "homepage": "https://openbindings.com",
-  "engines": { "node": ">=22" },
-  "dependencies": { "protobufjs": "^7.5.4" },
-  "peerDependencies": { "@openbindings/sdk": "^0.2.0" },
-  "devDependencies": { "@openbindings/sdk": "workspace:*", "@types/node": "^22.0.0" }
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "protobufjs": "^7.5.4"
+  },
+  "peerDependencies": {
+    "@openbindings/core": "^0.2.0",
+    "@openbindings/invoke": "^0.2.0",
+    "@openbindings/synthesize": "^0.2.0"
+  },
+  "devDependencies": {
+    "@openbindings/core": "workspace:*",
+    "@openbindings/invoke": "workspace:*",
+    "@openbindings/synthesize": "workspace:*",
+    "@types/node": "^22.0.0"
+  }
 }

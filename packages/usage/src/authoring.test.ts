@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { single } from "@openbindings/sdk";
+import { single } from "@openbindings/invoke";
 import { BINDING_SPEC, UsageInvoker, UsageSynthesizer, type ProcessRequest } from "./index.js";
 
 const descriptor = `name "tool"

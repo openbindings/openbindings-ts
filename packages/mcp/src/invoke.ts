@@ -5,6 +5,7 @@ import {
 } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { McpError } from "@modelcontextprotocol/sdk/types.js";
 import { UriTemplate } from "@modelcontextprotocol/sdk/shared/uriTemplate.js";
+import { compileExampleSchema } from "@openbindings/core";
 import {
   InvocationError,
   contextApiKey,
@@ -14,7 +15,6 @@ import {
   contextCookies,
   contextRequiredError,
   contextConfiguration,
-  compileExampleSchema,
   ERR_EXECUTION_FAILED,
   ERR_CANCELLED,
   ERR_CONNECT_FAILED,
@@ -26,7 +26,7 @@ import {
   ERR_VALIDATION_FAILED,
   type BindingHandle,
   type BindingInvocationArgs,
-} from "@openbindings/sdk";
+} from "@openbindings/invoke";
 import { BINDING_SPEC, CLIENT_NAME, CLIENT_VERSION } from "./constants.js";
 import { liveListing, parsePinnedListing, resolveRef, type Listing, type TargetKind } from "./listing.js";
 

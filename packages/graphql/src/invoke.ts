@@ -5,7 +5,7 @@ import {
   ERR_RESPONSE_ERROR,
   ERR_STREAM_ERROR,
   InvocationError,
-} from "@openbindings/sdk";
+} from "@openbindings/invoke";
 import type { Field, IntrospectionSchema } from "./introspection.js";
 import { rootTypeName, INTROSPECTION_QUERY } from "./introspection.js";
 import type { DocumentConfiguration, GraphQLWebSocketFactory } from "./configuration.js";

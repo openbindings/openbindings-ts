@@ -5,13 +5,15 @@ import { join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { parse, type Document, type Node as KDLNode } from "@bgotink/kdl";
 import {
+  MAX_TESTED_VERSION,
+  type BindingSpecInfo,
+  type JSONSchema,
+  type OBInterface,
+  type Source,
+} from "@openbindings/core";
+import {
   InvocationError,
   InvocationImpl,
-  MAX_TESTED_VERSION,
-  MultipleSourcesError,
-  finalizeSynthesis,
-  finalizeSynthesisCoverage,
-  synthesisSkeleton,
   contextApiKey,
   contextConfiguration,
   contextEnvironment,
@@ -25,19 +27,21 @@ import {
   ERR_VALIDATION_FAILED,
   type BindingInvocationArgs,
   type BindingInvoker,
-  type BindingSpecInfo,
+  type Invocation,
+} from "@openbindings/invoke";
+import {
+  MultipleSourcesError,
+  finalizeSynthesis,
+  finalizeSynthesisCoverage,
+  synthesisSkeleton,
   type CoverageSynthesizer,
   type InterfaceSynthesizer,
-  type Invocation,
-  type JSONSchema,
-  type OBInterface,
-  type Source,
   type SourceInspection,
   type SourceInspector,
   type SynthesisCoverageEntry,
   type SynthesizeInput,
   type SynthesizeResult,
-} from "@openbindings/sdk";
+} from "@openbindings/synthesize";
 
 export const BINDING_SPEC = "openbindings.usage@1";
 export const IMPLEMENTED_USAGE_VERSION = "3.5.6";

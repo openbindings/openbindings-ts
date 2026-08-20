@@ -6,7 +6,7 @@
  * Each engine processes events serially within its own async loop, so the
  * shapes here just hold mutable state with no lock coordination.
  */
-import { compileEmbeddedSchema, type CompiledSchema } from "@openbindings/sdk";
+import { compileEmbeddedSchema, type CompiledSchema } from "@openbindings/core";
 import type { Node } from "./types.js";
 
 /**

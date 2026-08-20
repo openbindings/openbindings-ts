@@ -1,5 +1,5 @@
 import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { InvocationError, ERR_REF_NOT_FOUND, ERR_PROTOCOL } from "@openbindings/sdk";
+import { InvocationError, ERR_REF_NOT_FOUND, ERR_PROTOCOL } from "@openbindings/invoke";
 import { BINDING_SPEC } from "./constants.js";
 
 /**

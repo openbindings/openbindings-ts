@@ -1,5 +1,5 @@
-import type { OBInterface, Operation } from "@openbindings/sdk";
-import { MAX_TESTED_VERSION } from "@openbindings/sdk";
+import type { OBInterface, Operation } from "@openbindings/core";
+import { MAX_TESTED_VERSION } from "@openbindings/core";
 import type { FullType, IntrospectionSchema, TypeRef } from "./introspection.js";
 import { buildTypeMap, rootTypeName } from "./introspection.js";
 import { BINDING_SPEC, DEFAULT_SOURCE_NAME } from "./constants.js";

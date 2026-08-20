@@ -1,3 +1,4 @@
+import { type BindingSpecInfo, type OBInterface, type Source } from "@openbindings/core";
 import {
   ERR_INVALID_REF,
   ERR_EXECUTION_FAILED,
@@ -9,27 +10,26 @@ import {
   ERR_VALIDATION_FAILED,
   InvocationError,
   InvocationImpl,
-  MultipleSourcesError,
   contextRequiredError,
-  finalizeSynthesis,
-  finalizeSynthesisCoverage,
   resolveDeliveryUnitLimit,
-  synthesisSkeleton,
   type BindingInvocationArgs,
   type BindingInvoker,
   type ContextRequiredDetails,
+  type Invocation,
+} from "@openbindings/invoke";
+import {
+  MultipleSourcesError,
+  finalizeSynthesis,
+  finalizeSynthesisCoverage,
+  synthesisSkeleton,
   type CoverageSynthesizer,
   type SynthesizeInput,
   type SynthesizeResult,
   type SynthesisCoverageEntry,
-  type BindingSpecInfo,
   type InterfaceSynthesizer,
-  type Invocation,
-  type OBInterface,
-  type Source,
   type SourceInspection,
   type SourceInspector,
-} from "@openbindings/sdk";
+} from "@openbindings/synthesize";
 import { BINDING_SPEC, DEFAULT_SOURCE_NAME } from "./constants.js";
 import {
   introspect,

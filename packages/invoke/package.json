@@ -1,0 +1,55 @@
+{
+  "name": "@openbindings/invoke",
+  "version": "0.2.0",
+  "description": "OpenBindings invocation layer: the binding-invoker and operation-invoker pattern — invocation handles, context, hooks, and operation requirements.",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsup",
+    "prepack": "tsup",
+    "test": "vitest run",
+    "lint": "tsc --noEmit && tsc -p tsconfig.test.json && eslint ."
+  },
+  "keywords": [
+    "openbindings",
+    "obi",
+    "api",
+    "sdk",
+    "invoker"
+  ],
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/openbindings/openbindings-ts.git",
+    "directory": "packages/invoke"
+  },
+  "homepage": "https://openbindings.com",
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@openbindings/compare": "workspace:^",
+    "@openbindings/core": "workspace:^"
+  }
+}

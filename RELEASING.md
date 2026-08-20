@@ -29,8 +29,11 @@ covers every package.
    `--access public` is also persisted in each package's
    `publishConfig.access`, and each package's `prepack` script reruns its
    build, so a publish can never ship a missing or stale `dist`. pnpm
-   publishes in topological order, so `@openbindings/sdk` lands on the
-   registry before the format packages that depend on it.
+   publishes in topological order, so the layered SDK packages
+   (`@openbindings/core`, then `@openbindings/compare`,
+   `@openbindings/invoke`, and `@openbindings/synthesize`) land on the
+   registry before the `@openbindings/sdk` facade and the format packages
+   that depend on them.
 
 One-time setup before the first tagged publish: on npmjs.com, each
 `@openbindings/*` package must list this repository and
@@ -41,9 +44,10 @@ checkout — but the workflow is the canonical path.
 
 ## Spec compatibility
 
-`@openbindings/sdk` declares which spec versions it supports via
+`@openbindings/core` declares which spec versions it supports via
 `MIN_SUPPORTED_VERSION` / `MAX_TESTED_VERSION` (and `supportedRange()` /
-`isSupportedVersion(v)`), exported from `packages/sdk/src/version.ts`.
+`isSupportedVersion(v)`), exported from `packages/core/src/version.ts` and
+re-exported by the `@openbindings/sdk` facade.
 When the spec version bumps, update these constants in the same PR that
 adds support for the new version.
 

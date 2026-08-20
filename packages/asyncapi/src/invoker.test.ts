@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { CONTEXT_REQUIRED, InvocationError, single } from "@openbindings/sdk";
+import { CONTEXT_REQUIRED, InvocationError, single } from "@openbindings/invoke";
 import { AsyncAPIEngine, AsyncAPIExecutionError } from "@openbindings/asyncapi-client/engine";
 import { AsyncAPIInvoker, AsyncAPISynthesizer } from "./invoker.js";
 import { BINDING_SPEC, DEFAULT_SOURCE_NAME } from "./constants.js";

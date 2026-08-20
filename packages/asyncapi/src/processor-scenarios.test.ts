@@ -4,15 +4,12 @@ import { dirname, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   matchProcessorObservation,
-  OperationInvoker,
-  operationSignature,
-  type Invocation,
-  type InvocationError,
   type OBInterface,
   type ProcessorObservation,
   type ProcessorScenario,
   type ProcessorScenarioFile,
-} from "@openbindings/sdk";
+} from "@openbindings/core";
+import { OperationInvoker, operationSignature, type Invocation, type InvocationError } from "@openbindings/invoke";
 import { AsyncAPIInvoker, AsyncAPISynthesizer } from "./index.js";
 
 const root = process.env.OB_SPEC_CORPUS ?? resolve(dirname(fileURLToPath(import.meta.url)), "../../../../spec/conformance");

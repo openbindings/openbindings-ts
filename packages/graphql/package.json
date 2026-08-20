@@ -48,10 +48,14 @@
     "node": ">=22"
   },
   "peerDependencies": {
-    "@openbindings/sdk": "^0.2.0"
+    "@openbindings/core": "^0.2.0",
+    "@openbindings/invoke": "^0.2.0",
+    "@openbindings/synthesize": "^0.2.0"
   },
   "devDependencies": {
-    "@openbindings/sdk": "workspace:*",
+    "@openbindings/core": "workspace:*",
+    "@openbindings/invoke": "workspace:*",
+    "@openbindings/synthesize": "workspace:*",
     "@types/node": "^22.0.0"
   }
 }

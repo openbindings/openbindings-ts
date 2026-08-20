@@ -11,7 +11,7 @@
  */
 
 import type { AsyncAPIChannel, AsyncAPIOperation } from "./asyncapi-types.js";
-import { contextConfiguration } from "@openbindings/sdk";
+import { contextConfiguration } from "@openbindings/invoke";
 
 /**
  * Returns the request method for an http-protocol cell. The default

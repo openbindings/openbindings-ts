@@ -1,6 +1,7 @@
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from "node:http";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { single, CONTEXT_REQUIRED, type InvocationError, type OBInterface } from "@openbindings/sdk";
+import { type OBInterface } from "@openbindings/core";
+import { single, CONTEXT_REQUIRED, type InvocationError } from "@openbindings/invoke";
 import { AsyncAPIInvoker, AsyncAPISynthesizer } from "./invoker.js";
 import { BINDING_SPEC } from "./constants.js";
 

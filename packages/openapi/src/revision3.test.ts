@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CONTEXT_REQUIRED, ERR_REFUSED, type InvocationError } from "@openbindings/sdk";
+import { CONTEXT_REQUIRED, ERR_REFUSED, type InvocationError } from "@openbindings/invoke";
 import { BINDING_SPEC } from "./constants.js";
 import { OpenAPIInvoker, OpenAPISynthesizer } from "./invoker.js";
 import { convertToInterface } from "./synthesize.js";

@@ -3,21 +3,23 @@ import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+  matchProcessorObservation,
+  type OBInterface,
+  type ProcessorObservation,
+  type ProcessorScenario,
+  type ProcessorScenarioFile,
+} from "@openbindings/core";
+import {
   CONTEXT_REQUIRED,
   ERR_SOURCE_LOAD_FAILED,
   ERR_OPERATION_VALIDATION_FAILED,
   ERR_VALIDATION_FAILED,
-  matchProcessorObservation,
   OperationInvoker,
   operationSignature,
   type Invocation,
   type InvocationError,
   type Metadata,
-  type OBInterface,
-  type ProcessorObservation,
-  type ProcessorScenario,
-  type ProcessorScenarioFile,
-} from "@openbindings/sdk";
+} from "@openbindings/invoke";
 import {
   GrpcInvoker,
   GrpcSynthesizer,

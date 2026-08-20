@@ -1,8 +1,8 @@
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from "node:http";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { type OBInterface } from "@openbindings/core";
 import {
   OperationInvoker,
-  fetchInterface,
   normalizeEndpoint,
   single,
   operationSignature,
@@ -12,8 +12,8 @@ import {
   type ContextStore,
   type ContextRequiredDetails,
   type InvocationError,
-  type OBInterface,
-} from "@openbindings/sdk";
+} from "@openbindings/invoke";
+import { fetchInterface } from "@openbindings/synthesize";
 import { OpenAPIInvoker, OpenAPISynthesizer } from "./invoker.js";
 
 const SECRET = "test-token-123";

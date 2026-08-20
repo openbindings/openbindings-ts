@@ -1,5 +1,6 @@
-import type { OBInterface, Operation, BindingEntry, JSONSchema, Source, SynthesizerWarning } from "@openbindings/sdk";
-import { MAX_TESTED_VERSION } from "@openbindings/sdk";
+import type { OBInterface, Operation, BindingEntry, JSONSchema, Source } from "@openbindings/core";
+import type { SynthesizerWarning } from "@openbindings/synthesize";
+import { MAX_TESTED_VERSION } from "@openbindings/core";
 import type {
   OpenAPIDocument,
   OpenAPIMediaType,

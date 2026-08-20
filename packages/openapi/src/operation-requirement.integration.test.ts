@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
+import { type OBInterface } from "@openbindings/core";
 import {
   OperationInvoker,
   operationRequirement,
   operationSignature,
   resolveOperationRequirement,
   single,
-  type OBInterface,
-} from "@openbindings/sdk";
+} from "@openbindings/invoke";
 import { OpenAPIInvoker, OpenAPISynthesizer } from "./invoker.js";
 
 type CreateTaskInput = { title: string };

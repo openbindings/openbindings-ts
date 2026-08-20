@@ -1,8 +1,8 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { UriTemplate } from "@modelcontextprotocol/sdk/shared/uriTemplate.js";
-import type { OBInterface, Operation, BindingEntry, JSONSchema } from "@openbindings/sdk";
-import { MAX_TESTED_VERSION } from "@openbindings/sdk";
+import type { OBInterface, Operation, BindingEntry, JSONSchema } from "@openbindings/core";
+import { MAX_TESTED_VERSION } from "@openbindings/core";
 import { CLIENT_NAME, CLIENT_VERSION, BINDING_SPEC, DEFAULT_SOURCE_NAME } from "./constants.js";
 import { exhaustPages, parsePinnedListing } from "./listing.js";
 
