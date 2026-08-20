@@ -10,6 +10,8 @@ import {
   InvocationImpl,
   InvocationError,
   single,
+  configValueRequirement,
+  isContextRequiredDetails,
   OUTPUT_BUFFER_CAPACITY,
 } from "./invocation.js";
 import {
@@ -511,6 +513,44 @@ describe("InvocationError portable record", () => {
       alternatives: [{ requirements: [{ type: "auth.bearer" }] }],
     });
     expect(err.message).toBe(CONTEXT_REQUIRED);
+  });
+
+  // config.value schema ratification (2026-08-20): the requirement MAY carry
+  // an engine-asserted JSON Schema; when present it must be a plain object.
+  it("builds a config.value requirement with an optional schema", () => {
+    const bare = configValueRequirement("server", "/url", "supply a connection URL");
+    expect(Object.hasOwn(bare, "schema")).toBe(false);
+    const constrained = configValueRequirement(
+      "server",
+      "/key",
+      "select a server",
+      { enum: ["prod", "staging"] },
+      true,
+    );
+    expect(constrained.schema).toEqual({ enum: ["prod", "staging"] });
+    expect(constrained.durable).toBe(true);
+  });
+
+  it("validates the config.value schema member as a plain object when present", () => {
+    const detailsWith = (schema: unknown) => ({
+      target: "https://example.com/specs/orders.yaml",
+      alternatives: [{ requirements: [
+        { type: "config.value", point: "server", path: "/key", schema },
+      ] }],
+    });
+    expect(isContextRequiredDetails(detailsWith({ enum: ["a", "b"] }))).toBe(true);
+    expect(isContextRequiredDetails(detailsWith(undefined))).toBe(false); // explicit undefined member is not portable JSON either way
+    expect(isContextRequiredDetails(detailsWith(["a", "b"]))).toBe(false);
+    expect(isContextRequiredDetails(detailsWith("a"))).toBe(false);
+    expect(isContextRequiredDetails(detailsWith(null))).toBe(false);
+    // The retired `choices` member is no longer validated: it passes through
+    // as an unknown extension field like any other.
+    expect(isContextRequiredDetails({
+      target: "t",
+      alternatives: [{ requirements: [
+        { type: "config.value", point: "server", path: "/url", choices: [1] },
+      ] }],
+    })).toBe(true);
   });
 
   it("rejects malformed CONTEXT_REQUIRED data and empty codes", () => {

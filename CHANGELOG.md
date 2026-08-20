@@ -4,6 +4,25 @@
 
 ### Changed
 
+- **A `config.value` context requirement may carry an engine-asserted
+  `schema` (JSON Schema) for the value at (point, path); the `choices` member
+  is removed** (pre-launch working-draft amendment of the binding-invoker
+  contract: one mechanism, no sugar). Absent = unconstrained; an `enum`
+  member is the closed admissible set — `requirementSatisfied` now validates
+  a stored value against the schema through the core package's boundary
+  schema machinery, fail-closed on a schema it cannot read or compile —
+  while `examples` remain advisory. `configValueRequirement`'s fourth
+  parameter is now the schema object; `isContextRequiredDetails` requires
+  `schema`, when present, to be a plain object and no longer inspects
+  `choices`. The asyncapi target resolution emits `{"enum": [...]}` where it
+  emitted choice lists (bindable member names, artifact-declared variable and
+  parameter enums), only where the admissible set is already computed at the
+  emission site. `storeContextResolver` now keys an alternative consisting
+  solely of config.value requirements by the EXACT asserted challenge target
+  (the engine-asserted artifact scope, per the ratified context-scope model)
+  and keeps the endpoint-normalized origin key for credential-family-bearing
+  alternatives.
+
 - **The SDK is layered into `@openbindings/core`, `@openbindings/invoke`,
   `@openbindings/synthesize`, and `@openbindings/compare`; `@openbindings/sdk`
   becomes a facade** (no renames or behavior changes; every existing named
