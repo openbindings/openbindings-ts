@@ -16,7 +16,11 @@ OpenBindings is an open standard. **One interface. Any binding.** Describe what 
 
 | Package | Description | Install |
 |---------|-------------|---------|
-| `@openbindings/sdk` | Core types, validation, compatibility, invocation | `npm install @openbindings/sdk` |
+| `@openbindings/core` | The spec-defined core: document model, parse, validate, resolve, verify | `npm install @openbindings/core` |
+| `@openbindings/invoke` | Binding-invoker / operation-invoker pattern: invocation handles, context, hooks, operation requirements | `npm install @openbindings/invoke` |
+| `@openbindings/synthesize` | Interface synthesis, coverage accounting, source inspection, `fetchInterface` | `npm install @openbindings/synthesize` |
+| `@openbindings/compare` | Schema comparison under the published OB-2020-12 profile | `npm install @openbindings/compare` |
+| `@openbindings/sdk` | Facade re-exporting core + invoke + synthesize + compare | `npm install @openbindings/sdk` |
 | [`@openbindings/openapi-client`](../openapi-client) | Standalone OpenAPI 3.0/3.1 document-driven client and execution engine (separate repository) | `npm install @openbindings/openapi-client` |
 | `@openbindings/openapi` | OpenAPI 3.x binding invoker and interface synthesizer | `npm install @openbindings/openapi` |
 | `@openbindings/asyncapi` | AsyncAPI 3.x binding invoker and interface synthesizer | `npm install @openbindings/asyncapi` |
@@ -26,6 +30,15 @@ OpenBindings is an open standard. **One interface. Any binding.** Describe what 
 | `@openbindings/usage` | jdx usage binding invoker and interface synthesizer | `npm install @openbindings/usage` |
 | `@openbindings/graphql` | GraphQL binding invoker and exhaustive root-field interface synthesizer | `npm install @openbindings/graphql` |
 | `@openbindings/operationgraph` | Operation-graph binding invoker (compose operations) | `npm install @openbindings/operationgraph` |
+
+The SDK is layered along the project's authority graph: `@openbindings/core`
+carries everything `openbindings.md` defines and never requires invocation;
+`@openbindings/invoke`, `@openbindings/synthesize`, and `@openbindings/compare`
+realize the published binding-invoker/operation-invoker,
+interface-synthesizer/source-inspector, and schema-comparison interfaces on
+top of it. `@openbindings/sdk` is a facade re-exporting all four, so existing
+consumers keep one import path; new consumers may depend on the specific
+layers they use.
 
 For draft development:
 
@@ -79,7 +92,7 @@ asserted only in mirrored package tests.
 ### Parse and validate an OBI
 
 ```typescript
-import { parseDocument } from "@openbindings/sdk";
+import { parseDocument } from "@openbindings/core";
 
 const iface = parseDocument(data); // rejects duplicate JSON keys and throws ValidationError if invalid
 
@@ -92,7 +105,8 @@ for (const [name, op] of Object.entries(iface.operations)) {
 ### Resolve and invoke operations
 
 ```typescript
-import { OperationInvoker, operationSignature, fetchInterface } from "@openbindings/sdk";
+import { OperationInvoker, operationSignature } from "@openbindings/invoke";
+import { fetchInterface } from "@openbindings/synthesize";
 import { OpenAPIInvoker, OpenAPISynthesizer } from "@openbindings/openapi";
 
 // Create an operation invoker with the binding implementation you need
@@ -121,7 +135,7 @@ const call = invoker.invoke(iface, OperationSignatures.listItems);
 ### Check compatibility
 
 ```typescript
-import { checkInterfaceCompatibility } from "@openbindings/sdk";
+import { checkInterfaceCompatibility } from "@openbindings/compare";
 
 const issues = await checkInterfaceCompatibility(required, provided);
 for (const issue of issues) {
@@ -141,7 +155,7 @@ import {
   operationRequirement,
   resolveOperationRequirement,
   single,
-} from "@openbindings/sdk";
+} from "@openbindings/invoke";
 import { OpenAPIInvoker } from "@openbindings/openapi";
 
 const requirement = operationRequirement(
@@ -168,9 +182,10 @@ resolution uses only caller-owned preference and refuses an equal tie as
 route, aggregate, race, fan-out, or fallback semantics. The SDK owns no
 registry; applications retain and refresh their own interface/delegate state.
 
-The core package imports no binding package. An OpenAPI-only application ships
-only `@openbindings/sdk` and `@openbindings/openapi`; other binding
-implementations are neither installed nor bundled.
+The SDK packages import no binding package. An OpenAPI-only application ships
+only the SDK layers it uses (or the `@openbindings/sdk` facade) and
+`@openbindings/openapi`; other binding implementations are neither installed
+nor bundled.
 
 Runnable framework proofs live in
 [`examples/react-operation-dependencies`](examples/react-operation-dependencies)
@@ -204,7 +219,7 @@ terminal is `single` — strict and short-circuiting (`ERR_EXPECTED_SINGLE` on
 zero or more than one):
 
 ```typescript
-import { single } from "@openbindings/sdk";
+import { single } from "@openbindings/invoke";
 
 const call = invoker.invoke(iface, operationSignature("getItem"));
 await call.write({ id: "item_1" });
@@ -277,7 +292,7 @@ contract does not prescribe storage or keying. For applications that choose
 origin-scoped reuse, the SDK provides a scheme-agnostic normalization helper:
 
 ```typescript
-import { normalizeContextKey } from "@openbindings/sdk";
+import { normalizeContextKey } from "@openbindings/invoke";
 
 const key = normalizeContextKey("https://api.example.com/v1/users");
 // key = "api.example.com"
@@ -303,8 +318,8 @@ explicitly carry `durable: true`; omission means one-shot and cannot authorize
 stored-context release or persistence.
 
 ```typescript
-import { storeContextResolver } from "@openbindings/sdk";
-import type { ContextStore } from "@openbindings/sdk";
+import { storeContextResolver } from "@openbindings/invoke";
+import type { ContextStore } from "@openbindings/invoke";
 
 const store: ContextStore = myStore; // your get/set/delete implementation
 const invoker = new OperationInvoker([new OpenAPIInvoker()], {
@@ -320,7 +335,7 @@ their own resolver instead.
 The SDK includes the OpenBindings Schema Compatibility Profile v0.1 for deterministic schema comparison:
 
 ```typescript
-import { outputCompatible } from "@openbindings/sdk";
+import { outputCompatible } from "@openbindings/compare";
 
 const result = outputCompatible(targetSchema, candidateSchema);
 if (!result.compatible) {
@@ -333,8 +348,10 @@ The profile handles: type sets, const/enum, object properties and required field
 
 ## Platform support
 
-The core `@openbindings/sdk` package uses web-platform APIs and imports no Node
-built-ins. It is intended for Cloudflare Workers and comparable edge runtimes
+The SDK packages — `@openbindings/core`, `@openbindings/invoke`,
+`@openbindings/synthesize`, `@openbindings/compare`, and the
+`@openbindings/sdk` facade — use web-platform APIs and import no Node
+built-ins. They are intended for Cloudflare Workers and comparable edge runtimes
 as well as browsers, Node.js, Deno, and Bun. The workspace build bundles a
 Worker entry that imports the core and OpenAPI packages and rejects any Node
 dependency in that graph.
