@@ -1,4 +1,4 @@
-import type { BindingInvocationArgs, ContextRequiredDetails, Metadata } from "@openbindings/sdk";
+import type { BindingInvocationArgs, ContextRequiredDetails, Metadata } from "@openbindings/invoke";
 
 export interface DocumentConfiguration {
   source: string;

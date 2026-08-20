@@ -1,11 +1,7 @@
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import {
-  fixedSynthesizer,
-  parseSynthesisScenarioFile,
-  verifySynthesisScenario,
-} from "@openbindings/sdk";
+import { fixedSynthesizer, parseSynthesisScenarioFile, verifySynthesisScenario } from "@openbindings/synthesize";
 import { describe, expect, it } from "vitest";
 import { UsageSynthesizer } from "./index.js";
 

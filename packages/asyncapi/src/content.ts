@@ -16,7 +16,7 @@ import type {
   AsyncAPIMessage,
   AsyncAPIOperation,
 } from "./asyncapi-types.js";
-import { contextConfiguration } from "@openbindings/sdk";
+import { contextConfiguration } from "@openbindings/invoke";
 import { MESSAGE_NAME_TAG } from "./constants.js";
 
 /**

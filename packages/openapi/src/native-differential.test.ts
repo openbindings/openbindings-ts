@@ -4,14 +4,8 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import jsonata from "jsonata";
-import {
-  CONTEXT_REQUIRED,
-  OperationInvoker,
-  operationSignature,
-  type InvocationError,
-  type ProcessorScenario,
-  type ProcessorScenarioFile,
-} from "@openbindings/sdk";
+import { type ProcessorScenario, type ProcessorScenarioFile } from "@openbindings/core";
+import { CONTEXT_REQUIRED, OperationInvoker, operationSignature, type InvocationError } from "@openbindings/invoke";
 import { OpenAPIInvoker, OpenAPISynthesizer } from "./invoker.js";
 
 const corpusRoot = process.env.OB_SPEC_CORPUS ?? resolve(

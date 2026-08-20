@@ -51,10 +51,14 @@
     "@openbindings/asyncapi-client": "^0.1.0"
   },
   "peerDependencies": {
-    "@openbindings/sdk": "^0.2.0"
+    "@openbindings/core": "^0.2.0",
+    "@openbindings/invoke": "^0.2.0",
+    "@openbindings/synthesize": "^0.2.0"
   },
   "devDependencies": {
-    "@openbindings/sdk": "workspace:*",
+    "@openbindings/core": "workspace:*",
+    "@openbindings/invoke": "workspace:*",
+    "@openbindings/synthesize": "workspace:*",
     "@types/node": "^22.0.0",
     "@types/ws": "^8.18.1",
     "ws": "^8.21.0"

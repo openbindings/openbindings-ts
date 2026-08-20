@@ -1,26 +1,26 @@
+import { type BindingSpecInfo, type OBInterface, type Source } from "@openbindings/core";
 import {
-  MultipleSourcesError,
   InvocationError,
   InvocationImpl,
   isContextRequiredDetails,
-  finalizeSynthesis,
-  finalizeSynthesisCoverage,
-  synthesisSkeleton,
   type BindingInvoker,
   type BindingInvocationArgs,
   type ContextRequiredDetails,
+  type Invocation,
+  type Metadata,
+} from "@openbindings/invoke";
+import {
+  MultipleSourcesError,
+  finalizeSynthesis,
+  finalizeSynthesisCoverage,
+  synthesisSkeleton,
   type SynthesizeInput,
-  type BindingSpecInfo,
   type InterfaceSynthesizer,
   type CoverageSynthesizer,
   type SynthesizeResult,
-  type Invocation,
-  type Metadata,
-  type OBInterface,
-  type Source,
   type SourceInspection,
   type SourceInspector,
-} from "@openbindings/sdk";
+} from "@openbindings/synthesize";
 import {
   OPENAPI_USE_DEFAULT,
   OpenAPIEngine,

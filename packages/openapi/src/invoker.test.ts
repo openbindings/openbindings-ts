@@ -17,7 +17,7 @@ import {
   InvocationError,
   USE_DEFAULT,
   newInvokeHooks,
-} from "@openbindings/sdk";
+} from "@openbindings/invoke";
 import { OpenAPIEngine, OpenAPIExecutionError } from "@openbindings/openapi-client/engine";
 import { OpenAPIInvoker } from "./invoker.js";
 

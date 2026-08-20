@@ -368,7 +368,7 @@ describe("convertToInterface — OpenAPI 3.0 dialect translation", () => {
 
 // Multi-source composition is implementation-defined; a single-source
 // synthesizer refuses extras loudly rather than silently using a subset.
-import { MultipleSourcesError } from "@openbindings/sdk";
+import { MultipleSourcesError } from "@openbindings/synthesize";
 import { OpenAPISynthesizer } from "./index.js";
 import { describe as describeMS, expect as expectMS, it as itMS } from "vitest";
 

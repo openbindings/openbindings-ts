@@ -115,9 +115,15 @@ importers:
         specifier: ^0.1.0
         version: link:../../../asyncapi-client/typescript
     devDependencies:
-      '@openbindings/sdk':
+      '@openbindings/core':
         specifier: workspace:*
-        version: link:../sdk
+        version: link:../core
+      '@openbindings/invoke':
+        specifier: workspace:*
+        version: link:../invoke
+      '@openbindings/synthesize':
+        specifier: workspace:*
+        version: link:../synthesize
       '@types/node':
         specifier: ^22.0.0
         version: 22.19.17
@@ -143,9 +149,15 @@ importers:
         specifier: ^7.5.4
         version: 7.6.5
     devDependencies:
-      '@openbindings/sdk':
+      '@openbindings/core':
         specifier: workspace:*
-        version: link:../sdk
+        version: link:../core
+      '@openbindings/invoke':
+        specifier: workspace:*
+        version: link:../invoke
+      '@openbindings/synthesize':
+        specifier: workspace:*
+        version: link:../synthesize
       '@types/node':
         specifier: ^22.0.0
         version: 22.19.17
@@ -164,9 +176,15 @@ importers:
 
   packages/graphql:
     devDependencies:
-      '@openbindings/sdk':
+      '@openbindings/core':
         specifier: workspace:*
-        version: link:../sdk
+        version: link:../core
+      '@openbindings/invoke':
+        specifier: workspace:*
+        version: link:../invoke
+      '@openbindings/synthesize':
+        specifier: workspace:*
+        version: link:../synthesize
       '@types/node':
         specifier: ^22.0.0
         version: 22.19.17
@@ -180,9 +198,15 @@ importers:
         specifier: ^7.5.4
         version: 7.6.5
     devDependencies:
-      '@openbindings/sdk':
+      '@openbindings/core':
         specifier: workspace:*
-        version: link:../sdk
+        version: link:../core
+      '@openbindings/invoke':
+        specifier: workspace:*
+        version: link:../invoke
+      '@openbindings/synthesize':
+        specifier: workspace:*
+        version: link:../synthesize
       '@types/node':
         specifier: ^22.0.0
         version: 22.19.17
@@ -202,9 +226,15 @@ importers:
         specifier: ^1.29.0
         version: 1.29.0(@cfworker/json-schema@4.1.1)(zod@4.3.6)
     devDependencies:
-      '@openbindings/sdk':
+      '@openbindings/core':
         specifier: workspace:*
-        version: link:../sdk
+        version: link:../core
+      '@openbindings/invoke':
+        specifier: workspace:*
+        version: link:../invoke
+      '@openbindings/synthesize':
+        specifier: workspace:*
+        version: link:../synthesize
       '@types/node':
         specifier: ^22.0.0
         version: 22.19.17
@@ -215,9 +245,15 @@ importers:
         specifier: ^0.1.0
         version: link:../../../openapi-client/typescript
     devDependencies:
-      '@openbindings/sdk':
+      '@openbindings/core':
         specifier: workspace:*
-        version: link:../sdk
+        version: link:../core
+      '@openbindings/invoke':
+        specifier: workspace:*
+        version: link:../invoke
+      '@openbindings/synthesize':
+        specifier: workspace:*
+        version: link:../synthesize
       '@types/json-schema':
         specifier: ^7.0.15
         version: 7.0.15
@@ -230,9 +266,12 @@ importers:
 
   packages/operationgraph:
     devDependencies:
-      '@openbindings/sdk':
+      '@openbindings/core':
         specifier: workspace:*
-        version: link:../sdk
+        version: link:../core
+      '@openbindings/invoke':
+        specifier: workspace:*
+        version: link:../invoke
       '@types/node':
         specifier: ^22.0.0
         version: 22.19.17
@@ -267,9 +306,15 @@ importers:
         specifier: ^0.4.0
         version: 0.4.0
     devDependencies:
-      '@openbindings/sdk':
+      '@openbindings/core':
         specifier: workspace:*
-        version: link:../sdk
+        version: link:../core
+      '@openbindings/invoke':
+        specifier: workspace:*
+        version: link:../invoke
+      '@openbindings/synthesize':
+        specifier: workspace:*
+        version: link:../synthesize
       '@types/node':
         specifier: ^22.0.0
         version: 22.19.17

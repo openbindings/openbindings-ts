@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { OperationInvoker, single, type InvocationError } from "@openbindings/sdk";
+import { OperationInvoker, single, type InvocationError } from "@openbindings/invoke";
 import { OperationGraphInvoker } from "./invoker.js";
 import { BINDING_SPEC } from "./constants.js";
 

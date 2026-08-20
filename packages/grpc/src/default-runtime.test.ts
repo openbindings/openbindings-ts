@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ERR_REF_NOT_FOUND, ERR_VALIDATION_FAILED } from "@openbindings/sdk";
+import { ERR_REF_NOT_FOUND, ERR_VALIDATION_FAILED } from "@openbindings/invoke";
 import { BINDING_SPEC, GrpcInvoker, loadProtobufSchema } from "./index.js";
 
 const descriptorSet = {

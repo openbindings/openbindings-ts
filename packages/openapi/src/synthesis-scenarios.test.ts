@@ -1,11 +1,7 @@
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import {
-  parseSynthesisScenarioFile,
-  verifySynthesisScenario,
-  type SynthesisScenario,
-} from "@openbindings/sdk";
+import { parseSynthesisScenarioFile, verifySynthesisScenario, type SynthesisScenario } from "@openbindings/synthesize";
 import { describe, expect, it } from "vitest";
 import { OpenAPISynthesizer } from "./invoker.js";
 

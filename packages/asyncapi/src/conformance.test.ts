@@ -1,7 +1,7 @@
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from "node:http";
 import { WebSocketServer } from "ws";
 import { afterEach, describe, expect, it } from "vitest";
-import type { Invocation } from "@openbindings/sdk";
+import type { Invocation } from "@openbindings/invoke";
 import { AsyncAPIInvoker } from "./invoker.js";
 import { BINDING_SPEC } from "./constants.js";
 

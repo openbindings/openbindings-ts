@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { type InvocationError } from "@openbindings/sdk";
+import { type InvocationError } from "@openbindings/invoke";
 import { BINDING_SPEC } from "./constants.js";
 import { OpenAPIInvoker } from "./invoker.js";
 import { governingResponseMediaMatch } from "./media.js";

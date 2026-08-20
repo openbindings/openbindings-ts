@@ -7,13 +7,9 @@
  * dependency is resolved post-construction via
  * OperationInvoker.addBindingInvoker.
  */
-import type {
-  BindingInvocationArgs,
-  BindingInvoker,
-  BindingSpecInfo,
-  Invocation,
-  OperationInvoker,
-} from "@openbindings/sdk";
+import type { BindingSpecInfo } from "@openbindings/core";
+import type { BindingInvocationArgs, BindingInvoker, Invocation, OperationInvoker } from "@openbindings/invoke";
+import { isHttpUrl } from "@openbindings/core";
 import {
   ERR_INVALID_REF,
   ERR_REF_NOT_FOUND,
@@ -23,8 +19,7 @@ import {
   ERR_VALIDATION_FAILED,
   InvocationError,
   InvocationImpl,
-  isHttpUrl,
-} from "@openbindings/sdk";
+} from "@openbindings/invoke";
 import { BINDING_SPEC } from "./constants.js";
 import { Engine } from "./engine.js";
 import { RefError, resolveRef } from "./jsonpointer.js";

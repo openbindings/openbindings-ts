@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { single } from "@openbindings/sdk";
+import { single } from "@openbindings/invoke";
 import { BINDING_SPEC, ConnectInvoker, ConnectSynthesizer, envelope } from "./index.js";
 
 const content = {

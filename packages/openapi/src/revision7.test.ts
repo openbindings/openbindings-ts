@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import jsonata from "jsonata";
-import { OperationInvoker, operationSignature } from "@openbindings/sdk";
+import { OperationInvoker, operationSignature } from "@openbindings/invoke";
 import { BINDING_SPEC } from "./constants.js";
 import { OpenAPIInvoker, OpenAPISynthesizer } from "./invoker.js";
 

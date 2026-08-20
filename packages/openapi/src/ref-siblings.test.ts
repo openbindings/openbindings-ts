@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { validateInterface } from "@openbindings/sdk";
+import { validateInterface } from "@openbindings/core";
 import { convertToInterface } from "./synthesize.js";
 import { loadOpenAPIDocument } from "./util.js";
 

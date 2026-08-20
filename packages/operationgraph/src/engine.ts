@@ -31,7 +31,7 @@ import type {
   Invocation,
   OperationInvoker,
   TransformEvaluator,
-} from "@openbindings/sdk";
+} from "@openbindings/invoke";
 import {
   ERR_CANCELLED,
   ERR_EVENT_LIMIT_EXCEEDED,
@@ -40,7 +40,7 @@ import {
   InvocationError,
   isTransformEvaluatorWithBindings,
   operationSignature,
-} from "@openbindings/sdk";
+} from "@openbindings/invoke";
 import {
   EXPRESSION_EVALUATION_FAILED,
   MAP_NOT_ARRAY,

@@ -1,24 +1,24 @@
+import { type BindingSpecInfo, type OBInterface, type Source } from "@openbindings/core";
 import {
   ERR_RUNTIME,
   InvocationError,
   InvocationImpl,
+  type BindingInvocationArgs,
+  type BindingInvoker,
+  type Invocation,
+} from "@openbindings/invoke";
+import {
   MultipleSourcesError,
   finalizeSynthesis,
   finalizeSynthesisCoverage,
   synthesisSkeleton,
-  type BindingInvocationArgs,
-  type BindingInvoker,
   type SynthesizeInput,
-  type BindingSpecInfo,
   type CoverageSynthesizer,
   type InterfaceSynthesizer,
-  type Invocation,
-  type OBInterface,
-  type Source,
   type SourceInspection,
   type SourceInspector,
   type SynthesizeResult,
-} from "@openbindings/sdk";
+} from "@openbindings/synthesize";
 import { BINDING_SPEC, DEFAULT_SOURCE_NAME } from "./constants.js";
 import { runMCPBinding, validateEndpoint } from "./invoke.js";
 import {

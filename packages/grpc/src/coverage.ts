@@ -1,9 +1,6 @@
 import * as protobuf from "protobufjs";
-import type {
-  OBInterface,
-  SynthesisCoverageEntry,
-  SynthesizerWarning,
-} from "@openbindings/sdk";
+import type { OBInterface } from "@openbindings/core";
+import type { SynthesisCoverageEntry, SynthesizerWarning } from "@openbindings/synthesize";
 import { boundMethodRangeError } from "./schema-range.js";
 
 /** Inventories every reflected protobuf RPC method and schema projection. */

@@ -1,5 +1,5 @@
-import type { OBInterface, Operation, Source } from "@openbindings/sdk";
-import { MAX_TESTED_VERSION, canonicalize, validateInterface } from "@openbindings/sdk";
+import type { OBInterface, Operation, Source } from "@openbindings/core";
+import { MAX_TESTED_VERSION, canonicalize, validateInterface } from "@openbindings/core";
 import { decycleOperationSchema } from "./decycle.js";
 import { deriveAvroSchema } from "./avro.js";
 import {

@@ -1,5 +1,6 @@
 import { UriTemplate } from "@modelcontextprotocol/sdk/shared/uriTemplate.js";
-import type { OBInterface, SynthesisCoverageEntry } from "@openbindings/sdk";
+import type { OBInterface } from "@openbindings/core";
+import type { SynthesisCoverageEntry } from "@openbindings/synthesize";
 import type { MCPDiscovery } from "./synthesize.js";
 import { BINDING_SPEC, DEFAULT_SOURCE_NAME } from "./constants.js";
 

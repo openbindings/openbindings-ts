@@ -41,7 +41,7 @@ import {
   type Metadata,
   type OutputDecoder,
   type RawResult,
-} from "@openbindings/sdk";
+} from "@openbindings/invoke";
 
 /**
  * Bounds buffered not-yet-terminated line length to prevent runaway memory

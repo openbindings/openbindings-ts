@@ -1,23 +1,25 @@
 import * as protobuf from "protobufjs";
 import {
   MAX_TESTED_VERSION,
-  MultipleSourcesError,
-  finalizeSynthesis,
-  finalizeSynthesisCoverage,
-  synthesisSkeleton,
   type BindingSpecInfo,
-  type CoverageSynthesizer,
-  type InterfaceSynthesizer,
   type JSONSchema,
   type OBInterface,
   type Operation,
   type Source,
+} from "@openbindings/core";
+import {
+  MultipleSourcesError,
+  finalizeSynthesis,
+  finalizeSynthesisCoverage,
+  synthesisSkeleton,
+  type CoverageSynthesizer,
+  type InterfaceSynthesizer,
   type SourceInspection,
   type SourceInspector,
   type SynthesizeInput,
   type SynthesizeResult,
   type SynthesizerWarning,
-} from "@openbindings/sdk";
+} from "@openbindings/synthesize";
 import { BINDING_SPEC, loadProtobufSchema } from "./index.js";
 import { protobufSynthesisCoverage } from "./coverage.js";
 import { boundMethodRangeError } from "./schema-range.js";

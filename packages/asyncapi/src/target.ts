@@ -14,7 +14,7 @@
  * value per point. Mirrors the Go SDK's target.go.
  */
 
-import { contextConfiguration, contextMetadata } from "@openbindings/sdk";
+import { contextConfiguration, contextMetadata } from "@openbindings/invoke";
 import type {
   AsyncAPIChannel,
   AsyncAPIDocument,

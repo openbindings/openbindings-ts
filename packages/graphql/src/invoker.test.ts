@@ -6,7 +6,7 @@ import {
   ERR_REF_NOT_FOUND,
   ERR_SOURCE_CONFIG_ERROR,
   type Invocation,
-} from "@openbindings/sdk";
+} from "@openbindings/invoke";
 import { BINDING_SPEC } from "./constants.js";
 import { GraphQLInvoker, GraphQLSynthesizer } from "./invoker.js";
 

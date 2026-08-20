@@ -7,7 +7,7 @@ import {
   ERR_SOURCE_CONFIG_ERROR,
   ERR_VALIDATION_FAILED,
   single,
-} from "@openbindings/sdk";
+} from "@openbindings/invoke";
 import { BINDING_SPEC } from "./constants.js";
 import { MCPInvoker } from "./invoker.js";
 import { ENDPOINT, mcpServer } from "./testserver.js";

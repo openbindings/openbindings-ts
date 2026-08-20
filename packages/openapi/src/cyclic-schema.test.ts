@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync, existsSync } from "node:fs";
 import jsonata from "jsonata";
-import { OperationInvoker, compileOperationSchema, operationSignature, single } from "@openbindings/sdk";
+import { compileOperationSchema } from "@openbindings/core";
+import { OperationInvoker, operationSignature, single } from "@openbindings/invoke";
 import { OpenAPIInvoker, OpenAPISynthesizer } from "./invoker.js";
 import { BINDING_SPEC } from "./constants.js";
 

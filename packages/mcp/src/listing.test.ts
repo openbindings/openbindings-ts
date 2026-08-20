@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ERR_REF_NOT_FOUND, type InvocationError } from "@openbindings/sdk";
+import { ERR_REF_NOT_FOUND, type InvocationError } from "@openbindings/invoke";
 import { parsePinnedListing, resolveRef, type Listing } from "./listing.js";
 
 function listing(overrides: Partial<Listing> = {}): Listing {

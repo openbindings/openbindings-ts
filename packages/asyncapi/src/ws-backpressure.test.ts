@@ -1,6 +1,6 @@
 import { WebSocketServer } from "ws";
 import { describe, it, expect } from "vitest";
-import type { Invocation } from "@openbindings/sdk";
+import type { Invocation } from "@openbindings/invoke";
 import { AsyncAPIInvoker } from "./invoker.js";
 import { BINDING_SPEC } from "./constants.js";
 import { setBackpressureBoundsForTest } from "@openbindings/asyncapi-client/testing";

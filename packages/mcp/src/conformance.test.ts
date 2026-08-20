@@ -5,7 +5,7 @@ import {
   single,
   type Invocation,
   type InvocationError,
-} from "@openbindings/sdk";
+} from "@openbindings/invoke";
 import { BINDING_SPEC } from "./constants.js";
 import { MCPInvoker } from "./invoker.js";
 import { ENDPOINT, mcpServer, type MCPServerOptions, type RpcRequest, type RpcReply } from "./testserver.js";
