@@ -20,7 +20,9 @@ import type { ContextResolver } from "./invokers.js";
  * auth.bearer  →  "bearerToken"
  * auth.apiKey  →  "apiKey"
  * auth.basic   →  "basic" (a { username, password } object)
- * auth.oauth2  →  "accessToken" (plus "refreshToken", "clientSecret")
+ * auth.oauth2  →  "accessToken" or "bearerToken" (plus "refreshToken",
+ *                 "clientSecret") — an access token rides the wire as a
+ *                 Bearer credential, so either spelling answers the family
  * ```
  *
  * so satisfying a bearer challenge for an origin is one call:
@@ -482,7 +484,14 @@ function requirementSatisfied(
       const token = (named as Record<string, unknown>)["accessToken"];
       if (typeof token === "string" && token) return true;
     }
-    return allowFlatNamedCredential && contextString(ctx, "accessToken") !== "";
+    if (!allowFlatNamedCredential) return false;
+    // A flat bearer token counts here because an OAuth2 access token reaches
+    // the wire AS a Bearer credential, and the placement side already knows
+    // it. Until these two agreed, an artifact declaring oauth2 was a dead end:
+    // the challenge asked for context, the remedy it printed stored a
+    // bearerToken, and the next attempt challenged identically because only
+    // `accessToken` counted. Twin of openbindings-go/contextstore.go.
+    return contextString(ctx, "accessToken") !== "" || contextBearerToken(ctx) !== "";
   }
   if (req.type === "config.value") {
     const point = typeof req.point === "string" ? req.point : "";
@@ -566,7 +575,13 @@ const REQUIREMENT_FAMILY_FIELDS: Record<string, string[]> = {
   "auth.bearer": ["bearerToken"],
   "auth.apiKey": ["apiKey", "apiKeys"],
   "auth.basic": ["basic"],
-  "auth.oauth2": ["accessToken", "refreshToken", "clientSecret"],
+  // `bearerToken` belongs here because requirementSatisfied's oauth2 arm
+  // accepts one. Without it the two rules in this file contradicted each
+  // other: the challenge validated against a stored bearer token and then
+  // scopeContext admitted nothing, so a caller supplied exactly what the
+  // error asked for, the scope gate dropped it, and the invoker re-challenged
+  // forever. Twin of openbindings-go/contextstore.go.
+  "auth.oauth2": ["accessToken", "bearerToken", "refreshToken", "clientSecret"],
 };
 
 /**

@@ -506,6 +506,18 @@
 
 ### Fixed
 
+- **Compatibility checking now handles the boolean `false` schema — the
+  spec's spelling for "carries no caller input" / "emits no output".**
+  `checkInterfaceCompatibility` previously rewrote `false` to its object
+  spelling `{"not": {}}`, which the schema-compatibility profile rejects
+  (`outside profile: keyword "not"`), so any operation declaring
+  `input: false` failed requirement resolution as `input_incompatible`
+  even against itself. `false` now short-circuits before normalization:
+  compatible exactly with `false`, incompatible (with a clear reason)
+  against any other specified schema; `true` continues to flow through
+  the normal check as the empty schema. Caught live by the Panjir dogfood
+  loop resolving a no-input contract operation. Mirrored in the Go SDK.
+
 - **OBI-D-17 well-formedness is decided per distinct schema node, not per
   occurrence.** A boundary schema synthesized from a heavily-referenced
   artifact is a DAG: full dereference makes one component subtree the SAME
