@@ -1,0 +1,1449 @@
+{
+  "$comment": "Shared twin case table for openbindings.openapi@1 §9.1: which JSON request-body\ndeclarations select WHOLE carriage (body.whole — an explicitly dynamic object or a\ndeclaration-complex JSON body) and which stay FLATTENED into named body properties.\nByte-identical copies live in openapi-client/go/testdata,\nopenapi-client/typescript/src/testdata, openbindings-go/formats/openapi/testdata and\nopenbindings-ts/packages/openapi/src/testdata.\n\nEach cell pins ONE (edition line × trigger keyword × presence) triple. The trigger\nkeywords are read under the GOVERNING EDITION'S dialect: on the 3.0 line the Schema\nObject is a defined subset whose own text makes unmentioned JSON Schema keywords\nstrictly unsupported, so patternProperties, if, then, else, dependentSchemas and\nunevaluatedProperties decide there as if absent; oneOf, anyOf, not and\nadditionalProperties are in both lines' dialects and decide alike on both. The\nunevaluatedProperties trigger is ANY-VALUE PRESENCE — the `false` spelling triggers\nexactly like `true` or a Schema Object.\n\nEvery harness renders the cell as a WHOLE OpenAPI document:\n  openapi: <openapi>; info {title: \"json body trigger scoping\", version: \"1\"};\n  servers [{url: <harness peer>}];\n  paths./items.post: operationId createItem, requestBody {required: true,\n    content: {\"application/json\": {schema: <schema>}}}, responses {\"204\": ...}.\n\nexpect is \"whole\" or \"flattened\", and each engine asserts it through its own\nSHIPPED path:\n  * The two openapi-client engines invoke twice. A FLAT input {\"value\": \"v\"}\n    dispatches {\"value\":\"v\"} when the cell is flattened, and refuses before\n    dispatch naming \"whole-value carriage\" when it is whole. A ROUTED one-tuple\n    whose body names {\"whole\": \"payload\"} with value.payload = {\"value\": \"v\"}\n    dispatches the same bytes when the cell is whole, and refuses naming\n    \"routed whole-body field does not identify any admissible whole-value\n    request-body candidate\" when it is flattened. Each harness supplies its own\n    envelope key and marker from its own profile constants.\n  * The two adapter engines synthesize. A whole cell publishes the one\n    protocol-neutral `payload` operation property and an inputTransform carrying\n    \"whole\":\"payload\"; a flattened cell publishes the artifact's own `value`\n    property and no `payload`.\n\nSpec: binding-specs/openapi/openbindings.openapi.md §9.1 (\"explicitly dynamic\",\n\"declaration-complex at the JSON body boundary\") at release/0.2. Census:\naudit/openapi-stage3-census.md items 2 and 3.",
+  "cases": [
+    {
+      "name": "3.0.4 patternProperties present-entry",
+      "openapi": "3.0.4",
+      "line": "3.0",
+      "keyword": "patternProperties",
+      "presence": "present-entry",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "string"
+          }
+        },
+        "patternProperties": {
+          "^x-": {
+            "type": "string"
+          }
+        }
+      },
+      "expect": "flattened"
+    },
+    {
+      "name": "3.0.4 patternProperties present-empty",
+      "openapi": "3.0.4",
+      "line": "3.0",
+      "keyword": "patternProperties",
+      "presence": "present-empty",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "string"
+          }
+        },
+        "patternProperties": {}
+      },
+      "expect": "flattened"
+    },
+    {
+      "name": "3.0.4 patternProperties absent",
+      "openapi": "3.0.4",
+      "line": "3.0",
+      "keyword": "patternProperties",
+      "presence": "absent",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "string"
+          }
+        }
+      },
+      "expect": "flattened"
+    },
+    {
+      "name": "3.0.4 if present-schema",
+      "openapi": "3.0.4",
+      "line": "3.0",
+      "keyword": "if",
+      "presence": "present-schema",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "string"
+          }
+        },
+        "if": {
+          "required": [
+            "value"
+          ]
+        }
+      },
+      "expect": "flattened"
+    },
+    {
+      "name": "3.0.4 if present-empty",
+      "openapi": "3.0.4",
+      "line": "3.0",
+      "keyword": "if",
+      "presence": "present-empty",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "string"
+          }
+        },
+        "if": {}
+      },
+      "expect": "flattened"
+    },
+    {
+      "name": "3.0.4 if absent",
+      "openapi": "3.0.4",
+      "line": "3.0",
+      "keyword": "if",
+      "presence": "absent",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "string"
+          }
+        }
+      },
+      "expect": "flattened"
+    },
+    {
+      "name": "3.0.4 then present-schema",
+      "openapi": "3.0.4",
+      "line": "3.0",
+      "keyword": "then",
+      "presence": "present-schema",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "string"
+          }
+        },
+        "then": {
+          "required": [
+            "value"
+          ]
+        }
+      },
+      "expect": "flattened"
+    },
+    {
+      "name": "3.0.4 then present-empty",
+      "openapi": "3.0.4",
+      "line": "3.0",
+      "keyword": "then",
+      "presence": "present-empty",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "string"
+          }
+        },
+        "then": {}
+      },
+      "expect": "flattened"
+    },
+    {
+      "name": "3.0.4 then absent",
+      "openapi": "3.0.4",
+      "line": "3.0",
+      "keyword": "then",
+      "presence": "absent",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "string"
+          }
+        }
+      },
+      "expect": "flattened"
+    },
+    {
+      "name": "3.0.4 else present-schema",
+      "openapi": "3.0.4",
+      "line": "3.0",
+      "keyword": "else",
+      "presence": "present-schema",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "string"
+          }
+        },
+        "else": {
+          "required": [
+            "value"
+          ]
+        }
+      },
+      "expect": "flattened"
+    },
+    {
+      "name": "3.0.4 else present-empty",
+      "openapi": "3.0.4",
+      "line": "3.0",
+      "keyword": "else",
+      "presence": "present-empty",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "string"
+          }
+        },
+        "else": {}
+      },
+      "expect": "flattened"
+    },
+    {
+      "name": "3.0.4 else absent",
+      "openapi": "3.0.4",
+      "line": "3.0",
+      "keyword": "else",
+      "presence": "absent",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "string"
+          }
+        }
+      },
+      "expect": "flattened"
+    },
+    {
+      "name": "3.0.4 dependentSchemas present-entry",
+      "openapi": "3.0.4",
+      "line": "3.0",
+      "keyword": "dependentSchemas",
+      "presence": "present-entry",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "string"
+          }
+        },
+        "dependentSchemas": {
+          "value": {
+            "required": [
+              "value"
+            ]
+          }
+        }
+      },
+      "expect": "flattened"
+    },
+    {
+      "name": "3.0.4 dependentSchemas present-empty",
+      "openapi": "3.0.4",
+      "line": "3.0",
+      "keyword": "dependentSchemas",
+      "presence": "present-empty",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "string"
+          }
+        },
+        "dependentSchemas": {}
+      },
+      "expect": "flattened"
+    },
+    {
+      "name": "3.0.4 dependentSchemas absent",
+      "openapi": "3.0.4",
+      "line": "3.0",
+      "keyword": "dependentSchemas",
+      "presence": "absent",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "string"
+          }
+        }
+      },
+      "expect": "flattened"
+    },
+    {
+      "name": "3.0.4 unevaluatedProperties present-true",
+      "openapi": "3.0.4",
+      "line": "3.0",
+      "keyword": "unevaluatedProperties",
+      "presence": "present-true",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "string"
+          }
+        },
+        "unevaluatedProperties": true
+      },
+      "expect": "flattened"
+    },
+    {
+      "name": "3.0.4 unevaluatedProperties present-false",
+      "openapi": "3.0.4",
+      "line": "3.0",
+      "keyword": "unevaluatedProperties",
+      "presence": "present-false",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "string"
+          }
+        },
+        "unevaluatedProperties": false
+      },
+      "expect": "flattened"
+    },
+    {
+      "name": "3.0.4 unevaluatedProperties present-schema",
+      "openapi": "3.0.4",
+      "line": "3.0",
+      "keyword": "unevaluatedProperties",
+      "presence": "present-schema",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "string"
+          }
+        },
+        "unevaluatedProperties": {
+          "type": "string"
+        }
+      },
+      "expect": "flattened"
+    },
+    {
+      "name": "3.0.4 unevaluatedProperties absent",
+      "openapi": "3.0.4",
+      "line": "3.0",
+      "keyword": "unevaluatedProperties",
+      "presence": "absent",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "string"
+          }
+        }
+      },
+      "expect": "flattened"
+    },
+    {
+      "name": "3.0.4 oneOf present-branches",
+      "openapi": "3.0.4",
+      "line": "3.0",
+      "keyword": "oneOf",
+      "presence": "present-branches",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "string"
+          }
+        },
+        "oneOf": [
+          {
+            "required": [
+              "value"
+            ]
+          },
+          {
+            "required": [
+              "other"
+            ]
+          }
+        ]
+      },
+      "expect": "whole"
+    },
+    {
+      "name": "3.0.4 oneOf absent",
+      "openapi": "3.0.4",
+      "line": "3.0",
+      "keyword": "oneOf",
+      "presence": "absent",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "string"
+          }
+        }
+      },
+      "expect": "flattened"
+    },
+    {
+      "name": "3.0.4 anyOf present-branches",
+      "openapi": "3.0.4",
+      "line": "3.0",
+      "keyword": "anyOf",
+      "presence": "present-branches",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "string"
+          }
+        },
+        "anyOf": [
+          {
+            "required": [
+              "value"
+            ]
+          },
+          {
+            "required": [
+              "other"
+            ]
+          }
+        ]
+      },
+      "expect": "whole"
+    },
+    {
+      "name": "3.0.4 anyOf absent",
+      "openapi": "3.0.4",
+      "line": "3.0",
+      "keyword": "anyOf",
+      "presence": "absent",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "string"
+          }
+        }
+      },
+      "expect": "flattened"
+    },
+    {
+      "name": "3.0.4 not present-schema",
+      "openapi": "3.0.4",
+      "line": "3.0",
+      "keyword": "not",
+      "presence": "present-schema",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "string"
+          }
+        },
+        "not": {
+          "required": [
+            "forbidden"
+          ]
+        }
+      },
+      "expect": "whole"
+    },
+    {
+      "name": "3.0.4 not absent",
+      "openapi": "3.0.4",
+      "line": "3.0",
+      "keyword": "not",
+      "presence": "absent",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "string"
+          }
+        }
+      },
+      "expect": "flattened"
+    },
+    {
+      "name": "3.0.4 additionalProperties present-true",
+      "openapi": "3.0.4",
+      "line": "3.0",
+      "keyword": "additionalProperties",
+      "presence": "present-true",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": true
+      },
+      "expect": "whole"
+    },
+    {
+      "name": "3.0.4 additionalProperties present-schema",
+      "openapi": "3.0.4",
+      "line": "3.0",
+      "keyword": "additionalProperties",
+      "presence": "present-schema",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": {
+          "type": "string"
+        }
+      },
+      "expect": "whole"
+    },
+    {
+      "name": "3.0.4 additionalProperties present-false",
+      "openapi": "3.0.4",
+      "line": "3.0",
+      "keyword": "additionalProperties",
+      "presence": "present-false",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "expect": "flattened"
+    },
+    {
+      "name": "3.0.4 additionalProperties absent",
+      "openapi": "3.0.4",
+      "line": "3.0",
+      "keyword": "additionalProperties",
+      "presence": "absent",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "string"
+          }
+        }
+      },
+      "expect": "flattened"
+    },
+    {
+      "name": "3.0.4 allOf/patternProperties present-entry",
+      "openapi": "3.0.4",
+      "line": "3.0",
+      "keyword": "allOf/patternProperties",
+      "presence": "present-entry",
+      "schema": {
+        "allOf": [
+          {
+            "type": "object",
+            "properties": {
+              "value": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "patternProperties": {
+              "^x-": {
+                "type": "string"
+              }
+            }
+          }
+        ]
+      },
+      "expect": "flattened"
+    },
+    {
+      "name": "3.0.4 allOf/unevaluatedProperties present-false",
+      "openapi": "3.0.4",
+      "line": "3.0",
+      "keyword": "allOf/unevaluatedProperties",
+      "presence": "present-false",
+      "schema": {
+        "allOf": [
+          {
+            "type": "object",
+            "properties": {
+              "value": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "unevaluatedProperties": false
+          }
+        ]
+      },
+      "expect": "flattened"
+    },
+    {
+      "name": "3.0.4 allOf/additionalProperties present-true",
+      "openapi": "3.0.4",
+      "line": "3.0",
+      "keyword": "allOf/additionalProperties",
+      "presence": "present-true",
+      "schema": {
+        "allOf": [
+          {
+            "type": "object",
+            "properties": {
+              "value": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "additionalProperties": true
+          }
+        ]
+      },
+      "expect": "whole"
+    },
+    {
+      "name": "3.1.2 patternProperties present-entry",
+      "openapi": "3.1.2",
+      "line": "3.1",
+      "keyword": "patternProperties",
+      "presence": "present-entry",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "string"
+          }
+        },
+        "patternProperties": {
+          "^x-": {
+            "type": "string"
+          }
+        }
+      },
+      "expect": "whole"
+    },
+    {
+      "name": "3.1.2 patternProperties present-empty",
+      "openapi": "3.1.2",
+      "line": "3.1",
+      "keyword": "patternProperties",
+      "presence": "present-empty",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "string"
+          }
+        },
+        "patternProperties": {}
+      },
+      "expect": "flattened"
+    },
+    {
+      "name": "3.1.2 patternProperties absent",
+      "openapi": "3.1.2",
+      "line": "3.1",
+      "keyword": "patternProperties",
+      "presence": "absent",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "string"
+          }
+        }
+      },
+      "expect": "flattened"
+    },
+    {
+      "name": "3.1.2 if present-schema",
+      "openapi": "3.1.2",
+      "line": "3.1",
+      "keyword": "if",
+      "presence": "present-schema",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "string"
+          }
+        },
+        "if": {
+          "required": [
+            "value"
+          ]
+        }
+      },
+      "expect": "whole"
+    },
+    {
+      "name": "3.1.2 if present-empty",
+      "openapi": "3.1.2",
+      "line": "3.1",
+      "keyword": "if",
+      "presence": "present-empty",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "string"
+          }
+        },
+        "if": {}
+      },
+      "expect": "whole"
+    },
+    {
+      "name": "3.1.2 if absent",
+      "openapi": "3.1.2",
+      "line": "3.1",
+      "keyword": "if",
+      "presence": "absent",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "string"
+          }
+        }
+      },
+      "expect": "flattened"
+    },
+    {
+      "name": "3.1.2 then present-schema",
+      "openapi": "3.1.2",
+      "line": "3.1",
+      "keyword": "then",
+      "presence": "present-schema",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "string"
+          }
+        },
+        "then": {
+          "required": [
+            "value"
+          ]
+        }
+      },
+      "expect": "whole"
+    },
+    {
+      "name": "3.1.2 then present-empty",
+      "openapi": "3.1.2",
+      "line": "3.1",
+      "keyword": "then",
+      "presence": "present-empty",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "string"
+          }
+        },
+        "then": {}
+      },
+      "expect": "whole"
+    },
+    {
+      "name": "3.1.2 then absent",
+      "openapi": "3.1.2",
+      "line": "3.1",
+      "keyword": "then",
+      "presence": "absent",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "string"
+          }
+        }
+      },
+      "expect": "flattened"
+    },
+    {
+      "name": "3.1.2 else present-schema",
+      "openapi": "3.1.2",
+      "line": "3.1",
+      "keyword": "else",
+      "presence": "present-schema",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "string"
+          }
+        },
+        "else": {
+          "required": [
+            "value"
+          ]
+        }
+      },
+      "expect": "whole"
+    },
+    {
+      "name": "3.1.2 else present-empty",
+      "openapi": "3.1.2",
+      "line": "3.1",
+      "keyword": "else",
+      "presence": "present-empty",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "string"
+          }
+        },
+        "else": {}
+      },
+      "expect": "whole"
+    },
+    {
+      "name": "3.1.2 else absent",
+      "openapi": "3.1.2",
+      "line": "3.1",
+      "keyword": "else",
+      "presence": "absent",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "string"
+          }
+        }
+      },
+      "expect": "flattened"
+    },
+    {
+      "name": "3.1.2 dependentSchemas present-entry",
+      "openapi": "3.1.2",
+      "line": "3.1",
+      "keyword": "dependentSchemas",
+      "presence": "present-entry",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "string"
+          }
+        },
+        "dependentSchemas": {
+          "value": {
+            "required": [
+              "value"
+            ]
+          }
+        }
+      },
+      "expect": "whole"
+    },
+    {
+      "name": "3.1.2 dependentSchemas present-empty",
+      "openapi": "3.1.2",
+      "line": "3.1",
+      "keyword": "dependentSchemas",
+      "presence": "present-empty",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "string"
+          }
+        },
+        "dependentSchemas": {}
+      },
+      "expect": "flattened"
+    },
+    {
+      "name": "3.1.2 dependentSchemas absent",
+      "openapi": "3.1.2",
+      "line": "3.1",
+      "keyword": "dependentSchemas",
+      "presence": "absent",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "string"
+          }
+        }
+      },
+      "expect": "flattened"
+    },
+    {
+      "name": "3.1.2 unevaluatedProperties present-true",
+      "openapi": "3.1.2",
+      "line": "3.1",
+      "keyword": "unevaluatedProperties",
+      "presence": "present-true",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "string"
+          }
+        },
+        "unevaluatedProperties": true
+      },
+      "expect": "whole"
+    },
+    {
+      "name": "3.1.2 unevaluatedProperties present-false",
+      "openapi": "3.1.2",
+      "line": "3.1",
+      "keyword": "unevaluatedProperties",
+      "presence": "present-false",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "string"
+          }
+        },
+        "unevaluatedProperties": false
+      },
+      "expect": "whole"
+    },
+    {
+      "name": "3.1.2 unevaluatedProperties present-schema",
+      "openapi": "3.1.2",
+      "line": "3.1",
+      "keyword": "unevaluatedProperties",
+      "presence": "present-schema",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "string"
+          }
+        },
+        "unevaluatedProperties": {
+          "type": "string"
+        }
+      },
+      "expect": "whole"
+    },
+    {
+      "name": "3.1.2 unevaluatedProperties absent",
+      "openapi": "3.1.2",
+      "line": "3.1",
+      "keyword": "unevaluatedProperties",
+      "presence": "absent",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "string"
+          }
+        }
+      },
+      "expect": "flattened"
+    },
+    {
+      "name": "3.1.2 oneOf present-branches",
+      "openapi": "3.1.2",
+      "line": "3.1",
+      "keyword": "oneOf",
+      "presence": "present-branches",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "string"
+          }
+        },
+        "oneOf": [
+          {
+            "required": [
+              "value"
+            ]
+          },
+          {
+            "required": [
+              "other"
+            ]
+          }
+        ]
+      },
+      "expect": "whole"
+    },
+    {
+      "name": "3.1.2 oneOf absent",
+      "openapi": "3.1.2",
+      "line": "3.1",
+      "keyword": "oneOf",
+      "presence": "absent",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "string"
+          }
+        }
+      },
+      "expect": "flattened"
+    },
+    {
+      "name": "3.1.2 anyOf present-branches",
+      "openapi": "3.1.2",
+      "line": "3.1",
+      "keyword": "anyOf",
+      "presence": "present-branches",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "string"
+          }
+        },
+        "anyOf": [
+          {
+            "required": [
+              "value"
+            ]
+          },
+          {
+            "required": [
+              "other"
+            ]
+          }
+        ]
+      },
+      "expect": "whole"
+    },
+    {
+      "name": "3.1.2 anyOf absent",
+      "openapi": "3.1.2",
+      "line": "3.1",
+      "keyword": "anyOf",
+      "presence": "absent",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "string"
+          }
+        }
+      },
+      "expect": "flattened"
+    },
+    {
+      "name": "3.1.2 not present-schema",
+      "openapi": "3.1.2",
+      "line": "3.1",
+      "keyword": "not",
+      "presence": "present-schema",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "string"
+          }
+        },
+        "not": {
+          "required": [
+            "forbidden"
+          ]
+        }
+      },
+      "expect": "whole"
+    },
+    {
+      "name": "3.1.2 not absent",
+      "openapi": "3.1.2",
+      "line": "3.1",
+      "keyword": "not",
+      "presence": "absent",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "string"
+          }
+        }
+      },
+      "expect": "flattened"
+    },
+    {
+      "name": "3.1.2 additionalProperties present-true",
+      "openapi": "3.1.2",
+      "line": "3.1",
+      "keyword": "additionalProperties",
+      "presence": "present-true",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": true
+      },
+      "expect": "whole"
+    },
+    {
+      "name": "3.1.2 additionalProperties present-schema",
+      "openapi": "3.1.2",
+      "line": "3.1",
+      "keyword": "additionalProperties",
+      "presence": "present-schema",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": {
+          "type": "string"
+        }
+      },
+      "expect": "whole"
+    },
+    {
+      "name": "3.1.2 additionalProperties present-false",
+      "openapi": "3.1.2",
+      "line": "3.1",
+      "keyword": "additionalProperties",
+      "presence": "present-false",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "expect": "flattened"
+    },
+    {
+      "name": "3.1.2 additionalProperties absent",
+      "openapi": "3.1.2",
+      "line": "3.1",
+      "keyword": "additionalProperties",
+      "presence": "absent",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "string"
+          }
+        }
+      },
+      "expect": "flattened"
+    },
+    {
+      "name": "3.1.2 allOf/patternProperties present-entry",
+      "openapi": "3.1.2",
+      "line": "3.1",
+      "keyword": "allOf/patternProperties",
+      "presence": "present-entry",
+      "schema": {
+        "allOf": [
+          {
+            "type": "object",
+            "properties": {
+              "value": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "patternProperties": {
+              "^x-": {
+                "type": "string"
+              }
+            }
+          }
+        ]
+      },
+      "expect": "whole"
+    },
+    {
+      "name": "3.1.2 allOf/unevaluatedProperties present-false",
+      "openapi": "3.1.2",
+      "line": "3.1",
+      "keyword": "allOf/unevaluatedProperties",
+      "presence": "present-false",
+      "schema": {
+        "allOf": [
+          {
+            "type": "object",
+            "properties": {
+              "value": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "unevaluatedProperties": false
+          }
+        ]
+      },
+      "expect": "whole"
+    },
+    {
+      "name": "3.1.2 allOf/additionalProperties present-true",
+      "openapi": "3.1.2",
+      "line": "3.1",
+      "keyword": "allOf/additionalProperties",
+      "presence": "present-true",
+      "schema": {
+        "allOf": [
+          {
+            "type": "object",
+            "properties": {
+              "value": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "additionalProperties": true
+          }
+        ]
+      },
+      "expect": "whole"
+    },
+    {
+      "name": "3.0.0 patternProperties present-entry",
+      "openapi": "3.0.0",
+      "line": "3.0",
+      "keyword": "patternProperties",
+      "presence": "present-entry",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "string"
+          }
+        },
+        "patternProperties": {
+          "^x-": {
+            "type": "string"
+          }
+        }
+      },
+      "expect": "flattened"
+    },
+    {
+      "name": "3.0.0 unevaluatedProperties present-false",
+      "openapi": "3.0.0",
+      "line": "3.0",
+      "keyword": "unevaluatedProperties",
+      "presence": "present-false",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "string"
+          }
+        },
+        "unevaluatedProperties": false
+      },
+      "expect": "flattened"
+    },
+    {
+      "name": "3.0.1 patternProperties present-entry",
+      "openapi": "3.0.1",
+      "line": "3.0",
+      "keyword": "patternProperties",
+      "presence": "present-entry",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "string"
+          }
+        },
+        "patternProperties": {
+          "^x-": {
+            "type": "string"
+          }
+        }
+      },
+      "expect": "flattened"
+    },
+    {
+      "name": "3.0.1 unevaluatedProperties present-false",
+      "openapi": "3.0.1",
+      "line": "3.0",
+      "keyword": "unevaluatedProperties",
+      "presence": "present-false",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "string"
+          }
+        },
+        "unevaluatedProperties": false
+      },
+      "expect": "flattened"
+    },
+    {
+      "name": "3.0.2 patternProperties present-entry",
+      "openapi": "3.0.2",
+      "line": "3.0",
+      "keyword": "patternProperties",
+      "presence": "present-entry",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "string"
+          }
+        },
+        "patternProperties": {
+          "^x-": {
+            "type": "string"
+          }
+        }
+      },
+      "expect": "flattened"
+    },
+    {
+      "name": "3.0.2 unevaluatedProperties present-false",
+      "openapi": "3.0.2",
+      "line": "3.0",
+      "keyword": "unevaluatedProperties",
+      "presence": "present-false",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "string"
+          }
+        },
+        "unevaluatedProperties": false
+      },
+      "expect": "flattened"
+    },
+    {
+      "name": "3.0.3 patternProperties present-entry",
+      "openapi": "3.0.3",
+      "line": "3.0",
+      "keyword": "patternProperties",
+      "presence": "present-entry",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "string"
+          }
+        },
+        "patternProperties": {
+          "^x-": {
+            "type": "string"
+          }
+        }
+      },
+      "expect": "flattened"
+    },
+    {
+      "name": "3.0.3 unevaluatedProperties present-false",
+      "openapi": "3.0.3",
+      "line": "3.0",
+      "keyword": "unevaluatedProperties",
+      "presence": "present-false",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "string"
+          }
+        },
+        "unevaluatedProperties": false
+      },
+      "expect": "flattened"
+    },
+    {
+      "name": "3.1.0 patternProperties present-entry",
+      "openapi": "3.1.0",
+      "line": "3.1",
+      "keyword": "patternProperties",
+      "presence": "present-entry",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "string"
+          }
+        },
+        "patternProperties": {
+          "^x-": {
+            "type": "string"
+          }
+        }
+      },
+      "expect": "whole"
+    },
+    {
+      "name": "3.1.0 unevaluatedProperties present-false",
+      "openapi": "3.1.0",
+      "line": "3.1",
+      "keyword": "unevaluatedProperties",
+      "presence": "present-false",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "string"
+          }
+        },
+        "unevaluatedProperties": false
+      },
+      "expect": "whole"
+    },
+    {
+      "name": "3.1.1 patternProperties present-entry",
+      "openapi": "3.1.1",
+      "line": "3.1",
+      "keyword": "patternProperties",
+      "presence": "present-entry",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "string"
+          }
+        },
+        "patternProperties": {
+          "^x-": {
+            "type": "string"
+          }
+        }
+      },
+      "expect": "whole"
+    },
+    {
+      "name": "3.1.1 unevaluatedProperties present-false",
+      "openapi": "3.1.1",
+      "line": "3.1",
+      "keyword": "unevaluatedProperties",
+      "presence": "present-false",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "string"
+          }
+        },
+        "unevaluatedProperties": false
+      },
+      "expect": "whole"
+    }
+  ]
+}

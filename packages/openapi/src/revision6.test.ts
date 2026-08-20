@@ -97,6 +97,10 @@ describe("openbindings.openapi@1 whole JSON carriage", () => {
       ["else", { type: "object", else: { required: ["fallback"] } }],
       ["dependentSchemas", { type: "object", dependentSchemas: { kind: { required: ["name"] } } }],
       ["unevaluatedProperties", { type: "object", unevaluatedProperties: true }],
+      [
+        "unevaluatedProperties false",
+        { type: "object", properties: { value: { type: "string" } }, unevaluatedProperties: false },
+      ],
       ["allOf traversal", { allOf: [{ type: "object" }, { anyOf: [{ required: ["a"] }, { required: ["b"] }] }] }],
     ];
 
@@ -113,7 +117,6 @@ describe("openbindings.openapi@1 whole JSON carriage", () => {
   it("does not promote inert or nested declarations into a top-level whole-value route", async () => {
     const cases: Array<[string, Record<string, unknown>]> = [
       ["empty dependentSchemas", { type: "object", properties: { value: { type: "string" } }, dependentSchemas: {} }],
-      ["closed unevaluatedProperties", { type: "object", properties: { value: { type: "string" } }, unevaluatedProperties: false }],
       ["nested oneOf", { type: "object", properties: { value: { oneOf: [{ type: "string" }, { type: "number" }] } } }],
     ];
 
