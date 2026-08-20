@@ -1,0 +1,1317 @@
+{
+  "$comment": "Shared twin case table for openbindings.openapi@1 §9.2 and OAPI-P-04: what a `type: string` declaration carrying `format: byte` does, per accepted OAS edition, in each of the three request positions that can hold one — the WHOLE BODY of an exact non-JSON, non-form selection, a multipart part, and an urlencoded property. Minted 2026-08-20 with stage-3 block 5 (escalation M4, ruled 2026-08-20); before it the format literal appeared nowhere in any engine and none of these cells had coverage anywhere, the whole-body request lane having no shared table at all.\n\nWHAT THE AUTHORITIES DECIDE. Every accepted 3.0 edition's own Data Types format registry defines `byte` as \"base64 encoded characters\" (3.0.4's row citing [RFC 4648] Section 4), so the declared value already IS the encoded characters: the body or part is that string, sent as-is, and the OpenBindings raw-byte boundary decode never runs. That is the 3.0 line's parallel of the 3.1 `contentEncoding` rule, and it is why the `byte` and `binary` cells differ observably here — `binary` is the OpenBindings canonical-Base64 caller boundary and emits the DECODED octets (ABC), while `byte` emits the encoded characters (QUJD). The form-part DEFAULT is application/octet-stream: 3.0.4's default-`contentType` table gives `string` with `format` \"`binary` or `byte`\" that default, 3.0.0 through 3.0.3's prose names only `binary` before \"other primitive types\", and under the editions' own Section 4.1 patch-uniformity instruction the line answers uniformly with 3.0.4 read under its own text fixing what the uniform answer is.\n\nTHE 3.1 CELLS ARE CONTROLS, AND THEY ARE NOT THE SAME CELL. On that line `format` is an annotation with no content-encoding force (3.1.0 Section 4.8.14.3, restated at 3.1.1 Section 4.8.14.3) and `byte` is absent from the format tables, so every 3.1 row here is an ordinary `type: string` declaration: it takes the primitive text/plain part default, and on the whole-body lane it selects nothing at all, because application/pdf is outside §9.2's closed character-data test and this specification invents no string-to-octets mapping where no character encoding applies.\n\nNO Content-Transfer-Encoding IS EMITTED, on either line. 3.0.4 equates a `byte` part with an Encoding Object whose `headers` field carries a Content-Transfer-Encoding schema requiring base64; §9.2 reads that equivalence as DECLARATION semantics, so the header rides only when the artifact itself declares it. Content-Transfer-Encoding is outside this table's rendering for the same expressibility reason the part-content-encoding table states — TypeScript inserts part headers after FormData has serialized — and each engine pins its absence in its own tests.\n\nTHE `byte-encoding-json` KIND is what makes the urlencoded lane discriminating. An Encoding Object that declares a part contentType displaces the default row, and on the urlencoded content lane the part content type is otherwise invisible on the wire: a `byte` property whose default is text/plain and one whose default is application/octet-stream emit the same bytes. With `contentType: application/json` declared they do not — the artifact-encoded lane carries the characters as-is while a plain string declaration is JSON-serialized, quotes and all — so those cells are what turn red if the 3.0 byte lane is removed.\n\nDECISION FORMAT, identical in all four engines. `refused` means the request-body plan refuses the candidate before any value is supplied. Otherwise `admitted;emit=<rendering>`:\n  body        `<emitted Content-Type>:<body bytes>`\n  multipart   each emitted part as `<Content-Type>:<body>`; a part with NO Content-Type header renders as text/plain, which [RFC7578] Section 4.4 makes the same wire fact\n  urlencoded  the whole emitted body\n`error` is the encoder refusing a supplied value. Refusal MESSAGES are each implementation's own surface and never cross the twin boundary.",
+  "cases": [
+    {
+      "name": "3.0.0|body|byte",
+      "openapi": "3.0.0",
+      "lane": "body",
+      "media": "application/pdf",
+      "kind": "byte",
+      "propertyName": "p",
+      "schema": {
+        "type": "string",
+        "format": "byte"
+      },
+      "value": "QUJD",
+      "expect": "admitted;emit=application/pdf:QUJD",
+      "basis": "Every accepted 3.0 edition defines `byte` as \"base64 encoded characters\", so the caller's string IS the body and rides as-is; §9.2's 3.0 request-lane bullet states it, and no OpenBindings boundary decode runs. application/pdf is outside the character-data test, which is exactly why this lane has to exist: without it the declaration would fall to an exclusion the artifact never asked for."
+    },
+    {
+      "name": "3.0.0|body|binary",
+      "openapi": "3.0.0",
+      "lane": "body",
+      "media": "application/pdf",
+      "kind": "binary",
+      "propertyName": "p",
+      "schema": {
+        "type": "string",
+        "format": "binary"
+      },
+      "value": "QUJD",
+      "expect": "admitted;emit=application/pdf:ABC",
+      "basis": "Control, and the cell that proves `byte` and `binary` are different lanes: the 3.0 line defines `binary` as \"any sequence of octets\", so the caller's string is the OpenBindings canonical Base64 boundary and the binding emits the DECODED octets."
+    },
+    {
+      "name": "3.0.0|body|plain-string",
+      "openapi": "3.0.0",
+      "lane": "body",
+      "media": "application/pdf",
+      "kind": "plain-string",
+      "propertyName": "p",
+      "schema": {
+        "type": "string"
+      },
+      "value": "QUJD",
+      "expect": "refused",
+      "basis": "Control. A bare `type: string` on a media type outside the character-data test has no defined octet image, so the alternative is excluded on both lines. The `byte` cell above differs only because the ARTIFACT, not the media-type registration, declares the value to be characters."
+    },
+    {
+      "name": "3.0.0|multipart|byte",
+      "openapi": "3.0.0",
+      "lane": "multipart",
+      "media": "multipart/form-data",
+      "kind": "byte",
+      "propertyName": "p",
+      "schema": {
+        "type": "string",
+        "format": "byte"
+      },
+      "value": "QUJD",
+      "expect": "admitted;emit=application/octet-stream:QUJD",
+      "basis": "The part default is application/octet-stream, per 3.0.4's default-`contentType` row for `string` with `format` \"`binary` or `byte`\" read line-uniformly under the editions' own Section 4.1 instruction, and the part's value is the caller's artifact-encoded Base64 text sent as-is. Emitting different part framing on either side of a patch boundary is the distinction those editions instruct against."
+    },
+    {
+      "name": "3.0.0|multipart|binary",
+      "openapi": "3.0.0",
+      "lane": "multipart",
+      "media": "multipart/form-data",
+      "kind": "binary",
+      "propertyName": "p",
+      "schema": {
+        "type": "string",
+        "format": "binary"
+      },
+      "value": "QUJD",
+      "expect": "admitted;emit=application/octet-stream:ABC",
+      "basis": "Control. The 3.0 `binary` row is also application/octet-stream, but its value half is the OpenBindings canonical Base64 boundary, so the part carries the DECODED octets."
+    },
+    {
+      "name": "3.0.0|multipart|plain-string",
+      "openapi": "3.0.0",
+      "lane": "multipart",
+      "media": "multipart/form-data",
+      "kind": "plain-string",
+      "propertyName": "p",
+      "schema": {
+        "type": "string"
+      },
+      "value": "QUJD",
+      "expect": "admitted;emit=text/plain:QUJD",
+      "basis": "Control. \"Other primitive types\" take text/plain on this line, which is what the `byte` row above moved away from."
+    },
+    {
+      "name": "3.0.0|multipart|byte-encoding-json",
+      "openapi": "3.0.0",
+      "lane": "multipart",
+      "media": "multipart/form-data",
+      "kind": "byte-encoding-json",
+      "propertyName": "p",
+      "schema": {
+        "type": "string",
+        "format": "byte"
+      },
+      "value": "QUJD",
+      "expect": "admitted;emit=application/json:QUJD",
+      "basis": "An Encoding Object that declares a part contentType displaces the default row, and the artifact-encoded value half survives it: the characters ride as-is under the declared application/json, unquoted. Contrast the 3.1 row, where the same declaration is an ordinary string and IS JSON-serialized.",
+      "encodingContentType": "application/json"
+    },
+    {
+      "name": "3.0.0|urlencoded|byte",
+      "openapi": "3.0.0",
+      "lane": "urlencoded",
+      "media": "application/x-www-form-urlencoded",
+      "kind": "byte",
+      "propertyName": "p",
+      "schema": {
+        "type": "string",
+        "format": "byte"
+      },
+      "value": "QUJD",
+      "expect": "admitted;emit=p=QUJD",
+      "basis": "The same declaration on the urlencoded content lane: default application/octet-stream, value carried as-is. The emission is wire-identical to the 3.1 control below, because the part content type is not emitted on this lane at all; the `byte-encoding-json` rows are where the lane discriminates."
+    },
+    {
+      "name": "3.0.0|urlencoded|binary",
+      "openapi": "3.0.0",
+      "lane": "urlencoded",
+      "media": "application/x-www-form-urlencoded",
+      "kind": "binary",
+      "propertyName": "p",
+      "schema": {
+        "type": "string",
+        "format": "binary"
+      },
+      "value": "QUJD",
+      "expect": "refused",
+      "basis": "Control. §9.2 defines no urlencoded octet boundary for the 3.0 raw-binary lane, so the property has no faithful carriage and the alternative is refused — which is precisely the outcome the `byte` row above must NOT have, since a `byte` value is characters rather than octets."
+    },
+    {
+      "name": "3.0.0|urlencoded|plain-string",
+      "openapi": "3.0.0",
+      "lane": "urlencoded",
+      "media": "application/x-www-form-urlencoded",
+      "kind": "plain-string",
+      "propertyName": "p",
+      "schema": {
+        "type": "string"
+      },
+      "value": "QUJD",
+      "expect": "admitted;emit=p=QUJD",
+      "basis": "Control. The unchanged plain-string content-lane carriage."
+    },
+    {
+      "name": "3.0.0|urlencoded|byte-encoding-json",
+      "openapi": "3.0.0",
+      "lane": "urlencoded",
+      "media": "application/x-www-form-urlencoded",
+      "kind": "byte-encoding-json",
+      "propertyName": "p",
+      "schema": {
+        "type": "string",
+        "format": "byte"
+      },
+      "value": "QUJD",
+      "expect": "admitted;emit=p=QUJD",
+      "basis": "The declared application/json displaces the default row and the artifact-encoded value half survives: the characters are percent-encoded as-is. This is the cell that turns red if the 3.0 byte lane is removed, since a plain string declaration would be JSON-serialized first.",
+      "encodingContentType": "application/json"
+    },
+    {
+      "name": "3.0.1|body|byte",
+      "openapi": "3.0.1",
+      "lane": "body",
+      "media": "application/pdf",
+      "kind": "byte",
+      "propertyName": "p",
+      "schema": {
+        "type": "string",
+        "format": "byte"
+      },
+      "value": "QUJD",
+      "expect": "admitted;emit=application/pdf:QUJD",
+      "basis": "Every accepted 3.0 edition defines `byte` as \"base64 encoded characters\", so the caller's string IS the body and rides as-is; §9.2's 3.0 request-lane bullet states it, and no OpenBindings boundary decode runs. application/pdf is outside the character-data test, which is exactly why this lane has to exist: without it the declaration would fall to an exclusion the artifact never asked for."
+    },
+    {
+      "name": "3.0.1|body|binary",
+      "openapi": "3.0.1",
+      "lane": "body",
+      "media": "application/pdf",
+      "kind": "binary",
+      "propertyName": "p",
+      "schema": {
+        "type": "string",
+        "format": "binary"
+      },
+      "value": "QUJD",
+      "expect": "admitted;emit=application/pdf:ABC",
+      "basis": "Control, and the cell that proves `byte` and `binary` are different lanes: the 3.0 line defines `binary` as \"any sequence of octets\", so the caller's string is the OpenBindings canonical Base64 boundary and the binding emits the DECODED octets."
+    },
+    {
+      "name": "3.0.1|body|plain-string",
+      "openapi": "3.0.1",
+      "lane": "body",
+      "media": "application/pdf",
+      "kind": "plain-string",
+      "propertyName": "p",
+      "schema": {
+        "type": "string"
+      },
+      "value": "QUJD",
+      "expect": "refused",
+      "basis": "Control. A bare `type: string` on a media type outside the character-data test has no defined octet image, so the alternative is excluded on both lines. The `byte` cell above differs only because the ARTIFACT, not the media-type registration, declares the value to be characters."
+    },
+    {
+      "name": "3.0.1|multipart|byte",
+      "openapi": "3.0.1",
+      "lane": "multipart",
+      "media": "multipart/form-data",
+      "kind": "byte",
+      "propertyName": "p",
+      "schema": {
+        "type": "string",
+        "format": "byte"
+      },
+      "value": "QUJD",
+      "expect": "admitted;emit=application/octet-stream:QUJD",
+      "basis": "The part default is application/octet-stream, per 3.0.4's default-`contentType` row for `string` with `format` \"`binary` or `byte`\" read line-uniformly under the editions' own Section 4.1 instruction, and the part's value is the caller's artifact-encoded Base64 text sent as-is. Emitting different part framing on either side of a patch boundary is the distinction those editions instruct against."
+    },
+    {
+      "name": "3.0.1|multipart|binary",
+      "openapi": "3.0.1",
+      "lane": "multipart",
+      "media": "multipart/form-data",
+      "kind": "binary",
+      "propertyName": "p",
+      "schema": {
+        "type": "string",
+        "format": "binary"
+      },
+      "value": "QUJD",
+      "expect": "admitted;emit=application/octet-stream:ABC",
+      "basis": "Control. The 3.0 `binary` row is also application/octet-stream, but its value half is the OpenBindings canonical Base64 boundary, so the part carries the DECODED octets."
+    },
+    {
+      "name": "3.0.1|multipart|plain-string",
+      "openapi": "3.0.1",
+      "lane": "multipart",
+      "media": "multipart/form-data",
+      "kind": "plain-string",
+      "propertyName": "p",
+      "schema": {
+        "type": "string"
+      },
+      "value": "QUJD",
+      "expect": "admitted;emit=text/plain:QUJD",
+      "basis": "Control. \"Other primitive types\" take text/plain on this line, which is what the `byte` row above moved away from."
+    },
+    {
+      "name": "3.0.1|multipart|byte-encoding-json",
+      "openapi": "3.0.1",
+      "lane": "multipart",
+      "media": "multipart/form-data",
+      "kind": "byte-encoding-json",
+      "propertyName": "p",
+      "schema": {
+        "type": "string",
+        "format": "byte"
+      },
+      "value": "QUJD",
+      "expect": "admitted;emit=application/json:QUJD",
+      "basis": "An Encoding Object that declares a part contentType displaces the default row, and the artifact-encoded value half survives it: the characters ride as-is under the declared application/json, unquoted. Contrast the 3.1 row, where the same declaration is an ordinary string and IS JSON-serialized.",
+      "encodingContentType": "application/json"
+    },
+    {
+      "name": "3.0.1|urlencoded|byte",
+      "openapi": "3.0.1",
+      "lane": "urlencoded",
+      "media": "application/x-www-form-urlencoded",
+      "kind": "byte",
+      "propertyName": "p",
+      "schema": {
+        "type": "string",
+        "format": "byte"
+      },
+      "value": "QUJD",
+      "expect": "admitted;emit=p=QUJD",
+      "basis": "The same declaration on the urlencoded content lane: default application/octet-stream, value carried as-is. The emission is wire-identical to the 3.1 control below, because the part content type is not emitted on this lane at all; the `byte-encoding-json` rows are where the lane discriminates."
+    },
+    {
+      "name": "3.0.1|urlencoded|binary",
+      "openapi": "3.0.1",
+      "lane": "urlencoded",
+      "media": "application/x-www-form-urlencoded",
+      "kind": "binary",
+      "propertyName": "p",
+      "schema": {
+        "type": "string",
+        "format": "binary"
+      },
+      "value": "QUJD",
+      "expect": "refused",
+      "basis": "Control. §9.2 defines no urlencoded octet boundary for the 3.0 raw-binary lane, so the property has no faithful carriage and the alternative is refused — which is precisely the outcome the `byte` row above must NOT have, since a `byte` value is characters rather than octets."
+    },
+    {
+      "name": "3.0.1|urlencoded|plain-string",
+      "openapi": "3.0.1",
+      "lane": "urlencoded",
+      "media": "application/x-www-form-urlencoded",
+      "kind": "plain-string",
+      "propertyName": "p",
+      "schema": {
+        "type": "string"
+      },
+      "value": "QUJD",
+      "expect": "admitted;emit=p=QUJD",
+      "basis": "Control. The unchanged plain-string content-lane carriage."
+    },
+    {
+      "name": "3.0.1|urlencoded|byte-encoding-json",
+      "openapi": "3.0.1",
+      "lane": "urlencoded",
+      "media": "application/x-www-form-urlencoded",
+      "kind": "byte-encoding-json",
+      "propertyName": "p",
+      "schema": {
+        "type": "string",
+        "format": "byte"
+      },
+      "value": "QUJD",
+      "expect": "admitted;emit=p=QUJD",
+      "basis": "The declared application/json displaces the default row and the artifact-encoded value half survives: the characters are percent-encoded as-is. This is the cell that turns red if the 3.0 byte lane is removed, since a plain string declaration would be JSON-serialized first.",
+      "encodingContentType": "application/json"
+    },
+    {
+      "name": "3.0.2|body|byte",
+      "openapi": "3.0.2",
+      "lane": "body",
+      "media": "application/pdf",
+      "kind": "byte",
+      "propertyName": "p",
+      "schema": {
+        "type": "string",
+        "format": "byte"
+      },
+      "value": "QUJD",
+      "expect": "admitted;emit=application/pdf:QUJD",
+      "basis": "Every accepted 3.0 edition defines `byte` as \"base64 encoded characters\", so the caller's string IS the body and rides as-is; §9.2's 3.0 request-lane bullet states it, and no OpenBindings boundary decode runs. application/pdf is outside the character-data test, which is exactly why this lane has to exist: without it the declaration would fall to an exclusion the artifact never asked for."
+    },
+    {
+      "name": "3.0.2|body|binary",
+      "openapi": "3.0.2",
+      "lane": "body",
+      "media": "application/pdf",
+      "kind": "binary",
+      "propertyName": "p",
+      "schema": {
+        "type": "string",
+        "format": "binary"
+      },
+      "value": "QUJD",
+      "expect": "admitted;emit=application/pdf:ABC",
+      "basis": "Control, and the cell that proves `byte` and `binary` are different lanes: the 3.0 line defines `binary` as \"any sequence of octets\", so the caller's string is the OpenBindings canonical Base64 boundary and the binding emits the DECODED octets."
+    },
+    {
+      "name": "3.0.2|body|plain-string",
+      "openapi": "3.0.2",
+      "lane": "body",
+      "media": "application/pdf",
+      "kind": "plain-string",
+      "propertyName": "p",
+      "schema": {
+        "type": "string"
+      },
+      "value": "QUJD",
+      "expect": "refused",
+      "basis": "Control. A bare `type: string` on a media type outside the character-data test has no defined octet image, so the alternative is excluded on both lines. The `byte` cell above differs only because the ARTIFACT, not the media-type registration, declares the value to be characters."
+    },
+    {
+      "name": "3.0.2|multipart|byte",
+      "openapi": "3.0.2",
+      "lane": "multipart",
+      "media": "multipart/form-data",
+      "kind": "byte",
+      "propertyName": "p",
+      "schema": {
+        "type": "string",
+        "format": "byte"
+      },
+      "value": "QUJD",
+      "expect": "admitted;emit=application/octet-stream:QUJD",
+      "basis": "The part default is application/octet-stream, per 3.0.4's default-`contentType` row for `string` with `format` \"`binary` or `byte`\" read line-uniformly under the editions' own Section 4.1 instruction, and the part's value is the caller's artifact-encoded Base64 text sent as-is. Emitting different part framing on either side of a patch boundary is the distinction those editions instruct against."
+    },
+    {
+      "name": "3.0.2|multipart|binary",
+      "openapi": "3.0.2",
+      "lane": "multipart",
+      "media": "multipart/form-data",
+      "kind": "binary",
+      "propertyName": "p",
+      "schema": {
+        "type": "string",
+        "format": "binary"
+      },
+      "value": "QUJD",
+      "expect": "admitted;emit=application/octet-stream:ABC",
+      "basis": "Control. The 3.0 `binary` row is also application/octet-stream, but its value half is the OpenBindings canonical Base64 boundary, so the part carries the DECODED octets."
+    },
+    {
+      "name": "3.0.2|multipart|plain-string",
+      "openapi": "3.0.2",
+      "lane": "multipart",
+      "media": "multipart/form-data",
+      "kind": "plain-string",
+      "propertyName": "p",
+      "schema": {
+        "type": "string"
+      },
+      "value": "QUJD",
+      "expect": "admitted;emit=text/plain:QUJD",
+      "basis": "Control. \"Other primitive types\" take text/plain on this line, which is what the `byte` row above moved away from."
+    },
+    {
+      "name": "3.0.2|multipart|byte-encoding-json",
+      "openapi": "3.0.2",
+      "lane": "multipart",
+      "media": "multipart/form-data",
+      "kind": "byte-encoding-json",
+      "propertyName": "p",
+      "schema": {
+        "type": "string",
+        "format": "byte"
+      },
+      "value": "QUJD",
+      "expect": "admitted;emit=application/json:QUJD",
+      "basis": "An Encoding Object that declares a part contentType displaces the default row, and the artifact-encoded value half survives it: the characters ride as-is under the declared application/json, unquoted. Contrast the 3.1 row, where the same declaration is an ordinary string and IS JSON-serialized.",
+      "encodingContentType": "application/json"
+    },
+    {
+      "name": "3.0.2|urlencoded|byte",
+      "openapi": "3.0.2",
+      "lane": "urlencoded",
+      "media": "application/x-www-form-urlencoded",
+      "kind": "byte",
+      "propertyName": "p",
+      "schema": {
+        "type": "string",
+        "format": "byte"
+      },
+      "value": "QUJD",
+      "expect": "admitted;emit=p=QUJD",
+      "basis": "The same declaration on the urlencoded content lane: default application/octet-stream, value carried as-is. The emission is wire-identical to the 3.1 control below, because the part content type is not emitted on this lane at all; the `byte-encoding-json` rows are where the lane discriminates."
+    },
+    {
+      "name": "3.0.2|urlencoded|binary",
+      "openapi": "3.0.2",
+      "lane": "urlencoded",
+      "media": "application/x-www-form-urlencoded",
+      "kind": "binary",
+      "propertyName": "p",
+      "schema": {
+        "type": "string",
+        "format": "binary"
+      },
+      "value": "QUJD",
+      "expect": "refused",
+      "basis": "Control. §9.2 defines no urlencoded octet boundary for the 3.0 raw-binary lane, so the property has no faithful carriage and the alternative is refused — which is precisely the outcome the `byte` row above must NOT have, since a `byte` value is characters rather than octets."
+    },
+    {
+      "name": "3.0.2|urlencoded|plain-string",
+      "openapi": "3.0.2",
+      "lane": "urlencoded",
+      "media": "application/x-www-form-urlencoded",
+      "kind": "plain-string",
+      "propertyName": "p",
+      "schema": {
+        "type": "string"
+      },
+      "value": "QUJD",
+      "expect": "admitted;emit=p=QUJD",
+      "basis": "Control. The unchanged plain-string content-lane carriage."
+    },
+    {
+      "name": "3.0.2|urlencoded|byte-encoding-json",
+      "openapi": "3.0.2",
+      "lane": "urlencoded",
+      "media": "application/x-www-form-urlencoded",
+      "kind": "byte-encoding-json",
+      "propertyName": "p",
+      "schema": {
+        "type": "string",
+        "format": "byte"
+      },
+      "value": "QUJD",
+      "expect": "admitted;emit=p=QUJD",
+      "basis": "The declared application/json displaces the default row and the artifact-encoded value half survives: the characters are percent-encoded as-is. This is the cell that turns red if the 3.0 byte lane is removed, since a plain string declaration would be JSON-serialized first.",
+      "encodingContentType": "application/json"
+    },
+    {
+      "name": "3.0.3|body|byte",
+      "openapi": "3.0.3",
+      "lane": "body",
+      "media": "application/pdf",
+      "kind": "byte",
+      "propertyName": "p",
+      "schema": {
+        "type": "string",
+        "format": "byte"
+      },
+      "value": "QUJD",
+      "expect": "admitted;emit=application/pdf:QUJD",
+      "basis": "Every accepted 3.0 edition defines `byte` as \"base64 encoded characters\", so the caller's string IS the body and rides as-is; §9.2's 3.0 request-lane bullet states it, and no OpenBindings boundary decode runs. application/pdf is outside the character-data test, which is exactly why this lane has to exist: without it the declaration would fall to an exclusion the artifact never asked for."
+    },
+    {
+      "name": "3.0.3|body|binary",
+      "openapi": "3.0.3",
+      "lane": "body",
+      "media": "application/pdf",
+      "kind": "binary",
+      "propertyName": "p",
+      "schema": {
+        "type": "string",
+        "format": "binary"
+      },
+      "value": "QUJD",
+      "expect": "admitted;emit=application/pdf:ABC",
+      "basis": "Control, and the cell that proves `byte` and `binary` are different lanes: the 3.0 line defines `binary` as \"any sequence of octets\", so the caller's string is the OpenBindings canonical Base64 boundary and the binding emits the DECODED octets."
+    },
+    {
+      "name": "3.0.3|body|plain-string",
+      "openapi": "3.0.3",
+      "lane": "body",
+      "media": "application/pdf",
+      "kind": "plain-string",
+      "propertyName": "p",
+      "schema": {
+        "type": "string"
+      },
+      "value": "QUJD",
+      "expect": "refused",
+      "basis": "Control. A bare `type: string` on a media type outside the character-data test has no defined octet image, so the alternative is excluded on both lines. The `byte` cell above differs only because the ARTIFACT, not the media-type registration, declares the value to be characters."
+    },
+    {
+      "name": "3.0.3|multipart|byte",
+      "openapi": "3.0.3",
+      "lane": "multipart",
+      "media": "multipart/form-data",
+      "kind": "byte",
+      "propertyName": "p",
+      "schema": {
+        "type": "string",
+        "format": "byte"
+      },
+      "value": "QUJD",
+      "expect": "admitted;emit=application/octet-stream:QUJD",
+      "basis": "The part default is application/octet-stream, per 3.0.4's default-`contentType` row for `string` with `format` \"`binary` or `byte`\" read line-uniformly under the editions' own Section 4.1 instruction, and the part's value is the caller's artifact-encoded Base64 text sent as-is. Emitting different part framing on either side of a patch boundary is the distinction those editions instruct against."
+    },
+    {
+      "name": "3.0.3|multipart|binary",
+      "openapi": "3.0.3",
+      "lane": "multipart",
+      "media": "multipart/form-data",
+      "kind": "binary",
+      "propertyName": "p",
+      "schema": {
+        "type": "string",
+        "format": "binary"
+      },
+      "value": "QUJD",
+      "expect": "admitted;emit=application/octet-stream:ABC",
+      "basis": "Control. The 3.0 `binary` row is also application/octet-stream, but its value half is the OpenBindings canonical Base64 boundary, so the part carries the DECODED octets."
+    },
+    {
+      "name": "3.0.3|multipart|plain-string",
+      "openapi": "3.0.3",
+      "lane": "multipart",
+      "media": "multipart/form-data",
+      "kind": "plain-string",
+      "propertyName": "p",
+      "schema": {
+        "type": "string"
+      },
+      "value": "QUJD",
+      "expect": "admitted;emit=text/plain:QUJD",
+      "basis": "Control. \"Other primitive types\" take text/plain on this line, which is what the `byte` row above moved away from."
+    },
+    {
+      "name": "3.0.3|multipart|byte-encoding-json",
+      "openapi": "3.0.3",
+      "lane": "multipart",
+      "media": "multipart/form-data",
+      "kind": "byte-encoding-json",
+      "propertyName": "p",
+      "schema": {
+        "type": "string",
+        "format": "byte"
+      },
+      "value": "QUJD",
+      "expect": "admitted;emit=application/json:QUJD",
+      "basis": "An Encoding Object that declares a part contentType displaces the default row, and the artifact-encoded value half survives it: the characters ride as-is under the declared application/json, unquoted. Contrast the 3.1 row, where the same declaration is an ordinary string and IS JSON-serialized.",
+      "encodingContentType": "application/json"
+    },
+    {
+      "name": "3.0.3|urlencoded|byte",
+      "openapi": "3.0.3",
+      "lane": "urlencoded",
+      "media": "application/x-www-form-urlencoded",
+      "kind": "byte",
+      "propertyName": "p",
+      "schema": {
+        "type": "string",
+        "format": "byte"
+      },
+      "value": "QUJD",
+      "expect": "admitted;emit=p=QUJD",
+      "basis": "The same declaration on the urlencoded content lane: default application/octet-stream, value carried as-is. The emission is wire-identical to the 3.1 control below, because the part content type is not emitted on this lane at all; the `byte-encoding-json` rows are where the lane discriminates."
+    },
+    {
+      "name": "3.0.3|urlencoded|binary",
+      "openapi": "3.0.3",
+      "lane": "urlencoded",
+      "media": "application/x-www-form-urlencoded",
+      "kind": "binary",
+      "propertyName": "p",
+      "schema": {
+        "type": "string",
+        "format": "binary"
+      },
+      "value": "QUJD",
+      "expect": "refused",
+      "basis": "Control. §9.2 defines no urlencoded octet boundary for the 3.0 raw-binary lane, so the property has no faithful carriage and the alternative is refused — which is precisely the outcome the `byte` row above must NOT have, since a `byte` value is characters rather than octets."
+    },
+    {
+      "name": "3.0.3|urlencoded|plain-string",
+      "openapi": "3.0.3",
+      "lane": "urlencoded",
+      "media": "application/x-www-form-urlencoded",
+      "kind": "plain-string",
+      "propertyName": "p",
+      "schema": {
+        "type": "string"
+      },
+      "value": "QUJD",
+      "expect": "admitted;emit=p=QUJD",
+      "basis": "Control. The unchanged plain-string content-lane carriage."
+    },
+    {
+      "name": "3.0.3|urlencoded|byte-encoding-json",
+      "openapi": "3.0.3",
+      "lane": "urlencoded",
+      "media": "application/x-www-form-urlencoded",
+      "kind": "byte-encoding-json",
+      "propertyName": "p",
+      "schema": {
+        "type": "string",
+        "format": "byte"
+      },
+      "value": "QUJD",
+      "expect": "admitted;emit=p=QUJD",
+      "basis": "The declared application/json displaces the default row and the artifact-encoded value half survives: the characters are percent-encoded as-is. This is the cell that turns red if the 3.0 byte lane is removed, since a plain string declaration would be JSON-serialized first.",
+      "encodingContentType": "application/json"
+    },
+    {
+      "name": "3.0.4|body|byte",
+      "openapi": "3.0.4",
+      "lane": "body",
+      "media": "application/pdf",
+      "kind": "byte",
+      "propertyName": "p",
+      "schema": {
+        "type": "string",
+        "format": "byte"
+      },
+      "value": "QUJD",
+      "expect": "admitted;emit=application/pdf:QUJD",
+      "basis": "Every accepted 3.0 edition defines `byte` as \"base64 encoded characters\", so the caller's string IS the body and rides as-is; §9.2's 3.0 request-lane bullet states it, and no OpenBindings boundary decode runs. application/pdf is outside the character-data test, which is exactly why this lane has to exist: without it the declaration would fall to an exclusion the artifact never asked for."
+    },
+    {
+      "name": "3.0.4|body|binary",
+      "openapi": "3.0.4",
+      "lane": "body",
+      "media": "application/pdf",
+      "kind": "binary",
+      "propertyName": "p",
+      "schema": {
+        "type": "string",
+        "format": "binary"
+      },
+      "value": "QUJD",
+      "expect": "admitted;emit=application/pdf:ABC",
+      "basis": "Control, and the cell that proves `byte` and `binary` are different lanes: the 3.0 line defines `binary` as \"any sequence of octets\", so the caller's string is the OpenBindings canonical Base64 boundary and the binding emits the DECODED octets."
+    },
+    {
+      "name": "3.0.4|body|plain-string",
+      "openapi": "3.0.4",
+      "lane": "body",
+      "media": "application/pdf",
+      "kind": "plain-string",
+      "propertyName": "p",
+      "schema": {
+        "type": "string"
+      },
+      "value": "QUJD",
+      "expect": "refused",
+      "basis": "Control. A bare `type: string` on a media type outside the character-data test has no defined octet image, so the alternative is excluded on both lines. The `byte` cell above differs only because the ARTIFACT, not the media-type registration, declares the value to be characters."
+    },
+    {
+      "name": "3.0.4|multipart|byte",
+      "openapi": "3.0.4",
+      "lane": "multipart",
+      "media": "multipart/form-data",
+      "kind": "byte",
+      "propertyName": "p",
+      "schema": {
+        "type": "string",
+        "format": "byte"
+      },
+      "value": "QUJD",
+      "expect": "admitted;emit=application/octet-stream:QUJD",
+      "basis": "The part default is application/octet-stream, per 3.0.4's default-`contentType` row for `string` with `format` \"`binary` or `byte`\" read line-uniformly under the editions' own Section 4.1 instruction, and the part's value is the caller's artifact-encoded Base64 text sent as-is. Emitting different part framing on either side of a patch boundary is the distinction those editions instruct against."
+    },
+    {
+      "name": "3.0.4|multipart|binary",
+      "openapi": "3.0.4",
+      "lane": "multipart",
+      "media": "multipart/form-data",
+      "kind": "binary",
+      "propertyName": "p",
+      "schema": {
+        "type": "string",
+        "format": "binary"
+      },
+      "value": "QUJD",
+      "expect": "admitted;emit=application/octet-stream:ABC",
+      "basis": "Control. The 3.0 `binary` row is also application/octet-stream, but its value half is the OpenBindings canonical Base64 boundary, so the part carries the DECODED octets."
+    },
+    {
+      "name": "3.0.4|multipart|plain-string",
+      "openapi": "3.0.4",
+      "lane": "multipart",
+      "media": "multipart/form-data",
+      "kind": "plain-string",
+      "propertyName": "p",
+      "schema": {
+        "type": "string"
+      },
+      "value": "QUJD",
+      "expect": "admitted;emit=text/plain:QUJD",
+      "basis": "Control. \"Other primitive types\" take text/plain on this line, which is what the `byte` row above moved away from."
+    },
+    {
+      "name": "3.0.4|multipart|byte-encoding-json",
+      "openapi": "3.0.4",
+      "lane": "multipart",
+      "media": "multipart/form-data",
+      "kind": "byte-encoding-json",
+      "propertyName": "p",
+      "schema": {
+        "type": "string",
+        "format": "byte"
+      },
+      "value": "QUJD",
+      "expect": "admitted;emit=application/json:QUJD",
+      "basis": "An Encoding Object that declares a part contentType displaces the default row, and the artifact-encoded value half survives it: the characters ride as-is under the declared application/json, unquoted. Contrast the 3.1 row, where the same declaration is an ordinary string and IS JSON-serialized.",
+      "encodingContentType": "application/json"
+    },
+    {
+      "name": "3.0.4|urlencoded|byte",
+      "openapi": "3.0.4",
+      "lane": "urlencoded",
+      "media": "application/x-www-form-urlencoded",
+      "kind": "byte",
+      "propertyName": "p",
+      "schema": {
+        "type": "string",
+        "format": "byte"
+      },
+      "value": "QUJD",
+      "expect": "admitted;emit=p=QUJD",
+      "basis": "The same declaration on the urlencoded content lane: default application/octet-stream, value carried as-is. The emission is wire-identical to the 3.1 control below, because the part content type is not emitted on this lane at all; the `byte-encoding-json` rows are where the lane discriminates."
+    },
+    {
+      "name": "3.0.4|urlencoded|binary",
+      "openapi": "3.0.4",
+      "lane": "urlencoded",
+      "media": "application/x-www-form-urlencoded",
+      "kind": "binary",
+      "propertyName": "p",
+      "schema": {
+        "type": "string",
+        "format": "binary"
+      },
+      "value": "QUJD",
+      "expect": "refused",
+      "basis": "Control. §9.2 defines no urlencoded octet boundary for the 3.0 raw-binary lane, so the property has no faithful carriage and the alternative is refused — which is precisely the outcome the `byte` row above must NOT have, since a `byte` value is characters rather than octets."
+    },
+    {
+      "name": "3.0.4|urlencoded|plain-string",
+      "openapi": "3.0.4",
+      "lane": "urlencoded",
+      "media": "application/x-www-form-urlencoded",
+      "kind": "plain-string",
+      "propertyName": "p",
+      "schema": {
+        "type": "string"
+      },
+      "value": "QUJD",
+      "expect": "admitted;emit=p=QUJD",
+      "basis": "Control. The unchanged plain-string content-lane carriage."
+    },
+    {
+      "name": "3.0.4|urlencoded|byte-encoding-json",
+      "openapi": "3.0.4",
+      "lane": "urlencoded",
+      "media": "application/x-www-form-urlencoded",
+      "kind": "byte-encoding-json",
+      "propertyName": "p",
+      "schema": {
+        "type": "string",
+        "format": "byte"
+      },
+      "value": "QUJD",
+      "expect": "admitted;emit=p=QUJD",
+      "basis": "The declared application/json displaces the default row and the artifact-encoded value half survives: the characters are percent-encoded as-is. This is the cell that turns red if the 3.0 byte lane is removed, since a plain string declaration would be JSON-serialized first.",
+      "encodingContentType": "application/json"
+    },
+    {
+      "name": "3.1.0|body|byte",
+      "openapi": "3.1.0",
+      "lane": "body",
+      "media": "application/pdf",
+      "kind": "byte",
+      "propertyName": "p",
+      "schema": {
+        "type": "string",
+        "format": "byte"
+      },
+      "value": "QUJD",
+      "expect": "refused",
+      "basis": "Control. On the 3.1 line `format` has no content-encoding force and `byte` is absent from the format tables, so this is an ordinary `type: string` declaration. application/pdf is outside §9.2's closed character-data test, so no string-carriage lane applies and the alternative is excluded — the 3.1 spelling for an already-encoded string is `contentEncoding`, not `format`."
+    },
+    {
+      "name": "3.1.0|body|binary",
+      "openapi": "3.1.0",
+      "lane": "body",
+      "media": "application/pdf",
+      "kind": "binary",
+      "propertyName": "p",
+      "schema": {
+        "type": "string",
+        "format": "binary"
+      },
+      "value": "QUJD",
+      "expect": "refused",
+      "basis": "Control. `format: binary` is a string declaration on this line (3.1.0 Section 4.8.14.3), and application/pdf is outside the character-data test, so nothing carries it."
+    },
+    {
+      "name": "3.1.0|body|plain-string",
+      "openapi": "3.1.0",
+      "lane": "body",
+      "media": "application/pdf",
+      "kind": "plain-string",
+      "propertyName": "p",
+      "schema": {
+        "type": "string"
+      },
+      "value": "QUJD",
+      "expect": "refused",
+      "basis": "Control. Same as the 3.0 row: outside character data, a bare string declaration carries nothing."
+    },
+    {
+      "name": "3.1.0|multipart|byte",
+      "openapi": "3.1.0",
+      "lane": "multipart",
+      "media": "multipart/form-data",
+      "kind": "byte",
+      "propertyName": "p",
+      "schema": {
+        "type": "string",
+        "format": "byte"
+      },
+      "value": "QUJD",
+      "expect": "admitted;emit=text/plain:QUJD",
+      "basis": "Control. `format` annotates nothing on this line, so the part is a declared primitive and takes the text/plain row (3.1.0 Section 4.8.14.5; the `string` row with `contentEncoding` ABSENT in 3.1.1 and 3.1.2)."
+    },
+    {
+      "name": "3.1.0|multipart|binary",
+      "openapi": "3.1.0",
+      "lane": "multipart",
+      "media": "multipart/form-data",
+      "kind": "binary",
+      "propertyName": "p",
+      "schema": {
+        "type": "string",
+        "format": "binary"
+      },
+      "value": "QUJD",
+      "expect": "admitted;emit=text/plain:QUJD",
+      "basis": "Control. A string declaration whose `format` annotates nothing takes the primitive text/plain row."
+    },
+    {
+      "name": "3.1.0|multipart|plain-string",
+      "openapi": "3.1.0",
+      "lane": "multipart",
+      "media": "multipart/form-data",
+      "kind": "plain-string",
+      "propertyName": "p",
+      "schema": {
+        "type": "string"
+      },
+      "value": "QUJD",
+      "expect": "admitted;emit=text/plain:QUJD",
+      "basis": "Control. The primitive text/plain row, reconciled for 3.1.0 in §9.2 against that edition's Encoding Object catch-all."
+    },
+    {
+      "name": "3.1.0|multipart|byte-encoding-json",
+      "openapi": "3.1.0",
+      "lane": "multipart",
+      "media": "multipart/form-data",
+      "kind": "byte-encoding-json",
+      "propertyName": "p",
+      "schema": {
+        "type": "string",
+        "format": "byte"
+      },
+      "value": "QUJD",
+      "expect": "admitted;emit=application/json:\"QUJD\"",
+      "basis": "Control, and the discriminator: with `format` inert this is a plain string part, so the declared application/json serializes it as JSON — quotes included.",
+      "encodingContentType": "application/json"
+    },
+    {
+      "name": "3.1.0|urlencoded|byte",
+      "openapi": "3.1.0",
+      "lane": "urlencoded",
+      "media": "application/x-www-form-urlencoded",
+      "kind": "byte",
+      "propertyName": "p",
+      "schema": {
+        "type": "string",
+        "format": "byte"
+      },
+      "value": "QUJD",
+      "expect": "admitted;emit=p=QUJD",
+      "basis": "Control. A plain string property on the content lane, percent-encoded."
+    },
+    {
+      "name": "3.1.0|urlencoded|binary",
+      "openapi": "3.1.0",
+      "lane": "urlencoded",
+      "media": "application/x-www-form-urlencoded",
+      "kind": "binary",
+      "propertyName": "p",
+      "schema": {
+        "type": "string",
+        "format": "binary"
+      },
+      "value": "QUJD",
+      "expect": "admitted;emit=p=QUJD",
+      "basis": "Control. A string declaration whose `format` annotates nothing carries as text."
+    },
+    {
+      "name": "3.1.0|urlencoded|plain-string",
+      "openapi": "3.1.0",
+      "lane": "urlencoded",
+      "media": "application/x-www-form-urlencoded",
+      "kind": "plain-string",
+      "propertyName": "p",
+      "schema": {
+        "type": "string"
+      },
+      "value": "QUJD",
+      "expect": "admitted;emit=p=QUJD",
+      "basis": "Control. The unchanged plain-string content-lane carriage."
+    },
+    {
+      "name": "3.1.0|urlencoded|byte-encoding-json",
+      "openapi": "3.1.0",
+      "lane": "urlencoded",
+      "media": "application/x-www-form-urlencoded",
+      "kind": "byte-encoding-json",
+      "propertyName": "p",
+      "schema": {
+        "type": "string",
+        "format": "byte"
+      },
+      "value": "QUJD",
+      "expect": "admitted;emit=p=%22QUJD%22",
+      "basis": "Control, and the discriminator: `format` is inert here, so the declared application/json serializes the string as JSON and the quotes are percent-encoded.",
+      "encodingContentType": "application/json"
+    },
+    {
+      "name": "3.1.1|body|byte",
+      "openapi": "3.1.1",
+      "lane": "body",
+      "media": "application/pdf",
+      "kind": "byte",
+      "propertyName": "p",
+      "schema": {
+        "type": "string",
+        "format": "byte"
+      },
+      "value": "QUJD",
+      "expect": "refused",
+      "basis": "Control. On the 3.1 line `format` has no content-encoding force and `byte` is absent from the format tables, so this is an ordinary `type: string` declaration. application/pdf is outside §9.2's closed character-data test, so no string-carriage lane applies and the alternative is excluded — the 3.1 spelling for an already-encoded string is `contentEncoding`, not `format`."
+    },
+    {
+      "name": "3.1.1|body|binary",
+      "openapi": "3.1.1",
+      "lane": "body",
+      "media": "application/pdf",
+      "kind": "binary",
+      "propertyName": "p",
+      "schema": {
+        "type": "string",
+        "format": "binary"
+      },
+      "value": "QUJD",
+      "expect": "refused",
+      "basis": "Control. `format: binary` is a string declaration on this line (3.1.0 Section 4.8.14.3), and application/pdf is outside the character-data test, so nothing carries it."
+    },
+    {
+      "name": "3.1.1|body|plain-string",
+      "openapi": "3.1.1",
+      "lane": "body",
+      "media": "application/pdf",
+      "kind": "plain-string",
+      "propertyName": "p",
+      "schema": {
+        "type": "string"
+      },
+      "value": "QUJD",
+      "expect": "refused",
+      "basis": "Control. Same as the 3.0 row: outside character data, a bare string declaration carries nothing."
+    },
+    {
+      "name": "3.1.1|multipart|byte",
+      "openapi": "3.1.1",
+      "lane": "multipart",
+      "media": "multipart/form-data",
+      "kind": "byte",
+      "propertyName": "p",
+      "schema": {
+        "type": "string",
+        "format": "byte"
+      },
+      "value": "QUJD",
+      "expect": "admitted;emit=text/plain:QUJD",
+      "basis": "Control. `format` annotates nothing on this line, so the part is a declared primitive and takes the text/plain row (3.1.0 Section 4.8.14.5; the `string` row with `contentEncoding` ABSENT in 3.1.1 and 3.1.2)."
+    },
+    {
+      "name": "3.1.1|multipart|binary",
+      "openapi": "3.1.1",
+      "lane": "multipart",
+      "media": "multipart/form-data",
+      "kind": "binary",
+      "propertyName": "p",
+      "schema": {
+        "type": "string",
+        "format": "binary"
+      },
+      "value": "QUJD",
+      "expect": "admitted;emit=text/plain:QUJD",
+      "basis": "Control. A string declaration whose `format` annotates nothing takes the primitive text/plain row."
+    },
+    {
+      "name": "3.1.1|multipart|plain-string",
+      "openapi": "3.1.1",
+      "lane": "multipart",
+      "media": "multipart/form-data",
+      "kind": "plain-string",
+      "propertyName": "p",
+      "schema": {
+        "type": "string"
+      },
+      "value": "QUJD",
+      "expect": "admitted;emit=text/plain:QUJD",
+      "basis": "Control. The primitive text/plain row, reconciled for 3.1.0 in §9.2 against that edition's Encoding Object catch-all."
+    },
+    {
+      "name": "3.1.1|multipart|byte-encoding-json",
+      "openapi": "3.1.1",
+      "lane": "multipart",
+      "media": "multipart/form-data",
+      "kind": "byte-encoding-json",
+      "propertyName": "p",
+      "schema": {
+        "type": "string",
+        "format": "byte"
+      },
+      "value": "QUJD",
+      "expect": "admitted;emit=application/json:\"QUJD\"",
+      "basis": "Control, and the discriminator: with `format` inert this is a plain string part, so the declared application/json serializes it as JSON — quotes included.",
+      "encodingContentType": "application/json"
+    },
+    {
+      "name": "3.1.1|urlencoded|byte",
+      "openapi": "3.1.1",
+      "lane": "urlencoded",
+      "media": "application/x-www-form-urlencoded",
+      "kind": "byte",
+      "propertyName": "p",
+      "schema": {
+        "type": "string",
+        "format": "byte"
+      },
+      "value": "QUJD",
+      "expect": "admitted;emit=p=QUJD",
+      "basis": "Control. A plain string property on the content lane, percent-encoded."
+    },
+    {
+      "name": "3.1.1|urlencoded|binary",
+      "openapi": "3.1.1",
+      "lane": "urlencoded",
+      "media": "application/x-www-form-urlencoded",
+      "kind": "binary",
+      "propertyName": "p",
+      "schema": {
+        "type": "string",
+        "format": "binary"
+      },
+      "value": "QUJD",
+      "expect": "admitted;emit=p=QUJD",
+      "basis": "Control. A string declaration whose `format` annotates nothing carries as text."
+    },
+    {
+      "name": "3.1.1|urlencoded|plain-string",
+      "openapi": "3.1.1",
+      "lane": "urlencoded",
+      "media": "application/x-www-form-urlencoded",
+      "kind": "plain-string",
+      "propertyName": "p",
+      "schema": {
+        "type": "string"
+      },
+      "value": "QUJD",
+      "expect": "admitted;emit=p=QUJD",
+      "basis": "Control. The unchanged plain-string content-lane carriage."
+    },
+    {
+      "name": "3.1.1|urlencoded|byte-encoding-json",
+      "openapi": "3.1.1",
+      "lane": "urlencoded",
+      "media": "application/x-www-form-urlencoded",
+      "kind": "byte-encoding-json",
+      "propertyName": "p",
+      "schema": {
+        "type": "string",
+        "format": "byte"
+      },
+      "value": "QUJD",
+      "expect": "admitted;emit=p=%22QUJD%22",
+      "basis": "Control, and the discriminator: `format` is inert here, so the declared application/json serializes the string as JSON and the quotes are percent-encoded.",
+      "encodingContentType": "application/json"
+    },
+    {
+      "name": "3.1.2|body|byte",
+      "openapi": "3.1.2",
+      "lane": "body",
+      "media": "application/pdf",
+      "kind": "byte",
+      "propertyName": "p",
+      "schema": {
+        "type": "string",
+        "format": "byte"
+      },
+      "value": "QUJD",
+      "expect": "refused",
+      "basis": "Control. On the 3.1 line `format` has no content-encoding force and `byte` is absent from the format tables, so this is an ordinary `type: string` declaration. application/pdf is outside §9.2's closed character-data test, so no string-carriage lane applies and the alternative is excluded — the 3.1 spelling for an already-encoded string is `contentEncoding`, not `format`."
+    },
+    {
+      "name": "3.1.2|body|binary",
+      "openapi": "3.1.2",
+      "lane": "body",
+      "media": "application/pdf",
+      "kind": "binary",
+      "propertyName": "p",
+      "schema": {
+        "type": "string",
+        "format": "binary"
+      },
+      "value": "QUJD",
+      "expect": "refused",
+      "basis": "Control. `format: binary` is a string declaration on this line (3.1.0 Section 4.8.14.3), and application/pdf is outside the character-data test, so nothing carries it."
+    },
+    {
+      "name": "3.1.2|body|plain-string",
+      "openapi": "3.1.2",
+      "lane": "body",
+      "media": "application/pdf",
+      "kind": "plain-string",
+      "propertyName": "p",
+      "schema": {
+        "type": "string"
+      },
+      "value": "QUJD",
+      "expect": "refused",
+      "basis": "Control. Same as the 3.0 row: outside character data, a bare string declaration carries nothing."
+    },
+    {
+      "name": "3.1.2|multipart|byte",
+      "openapi": "3.1.2",
+      "lane": "multipart",
+      "media": "multipart/form-data",
+      "kind": "byte",
+      "propertyName": "p",
+      "schema": {
+        "type": "string",
+        "format": "byte"
+      },
+      "value": "QUJD",
+      "expect": "admitted;emit=text/plain:QUJD",
+      "basis": "Control. `format` annotates nothing on this line, so the part is a declared primitive and takes the text/plain row (3.1.0 Section 4.8.14.5; the `string` row with `contentEncoding` ABSENT in 3.1.1 and 3.1.2)."
+    },
+    {
+      "name": "3.1.2|multipart|binary",
+      "openapi": "3.1.2",
+      "lane": "multipart",
+      "media": "multipart/form-data",
+      "kind": "binary",
+      "propertyName": "p",
+      "schema": {
+        "type": "string",
+        "format": "binary"
+      },
+      "value": "QUJD",
+      "expect": "admitted;emit=text/plain:QUJD",
+      "basis": "Control. A string declaration whose `format` annotates nothing takes the primitive text/plain row."
+    },
+    {
+      "name": "3.1.2|multipart|plain-string",
+      "openapi": "3.1.2",
+      "lane": "multipart",
+      "media": "multipart/form-data",
+      "kind": "plain-string",
+      "propertyName": "p",
+      "schema": {
+        "type": "string"
+      },
+      "value": "QUJD",
+      "expect": "admitted;emit=text/plain:QUJD",
+      "basis": "Control. The primitive text/plain row, reconciled for 3.1.0 in §9.2 against that edition's Encoding Object catch-all."
+    },
+    {
+      "name": "3.1.2|multipart|byte-encoding-json",
+      "openapi": "3.1.2",
+      "lane": "multipart",
+      "media": "multipart/form-data",
+      "kind": "byte-encoding-json",
+      "propertyName": "p",
+      "schema": {
+        "type": "string",
+        "format": "byte"
+      },
+      "value": "QUJD",
+      "expect": "admitted;emit=application/json:\"QUJD\"",
+      "basis": "Control, and the discriminator: with `format` inert this is a plain string part, so the declared application/json serializes it as JSON — quotes included.",
+      "encodingContentType": "application/json"
+    },
+    {
+      "name": "3.1.2|urlencoded|byte",
+      "openapi": "3.1.2",
+      "lane": "urlencoded",
+      "media": "application/x-www-form-urlencoded",
+      "kind": "byte",
+      "propertyName": "p",
+      "schema": {
+        "type": "string",
+        "format": "byte"
+      },
+      "value": "QUJD",
+      "expect": "admitted;emit=p=QUJD",
+      "basis": "Control. A plain string property on the content lane, percent-encoded."
+    },
+    {
+      "name": "3.1.2|urlencoded|binary",
+      "openapi": "3.1.2",
+      "lane": "urlencoded",
+      "media": "application/x-www-form-urlencoded",
+      "kind": "binary",
+      "propertyName": "p",
+      "schema": {
+        "type": "string",
+        "format": "binary"
+      },
+      "value": "QUJD",
+      "expect": "admitted;emit=p=QUJD",
+      "basis": "Control. A string declaration whose `format` annotates nothing carries as text."
+    },
+    {
+      "name": "3.1.2|urlencoded|plain-string",
+      "openapi": "3.1.2",
+      "lane": "urlencoded",
+      "media": "application/x-www-form-urlencoded",
+      "kind": "plain-string",
+      "propertyName": "p",
+      "schema": {
+        "type": "string"
+      },
+      "value": "QUJD",
+      "expect": "admitted;emit=p=QUJD",
+      "basis": "Control. The unchanged plain-string content-lane carriage."
+    },
+    {
+      "name": "3.1.2|urlencoded|byte-encoding-json",
+      "openapi": "3.1.2",
+      "lane": "urlencoded",
+      "media": "application/x-www-form-urlencoded",
+      "kind": "byte-encoding-json",
+      "propertyName": "p",
+      "schema": {
+        "type": "string",
+        "format": "byte"
+      },
+      "value": "QUJD",
+      "expect": "admitted;emit=p=%22QUJD%22",
+      "basis": "Control, and the discriminator: `format` is inert here, so the declared application/json serializes the string as JSON and the quotes are percent-encoded.",
+      "encodingContentType": "application/json"
+    }
+  ]
+}

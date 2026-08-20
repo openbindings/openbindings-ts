@@ -782,23 +782,37 @@ describe("openbindings.openapi@1 request carriage", () => {
     }));
   });
 
-  // §9.2 per edition: on the 3.0 line no stated default contentType row
-  // reaches a part declaring no `type`, so this specification's own
-  // convention answers and the alternative is represented; on every accepted
-  // 3.1 edition the OAS states application/octet-stream for it and this
-  // revision defines no JSON-to-octet part boundary, so the alternative is an
-  // accounted exclusion.
+  // §9.2, both lines: a multipart alternative whose part declares no `type`
+  // is an ACCOUNTED EXCLUSION on every accepted edition. This case split by
+  // edition until 2026-08-20 — the 3.0 line represented the alternative under
+  // the specification's own value-keyed convention — and escalation M2
+  // deleted that convention, so the accounting converges. The grounds still
+  // differ per line: the 3.1 editions STATE application/octet-stream for the
+  // part and this revision defines no JSON-to-octet part boundary to cross,
+  // while the 3.0 editions state no row at all and this revision authors none.
+  // The boolean-literal `true` part left this case list with F-O1-13: on the
+  // 3.0 line it is not a Schema Object, so the acceptance floor accounts it
+  // `invalid` rather than excluded — see the F-O1-13 test below.
   it.each([
     ["typeless part", { schema: { type: "object", properties: { note: {} } } }],
-    ["boolean-true part", { schema: { type: "object", properties: { note: true } } }],
-  ])("coverage splits multipart %s by edition (§9.2 part interpretation)", async (_case, media) => {
-    const represented = await new OpenAPISynthesizer().synthesizeInterfaceWithCoverage({
-      sources: [{ bindingSpec: BINDING_SPEC, content: document("3.0.4", { "multipart/form-data": media }, false) }],
-    });
-    expect(represented.coverage.entries).toContainEqual(expect.objectContaining({
-      scope: "alternative",
-      status: "represented",
-    }));
+  ])("coverage-excludes multipart %s on every edition (§9.2 part interpretation)", async (_case, media) => {
+    for (const edition of ["3.0.0", "3.0.4", "3.1.0", "3.1.1", "3.1.2"]) {
+      const excluded = await new OpenAPISynthesizer().synthesizeInterfaceWithCoverage({
+        sources: [{ bindingSpec: BINDING_SPEC, content: document(edition, { "multipart/form-data": media }, false) }],
+      });
+      expect(excluded.coverage.entries).toContainEqual(expect.objectContaining({
+        scope: "alternative",
+        status: "excluded",
+        reasonCode: "openapi.request_media_excluded",
+      }));
+    }
+  });
+
+  // The 3.1 half of the boolean-literal part: `true` is a legal 2020-12
+  // schema that asserts nothing, so it is the type-absent cell there and its
+  // alternative is an accounted exclusion. The 3.0 half is F-O1-13's.
+  it("coverage-excludes a multipart boolean-true part on the 3.1 line", async () => {
+    const media = { schema: { type: "object", properties: { note: true } } };
     for (const edition of ["3.1.0", "3.1.1", "3.1.2"]) {
       const excluded = await new OpenAPISynthesizer().synthesizeInterfaceWithCoverage({
         sources: [{ bindingSpec: BINDING_SPEC, content: document(edition, { "multipart/form-data": media }, false) }],
