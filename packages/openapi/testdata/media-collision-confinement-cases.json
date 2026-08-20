@@ -1,0 +1,267 @@
+{
+  "$comment": "openbindings.openapi@1 section 9.2 normalized-collision CONFINEMENT, shared byte-identically by the two client engines and the two adapter engines. Two keys in ONE content map denoting the same parsed media type are a normalized collision, and the defect confines to that colliding parsed identity -- the smallest unit that owns it. No first-key rule: no request selection may land on the colliding identity and no response match may be governed by it, each such selection refusing with the exclusion accounted, while the map's non-colliding entries remain usable alternatives. 'side' names which content map the cell exercises. Request cells carry the synthesis coverage accounting the adapters emit ('target', 'represented', 'excluded', 'collidingIdentity'); response cells carry the advertised success-media membership ('advertised'), which is the Accept set the clients emit.",
+  "cases": [
+    {
+      "name": "request-collision-confines-and-the-sibling-selects",
+      "openapi": "3.1.0",
+      "side": "request",
+      "description": "Two spellings of application/json collide in one content map; the non-colliding sibling is still a usable alternative and dispatches under its own declaration.",
+      "content": {
+        "application/json; charset=UTF-8": {
+          "schema": {
+            "type": "object"
+          }
+        },
+        "Application/JSON;charset=\"utf-8\"": {
+          "schema": {
+            "type": "object"
+          }
+        },
+        "application/vnd.safe+json": {
+          "schema": {
+            "type": "object"
+          }
+        }
+      },
+      "select": "application/vnd.safe+json",
+      "outcome": "usable",
+      "target": "represented",
+      "represented": [
+        "application/vnd.safe+json"
+      ],
+      "excluded": [
+        "Application/JSON;charset=\"utf-8\"",
+        "application/json; charset=UTF-8"
+      ],
+      "collidingIdentity": "application/json; charset=UTF-8"
+    },
+    {
+      "name": "request-selection-may-not-land-on-the-colliding-identity",
+      "openapi": "3.1.0",
+      "side": "request",
+      "description": "The same map, selecting the colliding identity itself: no request selection may land on it, so the invocation refuses before dispatch even though a usable sibling exists.",
+      "content": {
+        "application/json; charset=UTF-8": {
+          "schema": {
+            "type": "object"
+          }
+        },
+        "Application/JSON;charset=\"utf-8\"": {
+          "schema": {
+            "type": "object"
+          }
+        },
+        "application/vnd.safe+json": {
+          "schema": {
+            "type": "object"
+          }
+        }
+      },
+      "select": "application/json; charset=utf-8",
+      "outcome": "refused",
+      "target": "represented",
+      "represented": [
+        "application/vnd.safe+json"
+      ],
+      "excluded": [
+        "Application/JSON;charset=\"utf-8\"",
+        "application/json; charset=UTF-8"
+      ],
+      "collidingIdentity": "application/json; charset=UTF-8"
+    },
+    {
+      "name": "request-map-whose-only-entries-collide-refuses",
+      "openapi": "3.1.0",
+      "side": "request",
+      "description": "A map with no non-colliding entry left has no candidate carriage at all: the required body refuses and the target is accounted excluded.",
+      "content": {
+        "application/json; charset=UTF-8": {
+          "schema": {
+            "type": "object"
+          }
+        },
+        "Application/JSON;charset=\"utf-8\"": {
+          "schema": {
+            "type": "object"
+          }
+        }
+      },
+      "select": "application/json; charset=utf-8",
+      "outcome": "refused",
+      "target": "excluded",
+      "targetReasonCode": "openapi.unresolvable_request_body",
+      "targetRule": "OAPI-P-04",
+      "represented": [],
+      "excluded": [],
+      "collidingIdentity": "application/json; charset=UTF-8"
+    },
+    {
+      "name": "request-control-no-collision",
+      "openapi": "3.1.0",
+      "side": "request",
+      "description": "Control: two distinct parsed identities in one map collide with nothing, so both stay represented and the selection dispatches.",
+      "content": {
+        "application/json": {
+          "schema": {
+            "type": "object"
+          }
+        },
+        "application/vnd.safe+json": {
+          "schema": {
+            "type": "object"
+          }
+        }
+      },
+      "select": "application/json",
+      "outcome": "usable",
+      "target": "represented",
+      "represented": [
+        "application/json",
+        "application/vnd.safe+json"
+      ],
+      "excluded": [],
+      "collidingIdentity": ""
+    },
+    {
+      "name": "request-collision-confines-on-the-3.0-line",
+      "openapi": "3.0.4",
+      "side": "request",
+      "description": "The rule is edition-uniform: a bare type/subtype case collision on the 3.0 line confines exactly as a parameterized one does on the 3.1 line.",
+      "content": {
+        "application/json": {
+          "schema": {
+            "type": "object"
+          }
+        },
+        "APPLICATION/JSON": {
+          "schema": {
+            "type": "object"
+          }
+        },
+        "application/vnd.safe+json": {
+          "schema": {
+            "type": "object"
+          }
+        }
+      },
+      "select": "application/vnd.safe+json",
+      "outcome": "usable",
+      "target": "represented",
+      "represented": [
+        "application/vnd.safe+json"
+      ],
+      "excluded": [
+        "APPLICATION/JSON",
+        "application/json"
+      ],
+      "collidingIdentity": "application/json"
+    },
+    {
+      "name": "response-collision-confines-and-the-sibling-governs",
+      "openapi": "3.1.0",
+      "side": "response",
+      "description": "A collision in a response content map does not poison a clean concrete match: the non-colliding text/plain sibling still governs the decode, and only it is advertised.",
+      "content": {
+        "text/plain": {},
+        "application/json; charset=UTF-8": {},
+        "Application/JSON;charset=\"utf-8\"": {}
+      },
+      "select": "text/plain",
+      "responseBody": "hi",
+      "outcome": "usable",
+      "output": "hi",
+      "advertised": [
+        "text/plain"
+      ]
+    },
+    {
+      "name": "response-match-may-not-be-governed-by-the-colliding-identity",
+      "openapi": "3.1.0",
+      "side": "response",
+      "description": "The same map, with the peer selecting the colliding identity: no response match may be governed by it, so the interaction fails loudly rather than picking a key by source order.",
+      "content": {
+        "text/plain": {},
+        "application/json; charset=UTF-8": {},
+        "Application/JSON;charset=\"utf-8\"": {}
+      },
+      "select": "application/json; charset=utf-8",
+      "responseBody": "{\"id\":1}",
+      "outcome": "refused",
+      "advertised": [
+        "text/plain"
+      ]
+    },
+    {
+      "name": "response-range-collision-confines-to-the-range-identity",
+      "openapi": "3.1.0",
+      "side": "response",
+      "description": "Two colliding RANGE keys own only their own range identity: a clean concrete application/json declaration still governs the decode.",
+      "content": {
+        "application/json": {},
+        "application/*; charset=UTF-8": {},
+        "Application/*;charset=\"utf-8\"": {}
+      },
+      "select": "application/json",
+      "responseBody": "{\"id\":1}",
+      "outcome": "usable",
+      "output": {
+        "id": 1
+      },
+      "advertised": [
+        "application/json"
+      ]
+    },
+    {
+      "name": "response-map-whose-only-entries-collide-governs-nothing",
+      "openapi": "3.1.0",
+      "side": "response",
+      "description": "A response map with no non-colliding entry left governs nothing, and advertises nothing: the Accept set is empty rather than naming a representation the decode lane must refuse.",
+      "content": {
+        "application/json; charset=UTF-8": {},
+        "Application/JSON;charset=\"utf-8\"": {}
+      },
+      "select": "application/json; charset=utf-8",
+      "responseBody": "{\"id\":1}",
+      "outcome": "refused",
+      "advertised": []
+    },
+    {
+      "name": "response-control-no-collision",
+      "openapi": "3.1.0",
+      "side": "response",
+      "description": "Control: two distinct parsed identities govern and advertise normally.",
+      "content": {
+        "application/json": {},
+        "text/plain": {}
+      },
+      "select": "text/plain",
+      "responseBody": "hi",
+      "outcome": "usable",
+      "output": "hi",
+      "advertised": [
+        "application/json",
+        "text/plain"
+      ]
+    },
+    {
+      "name": "response-collision-confines-on-the-3.0-line",
+      "openapi": "3.0.4",
+      "side": "response",
+      "description": "The response half is edition-uniform too: a bare case collision on the 3.0 line confines to its identity and leaves the sibling governing.",
+      "content": {
+        "application/json": {},
+        "text/plain": {},
+        "TEXT/PLAIN": {}
+      },
+      "select": "application/json",
+      "responseBody": "{\"id\":1}",
+      "outcome": "usable",
+      "output": {
+        "id": 1
+      },
+      "advertised": [
+        "application/json"
+      ]
+    }
+  ]
+}

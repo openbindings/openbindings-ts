@@ -7,6 +7,7 @@ import type {
 } from "./types.js";
 import {
   candidateCollides,
+  normalizedMediaCollisions,
   planRequestBodies,
 } from "./media.js";
 import { effectiveParameters } from "./params.js";
@@ -255,6 +256,10 @@ function requestMediaCoverage(
   } catch (error: unknown) {
     planError = error;
   }
+  // §9.2's normalized collision confines to the colliding parsed identity:
+  // the colliding keys are excluded alternatives naming that identity, and the
+  // map's non-colliding siblings stay represented beside them.
+  const colliding = normalizedMediaCollisions(content, hasMediaFidelity(bindingSpec));
   const planned = new Set(plans.map((plan) => plan.mediaKey));
   const represented = new Set(
     plans
@@ -296,6 +301,15 @@ function requestMediaCoverage(
       return entry;
     }
     const collision = planned.has(mediaType);
+    const collidingIdentity = colliding.get(mediaType);
+    let message: string;
+    if (collision) {
+      message = "request media alternative collides with an independently declared parameter in the candidate's application boundary";
+    } else if (collidingIdentity !== undefined) {
+      message = `request media alternative denotes the parsed media identity ${collidingIdentity}, which another declaration in this content map also denotes; no selection may land on a normalized-colliding identity`;
+    } else {
+      message = errorMessage(planError) || "request media alternative has no faithful candidate carriage";
+    }
     return {
       sourceIndex: 0,
       sourceRef,
@@ -303,9 +317,7 @@ function requestMediaCoverage(
       status: "excluded",
       reasonCode: collision ? "openapi.flattening_collision" : "openapi.request_media_excluded",
       rule: collision ? "OAPI-P-03" : "OAPI-P-04",
-      message: collision
-        ? "request media alternative collides with an independently declared parameter in the candidate's application boundary"
-        : errorMessage(planError) || "request media alternative has no faithful candidate carriage",
+      message,
       details: { mediaType },
     };
   });

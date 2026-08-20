@@ -978,9 +978,13 @@ describe("openbindings.openapi@1 request carriage", () => {
   });
 
   it("decodes a revision-3 unary response using its declared Latin-1 charset", async () => {
+    // The request side is incidental here: input {} routes nothing to the
+    // body, and a REQUIRED body with no value to carry now refuses before
+    // dispatch (§9.1 applied uniformly to absent and supplied input). An
+    // optional body keeps these response-decoding subjects dispatchable.
     const spec = document("3.1.2", {
       "application/json": { schema: { type: "object" } },
-    });
+    }, false);
     const operation = ((spec.paths as Record<string, any>)["/payload"].put as Record<string, unknown>);
     operation.responses = {
       "200": {
@@ -997,9 +1001,13 @@ describe("openbindings.openapi@1 request carriage", () => {
   });
 
   it("treats an explicitly empty response charset as unsupported, not absent", async () => {
+    // The request side is incidental here: input {} routes nothing to the
+    // body, and a REQUIRED body with no value to carry now refuses before
+    // dispatch (§9.1 applied uniformly to absent and supplied input). An
+    // optional body keeps these response-decoding subjects dispatchable.
     const spec = document("3.1.2", {
       "application/json": { schema: { type: "object" } },
-    });
+    }, false);
     const operation = ((spec.paths as Record<string, any>)["/payload"].put as Record<string, unknown>);
     operation.responses = {
       "200": {
@@ -1016,9 +1024,13 @@ describe("openbindings.openapi@1 request carriage", () => {
   });
 
   it("refuses a folded multiple Content-Type success header", async () => {
+    // The request side is incidental here: input {} routes nothing to the
+    // body, and a REQUIRED body with no value to carry now refuses before
+    // dispatch (§9.1 applied uniformly to absent and supplied input). An
+    // optional body keeps these response-decoding subjects dispatchable.
     const spec = document("3.1.2", {
       "application/json": { schema: { type: "object" } },
-    });
+    }, false);
     const operation = ((spec.paths as Record<string, any>)["/payload"].put as Record<string, unknown>);
     operation.responses = {
       "200": {
@@ -1035,9 +1047,13 @@ describe("openbindings.openapi@1 request carriage", () => {
   });
 
   it("completes an empty 2xx before applying stray SSE declaration checks", async () => {
+    // The request side is incidental here: input {} routes nothing to the
+    // body, and a REQUIRED body with no value to carry now refuses before
+    // dispatch (§9.1 applied uniformly to absent and supplied input). An
+    // optional body keeps these response-decoding subjects dispatchable.
     const spec = document("3.1.2", {
       "application/json": { schema: { type: "object" } },
-    });
+    }, false);
     const operation = ((spec.paths as Record<string, any>)["/payload"].put as Record<string, unknown>);
     operation.responses = { "200": { description: "empty" } };
     const result = await invokeResponse(spec, {}, new Response(null, {
@@ -1056,9 +1072,13 @@ describe("openbindings.openapi@1 request carriage", () => {
     body,
     expected,
   ) => {
+    // The request side is incidental here: input {} routes nothing to the
+    // body, and a REQUIRED body with no value to carry now refuses before
+    // dispatch (§9.1 applied uniformly to absent and supplied input). An
+    // optional body keeps these response-decoding subjects dispatchable.
     const spec = document("3.1.2", {
       "application/json": { schema: { type: "object" } },
-    });
+    }, false);
     const operation = ((spec.paths as Record<string, any>)["/payload"].put as Record<string, unknown>);
     operation.responses = {
       "200": {

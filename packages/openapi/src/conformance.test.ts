@@ -4,7 +4,6 @@ import {
   newInvokeHooks,
   USE_DEFAULT,
   ERR_INVALID_REF,
-  ERR_MISSING_INPUT,
   ERR_PROTOCOL,
   ERR_RESPONSE_ERROR,
   ERR_REFUSED,
@@ -608,7 +607,7 @@ describe("OAPI-P-03 — flattened-model refusals", () => {
     });
     await call.write({ name: "x" });
     await expect(call.closed).rejects.toMatchObject({
-      code: ERR_MISSING_INPUT,
+      code: ERR_REFUSED,
     });
     expect(requests).toHaveLength(0);
 
@@ -1143,15 +1142,20 @@ describe("OAPI-P-06 / §8 — interaction shape", () => {
     await expect(single(unaryCall.outputs)).resolves.toEqual({ mode: "unary" });
   });
 
-  // WHATWG extraction: comment-only, empty-data, and event/id-only events
-  // emit nothing; an incomplete final event is discarded.
-  it("emits nothing for empty events and discards an incomplete final event", async () => {
+  // WHATWG extraction: a lone empty `data:` line DISPATCHES an event whose
+  // data is the empty string (the data-buffer emptiness check precedes the
+  // trailing-LF strip; openapi@1 §8), at its position in the stream. Blocks
+  // with no data line — comment-only or event/id-only — dispatch nothing,
+  // and an incomplete final event is discarded. Shared empty-data case:
+  // byte-identical stream across the openapi and asyncapi engines.
+  it("dispatches the empty string for a lone empty data line at its position", async () => {
     const { fetch } = mockFetch(() =>
       sseResponse([
         ": comment only\n\n", // comment-only: nothing
         "event: tick\nid: 7\n\n", // fields-only: nothing
-        "data:\n\n", // empty-data: nothing
-        "data: real\n\n", // emits "real"
+        "data: first\n\n", // emits "first"
+        "data:\n\n", // lone empty data line: emits ""
+        "data: third\n\n", // emits "third"
         "data: incomplete-final-event", // no blank line: discarded
       ]),
     );
@@ -1163,7 +1167,7 @@ describe("OAPI-P-06 / §8 — interaction shape", () => {
     const events: unknown[] = [];
     for await (const e of call.outputs) events.push(e);
     await call.closed;
-    expect(events).toEqual(["real"]);
+    expect(events).toEqual(["first", "", "third"]);
   });
 
   // CRLF and lone-CR line endings are valid event-stream line terminators.

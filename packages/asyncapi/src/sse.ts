@@ -10,7 +10,11 @@
  *
  *   - `data:` lines accumulate; an event's data lines joined with U+000A
  *     form the event's text
- *   - comment-only and empty-`data` events emit nothing
+ *   - a block that carried no `data` line — comment-only and
+ *     `event:`/`id:`-only blocks included — dispatches nothing, while a
+ *     received `data` line whose value is empty dispatches like any other:
+ *     a lone empty `data:` line emits the empty string (WHATWG dispatch
+ *     checks the data buffer for emptiness BEFORE the trailing-LF strip)
  *   - `event`, `id`, and `retry` are FRAMING: they never enter the output
  *     value; they surface out of band on the per-unit meta
  *     (x-sse-event / x-sse-id / x-sse-retry). `retry` is never acted on:
@@ -79,13 +83,18 @@ export async function streamSSE(
   // because the handle went terminal while parked), signalling the caller
   // to stop reading the body.
   const dispatch = async (): Promise<boolean> => {
+    const hadDataLine = dataLines.length > 0;
     const rawData = dataLines.join("\n");
     const name = eventName;
     eventName = "";
     dataLines = [];
-    // Comment-only and empty-data events emit nothing (§8): an event whose
-    // joined data text is empty is discarded.
-    if (rawData === "") return true;
+    // A block that carried no data line dispatches nothing (WHATWG dispatch
+    // step 2: the data buffer is the empty string; comment-only and
+    // `event:`/`id:`-only blocks included). The emptiness check precedes
+    // the trailing-LF strip, so a received data line whose value is empty
+    // dispatches like any other — a lone empty `data:` line emits the
+    // empty string.
+    if (!hadDataLine) return true;
 
     // Per-unit meta: invocation-scoped headers merged with this event's
     // framing fields (out of band — never the output value).
