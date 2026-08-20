@@ -1,7 +1,7 @@
 {
-  "name": "@openbindings/sdk",
+  "name": "@openbindings/invoke",
   "version": "0.2.0",
-  "description": "OpenBindings TypeScript SDK: parse, validate, resolve, and invoke OBI interfaces.",
+  "description": "OpenBindings invocation layer: the binding-invoker and operation-invoker pattern — invocation handles, context, hooks, and operation requirements.",
   "type": "module",
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
@@ -36,14 +36,13 @@
     "obi",
     "api",
     "sdk",
-    "openapi",
-    "mcp"
+    "invoker"
   ],
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
     "url": "https://github.com/openbindings/openbindings-ts.git",
-    "directory": "packages/sdk"
+    "directory": "packages/invoke"
   },
   "homepage": "https://openbindings.com",
   "engines": {
@@ -51,8 +50,6 @@
   },
   "dependencies": {
     "@openbindings/compare": "workspace:^",
-    "@openbindings/core": "workspace:^",
-    "@openbindings/invoke": "workspace:^",
-    "@openbindings/synthesize": "workspace:^"
+    "@openbindings/core": "workspace:^"
   }
 }

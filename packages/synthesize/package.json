@@ -1,7 +1,7 @@
 {
-  "name": "@openbindings/sdk",
+  "name": "@openbindings/synthesize",
   "version": "0.2.0",
-  "description": "OpenBindings TypeScript SDK: parse, validate, resolve, and invoke OBI interfaces.",
+  "description": "OpenBindings synthesis layer: the interface-synthesizer and source-inspector pattern — synthesize OBIs from binding sources, coverage evidence, and interface fetching.",
   "type": "module",
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
@@ -36,23 +36,19 @@
     "obi",
     "api",
     "sdk",
-    "openapi",
-    "mcp"
+    "synthesizer"
   ],
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
     "url": "https://github.com/openbindings/openbindings-ts.git",
-    "directory": "packages/sdk"
+    "directory": "packages/synthesize"
   },
   "homepage": "https://openbindings.com",
   "engines": {
     "node": ">=18"
   },
   "dependencies": {
-    "@openbindings/compare": "workspace:^",
-    "@openbindings/core": "workspace:^",
-    "@openbindings/invoke": "workspace:^",
-    "@openbindings/synthesize": "workspace:^"
+    "@openbindings/core": "workspace:^"
   }
 }

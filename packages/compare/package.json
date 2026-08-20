@@ -1,7 +1,7 @@
 {
-  "name": "@openbindings/sdk",
+  "name": "@openbindings/compare",
   "version": "0.2.0",
-  "description": "OpenBindings TypeScript SDK: parse, validate, resolve, and invoke OBI interfaces.",
+  "description": "OpenBindings schema-comparison layer: interface and operation compatibility checking under the published schema-comparison profile (OB-2020-12).",
   "type": "module",
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
@@ -36,23 +36,20 @@
     "obi",
     "api",
     "sdk",
-    "openapi",
-    "mcp"
+    "compatibility"
   ],
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
     "url": "https://github.com/openbindings/openbindings-ts.git",
-    "directory": "packages/sdk"
+    "directory": "packages/compare"
   },
   "homepage": "https://openbindings.com",
   "engines": {
     "node": ">=18"
   },
   "dependencies": {
-    "@openbindings/compare": "workspace:^",
     "@openbindings/core": "workspace:^",
-    "@openbindings/invoke": "workspace:^",
-    "@openbindings/synthesize": "workspace:^"
+    "canonicalize": "^2.1.0"
   }
 }

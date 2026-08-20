@@ -1,7 +1,17 @@
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
-const browserPackages = ["sdk", "openapi", "asyncapi", "graphql", "mcp"];
+const browserPackages = [
+  "core",
+  "invoke",
+  "synthesize",
+  "compare",
+  "sdk",
+  "openapi",
+  "asyncapi",
+  "graphql",
+  "mcp",
+];
 const forbidden = /^(?:node:|fs(?:\/promises)?$|path$|url$)/;
 const failures = [];
 

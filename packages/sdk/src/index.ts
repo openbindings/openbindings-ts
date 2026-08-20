@@ -1,3 +1,24 @@
+/**
+ * @openbindings/sdk is the facade over the layered OpenBindings packages:
+ *
+ *   - @openbindings/core — the spec-defined document model (parse, validate,
+ *     resolve, verify)
+ *   - @openbindings/invoke — the binding-invoker / operation-invoker pattern
+ *   - @openbindings/synthesize — the interface-synthesizer / source-inspector
+ *     pattern
+ *   - @openbindings/compare — schema comparison under the published
+ *     schema-comparison profile (OB-2020-12)
+ *
+ * Every name exported here re-exports from the package that owns it; existing
+ * consumers keep importing from "@openbindings/sdk" unchanged. New consumers
+ * that want a smaller dependency surface import the layered packages
+ * directly.
+ */
+
+// ---------------------------------------------------------------------------
+// @openbindings/core
+// ---------------------------------------------------------------------------
+
 export type {
   JSONSchema,
   OperationExample,
@@ -8,8 +29,63 @@ export type {
   TransformRef,
   BindingEntry,
   OBInterface,
-} from "./types.js";
-export { isTransformRef, resolveTransform, schemaObjectForm } from "./types.js";
+  ValidateOptions,
+  ValidationFailure,
+  CompiledSchema,
+  ResolvedOperation,
+  RuleEvidenceStatus,
+  VerificationConclusion,
+  VerificationReport,
+  BindingSpecInfo,
+  ProcessorScenarioFile,
+  ProcessorScenario,
+  ProcessorExpected,
+  ProcessorAssertion,
+  ProcessorDisposition,
+  ProcessorPhase,
+  ProcessorObservation,
+  ProcessorMatch,
+} from "@openbindings/core";
+export {
+  isTransformRef,
+  resolveTransform,
+  schemaObjectForm,
+  validateInterface,
+  parseDocument,
+  validateDocument,
+  formatValidationErrors,
+  isOBInterface,
+  compileEmbeddedSchema,
+  compileExampleSchema,
+  compileOperationSchema,
+  OperationNotFoundError,
+  ValidationError,
+  MIN_SUPPORTED_VERSION,
+  MAX_TESTED_VERSION,
+  supportedRange,
+  isSupportedVersion,
+  isValidSemver,
+  isHigherMajorOrPre1MinorThanMaxTested,
+  isLowerThanMinSupported,
+  isUnsupportedPrerelease,
+  canonicalize,
+  canonicalizeLocation,
+  resolveRef,
+  unknownFields,
+  resolveOperation,
+  allOperationIdentifiers,
+  concludeVerification,
+  isHttpUrl,
+  MEDIA_TYPE,
+  WELL_KNOWN_PATH,
+  dereference,
+  checkAssertions,
+  matchProcessorObservation,
+} from "@openbindings/core";
+
+// ---------------------------------------------------------------------------
+// @openbindings/invoke
+// ---------------------------------------------------------------------------
 
 export type {
   Invocation,
@@ -19,7 +95,37 @@ export type {
   ContextAlternative,
   ContextRequiredDetails,
   InvocationImplOptions,
-} from "./invocation.js";
+  InvocationSource,
+  BindingInvocationArgs,
+  InvokeOptions,
+  ContextStore,
+  PlatformCallbacks,
+  BrowserRedirectResult,
+  PromptOptions,
+  FileSelectOptions,
+  BindingInvoker,
+  TransformEvaluator,
+  TransformEvaluatorWithBindings,
+  BindingSelector,
+  ContextResolver,
+  OperationInvokerOptions,
+  OperationSignature,
+  OperationRequirement,
+  OperationImplementation,
+  OperationImplementationAssessment,
+  OperationRequirementMatchOptions,
+  OperationMatch,
+  OperationRequirementMatches,
+  OperationRequirementResolution,
+  CombinedInvoker,
+  FieldRouter,
+  HookSlots,
+  InvokeSite,
+  OutputDecoder,
+  RawResult,
+  ResultClassifier,
+  InvocationErrorCode,
+} from "@openbindings/invoke";
 export {
   InvocationError,
   InvocationImpl,
@@ -29,43 +135,8 @@ export {
   isPortableInvocationData,
   configValueRequirement,
   isContextRequired,
-} from "./invocation.js";
-
-export type {
-  InvocationSource,
-  BindingInvocationArgs,
-  InvokeOptions,
-  SynthesizeSource,
-  SynthesizeInput,
-  SynthesizerWarning,
-  SynthesisCoverageScope,
-  SynthesisCoverageStatus,
-  SynthesisCoverageEntry,
-  SynthesisCoverage,
-  SynthesisCoverageLimitation,
-  SynthesizeResult,
-  BindingSpecInfo,
-  BindableTarget,
-  SourceInspection,
-  InspectionLimitation,
-} from "./invoker-types.js";
-export {
   DEFAULT_MAX_DELIVERY_UNIT_BYTES,
   resolveDeliveryUnitLimit,
-  synthesisSkeleton,
-  finalizeSynthesis,
-  finalizeSynthesisCoverage,
-  representedCoverageEntries,
-} from "./invoker-types.js";
-
-export type {
-  ContextStore,
-  PlatformCallbacks,
-  BrowserRedirectResult,
-  PromptOptions,
-  FileSelectOptions,
-} from "./context.js";
-export {
   contextBearerToken,
   contextBearerTokenFor,
   contextNamedCredential,
@@ -87,114 +158,24 @@ export {
   contextSatisfies,
   scopeContext,
   storeContextResolver,
-} from "./context.js";
-
-export type {
-  BindingInvoker,
-  InterfaceSynthesizer,
-  CoverageSynthesizer,
-  SourceInspector,
-  TransformEvaluator,
-  TransformEvaluatorWithBindings,
-  BindingSelector,
-  ContextResolver,
-} from "./invokers.js";
-export { isInterfaceSynthesizer, isTransformEvaluatorWithBindings } from "./invokers.js";
-
-export {
+  isTransformEvaluatorWithBindings,
   OperationInvoker,
   defaultBindingSelector,
-} from "./operation-invoker.js";
-export type { OperationInvokerOptions } from "./operation-invoker.js";
-
-export { operationSignature } from "./operation-signature.js";
-export type { OperationSignature } from "./operation-signature.js";
-
-export {
+  operationSignature,
   operationRequirement,
   matchOperationRequirement,
   resolveOperationRequirement,
-} from "./operation-requirement.js";
-export type {
-  OperationRequirement,
-  OperationImplementation,
-  OperationImplementationAssessment,
-  OperationRequirementMatchOptions,
-  OperationMatch,
-  OperationRequirementMatches,
-  OperationRequirementResolution,
-} from "./operation-requirement.js";
-
-export {
   combineInvokers,
-  combineSynthesizers,
-  combineSourceInspectors,
-  type CombinedInvoker,
-  type CombinedSynthesizer,
-} from "./combiners.js";
-
-export { validateInterface } from "./validate.js";
-export type { ValidateOptions } from "./validate.js";
-export { parseDocument, validateDocument, formatValidationErrors } from "./parse.js";
-
-export type { ValidationFailure } from "./schema-validation.js";
-export { compileEmbeddedSchema, compileExampleSchema, compileOperationSchema, type CompiledSchema } from "./schema-validation.js";
-
-export {
   NoInvokerError,
-  NoSynthesizerError,
-  SynthesisCoverageUnsupportedError,
-  OperationNotFoundError,
   BindingNotFoundError,
   BindingSelectionRequiredError,
   MissingInterfaceError,
   UnknownSourceError,
   NoTransformEvaluatorError,
-  NoSourcesError,
-  MultipleSourcesError,
   TransformRefNotFoundError,
   EmptyTransformExpressionError,
-  ValidationError,
-} from "./errors.js";
-
-export {
-  MIN_SUPPORTED_VERSION,
-  MAX_TESTED_VERSION,
-  supportedRange,
-  isSupportedVersion,
-  isValidSemver,
-  isHigherMajorOrPre1MinorThanMaxTested,
-  isLowerThanMinSupported,
-  isUnsupportedPrerelease,
-} from "./version.js";
-
-export { canonicalize } from "./canonical-json.js";
-
-export { canonicalizeLocation, resolveRef, unknownFields } from "./uri.js";
-
-export { fetchInterface, MEDIA_TYPE, WELL_KNOWN_PATH } from "./fetch.js";
-export type { FetchInterfaceOptions, FetchedInterface } from "./fetch.js";
-
-export {
-  checkInterfaceCompatibility,
-  checkOperationCompatibility,
-  isOBInterface,
-} from "./compatibility.js";
-export type { CompatibilityIssue } from "./compatibility.js";
-
-export { resolveOperation, allOperationIdentifiers } from "./resolve-operation.js";
-export type { ResolvedOperation } from "./resolve-operation.js";
-
-export { concludeVerification } from "./verification.js";
-export type {
-  RuleEvidenceStatus,
-  VerificationConclusion,
-  VerificationReport,
-} from "./verification.js";
-
-export { familyName, isJSONContentType, isHttpUrl } from "./helpers.js";
-
-export {
+  familyName,
+  isJSONContentType,
   InvokeHooks,
   USE_DEFAULT,
   assumptionWarning,
@@ -204,17 +185,6 @@ export {
   newInvokeHooks,
   nonDiscriminatingOutput,
   siteFamilyName,
-} from "./hooks.js";
-export type {
-  FieldRouter,
-  HookSlots,
-  InvokeSite,
-  OutputDecoder,
-  RawResult,
-  ResultClassifier,
-} from "./hooks.js";
-
-export {
   CONTEXT_REQUIRED,
   ERR_ALREADY_CONSUMED,
   ERR_BINDING_NOT_FOUND,
@@ -249,32 +219,31 @@ export {
   ERR_SCHEMA_UNRESOLVED,
   ERR_TYPE_MISMATCH,
   ERR_VALIDATION_FAILED,
-} from "./errcodes.js";
-export type { InvocationErrorCode } from "./errcodes.js";
+} from "@openbindings/invoke";
 
-export { dereference } from "./deref.js";
+// ---------------------------------------------------------------------------
+// @openbindings/synthesize
+// ---------------------------------------------------------------------------
 
-export { checkAssertions, matchProcessorObservation } from "./processor-scenarios.js";
 export type {
-  ProcessorScenarioFile,
-  ProcessorScenario,
-  ProcessorExpected,
-  ProcessorAssertion,
-  ProcessorDisposition,
-  ProcessorPhase,
-  ProcessorObservation,
-  ProcessorMatch,
-} from "./processor-scenarios.js";
-
-export {
-  SYNTHESIS_SCENARIO_FORMAT,
-  fixedSynthesizer,
-  matchSynthesisScenario,
-  normalizeSynthesis,
-  parseSynthesisScenarioFile,
-  verifySynthesisScenario,
-} from "./synthesis-scenarios.js";
-export type {
+  SynthesizeSource,
+  SynthesizeInput,
+  SynthesizerWarning,
+  SynthesisCoverageScope,
+  SynthesisCoverageStatus,
+  SynthesisCoverageEntry,
+  SynthesisCoverage,
+  SynthesisCoverageLimitation,
+  SynthesizeResult,
+  BindableTarget,
+  SourceInspection,
+  InspectionLimitation,
+  InterfaceSynthesizer,
+  CoverageSynthesizer,
+  SourceInspector,
+  CombinedSynthesizer,
+  FetchInterfaceOptions,
+  FetchedInterface,
   RefusedScenarioExpected,
   SynthesisSynthesizerFactory,
   SynthesisScenarioFile,
@@ -284,13 +253,47 @@ export type {
   NormalizedSynthesis,
   SynthesisBindingIdentity,
   NormalizedSynthesisCoverageEntry,
-} from "./synthesis-scenarios.js";
-
-export { Normalizer, inputCompatible, outputCompatible } from "./schema-profile/index.js";
-export type { Fetcher, JSONValue, JSONObject, CompatResult } from "./schema-profile/index.js";
+} from "@openbindings/synthesize";
 export {
+  synthesisSkeleton,
+  finalizeSynthesis,
+  finalizeSynthesisCoverage,
+  representedCoverageEntries,
+  isInterfaceSynthesizer,
+  combineSynthesizers,
+  combineSourceInspectors,
+  NoSynthesizerError,
+  SynthesisCoverageUnsupportedError,
+  NoSourcesError,
+  MultipleSourcesError,
+  fetchInterface,
+  SYNTHESIS_SCENARIO_FORMAT,
+  fixedSynthesizer,
+  matchSynthesisScenario,
+  normalizeSynthesis,
+  parseSynthesisScenarioFile,
+  verifySynthesisScenario,
+} from "@openbindings/synthesize";
+
+// ---------------------------------------------------------------------------
+// @openbindings/compare
+// ---------------------------------------------------------------------------
+
+export type {
+  CompatibilityIssue,
+  Fetcher,
+  JSONValue,
+  JSONObject,
+  CompatResult,
+} from "@openbindings/compare";
+export {
+  checkInterfaceCompatibility,
+  checkOperationCompatibility,
+  Normalizer,
+  inputCompatible,
+  outputCompatible,
   NotNormalizedError,
   OutsideProfileError,
   RefError,
   SchemaError,
-} from "./schema-profile/index.js";
+} from "@openbindings/compare";
