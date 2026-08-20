@@ -135,12 +135,23 @@ export class ConfigRequired extends Error {
     readonly point: string,
     readonly path: string,
     message: string,
-    readonly choices?: string[],
+    /**
+     * Engine-asserted JSON Schema for the value at (point, path); absent =
+     * unconstrained. An `enum` member is the closed admissible set, emitted
+     * only where the admissible set is already computed at the throw site.
+     */
+    readonly schema?: Record<string, unknown>,
     readonly durable?: boolean,
   ) {
     super(message);
     this.name = "ConfigRequired";
   }
+}
+
+/** Wraps an artifact-declared closed value set as `{"enum": [...]}`, or
+ *  asserts nothing when the set is absent or empty. */
+function enumSchema(values: string[] | undefined): Record<string, unknown> | undefined {
+  return values && values.length > 0 ? { enum: [...values] } : undefined;
 }
 
 /**
@@ -191,7 +202,7 @@ export function resolveTarget(
         "server",
         "/key",
         "configuration.server.key must select one artifact server before metadata.baseURL can replace its target",
-        names,
+        enumSchema(names),
         true,
       );
     }
@@ -221,7 +232,7 @@ export function resolveTarget(
       "server",
       "/key",
       "the effective server set declares several bindable servers; configuration.server.key must select one artifact member",
-      names,
+      enumSchema(names),
       true,
     );
   }
@@ -341,7 +352,7 @@ function resolveServerConfig(
       "server",
       "/key",
       "configuration.server.key must select one artifact server before variables or a URL replacement can be applied",
-      names,
+      enumSchema(names),
       true,
     );
   }
@@ -500,7 +511,7 @@ function substituteServerVariables(
           "server",
           `/variables/${escapeJSONPointerToken(name)}`,
           `server ${JSON.stringify(member.name)}: variable ${JSON.stringify(name)} has no supplied value and no declared default (supply one at the server configuration point's "variables" member)`,
-          declared?.enum,
+          enumSchema(declared?.enum),
         );
       }
     }
@@ -656,7 +667,7 @@ function expandAddress(
           "address",
           `/parameters/${escapeJSONPointerToken(name)}`,
           `channel ${JSON.stringify(channelName)}: address parameter ${JSON.stringify(name)} has no supplied value and no declared default`,
-          declared?.enum,
+          enumSchema(declared?.enum),
         );
       }
     }

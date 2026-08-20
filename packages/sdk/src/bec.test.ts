@@ -358,6 +358,46 @@ describe("contextSatisfies", () => {
     expect(contextSatisfies({ configuration: { address: { value: "orders/{id}" } } }, details)).toBe(true);
   });
 
+  // config.value schema ratification (2026-08-20): a requirement MAY carry an
+  // engine-asserted JSON Schema for the value at (point, path); absent =
+  // unconstrained, `enum` = closed admissible set (satisfaction validates).
+  it("validates a stored config.value against the requirement's schema", () => {
+    const details: ContextRequiredDetails = {
+      target: "k",
+      alternatives: [{ requirements: [
+        { type: "config.value", point: "server", path: "/key", schema: { enum: ["prod", "staging"] } },
+      ] }],
+    };
+    expect(contextSatisfies({ configuration: { server: { key: "staging" } } }, details)).toBe(true);
+    expect(contextSatisfies({ configuration: { server: { key: "sandbox" } } }, details)).toBe(false);
+  });
+
+  it("treats an absent config.value schema as unconstrained", () => {
+    const details: ContextRequiredDetails = {
+      target: "k",
+      alternatives: [{ requirements: [
+        { type: "config.value", point: "server", path: "/key" },
+      ] }],
+    };
+    expect(contextSatisfies({ configuration: { server: { key: "anything" } } }, details)).toBe(true);
+  });
+
+  it("fails closed on a config.value schema it cannot read or compile", () => {
+    const stored = { configuration: { server: { key: "prod" } } };
+    const withSchema = (schema: unknown): ContextRequiredDetails => ({
+      target: "k",
+      alternatives: [{ requirements: [
+        { type: "config.value", point: "server", path: "/key", schema },
+      ] }],
+    });
+    // Not a plain object (never framed: isContextRequiredDetails rejects it,
+    // but a locally built challenge must not release stored values against a
+    // constraint this layer could not read).
+    expect(contextSatisfies(stored, withSchema(["prod"]))).toBe(false);
+    // Does not meta-validate as JSON Schema 2020-12.
+    expect(contextSatisfies(stored, withSchema({ enum: "prod" }))).toBe(false);
+  });
+
   // R2.d ruling: two ANDed auth.apiKey requirements are distinguished by
   // `name`, keying into the well-known `apiKeys` map rather than colliding
   // on the single `apiKey` field.
@@ -516,6 +556,65 @@ describe("storeContextResolver", () => {
       alternatives: [{ requirements: [{ type: "auth.bearer", durable: true }] }],
     };
     await expect(resolve(details)).resolves.toEqual({ bearerToken: "stored-tok" });
+  });
+
+  // Keying rule (context-scope model, 2026-08-19): an all-config.value
+  // alternative is artifact-bound — its asserted target is the canonicalized
+  // source identity — so it files and fetches under the EXACT target string.
+  // Origin normalization would conflate every artifact on one host.
+  it("looks up an all-config.value alternative by the exact asserted target", async () => {
+    const store = new MemoryStore();
+    await store.set("https://example.com/specs/orders.yaml", {
+      configuration: { server: { url: "https://api.example.com" } },
+    });
+    const resolve = storeContextResolver(store);
+    const details: ContextRequiredDetails = {
+      target: "https://example.com/specs/orders.yaml",
+      alternatives: [{ requirements: [
+        { type: "config.value", point: "server", path: "/url", durable: true },
+      ] }],
+    };
+    await expect(resolve(details)).resolves.toEqual({
+      configuration: { server: { url: "https://api.example.com" } },
+    });
+  });
+
+  it("does not derive an origin key for an all-config.value alternative", async () => {
+    const store = new MemoryStore();
+    // Filed under the normalized origin — the credential convention — not
+    // under the exact asserted source identity: a config-only alternative
+    // must NOT find it (two specs on one host would collide).
+    await store.set(normalizeEndpoint("https://example.com/specs/orders.yaml"), {
+      configuration: { server: { url: "https://api.example.com" } },
+    });
+    const resolve = storeContextResolver(store);
+    const details: ContextRequiredDetails = {
+      target: "https://example.com/specs/orders.yaml",
+      alternatives: [{ requirements: [
+        { type: "config.value", point: "server", path: "/url", durable: true },
+      ] }],
+    };
+    await expect(resolve(details)).resolves.toBeNull();
+  });
+
+  it("keeps the endpoint-normalized key for a credential-bearing alternative carrying config.value", async () => {
+    const store = new MemoryStore();
+    await store.set("api.example.com", {
+      bearerToken: "stored-tok",
+      configuration: { approval: { value: "yes" } },
+    });
+    const resolve = storeContextResolver(store);
+    const details: ContextRequiredDetails = {
+      target: "https://api.example.com/v1",
+      alternatives: [{ requirements: [
+        { type: "auth.bearer", durable: true },
+        { type: "config.value", point: "approval", path: "", durable: true },
+      ] }],
+    };
+    await expect(resolve(details)).resolves.toEqual({
+      bearerToken: "stored-tok",
+      configuration: { approval: { value: "yes" } },
+    });
   });
 
   it("resolves a credential stored with the explicit default port when challenged without it", async () => {

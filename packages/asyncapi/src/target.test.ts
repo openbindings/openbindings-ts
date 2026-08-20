@@ -191,6 +191,19 @@ describe("resolveTarget §9.2 server configuration carriage", () => {
     expect(() => resolveTarget(twoServerDoc(), undefined, cfg({ variables: { env: "staging" } })))
       .toThrow(/configuration\.server\.key must select/);
   });
+
+  it("carries the bindable member names as the /key challenge's enum schema", () => {
+    try {
+      resolveTarget(twoServerDoc(), undefined, undefined);
+      expect.unreachable("expected a config-required challenge");
+    } catch (error: unknown) {
+      const challenge = error as { name?: string; point?: string; path?: string; schema?: unknown };
+      expect(challenge.name).toBe("ConfigRequired");
+      expect(challenge.point).toBe("server");
+      expect(challenge.path).toBe("/key");
+      expect(challenge.schema).toEqual({ enum: ["backup", "prod"] });
+    }
+  });
 });
 
 // §9.2's `variables` member of the server pin's key form (ratified
@@ -267,6 +280,38 @@ describe("resolveTarget §9.2 server variables carriage", () => {
       undefined,
       cfg({ key: "tiered", variables: { env: "qa" } }),
     )).toThrow(/artifact-declared enum/);
+  });
+
+  // config.value schema ratification (2026-08-20): the challenge carries an
+  // engine-asserted `{"enum": [...]}` schema exactly where the artifact
+  // declares the closed set, and asserts nothing where it does not.
+  it("carries the artifact-declared enum as the challenge schema, and no schema where none is declared", () => {
+    const enumDoc: AsyncAPIDocument = {
+      asyncapi: "3.0.0",
+      info: { title: "t", version: "1" },
+      servers: {
+        tiered: {
+          host: "{env}.example.com",
+          protocol: "wss",
+          variables: { env: { enum: ["prod", "staging"] } }, // enum, no default
+        },
+      },
+    };
+    try {
+      resolveTarget(enumDoc, undefined, cfg({ key: "tiered" }));
+      expect.unreachable("expected a config-required challenge");
+    } catch (error: unknown) {
+      const challenge = error as { name?: string; path?: string; schema?: unknown };
+      expect(challenge.name).toBe("ConfigRequired");
+      expect(challenge.path).toBe("/variables/env");
+      expect(challenge.schema).toEqual({ enum: ["prod", "staging"] });
+    }
+    try {
+      resolveTarget(variableDoc(), undefined, cfg({ key: "bare" }));
+      expect.unreachable("expected a config-required challenge");
+    } catch (error: unknown) {
+      expect((error as { schema?: unknown }).schema).toBeUndefined();
+    }
   });
 
   it("refuses a supplied name the selected server does not declare, even when every expression would resolve", () => {
