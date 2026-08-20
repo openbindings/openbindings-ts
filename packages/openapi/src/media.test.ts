@@ -581,7 +581,7 @@ describe("successMediaTypes / acceptHeader / isStreamingCapable", () => {
     expect(isStreamingCapable(op, true, true)).toBe(true);
   });
 
-  it("revision 3 builds Accept from semantic parameter identities", () => {
+  it("revision 3 builds Accept from semantic parameter identities, and a normalized-colliding identity is not advertised", () => {
     const op: OpenAPIOperation = {
       responses: {
         "200": {
@@ -593,7 +593,27 @@ describe("successMediaTypes / acceptHeader / isStreamingCapable", () => {
         },
       },
     };
-    expect(acceptHeader(op, true)).toBe("application/json; note=az, text/plain; charset=UTF-8");
+    // The two text/plain spellings denote one parsed identity in ONE content
+    // map: a normalized collision. No response match may be governed by it
+    // (section 9.2), so it is not an available representation and advertising
+    // it would invite exactly the response the decode lane must refuse. The
+    // non-colliding sibling advertises unaffected -- confinement, not a
+    // first-key pick between the two spellings.
+    expect(acceptHeader(op, true)).toBe("application/json; note=az");
+  });
+
+  it("a normalized collision confines to its own content map, not to the Accept set", () => {
+    const op: OpenAPIOperation = {
+      responses: {
+        "200": { content: { "text/plain; charset=UTF-8": {} } },
+        default: { content: { "TEXT/PLAIN; CHARSET=utf-8": {} } },
+      },
+    };
+    // One identity declared by two DIFFERENT response content maps is not a
+    // collision: section 9.2's unit is one content map. The set carries the
+    // identity once, and the spelling is chosen deterministically rather than
+    // by whichever key was enumerated first.
+    expect(acceptHeader(op, true)).toBe("text/plain; charset=UTF-8");
   });
 });
 
@@ -604,24 +624,39 @@ describe("revision-3 response media governance", () => {
     }, "application/json", true)).toBe("application/json");
   });
 
-  it("rejects unrelated normalized concrete collisions before matching", () => {
-    expect(() => governingResponseMedia({
-      content: {
-        "text/plain": {},
-        "application/json; charset=UTF-8": {},
-        "APPLICATION/JSON; CHARSET=utf-8": {},
-      },
-    }, "text/plain", true)).toThrow(/normalized collision/);
+  it("confines a normalized concrete collision to the colliding identity", () => {
+    const content = {
+      "text/plain": {},
+      "application/json; charset=UTF-8": {},
+      "APPLICATION/JSON; CHARSET=utf-8": {},
+    };
+    // The non-colliding sibling remains a usable alternative...
+    expect(governingResponseMedia({ content }, "text/plain", true)).toBe("text/plain");
+    // ...while no response match may be governed by the colliding identity.
+    expect(() => governingResponseMedia({ content }, "application/json; charset=utf-8", true))
+      .toThrow(/normalized collision/);
   });
 
-  it("rejects normalized range collisions before excluding ranges from matching", () => {
-    expect(() => governingResponseMedia({
+  it("confines a normalized RANGE collision without poisoning a clean concrete match", () => {
+    // Two colliding range keys cannot govern a concrete decode at all in
+    // revision 3, and under confinement they no longer poison the concrete
+    // sibling that can.
+    expect(governingResponseMedia({
       content: {
         "application/json": {},
         "*/*; charset=UTF-8": {},
         "*/*; CHARSET=utf-8": {},
       },
-    }, "application/json", true)).toThrow(/normalized collision/);
+    }, "application/json", true)).toBe("application/json");
+  });
+
+  it("a content map whose ONLY entries collide governs nothing", () => {
+    expect(() => governingResponseMedia({
+      content: {
+        "application/json; charset=UTF-8": {},
+        "APPLICATION/JSON; CHARSET=utf-8": {},
+      },
+    }, "application/json; charset=utf-8", true)).toThrow(/normalized collision/);
   });
 
   it("matches charset values case-insensitively and fully unescapes quoted pairs", () => {
