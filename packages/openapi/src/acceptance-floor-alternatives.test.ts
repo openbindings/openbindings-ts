@@ -55,6 +55,54 @@ describe("acceptance floor: a ladder-invalid request media alternative is not ca
     }));
   });
 
+  // F-O1-13, the ruled outcome: a boolean-literal part schema on the 3.0 line
+  // is not a Schema Object there (that line's Wright Draft 00 subset grants a
+  // boolean only at `additionalProperties`), so it is a defect that confines
+  // to the request media alternative owning it while the operation stays
+  // represented on its healthy sibling and the SOURCE IS ACCEPTED. This
+  // engine used to ADMIT the spelling silently and value-dispatch the part;
+  // its Go twins refused the whole source. Both now land here.
+  it("confines a 3.0 boolean-literal part schema to its own alternative", async () => {
+    const result = await synthesizer.synthesizeInterfaceWithCoverage({
+      sources: [{
+        bindingSpec: BINDING_SPEC,
+        content: {
+          openapi: "3.0.3",
+          info: { title: "T", version: "1" },
+          paths: {
+            "/uploads": {
+              post: {
+                operationId: "upload",
+                requestBody: {
+                  required: true,
+                  content: {
+                    "multipart/form-data": {
+                      schema: { type: "object", properties: { note: true, label: { type: "string" } } },
+                    },
+                    "application/json": { schema: { type: "object" } },
+                  },
+                },
+                responses: { "204": { description: "stored" } },
+              },
+            },
+          },
+        },
+      }],
+    });
+    expect(result.interface.operations["upload"], "the operation survives on its sibling").toBeDefined();
+    expect(result.coverage.entries).toContainEqual(expect.objectContaining({
+      scope: "alternative",
+      status: "invalid",
+      reasonCode: "openapi.invalid_unit",
+      sourceRef: "#/paths/~1uploads/post/requestBody/content/multipart~1form-data",
+    }));
+    expect(result.coverage.entries).toContainEqual(expect.objectContaining({
+      scope: "alternative",
+      status: "represented",
+      sourceRef: "#/paths/~1uploads/post/requestBody/content/application~1json",
+    }));
+  });
+
   it("excludes the operation when a REQUIRED body has no surviving alternative", async () => {
     const result = await synthesizer.synthesizeInterfaceWithCoverage({
       sources: [{ bindingSpec: BINDING_SPEC, content: document(true) }],
