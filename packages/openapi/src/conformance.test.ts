@@ -4,7 +4,6 @@ import {
   newInvokeHooks,
   USE_DEFAULT,
   ERR_INVALID_REF,
-  ERR_MISSING_INPUT,
   ERR_PROTOCOL,
   ERR_RESPONSE_ERROR,
   ERR_REFUSED,
@@ -608,7 +607,7 @@ describe("OAPI-P-03 — flattened-model refusals", () => {
     });
     await call.write({ name: "x" });
     await expect(call.closed).rejects.toMatchObject({
-      code: ERR_MISSING_INPUT,
+      code: ERR_REFUSED,
     });
     expect(requests).toHaveLength(0);
 

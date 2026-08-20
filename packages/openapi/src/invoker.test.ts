@@ -6,7 +6,6 @@ import {
   ERR_CONNECT_FAILED,
   ERR_EXECUTION_FAILED,
   ERR_INVALID_REF,
-  ERR_MISSING_INPUT,
   ERR_PROTOCOL,
   ERR_REF_NOT_FOUND,
   ERR_RESPONSE_ERROR,
@@ -306,7 +305,7 @@ describe("invokeBinding — request construction", () => {
     expect(requests).toHaveLength(0);
   });
 
-  it("errors ERR_MISSING_INPUT when input closes bare on a required-input operation", async () => {
+  it("refuses ERR_REFUSED when input closes bare and the path parameter is unsupplied", async () => {
     const { fetch, requests } = mockFetch(() => jsonResponse({}));
     const call = new OpenAPIInvoker().invokeBinding({ source: SOURCE, ref: REF_GET_USER, fetch });
 
