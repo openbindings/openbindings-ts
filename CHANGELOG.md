@@ -394,7 +394,8 @@
     `Content-Type` framing selects among declared shapes; an undeclared
     event-stream response is an `ERR_PROTOCOL` failure (previously any 2xx SSE
     response silently streamed). SSE extraction is WHATWG-exact:
-    empty-data/fields-only events emit nothing, incomplete final events are
+    blocks with no `data` line emit nothing while a lone empty `data:` line
+    dispatches the empty string, incomplete final events are
     discarded, CR/CRLF/LF line endings and the leading BOM are handled, `id`
     follows lastEventId semantics, `retry` is digits-only.
   - **Decode (OAPI-P-07).** The text lane honors the `charset` parameter
@@ -543,6 +544,14 @@
   reference tooling, not spec primitives.
 
 ### Fixed
+
+- **A lone empty SSE `data:` line now dispatches an event whose value is
+  the empty string** (`@openbindings/openapi`, via the standalone engine),
+  at its position in the output sequence. The WHATWG dispatch steps check
+  the data buffer for emptiness BEFORE the trailing-LF strip, so only a
+  block that carried no `data` line — comment-only and `event:`/`id:`-only
+  blocks — dispatches nothing; previously the engines dropped the
+  empty-string event. Mirrored in the Go SDK.
 
 - **Compatibility checking now handles the boolean `false` schema — the
   spec's spelling for "carries no caller input" / "emits no output".**
