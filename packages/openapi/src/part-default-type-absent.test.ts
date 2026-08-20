@@ -19,7 +19,7 @@ import type { OpenAPIDocument, OpenAPIMediaType, OpenAPIOperation } from "./type
 // openbindings-go/formats/openapi/testdata, openapi-client/go/testdata and
 // openapi-client/typescript/src/testdata.
 export const PART_DEFAULT_TYPE_ABSENT_CASES_DIGEST =
-  "0750e5d5ed6bf8ca8bdb06d35b23e88145dc70ceaf2abedcd157e0750c792b69";
+  "93ceb6c3ad8fb64c974feefe13e1651ff2b0a9bac99f60d34aa2ea678310fe76";
 
 export interface PartDefaultTypeAbsentCase {
   name: string;
@@ -132,13 +132,15 @@ export async function partDefaultTypeAbsentDecision(c: PartDefaultTypeAbsentCase
 /**
  * The claim the table exists for, stated in its own right rather than left
  * implicit in 112 cells: a form part whose resolved schema declares no `type`
- * is admitted on every accepted 3.0 edition — where no stated default row
- * reaches it and this specification's own convention answers — and refused on
- * every accepted 3.1 one, where the edition states application/octet-stream
- * and this revision defines no JSON-to-octet part boundary. A part that
- * declares a type is admitted on all eight.
+ * refuses on EVERY accepted edition — the 3.1 editions state
+ * application/octet-stream for it and this revision defines no JSON-to-octet
+ * part boundary to cross, the 3.0 editions state no row at all and this
+ * revision authors none — while a part that declares a type is admitted on all
+ * eight. It replaces assertTypeAbsentPartRefusesExactlyOnThe31Line, whose
+ * predicate was the deleted 3.0-line value-keyed convention as an executed
+ * assertion (escalation M2, ruled 2026-08-20).
  */
-export async function assertTypeAbsentPartRefusesExactlyOnThe31Line(
+export async function assertTypeAbsentPartRefusesOnEveryAcceptedEdition(
   cases: PartDefaultTypeAbsentCase[],
 ): Promise<number> {
   // EXECUTED, not read off the table's own expectations: the claim is about
@@ -147,7 +149,7 @@ export async function assertTypeAbsentPartRefusesExactlyOnThe31Line(
   for (const c of cases) {
     const got = await partDefaultTypeAbsentDecision(c);
     const admitted = got.startsWith("admitted;");
-    const want = c.declaresType || c.openapi.startsWith("3.0");
+    const want = c.declaresType;
     if (admitted !== want) {
       throw new Error(
         `${c.name}: admitted = ${admitted}, want ${want} (decision ${JSON.stringify(got)})\nbasis: ${c.basis}`,
@@ -174,7 +176,7 @@ describe("type-absent part default case table", () => {
     });
   }
 
-  it("refuses a type-absent part exactly on the 3.1 line", async () => {
-    expect(await assertTypeAbsentPartRefusesExactlyOnThe31Line(cases)).toBe(112);
+  it("refuses a type-absent part on every accepted edition", async () => {
+    expect(await assertTypeAbsentPartRefusesOnEveryAcceptedEdition(cases)).toBe(112);
   });
 });
