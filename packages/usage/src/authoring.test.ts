@@ -5,6 +5,18 @@ import { join } from "node:path";
 import { single } from "@openbindings/invoke";
 import { BINDING_SPEC, UsageInvoker, UsageSynthesizer, type ProcessRequest } from "./index.js";
 
+describe("binding-spec support", () => {
+  it("keeps invoker and synthesizer verdicts in exact parity", () => {
+    const requested = [BINDING_SPEC, `${BINDING_SPEC}.next`, BINDING_SPEC];
+    const expected = [
+      { bindingSpec: BINDING_SPEC, supported: true },
+      { bindingSpec: `${BINDING_SPEC}.next`, supported: false },
+    ];
+    expect(new UsageInvoker().checkBindingSpecs(requested)).toEqual(expected);
+    expect(new UsageSynthesizer().checkBindingSpecs(requested)).toEqual(expected);
+  });
+});
+
 const descriptor = `name "tool"
 bin "tool"
 version "1.2.3"

@@ -53,7 +53,8 @@ export type {
 
 export { isHttpUrl } from "./helpers.js";
 
-export type { BindingSpecInfo } from "./bindingspec.js";
+export { checkBindingSpecs } from "./bindingspec.js";
+export type { BindingSpecInfo, BindingSpecVerdict } from "./bindingspec.js";
 
 export { MEDIA_TYPE, WELL_KNOWN_PATH } from "./constants.js";
 

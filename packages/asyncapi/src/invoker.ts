@@ -1,4 +1,5 @@
-import type { OBInterface, Source, BindingSpecInfo } from "@openbindings/core";
+import { checkBindingSpecs as checkBindingSpecSupport } from "@openbindings/core";
+import type { OBInterface, Source, BindingSpecInfo, BindingSpecVerdict } from "@openbindings/core";
 import type { BindingInvoker, BindingInvocationArgs, ContextRequiredDetails, Invocation } from "@openbindings/invoke";
 import type {
   CoverageSynthesizer,
@@ -38,6 +39,14 @@ import {
 // Invoker
 // ---------------------------------------------------------------------------
 
+function asyncAPIBindingSpecs(): BindingSpecInfo[] {
+  return [{ bindingSpec: BINDING_SPEC, description: "AsyncAPI 2.0–2.6 and 3.0–3.1 event-driven APIs" }];
+}
+
+function checkAsyncAPIBindingSpecs(bindingSpecs: readonly string[]): BindingSpecVerdict[] {
+  return checkBindingSpecSupport(bindingSpecs, asyncAPIBindingSpecs());
+}
+
 /** Invokes the unreleased AsyncAPI @1 candidate through the standalone runtime. */
 export class AsyncAPIInvoker implements BindingInvoker {
   private readonly engine: AsyncAPIEngine;
@@ -46,11 +55,13 @@ export class AsyncAPIInvoker implements BindingInvoker {
     this.engine = engine;
   }
 
+  checkBindingSpecs(bindingSpecs: readonly string[]): BindingSpecVerdict[] {
+    return checkAsyncAPIBindingSpecs(bindingSpecs);
+  }
+
   /** Returns the binding specifications this invoker supports, by exact identifier. */
   bindingSpecs(): BindingSpecInfo[] {
-    return [
-      { bindingSpec: BINDING_SPEC, description: "AsyncAPI 2.0–2.6 and 3.0–3.1 event-driven APIs" },
-    ];
+    return asyncAPIBindingSpecs();
   }
 
   /**
@@ -276,11 +287,13 @@ function cloneMetadata(metadata: Record<string, string[]>): Record<string, strin
 
 /** Synthesizes OBInterface definitions from AsyncAPI 3.x documents. */
 export class AsyncAPISynthesizer implements InterfaceSynthesizer, CoverageSynthesizer, SourceInspector {
+  checkBindingSpecs(bindingSpecs: readonly string[]): BindingSpecVerdict[] {
+    return checkAsyncAPIBindingSpecs(bindingSpecs);
+  }
+
   /** Returns the binding specifications this synthesizer supports, by exact identifier. */
   bindingSpecs(): BindingSpecInfo[] {
-    return [
-      { bindingSpec: BINDING_SPEC, description: "AsyncAPI 2.0–2.6 and 3.0–3.1 event-driven APIs" },
-    ];
+    return asyncAPIBindingSpecs();
   }
 
   /** Parses an AsyncAPI document and converts it into an OBInterface. */

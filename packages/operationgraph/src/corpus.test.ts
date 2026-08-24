@@ -135,6 +135,10 @@ function sortKeys(v: unknown): unknown {
 class MockBindingInvoker {
   constructor(private readonly ops: Record<string, MockOp>) {}
 
+  checkBindingSpecs(bindingSpecs: readonly string[]) {
+    return [...new Set(bindingSpecs)].map(bindingSpec => ({ bindingSpec, supported: bindingSpec === MOCK_FORMAT }));
+  }
+
   bindingSpecs(): BindingSpecInfo[] {
     return [{ bindingSpec: MOCK_FORMAT }];
   }

@@ -1,4 +1,4 @@
-import type { OBInterface, BindingEntry, Operation, Source, Transform, TransformOrRef, BindingSpecInfo } from "@openbindings/core";
+import type { OBInterface, BindingEntry, Operation, Source, Transform, TransformOrRef, BindingSpecInfo, BindingSpecVerdict } from "@openbindings/core";
 import { resolveTransform } from "@openbindings/core";
 import type {
   BindingInvocationArgs,
@@ -212,8 +212,24 @@ export class OperationInvoker {
     return this.invoker.bindingSpecs();
   }
 
-  private availableBindingSpecs(): Set<string> {
-    return new Set(this.invoker.bindingSpecs().map(f => f.bindingSpec));
+  /** Authoritatively checks exact binding-specification support. */
+  checkBindingSpecs(bindingSpecs: readonly string[]): BindingSpecVerdict[] {
+    return this.invoker.checkBindingSpecs(bindingSpecs);
+  }
+
+  private availableBindingSpecs(iface: OBInterface, opKey: string): Set<string> {
+    const candidates = new Set<string>();
+    for (const binding of Object.values(iface.bindings ?? {})) {
+      if (binding.operation !== opKey) continue;
+      const source = iface.sources?.[binding.source];
+      if (source) candidates.add(source.bindingSpec);
+    }
+    const requested = [...candidates].sort();
+    return new Set(
+      this.invoker.checkBindingSpecs(requested)
+        .filter(({ supported }) => supported)
+        .map(({ bindingSpec }) => bindingSpec),
+    );
   }
 
   /**
@@ -379,17 +395,18 @@ export class OperationInvoker {
       // the first invocable entry winning. It displaces whatever selection
       // policy is in place. When no listed key is invocable, the
       // policy-neutral sole-candidate/ambiguity rule applies.
+      const availableBindingSpecs = this.availableBindingSpecs(iface, opKey);
       const overridden = selectionOverride(
         iface,
         opKey,
         contextSelectionOverride(callerContext),
-        this.availableBindingSpecs(),
+        availableBindingSpecs,
       );
       if (overridden) {
         ({ key: bindingKey, binding } = overridden);
       } else {
         const selector = this.bindingSelector ?? ((i: OBInterface, o: string) =>
-          defaultBindingSelector(i, o, this.availableBindingSpecs()));
+          defaultBindingSelector(i, o, availableBindingSpecs));
         ({ key: bindingKey, binding } = selector(iface, opKey));
       }
     }

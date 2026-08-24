@@ -1,4 +1,5 @@
-import { type BindingSpecInfo, type OBInterface, type Source } from "@openbindings/core";
+import { checkBindingSpecs as checkBindingSpecSupport } from "@openbindings/core";
+import { type BindingSpecInfo, type BindingSpecVerdict, type OBInterface, type Source } from "@openbindings/core";
 import {
   InvocationError,
   InvocationImpl,
@@ -50,6 +51,14 @@ import {
 // Invoker
 // ---------------------------------------------------------------------------
 
+function openAPIBindingSpecs(): BindingSpecInfo[] {
+  return [{ bindingSpec: BINDING_SPEC, description: "OpenAPI 3.x HTTP APIs" }];
+}
+
+function checkOpenAPIBindingSpecs(bindingSpecs: readonly string[]): BindingSpecVerdict[] {
+  return checkBindingSpecSupport(bindingSpecs, openAPIBindingSpecs());
+}
+
 /** Invokes OpenAPI bindings by performing HTTP requests against the described API. */
 export interface OpenAPIInvokerOptions {
   engine?: OpenAPIEngine;
@@ -71,11 +80,13 @@ export class OpenAPIInvoker implements BindingInvoker {
       : undefined;
   }
 
+  checkBindingSpecs(bindingSpecs: readonly string[]): BindingSpecVerdict[] {
+    return checkOpenAPIBindingSpecs(bindingSpecs);
+  }
+
   /** Returns the binding specifications this invoker supports, by exact identifier. */
   bindingSpecs(): BindingSpecInfo[] {
-    return [
-      { bindingSpec: BINDING_SPEC, description: "OpenAPI 3.x HTTP APIs" },
-    ];
+    return openAPIBindingSpecs();
   }
 
   /**
@@ -316,11 +327,13 @@ export class OpenAPISynthesizer implements InterfaceSynthesizer, CoverageSynthes
     this.fetchFn = options?.fetch ?? globalThis.fetch;
   }
 
+  checkBindingSpecs(bindingSpecs: readonly string[]): BindingSpecVerdict[] {
+    return checkOpenAPIBindingSpecs(bindingSpecs);
+  }
+
   /** Returns the binding specifications this synthesizer supports, by exact identifier. */
   bindingSpecs(): BindingSpecInfo[] {
-    return [
-      { bindingSpec: BINDING_SPEC, description: "OpenAPI 3.x HTTP APIs" },
-    ];
+    return openAPIBindingSpecs();
   }
 
   /** Converts an OpenAPI source into an OBInterface, applying optional name/version/description overrides. */

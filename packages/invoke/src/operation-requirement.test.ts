@@ -91,6 +91,10 @@ class LocalBindingInvoker implements BindingInvoker {
     private readonly requirements: ContextRequiredDetails | null = null,
   ) {}
 
+  checkBindingSpecs(bindingSpecs: readonly string[]) {
+    return [...new Set(bindingSpecs)].map(bindingSpec => ({ bindingSpec, supported: bindingSpec === this.bindingSpec }));
+  }
+
   bindingSpecs(): BindingSpecInfo[] {
     return [{ bindingSpec: this.bindingSpec }];
   }
@@ -267,6 +271,10 @@ describe("resolveOperationRequirement", () => {
     });
     let observedSignal: AbortSignal | undefined;
     const binding: BindingInvoker = {
+      checkBindingSpecs: bindingSpecs => [...new Set(bindingSpecs)].map(bindingSpec => ({
+        bindingSpec,
+        supported: bindingSpec === "example.slow@1",
+      })),
       bindingSpecs: () => [{ bindingSpec: "example.slow@1" }],
       prepareBinding: args => {
         observedSignal = args.signal;

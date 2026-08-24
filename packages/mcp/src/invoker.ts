@@ -1,4 +1,5 @@
-import { type BindingSpecInfo, type OBInterface, type Source } from "@openbindings/core";
+import { checkBindingSpecs as checkBindingSpecSupport } from "@openbindings/core";
+import { type BindingSpecInfo, type BindingSpecVerdict, type OBInterface, type Source } from "@openbindings/core";
 import {
   ERR_RUNTIME,
   InvocationError,
@@ -37,6 +38,10 @@ function mcpBindingSpecs(): BindingSpecInfo[] {
   return [{ bindingSpec: BINDING_SPEC, description: "MCP application-contract tools via Streamable HTTP" }];
 }
 
+function checkMCPBindingSpecs(bindingSpecs: readonly string[]): BindingSpecVerdict[] {
+  return checkBindingSpecSupport(bindingSpecs, mcpBindingSpecs());
+}
+
 // ---------------------------------------------------------------------------
 // Invoker
 // ---------------------------------------------------------------------------
@@ -63,6 +68,10 @@ export class MCPInvoker implements BindingInvoker {
 
   constructor(options?: MCPInvokerOptions) {
     this.solicitProgress = options?.solicitProgress;
+  }
+
+  checkBindingSpecs(bindingSpecs: readonly string[]): BindingSpecVerdict[] {
+    return checkMCPBindingSpecs(bindingSpecs);
   }
 
   bindingSpecs(): BindingSpecInfo[] {
@@ -125,6 +134,10 @@ export class MCPSynthesizer implements InterfaceSynthesizer, CoverageSynthesizer
 
   constructor(options?: MCPSynthesizerOptions) {
     this.fetchImpl = options?.fetch;
+  }
+
+  checkBindingSpecs(bindingSpecs: readonly string[]): BindingSpecVerdict[] {
+    return checkMCPBindingSpecs(bindingSpecs);
   }
 
   bindingSpecs(): BindingSpecInfo[] {

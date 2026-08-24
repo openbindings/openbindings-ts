@@ -2,6 +2,7 @@ import * as protobuf from "protobufjs";
 import {
   MAX_TESTED_VERSION,
   type BindingSpecInfo,
+  type BindingSpecVerdict,
   type JSONSchema,
   type OBInterface,
   type Operation,
@@ -20,11 +21,8 @@ import {
   type SynthesizeResult,
   type SynthesizerWarning,
 } from "@openbindings/synthesize";
-import {
-  BINDING_SPEC,
-  discoverReflectedSchema,
-  loadProtobufSchema,
-} from "./index.js";
+import { discoverReflectedSchema, loadProtobufSchema } from "./index.js";
+import { BINDING_SPEC, checkGrpcBindingSpecs, grpcBindingSpecs } from "./binding-spec.js";
 import { protobufSynthesisCoverage } from "./coverage.js";
 import { boundMethodRangeError } from "./schema-range.js";
 
@@ -47,8 +45,12 @@ export class GrpcSynthesizer implements InterfaceSynthesizer, CoverageSynthesize
     this.#metadata = { ...(options.metadata ?? {}) };
   }
 
+  checkBindingSpecs(bindingSpecs: readonly string[]): BindingSpecVerdict[] {
+    return checkGrpcBindingSpecs(bindingSpecs);
+  }
+
   bindingSpecs(): BindingSpecInfo[] {
-    return [{ bindingSpec: BINDING_SPEC, description: "gRPC via protobuf schemas or server reflection" }];
+    return grpcBindingSpecs();
   }
 
   async synthesizeInterface(input: SynthesizeInput, options?: { signal?: AbortSignal }): Promise<OBInterface> {

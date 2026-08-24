@@ -2,6 +2,7 @@ import * as protobuf from "protobufjs";
 import {
   MAX_TESTED_VERSION,
   type BindingSpecInfo,
+  type BindingSpecVerdict,
   type JSONSchema,
   type OBInterface,
   type Operation,
@@ -20,7 +21,8 @@ import {
   type SynthesizeResult,
   type SynthesizerWarning,
 } from "@openbindings/synthesize";
-import { BINDING_SPEC, loadProtobufSchema } from "./index.js";
+import { loadProtobufSchema } from "./index.js";
+import { BINDING_SPEC, checkConnectBindingSpecs, connectBindingSpecs } from "./binding-spec.js";
 import { protobufSynthesisCoverage } from "./coverage.js";
 import { boundMethodRangeError } from "./schema-range.js";
 
@@ -28,8 +30,12 @@ type ProtoSource = Pick<Source, "bindingSpec" | "location" | "content">;
 
 /** Authoring implementation for schema-mode Connect sources. */
 export class ConnectSynthesizer implements InterfaceSynthesizer, CoverageSynthesizer, SourceInspector {
+  checkBindingSpecs(bindingSpecs: readonly string[]): BindingSpecVerdict[] {
+    return checkConnectBindingSpecs(bindingSpecs);
+  }
+
   bindingSpecs(): BindingSpecInfo[] {
-    return [{ bindingSpec: BINDING_SPEC, description: "Connect via embedded protobuf schemas" }];
+    return connectBindingSpecs();
   }
 
   async synthesizeInterface(input: SynthesizeInput): Promise<OBInterface> {

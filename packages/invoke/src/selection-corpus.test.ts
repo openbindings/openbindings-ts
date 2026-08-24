@@ -74,6 +74,11 @@ class SelectionSpecStub implements BindingInvoker {
 
   constructor(private readonly specs: string[]) {}
 
+  checkBindingSpecs(bindingSpecs: readonly string[]) {
+    const supported = new Set(this.specs);
+    return [...new Set(bindingSpecs)].map(bindingSpec => ({ bindingSpec, supported: supported.has(bindingSpec) }));
+  }
+
   bindingSpecs() {
     return this.specs.map((s) => ({ bindingSpec: s }));
   }

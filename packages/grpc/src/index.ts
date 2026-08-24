@@ -8,7 +8,7 @@ import sourceContextJSON from "protobufjs/google/protobuf/source_context.json" w
 import typeJSON from "protobufjs/google/protobuf/type.json" with { type: "json" };
 import { fromProtoJSON, toProtoJSON } from "./protojson.js";
 import { assertBoundMethodRange } from "./schema-range.js";
-import { type BindingSpecInfo } from "@openbindings/core";
+import { type BindingSpecInfo, type BindingSpecVerdict } from "@openbindings/core";
 import {
   InvocationError,
   InvocationImpl,
@@ -34,8 +34,9 @@ import {
   type Invocation,
   type Metadata,
 } from "@openbindings/invoke";
+import { BINDING_SPEC, checkGrpcBindingSpecs, grpcBindingSpecs } from "./binding-spec.js";
 
-export const BINDING_SPEC = "openbindings.grpc@1";
+export { BINDING_SPEC } from "./binding-spec.js";
 
 export type GrpcInteractionKind = "unary" | "client-streaming" | "server-streaming" | "bidirectional";
 
@@ -94,8 +95,12 @@ export class GrpcInvoker implements BindingInvoker {
     this.#runtime = options.runtime ?? new NodeGrpcRuntime();
   }
 
+  checkBindingSpecs(bindingSpecs: readonly string[]): BindingSpecVerdict[] {
+    return checkGrpcBindingSpecs(bindingSpecs);
+  }
+
   bindingSpecs(): BindingSpecInfo[] {
-    return [{ bindingSpec: BINDING_SPEC, description: "gRPC via protobuf schemas or server reflection" }];
+    return grpcBindingSpecs();
   }
 
   invokeBinding<I = unknown, O = unknown>(args: BindingInvocationArgs): Invocation<I, O> {

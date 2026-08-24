@@ -1,6 +1,7 @@
 import {
   InvocationImpl,
   OperationInvoker,
+  checkBindingSpecs,
   type BindingInvocationArgs,
   type BindingInvoker,
   type BindingSpecInfo,
@@ -81,6 +82,10 @@ export async function tasksImplementation(
 class ActivityBinding implements BindingInvoker {
   constructor(private readonly onCancelled: () => void) {}
 
+  checkBindingSpecs(bindingSpecs: readonly string[]) {
+    return checkBindingSpecs(bindingSpecs, this.bindingSpecs());
+  }
+
   bindingSpecs(): BindingSpecInfo[] {
     return [{ bindingSpec: LOCAL_ACTIVITY_BINDING }];
   }
@@ -149,6 +154,10 @@ export function activityImplementation(
 }
 
 class SlowPreflightBinding implements BindingInvoker {
+  checkBindingSpecs(bindingSpecs: readonly string[]) {
+    return checkBindingSpecs(bindingSpecs, this.bindingSpecs());
+  }
+
   bindingSpecs(): BindingSpecInfo[] {
     return [{ bindingSpec: SLOW_BINDING }];
   }

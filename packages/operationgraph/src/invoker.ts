@@ -7,7 +7,8 @@
  * dependency is resolved post-construction via
  * OperationInvoker.addBindingInvoker.
  */
-import type { BindingSpecInfo } from "@openbindings/core";
+import { checkBindingSpecs as checkBindingSpecSupport } from "@openbindings/core";
+import type { BindingSpecInfo, BindingSpecVerdict } from "@openbindings/core";
 import type { BindingInvocationArgs, BindingInvoker, Invocation, OperationInvoker } from "@openbindings/invoke";
 import { isHttpUrl } from "@openbindings/core";
 import {
@@ -45,6 +46,10 @@ export class OperationGraphInvoker implements BindingInvoker {
 
   constructor(invoker: OperationInvoker) {
     this.invoker = invoker;
+  }
+
+  checkBindingSpecs(bindingSpecs: readonly string[]): BindingSpecVerdict[] {
+    return checkBindingSpecSupport(bindingSpecs, this.bindingSpecs());
   }
 
   bindingSpecs(): BindingSpecInfo[] {

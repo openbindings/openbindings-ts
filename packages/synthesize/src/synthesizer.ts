@@ -1,4 +1,4 @@
-import type { OBInterface, Source, BindingSpecInfo } from "@openbindings/core";
+import type { OBInterface, Source, BindingSpecInfo, BindingSpecVerdict } from "@openbindings/core";
 import type {
   SynthesizeInput,
   SynthesizeResult,
@@ -17,6 +17,9 @@ import type {
  * partial interface.
  */
 export interface InterfaceSynthesizer {
+  /** Authoritatively checks support for exact, opaque identifiers. */
+  checkBindingSpecs(bindingSpecs: readonly string[]): BindingSpecVerdict[];
+  /** Advisory discoverability metadata; absence is not evidence of non-support. */
   bindingSpecs(): BindingSpecInfo[];
   synthesizeInterface(
     input: SynthesizeInput,

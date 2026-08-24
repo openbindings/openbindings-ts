@@ -15,6 +15,10 @@ function nonObiFetch(): typeof globalThis.fetch {
 /** A synthesizer that always throws for its one binding specification. */
 function failingSynthesizer(bindingSpec: string, err: string): InterfaceSynthesizer {
   return {
+    checkBindingSpecs: bindingSpecs => [...new Set(bindingSpecs)].map(candidate => ({
+      bindingSpec: candidate,
+      supported: candidate === bindingSpec,
+    })),
     bindingSpecs: () => [{ bindingSpec }],
     synthesizeInterface: async () => {
       throw new Error(err);
@@ -34,6 +38,10 @@ function coverageSynthesizer(): CoverageSynthesizer {
     },
   };
   return {
+    checkBindingSpecs: bindingSpecs => [...new Set(bindingSpecs)].map(bindingSpec => ({
+      bindingSpec,
+      supported: bindingSpec === "fake.coverage@1",
+    })),
     bindingSpecs: () => [{ bindingSpec: "fake.coverage@1" }],
     synthesizeInterface: async () => iface,
     synthesizeInterfaceWithCoverage: async () =>

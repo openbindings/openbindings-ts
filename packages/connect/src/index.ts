@@ -6,7 +6,7 @@ import sourceContextJSON from "protobufjs/google/protobuf/source_context.json" w
 import typeJSON from "protobufjs/google/protobuf/type.json" with { type: "json" };
 import { fromProtoJSON, toProtoJSON } from "./protojson.js";
 import { assertBoundMethodRange } from "./schema-range.js";
-import { type BindingSpecInfo } from "@openbindings/core";
+import { type BindingSpecInfo, type BindingSpecVerdict } from "@openbindings/core";
 import {
   InvocationError,
   InvocationImpl,
@@ -31,8 +31,9 @@ import {
   type BindingInvoker,
   type Invocation,
 } from "@openbindings/invoke";
+import { BINDING_SPEC, checkConnectBindingSpecs, connectBindingSpecs } from "./binding-spec.js";
 
-export const BINDING_SPEC = "openbindings.connect@1";
+export { BINDING_SPEC } from "./binding-spec.js";
 
 export interface ConnectInvokerOptions {
   /** Whether the selected runtime can provide an HTTP/2 full-duplex request body. */
@@ -58,8 +59,12 @@ export class ConnectInvoker implements BindingInvoker {
     this.#sendProtocolVersion = options.sendProtocolVersion ?? true;
   }
 
+  checkBindingSpecs(bindingSpecs: readonly string[]): BindingSpecVerdict[] {
+    return checkConnectBindingSpecs(bindingSpecs);
+  }
+
   bindingSpecs(): BindingSpecInfo[] {
-    return [{ bindingSpec: BINDING_SPEC, description: "Connect protocol with JSON codec" }];
+    return connectBindingSpecs();
   }
 
   invokeBinding<I = unknown, O = unknown>(args: BindingInvocationArgs): Invocation<I, O> {

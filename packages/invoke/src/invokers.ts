@@ -1,4 +1,4 @@
-import type { OBInterface, BindingEntry, BindingSpecInfo } from "@openbindings/core";
+import type { OBInterface, BindingEntry, BindingSpecInfo, BindingSpecVerdict } from "@openbindings/core";
 import type { BindingInvocationArgs } from "./invoker-types.js";
 import type { ContextRequiredDetails, Invocation } from "./invocation.js";
 
@@ -12,6 +12,9 @@ import type { ContextRequiredDetails, Invocation } from "./invocation.js";
  * other pre-dispatch failure) before any observable side effect.
  */
 export interface BindingInvoker {
+  /** Authoritatively checks support for exact, opaque identifiers. */
+  checkBindingSpecs(bindingSpecs: readonly string[]): BindingSpecVerdict[];
+  /** Advisory discoverability metadata; absence is not evidence of non-support. */
   bindingSpecs(): BindingSpecInfo[];
   invokeBinding<I = unknown, O = unknown>(args: BindingInvocationArgs): Invocation<I, O>;
   /**

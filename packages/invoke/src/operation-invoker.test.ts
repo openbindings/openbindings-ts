@@ -80,6 +80,11 @@ class MockBindingInvoker implements BindingInvoker {
     }
   }
 
+  checkBindingSpecs(bindingSpecs: readonly string[]) {
+    const supported = this.opts.bindingSpec ?? "mock@1.0";
+    return [...new Set(bindingSpecs)].map(bindingSpec => ({ bindingSpec, supported: bindingSpec === supported }));
+  }
+
   bindingSpecs() {
     return [{ bindingSpec: this.opts.bindingSpec ?? "mock@1.0" }];
   }
@@ -365,6 +370,40 @@ function makeInvoker(
 // ---------------------------------------------------------------------------
 
 describe("OperationInvoker wiring", () => {
+  it("batches candidate identifiers through the authoritative support query at selection time", async () => {
+    const checks: string[][] = [];
+    const hidden: BindingInvoker = {
+      bindingSpecs: () => [],
+      checkBindingSpecs(bindingSpecs) {
+        checks.push([...bindingSpecs]);
+        return [...new Set(bindingSpecs)].map(bindingSpec => ({
+          bindingSpec,
+          supported: bindingSpec === "example.hidden@1",
+        }));
+      },
+      invokeBinding<I, O>(args: BindingInvocationArgs): Invocation<I, O> {
+        const invocation = new InvocationImpl<unknown, { ok: boolean }>({ signal: args.signal });
+        queueMicrotask(async () => {
+          await invocation.closeInput();
+          await invocation.emitOutput({ ok: true });
+          invocation.closeOutput();
+        });
+        return invocation as Invocation<I, O>;
+      },
+    };
+    const iface: OBInterface = {
+      openbindings: "0.2.0",
+      operations: { ping: { output: { type: "object" } } },
+      sources: { hidden: { bindingSpec: "example.hidden@1" } },
+      bindings: { "ping.hidden": { operation: "ping", source: "hidden" } },
+    };
+
+    const operationInvoker = new OperationInvoker([hidden]);
+    const call = operationInvoker.invoke(iface, operationSignature("ping"));
+    await expect(single(call.outputs)).resolves.toEqual({ ok: true });
+    expect(checks[0]).toEqual(["example.hidden@1"]);
+  });
+
   it("invokes a no-input operation: binding closes input, single yields the output [NI]", async () => {
     const op = makeInvoker();
     const call = op.invoke(testInterface(), operationSignature("ping"));

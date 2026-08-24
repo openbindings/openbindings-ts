@@ -639,6 +639,10 @@ describe("storeContextResolver", () => {
 
 function echoContextInvoker(seen: (Record<string, unknown> | undefined)[]): BindingInvoker {
   return {
+    checkBindingSpecs: bindingSpecs => [...new Set(bindingSpecs)].map(bindingSpec => ({
+      bindingSpec,
+      supported: bindingSpec === "mock@1.0",
+    })),
     bindingSpecs: () => [{ bindingSpec: "mock@1.0" }],
     invokeBinding<I, O>(args: BindingInvocationArgs): Invocation<I, O> {
       const inv = new InvocationImpl<unknown, unknown>({ signal: args.signal });

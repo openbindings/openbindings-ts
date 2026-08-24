@@ -5,8 +5,10 @@ import { join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { parse, type Document, type Node as KDLNode } from "@bgotink/kdl";
 import {
+  checkBindingSpecs as checkBindingSpecSupport,
   MAX_TESTED_VERSION,
   type BindingSpecInfo,
+  type BindingSpecVerdict,
   type JSONSchema,
   type OBInterface,
   type Source,
@@ -45,6 +47,14 @@ import {
 
 export const BINDING_SPEC = "openbindings.usage@1";
 export const IMPLEMENTED_USAGE_VERSION = "3.5.6";
+
+function usageBindingSpecs(): BindingSpecInfo[] {
+  return [{ bindingSpec: BINDING_SPEC, description: "CLI tools described by jdx usage" }];
+}
+
+function checkUsageBindingSpecs(bindingSpecs: readonly string[]): BindingSpecVerdict[] {
+  return checkBindingSpecSupport(bindingSpecs, usageBindingSpecs());
+}
 
 export interface ProcessRequest {
   argv: string[];
@@ -138,8 +148,12 @@ export class UsageInvoker implements BindingInvoker {
     this.#classifiers = options.classifiers ?? {};
   }
 
+  checkBindingSpecs(bindingSpecs: readonly string[]): BindingSpecVerdict[] {
+    return checkUsageBindingSpecs(bindingSpecs);
+  }
+
   bindingSpecs(): BindingSpecInfo[] {
-    return [{ bindingSpec: BINDING_SPEC, description: "CLI tools described by jdx usage" }];
+    return usageBindingSpecs();
   }
 
   invokeBinding<I = unknown, O = unknown>(args: BindingInvocationArgs): Invocation<I, O> {
@@ -264,8 +278,12 @@ export class UsageSynthesizer implements InterfaceSynthesizer, CoverageSynthesiz
     this.#fetch = options.fetch;
   }
 
+  checkBindingSpecs(bindingSpecs: readonly string[]): BindingSpecVerdict[] {
+    return checkUsageBindingSpecs(bindingSpecs);
+  }
+
   bindingSpecs(): BindingSpecInfo[] {
-    return [{ bindingSpec: BINDING_SPEC, description: "CLI tools described by jdx usage" }];
+    return usageBindingSpecs();
   }
 
   async synthesizeInterface(input: SynthesizeInput, options?: { signal?: AbortSignal }): Promise<OBInterface> {

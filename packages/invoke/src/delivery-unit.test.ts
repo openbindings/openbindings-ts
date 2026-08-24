@@ -56,6 +56,9 @@ describe("resolveDeliveryUnitLimit", () => {
 function capturingInvoker(): { invoker: BindingInvoker; seen: BindingInvocationArgs[] } {
   const seen: BindingInvocationArgs[] = [];
   const invoker: BindingInvoker = {
+    checkBindingSpecs(bindingSpecs: readonly string[]) {
+      return [...new Set(bindingSpecs)].map(bindingSpec => ({ bindingSpec, supported: bindingSpec === "test.spec@1" }));
+    },
     bindingSpecs(): BindingSpecInfo[] {
       return [{ bindingSpec: "test.spec@1" }];
     },

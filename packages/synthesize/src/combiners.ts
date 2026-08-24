@@ -1,4 +1,5 @@
-import type { OBInterface, Source, BindingSpecInfo } from "@openbindings/core";
+import { checkBindingSpecs as unsupportedVerdicts } from "@openbindings/core";
+import type { OBInterface, Source, BindingSpecInfo, BindingSpecVerdict } from "@openbindings/core";
 import type { CoverageSynthesizer, InterfaceSynthesizer, SourceInspector } from "./synthesizer.js";
 import type {
   SynthesizeInput,
@@ -16,18 +17,37 @@ import { finalizeSynthesisCoverage, synthesisSkeleton } from "./synthesizer-type
 export type CombinedSynthesizer = CoverageSynthesizer;
 
 export function combineSynthesizers(...synthesizers: InterfaceSynthesizer[]): CombinedSynthesizer {
-  const bySpec = new Map<string, InterfaceSynthesizer>(); // exact identifier -> synthesizer
   const specs: BindingSpecInfo[] = [];
+  const listed = new Set<string>();
 
   for (const synthesizer of synthesizers) {
     for (const info of synthesizer.bindingSpecs()) {
-      if (bySpec.has(info.bindingSpec)) continue; // first registration wins
-      bySpec.set(info.bindingSpec, synthesizer);
+      if (listed.has(info.bindingSpec)) continue;
+      listed.add(info.bindingSpec);
       specs.push(info);
     }
   }
 
+  function supportingSynthesizer(bindingSpec: string): InterfaceSynthesizer | undefined {
+    return synthesizers.find((synthesizer) => {
+      const verdict = synthesizer.checkBindingSpecs([bindingSpec])[0];
+      return verdict?.bindingSpec === bindingSpec && verdict.supported === true;
+    });
+  }
+
   return {
+    checkBindingSpecs(bindingSpecs: readonly string[]): BindingSpecVerdict[] {
+      const verdicts = unsupportedVerdicts(bindingSpecs, []);
+      const bySpec = new Map(verdicts.map((verdict) => [verdict.bindingSpec, verdict]));
+      const requested = verdicts.map(({ bindingSpec }) => bindingSpec);
+      for (const synthesizer of synthesizers) {
+        for (const verdict of synthesizer.checkBindingSpecs(requested)) {
+          const combined = bySpec.get(verdict.bindingSpec);
+          if (combined && verdict.supported === true) combined.supported = true;
+        }
+      }
+      return verdicts;
+    },
     bindingSpecs(): BindingSpecInfo[] {
       return [...specs];
     },
@@ -39,7 +59,7 @@ export function combineSynthesizers(...synthesizers: InterfaceSynthesizer[]): Co
       if (!firstSource) {
         return synthesisSkeleton(input);
       }
-      const synthesizer = bySpec.get(firstSource.bindingSpec);
+      const synthesizer = supportingSynthesizer(firstSource.bindingSpec);
       if (!synthesizer) throw new NoSynthesizerError(firstSource.bindingSpec);
       return synthesizer.synthesizeInterface(input, options);
     },
@@ -51,7 +71,7 @@ export function combineSynthesizers(...synthesizers: InterfaceSynthesizer[]): Co
       if (!firstSource) {
         return finalizeSynthesisCoverage(synthesisSkeleton(input), [], true);
       }
-      const synthesizer = bySpec.get(firstSource.bindingSpec);
+      const synthesizer = supportingSynthesizer(firstSource.bindingSpec);
       if (!synthesizer) throw new NoSynthesizerError(firstSource.bindingSpec);
       const candidate = synthesizer as Partial<CoverageSynthesizer>;
       if (typeof candidate.synthesizeInterfaceWithCoverage !== "function") {

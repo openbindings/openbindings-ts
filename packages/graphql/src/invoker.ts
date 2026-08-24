@@ -1,4 +1,5 @@
-import { type BindingSpecInfo, type OBInterface, type Source } from "@openbindings/core";
+import { checkBindingSpecs as checkBindingSpecSupport } from "@openbindings/core";
+import { type BindingSpecInfo, type BindingSpecVerdict, type OBInterface, type Source } from "@openbindings/core";
 import {
   ERR_INVALID_SELECTOR,
   ERR_EXECUTION_FAILED,
@@ -59,6 +60,14 @@ async function readFirst<T>(it: AsyncIterable<T>): Promise<{ present: boolean; v
   return { present: false };
 }
 
+function graphQLBindingSpecs(): BindingSpecInfo[] {
+  return [{ bindingSpec: BINDING_SPEC, description: "GraphQL query and mutation application values" }];
+}
+
+function checkGraphQLBindingSpecs(bindingSpecs: readonly string[]): BindingSpecVerdict[] {
+  return checkBindingSpecSupport(bindingSpecs, graphQLBindingSpecs());
+}
+
 /**
  * Invokes GraphQL bindings via HTTP POST (queries/mutations) or the
  * graphql-transport-ws WebSocket protocol (subscriptions). The caller
@@ -73,8 +82,12 @@ export class GraphQLInvoker implements BindingInvoker {
 
   constructor(private readonly webSocketFactory?: GraphQLWebSocketFactory) {}
 
+  checkBindingSpecs(bindingSpecs: readonly string[]): BindingSpecVerdict[] {
+    return checkGraphQLBindingSpecs(bindingSpecs);
+  }
+
   bindingSpecs(): BindingSpecInfo[] {
-    return [{ bindingSpec: BINDING_SPEC, description: "GraphQL query and mutation application values" }];
+    return graphQLBindingSpecs();
   }
 
   invokeBinding<I = unknown, O = unknown>(args: BindingInvocationArgs): Invocation<I, O> {
@@ -297,8 +310,12 @@ function introspectionCacheKey(endpoint: string, headers: Record<string, string>
 
 /** Synthesizes OBInterface definitions by introspecting GraphQL endpoints. */
 export class GraphQLSynthesizer implements InterfaceSynthesizer, CoverageSynthesizer, SourceInspector {
+  checkBindingSpecs(bindingSpecs: readonly string[]): BindingSpecVerdict[] {
+    return checkGraphQLBindingSpecs(bindingSpecs);
+  }
+
   bindingSpecs(): BindingSpecInfo[] {
-    return [{ bindingSpec: BINDING_SPEC, description: "GraphQL query and mutation application values" }];
+    return graphQLBindingSpecs();
   }
 
   async synthesizeInterface(
