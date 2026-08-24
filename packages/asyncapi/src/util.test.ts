@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   sanitizeKey,
   uniqueKey,
-  parseRef,
+  parseSelector,
   parseAsyncAPIDocument,
 } from "./util.js";
 
@@ -52,45 +52,45 @@ describe("uniqueKey", () => {
   });
 });
 
-describe("parseRef", () => {
+describe("parseSelector", () => {
   it("extracts operation ID from #/operations/foo", () => {
-    expect(parseRef("#/operations/foo")).toBe("foo");
+    expect(parseSelector("#/operations/foo")).toBe("foo");
   });
 
   // ASYNC-D-03: the JSON Pointer `#/operations/<operation-key>` is the
   // ONLY conformant spelling — the former bare-key lenience is gone.
   it("refuses a bare operation key, citing the rule", () => {
-    expect(() => parseRef("sendMessage")).toThrow("ASYNC-D-03");
+    expect(() => parseSelector("sendMessage")).toThrow("ASYNC-D-03");
   });
 
   // ASYNC-D-03: an unescaped `/` after the prefix addresses a deeper path,
   // never an operations-map entry.
   it("refuses an unescaped / in the operation-key position", () => {
-    expect(() => parseRef("#/operations/tasks/create")).toThrow("ASYNC-D-03");
+    expect(() => parseSelector("#/operations/tasks/create")).toThrow("ASYNC-D-03");
   });
 
-  it("throws for empty ref", () => {
-    expect(() => parseRef("")).toThrow("ref is required");
+  it("throws for empty selector", () => {
+    expect(() => parseSelector("")).toThrow("ref is required");
   });
 
-  it("throws for whitespace-only ref", () => {
-    expect(() => parseRef("   ")).toThrow("ref is required");
+  it("throws for whitespace-only selector", () => {
+    expect(() => parseSelector("   ")).toThrow("ref is required");
   });
 
   it("throws for empty operation ID after prefix", () => {
-    expect(() => parseRef("#/operations/")).toThrow("empty operation key");
+    expect(() => parseSelector("#/operations/")).toThrow("empty operation key");
   });
 
   // ASYNC-D-03: operation keys containing `/` or `~` carry RFC 6901
   // escaping in the pointer (~1 → /, ~0 → ~).
   it("unescapes RFC 6901 sequences in the operation key", () => {
-    expect(parseRef("#/operations/orders~1create~0v2")).toBe(
+    expect(parseSelector("#/operations/orders~1create~0v2")).toBe(
       "orders/create~v2",
     );
   });
 
   it("accepts an edition-native AsyncAPI 2.x operation pointer", () => {
-    expect(parseRef("#/channels/orders~1created/publish")).toBe(
+    expect(parseSelector("#/channels/orders~1created/publish")).toBe(
       "v2:publish:orders/created",
     );
   });
@@ -142,7 +142,7 @@ describe("parseAsyncAPIDocument", () => {
     );
   });
 
-  it("normalizes AsyncAPI 2.x perspective while preserving its native ref", async () => {
+  it("normalizes AsyncAPI 2.x perspective while preserving its native selector", async () => {
     const doc2x = JSON.stringify({
       asyncapi: "2.6.0",
       info: { title: "Legacy", version: "1.0.0" },
@@ -153,7 +153,7 @@ describe("parseAsyncAPIDocument", () => {
     });
     const doc = await parseAsyncAPIDocument(undefined, doc2x);
     expect(doc.operations?.["v2:publish:messages/in"]?.action).toBe("receive");
-    expect(parseRef("#/channels/messages~1in/publish")).toBe("v2:publish:messages/in");
+    expect(parseSelector("#/channels/messages~1in/publish")).toBe("v2:publish:messages/in");
   });
 
   it("discriminates an unsupported edition before resolving external references", async () => {

@@ -52,7 +52,7 @@ Neither SDK owns a registry or infers route-versus-aggregate semantics.
 
 Every family is checked at five boundaries. Its `corpus.test.ts` adapter runs
 the shared D-rule fixtures from `spec/conformance/binding-specs/<family>/`
-through the package's own artifact, location, and ref lanes. Family authoring
+through the package's own artifact, location, and selector lanes. Family authoring
 tests then exercise artifact loading, inspection, synthesis, and
 synthesized-document validation. Both SDKs execute the same portable synthesis
 scenarios from `spec/conformance/binding-specs/synthesis/`, comparing exact

@@ -1,7 +1,7 @@
 /**
  * Operation graph definition types (openbindings.operation-graph@0.2.0, the
  * transparency rewrite). A graph is the addressable unit of the format: a
- * binding's ref resolves to it via JSON Pointer; the JSON document hosting
+ * binding's selector resolves to it via JSON Pointer; the JSON document hosting
  * it is unconstrained and carries no type here.
  */
 
@@ -58,13 +58,13 @@ export interface Edge {
 }
 
 /**
- * Converts a JSON value (the target of a resolved ref) into a Graph. The
+ * Converts a JSON value (the target of a resolved selector) into a Graph. The
  * value must be a JSON object; structural validity beyond that is
  * validate's concern.
  */
 export function graphFromValue(v: unknown): Graph {
   if (typeof v !== "object" || v === null || Array.isArray(v)) {
-    throw new Error("resolved ref value is not a JSON object");
+    throw new Error("resolved selector value is not a JSON object");
   }
   return v as Graph;
 }

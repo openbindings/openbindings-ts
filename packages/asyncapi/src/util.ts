@@ -1,6 +1,8 @@
+// The standalone client's analysis surface names the binding selector
+// `ref`; the OpenBindings packages adapt it to selector-based names here.
 export {
-  operationRef,
-  parseRef,
+  operationRef as operationSelector,
+  parseRef as parseSelector,
   rawParsedDocument,
   validateDocumentAddress,
 } from "@openbindings/asyncapi-client/analysis";

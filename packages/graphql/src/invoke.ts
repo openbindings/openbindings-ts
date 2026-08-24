@@ -11,22 +11,22 @@ import { rootTypeName, INTROSPECTION_QUERY } from "./introspection.js";
 import type { DocumentConfiguration, GraphQLWebSocketFactory } from "./configuration.js";
 
 // ---------------------------------------------------------------------------
-// Ref parsing
+// Selector parsing
 // ---------------------------------------------------------------------------
 
-/** Parse a ref form shared by the supported GraphQL revisions. */
-export function parseRef(ref: string): { rootType: string; fieldName: string } {
-  const idx = ref.indexOf("/");
-  if (idx < 0 || idx === 0 || idx === ref.length - 1 || ref.indexOf("/", idx + 1) >= 0) {
-    throw new Error(`GraphQL ref "${ref}" must be in the form query/fieldName, mutation/fieldName, or subscription/fieldName`);
+/** Parse a selector form shared by the supported GraphQL revisions. */
+export function parseSelector(selector: string): { rootType: string; fieldName: string } {
+  const idx = selector.indexOf("/");
+  if (idx < 0 || idx === 0 || idx === selector.length - 1 || selector.indexOf("/", idx + 1) >= 0) {
+    throw new Error(`GraphQL selector "${selector}" must be in the form query/fieldName, mutation/fieldName, or subscription/fieldName`);
   }
-  const rootType = ref.slice(0, idx);
-  const fieldName = ref.slice(idx + 1);
+  const rootType = selector.slice(0, idx);
+  const fieldName = selector.slice(idx + 1);
   if (rootType !== "query" && rootType !== "mutation" && rootType !== "subscription") {
-    throw new Error(`GraphQL ref "${ref}" has invalid operation kind "${rootType}" (must be query, mutation, or subscription)`);
+    throw new Error(`GraphQL selector "${selector}" has invalid operation kind "${rootType}" (must be query, mutation, or subscription)`);
   }
   if (!/^[_A-Za-z][_0-9A-Za-z]*$/.test(fieldName)) {
-    throw new Error(`GraphQL ref "${ref}" has invalid field name "${fieldName}"`);
+    throw new Error(`GraphQL selector "${selector}" has invalid field name "${fieldName}"`);
   }
   return { rootType, fieldName };
 }

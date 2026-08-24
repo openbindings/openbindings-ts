@@ -16,7 +16,7 @@ import {
   type UnrealizableTarget,
 } from "./synthesize.js";
 import {
-  buildJsonPointerRef,
+  buildJsonPointerSelector,
   codePointCompare,
 } from "./util.js";
 import { resolveServer } from "./servers.js";
@@ -51,9 +51,9 @@ export function openAPISynthesisCoverage(
   floor?: AcceptanceFloor,
 ): SynthesisCoverageEntry[] {
   if (!doc) return [];
-  const byRef = new Map<string, { operationKey: string; ref: string }>();
+  const bySelector = new Map<string, { operationKey: string; selector: string }>();
   for (const binding of Object.values(iface.bindings ?? {})) {
-    if (binding.ref) byRef.set(binding.ref, { operationKey: binding.operation, ref: binding.ref });
+    if (binding.selector) bySelector.set(binding.selector, { operationKey: binding.operation, selector: binding.selector });
   }
   const source = Object.values(iface.sources ?? {})
     .find((candidate) => candidate.bindingSpec === BINDING_SPEC
@@ -72,7 +72,7 @@ export function openAPISynthesisCoverage(
   // is owed. Deterministic order: sorted paths × the HTTP_METHODS order.
   const pathSet = new Set<string>();
   for (const path of Object.keys(doc.paths ?? {})) pathSet.add(path);
-  if (floor) for (const ref of floor.opOrder) pathSet.add(floor.ops.get(ref)!.path);
+  if (floor) for (const selector of floor.opOrder) pathSet.add(floor.ops.get(selector)!.path);
 
   const entries: SynthesisCoverageEntry[] = [];
   for (const path of [...pathSet].sort(codePointCompare)) {
@@ -81,8 +81,8 @@ export function openAPISynthesisCoverage(
     for (const method of HTTP_METHODS) {
       const rawOperation = pathItem?.[method];
       const loadedOperation = rawOperation && typeof rawOperation === "object" ? (rawOperation as OpenAPIOperation) : undefined;
-      const ref = buildJsonPointerRef(path, method);
-      const verdict = floorOpVerdict(floor, ref);
+      const selector = buildJsonPointerSelector(path, method);
+      const verdict = floorOpVerdict(floor, selector);
       if (!loadedOperation && !verdict) continue;
       if (verdict && verdict.disposition === "invalid") {
         // A ladder-invalid target: one invalid target entry carrying the
@@ -90,7 +90,7 @@ export function openAPISynthesisCoverage(
         // entries.
         entries.push({
           sourceIndex: 0,
-          sourceRef: ref,
+          sourceSelector: selector,
           scope: "target",
           status: "invalid",
           reasonCode: INVALID_UNIT_REASON_CODE,
@@ -106,17 +106,17 @@ export function openAPISynthesisCoverage(
         continue;
       }
       const operation = loadedOperation;
-      const identity = byRef.get(ref);
+      const identity = bySelector.get(selector);
       if (!identity) {
         // Tolerant synthesis skipped this operation with a recorded,
         // spec-governed reason: a per-operation exclusion, not an
         // implementation defect. Anything else genuinely missing remains
         // an implementation invariant violation.
-        const skipped = unrealizable?.get(ref);
+        const skipped = unrealizable?.get(selector);
         if (skipped) {
           entries.push({
             sourceIndex: 0,
-            sourceRef: ref,
+            sourceSelector: selector,
             scope: "target",
             status: "excluded",
             reasonCode: skipped.reasonCode,
@@ -131,7 +131,7 @@ export function openAPISynthesisCoverage(
         } else {
           entries.push({
             sourceIndex: 0,
-            sourceRef: ref,
+            sourceSelector: selector,
             scope: "target",
             status: "implementation-unsupported",
             reasonCode: "openapi.missing_emitted_binding",
@@ -142,11 +142,11 @@ export function openAPISynthesisCoverage(
       }
       entries.push({
         sourceIndex: 0,
-        sourceRef: ref,
+        sourceSelector: selector,
         scope: "target",
         status: "represented",
         operationKey: identity.operationKey,
-        bindingRef: identity.ref,
+        bindingSelector: identity.selector,
         requirements: [
           ...serverRequirements(doc, pathItem!, operation, sourceLocation),
           ...requestMediaTargetRequirements(operation, pathItem!, bindingSpec, doc.openapi),
@@ -154,7 +154,7 @@ export function openAPISynthesisCoverage(
       });
       entries.push(...requestMediaCoverage(operation, pathItem!, identity, bindingSpec, doc.openapi, verdict));
       entries.push(...floorProjectionEntries(verdict));
-      entries.push(...callbackCoverage(operation, ref));
+      entries.push(...callbackCoverage(operation, selector));
     }
   }
   entries.push(...webhookCoverage(doc));
@@ -164,18 +164,18 @@ export function openAPISynthesisCoverage(
 /** Renders a ladder-invalid or excluded operation's invalid request media alternatives. */
 function floorInvalidAlternativeEntries(verdict: FloorOp | undefined): SynthesisCoverageEntry[] {
   if (!verdict || verdict.altOrder.length === 0) return [];
-  return verdict.altOrder.map((altRef): SynthesisCoverageEntry => {
-    const defects = verdict.invalidAlternatives.get(altRef) ?? [];
+  return verdict.altOrder.map((altSelector): SynthesisCoverageEntry => {
+    const defects = verdict.invalidAlternatives.get(altSelector) ?? [];
     return {
       sourceIndex: 0,
-      sourceRef: altRef,
+      sourceSelector: altSelector,
       scope: "alternative",
       status: "invalid",
       reasonCode: INVALID_UNIT_REASON_CODE,
       message: floorInvalidAlternativeMessage(defects.length),
       details: {
         defects: floorDefectDetails(defects),
-        mediaType: unescapeJSONPointerToken(altRef.slice(altRef.lastIndexOf("/") + 1)),
+        mediaType: unescapeJSONPointerToken(altSelector.slice(altSelector.lastIndexOf("/") + 1)),
       },
     };
   });
@@ -191,7 +191,7 @@ function floorProjectionEntries(verdict: FloorOp | undefined): SynthesisCoverage
     const defects = verdict.projections.get(unit) ?? [];
     return {
       sourceIndex: 0,
-      sourceRef: unit,
+      sourceSelector: unit,
       scope: "projection",
       status: "invalid",
       reasonCode: INVALID_UNIT_REASON_CODE,
@@ -241,7 +241,7 @@ function serverRequirements(
 function requestMediaCoverage(
   operation: OpenAPIOperation,
   pathItem: OpenAPIPathItem,
-  identity: { operationKey: string; ref: string },
+  identity: { operationKey: string; selector: string },
   bindingSpec: string,
   openapiVersion: string | undefined,
   verdict: FloorOp | undefined,
@@ -267,15 +267,15 @@ function requestMediaCoverage(
       .map((plan) => plan.mediaKey),
   );
   return Object.keys(content).sort(codePointCompare).map((mediaType): SynthesisCoverageEntry => {
-    const sourceRef = `${identity.ref}/requestBody/content/${escapeJSONPointerToken(mediaType)}`;
-    const invalidDefects = verdict?.invalidAlternatives.get(sourceRef);
+    const sourceSelector = `${identity.selector}/requestBody/content/${escapeJSONPointerToken(mediaType)}`;
+    const invalidDefects = verdict?.invalidAlternatives.get(sourceSelector);
     if (invalidDefects) {
       // The ladder invalidates this alternative: `invalid`, not `excluded`
       // -- the unit is malformed under its upstream authority, not declined
       // by the revision.
       return {
         sourceIndex: 0,
-        sourceRef,
+        sourceSelector,
         scope: "alternative",
         status: "invalid",
         reasonCode: INVALID_UNIT_REASON_CODE,
@@ -289,11 +289,11 @@ function requestMediaCoverage(
     if (represented.has(mediaType)) {
       const entry: SynthesisCoverageEntry = {
         sourceIndex: 0,
-        sourceRef,
+        sourceSelector,
         scope: "alternative",
         status: "represented",
         operationKey: identity.operationKey,
-        bindingRef: identity.ref,
+        bindingSelector: identity.selector,
       };
       if (hasMediaFidelity(bindingSpec) && plans.some((plan) => plan.mediaKey === mediaType && plan.range)) {
         entry.requirements = ["configuration.requestMedia"];
@@ -312,7 +312,7 @@ function requestMediaCoverage(
     }
     return {
       sourceIndex: 0,
-      sourceRef,
+      sourceSelector,
       scope: "alternative",
       status: "excluded",
       reasonCode: collision ? "openapi.flattening_collision" : "openapi.request_media_excluded",
@@ -348,7 +348,7 @@ function webhookCoverage(doc: OpenAPIDocument): SynthesisCoverageEntry[] {
   if (!webhooks || typeof webhooks !== "object" || Array.isArray(webhooks)) {
     return [{
       sourceIndex: 0,
-      sourceRef: "#/webhooks",
+      sourceSelector: "#/webhooks",
       scope: "target",
       status: "invalid",
       reasonCode: "openapi.invalid_webhooks",
@@ -360,7 +360,7 @@ function webhookCoverage(doc: OpenAPIDocument): SynthesisCoverageEntry[] {
     if (!rawPathItem || typeof rawPathItem !== "object" || Array.isArray(rawPathItem)) {
       entries.push({
         sourceIndex: 0,
-        sourceRef: `#/webhooks/${escapeJSONPointerToken(name)}`,
+        sourceSelector: `#/webhooks/${escapeJSONPointerToken(name)}`,
         scope: "target",
         status: "invalid",
         reasonCode: "openapi.invalid_webhook",
@@ -376,10 +376,10 @@ function webhookCoverage(doc: OpenAPIDocument): SynthesisCoverageEntry[] {
   return entries;
 }
 
-function excludedReverseInteraction(sourceRef: string): SynthesisCoverageEntry {
+function excludedReverseInteraction(sourceSelector: string): SynthesisCoverageEntry {
   return {
     sourceIndex: 0,
-    sourceRef,
+    sourceSelector,
     scope: "target",
     status: "excluded",
     reasonCode: "openapi.reverse_direction",

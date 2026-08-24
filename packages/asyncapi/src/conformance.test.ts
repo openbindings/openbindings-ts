@@ -127,13 +127,13 @@ function configReq(err: Error | undefined): { type: string; point?: string; path
 async function publish(
   invoker: AsyncAPIInvoker,
   content: unknown,
-  ref: string,
+  selector: string,
   context?: Record<string, unknown>,
   value: unknown = { m: 1 },
 ): Promise<{ vals: unknown[]; err?: Error }> {
   const call = invoker.invokeBinding({
     source: { bindingSpec: BINDING_SPEC, content },
-    ref,
+    selector,
     context,
   });
   await call.write(value).catch(() => {});
@@ -506,7 +506,7 @@ describe("effective server set (ASYNC-P-04)", () => {
     try {
       const call = invoker.invokeBinding({
         source: { bindingSpec: BINDING_SPEC, content: doc },
-        ref: "#/operations/post",
+        selector: "#/operations/post",
       });
       const { err } = await drainOutputs(call);
       // The artifact target remains valid; this runtime simply has no Kafka
@@ -628,7 +628,7 @@ describe("http operation binding method override (ASYNC-P-02)", () => {
 
       const sub = invoker.invokeBinding({
         source: { bindingSpec: BINDING_SPEC, content: doc },
-        ref: "#/operations/sub",
+        selector: "#/operations/sub",
       });
       const { err } = await drainOutputs(sub);
       expect(codeOf(err)).toBe("ERR_REFUSED");
@@ -795,7 +795,7 @@ describe("standalone HTTP send exclusion (§8, ASYNC-P-02)", () => {
       const before = srv.requests();
       const call = invoker.invokeBinding({
         source: { bindingSpec: BINDING_SPEC, content: sseDoc(srv.port, "/") },
-        ref: "#/operations/receiveCaps",
+        selector: "#/operations/receiveCaps",
       });
       const { err } = await drainOutputs(call);
       expect(codeOf(err)).toBe("ERR_REFUSED");

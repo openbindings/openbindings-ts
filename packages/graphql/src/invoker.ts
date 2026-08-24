@@ -1,8 +1,8 @@
 import { type BindingSpecInfo, type OBInterface, type Source } from "@openbindings/core";
 import {
-  ERR_INVALID_REF,
+  ERR_INVALID_SELECTOR,
   ERR_EXECUTION_FAILED,
-  ERR_REF_NOT_FOUND,
+  ERR_SELECTOR_NOT_FOUND,
   ERR_RUNTIME,
   ERR_RESPONSE_ERROR,
   ERR_SOURCE_CONFIG_ERROR,
@@ -35,7 +35,7 @@ import {
   introspect,
   invokeGraphQL,
   parseIntrospectionContent,
-  parseRef,
+  parseSelector,
   resolveField,
   subscribeGraphQL,
 } from "./invoke.js";
@@ -63,7 +63,7 @@ async function readFirst<T>(it: AsyncIterable<T>): Promise<{ present: boolean; v
  * Invokes GraphQL bindings via HTTP POST (queries/mutations) or the
  * graphql-transport-ws WebSocket protocol (subscriptions). The caller
  * supplies the exact executable document through configuration; schema
- * introspection is used only to prove ref/root correspondence.
+ * introspection is used only to prove selector/root correspondence.
  *
  * `invokeBinding` returns the Invocation handle synchronously; the GraphQL
  * variables object is the operation's optional single input message.
@@ -95,15 +95,15 @@ export class GraphQLInvoker implements BindingInvoker {
     // Pre-dispatch validation: fail before any network I/O.
     let rootType: string, fieldName: string;
     try {
-      ({ rootType, fieldName } = parseRef(args.ref));
+      ({ rootType, fieldName } = parseSelector(args.selector));
     } catch {
-      throw new InvocationError(ERR_INVALID_REF);
+      throw new InvocationError(ERR_INVALID_SELECTOR);
     }
     if (args.source.bindingSpec !== BINDING_SPEC) {
       throw new InvocationError(ERR_SOURCE_CONFIG_ERROR);
     }
     if (rootType === "subscription") {
-      throw new InvocationError(ERR_INVALID_REF);
+      throw new InvocationError(ERR_INVALID_SELECTOR);
     }
 
     let url: string;
@@ -166,7 +166,7 @@ export class GraphQLInvoker implements BindingInvoker {
     try {
       resolveField(schema, rootType, fieldName);
     } catch {
-      throw new InvocationError(ERR_REF_NOT_FOUND);
+      throw new InvocationError(ERR_SELECTOR_NOT_FOUND);
     }
 
     let variables: Record<string, unknown> | undefined;
@@ -235,7 +235,7 @@ export class GraphQLInvoker implements BindingInvoker {
   prepareBinding(args: BindingInvocationArgs): Promise<ContextRequiredDetails | null> {
     let rootType: string;
     try {
-      ({ rootType } = parseRef(args.ref));
+      ({ rootType } = parseSelector(args.selector));
       validateHTTPLocation(args.source.location);
     } catch {
       return Promise.resolve(null);
@@ -385,11 +385,11 @@ export class GraphQLSynthesizer implements InterfaceSynthesizer, CoverageSynthes
       if (!t?.fields) continue;
       for (const f of [...t.fields].sort((a, b) => codePointCompare(a.name, b.name))) {
         if (f.name.startsWith("__")) continue;
-        const ref = `${rt.label}/${f.name}`;
+        const selector = `${rt.label}/${f.name}`;
         const operationKey = resolveKey(sanitizeKey(f.name), rt.label.toLowerCase(), usedKeys);
-        usedKeys.set(operationKey, ref);
+        usedKeys.set(operationKey, selector);
         const desc = f.description || undefined;
-        targets.push({ ref, operationKey, operation: desc ? { description: desc } : undefined });
+        targets.push({ selector, operationKey, operation: desc ? { description: desc } : undefined });
       }
     }
 
@@ -403,16 +403,16 @@ function graphQLSynthesisCoverage(
   bindingSpec: string,
 ): SynthesisCoverageEntry[] {
   const entries: SynthesisCoverageEntry[] = Object.entries(iface.bindings ?? {})
-    .sort(([, a], [, b]) => codePointCompare(a.ref ?? "", b.ref ?? ""))
+    .sort(([, a], [, b]) => codePointCompare(a.selector ?? "", b.selector ?? ""))
     .map(([bindingKey, binding]) => ({
       sourceIndex: 0,
-      sourceRef: binding.ref!,
+      sourceSelector: binding.selector!,
       scope: "target" as const,
       status: "represented" as const,
       operationKey: binding.operation,
       bindingKey,
-      bindingRef: binding.ref!,
-      requirements: binding.ref!.startsWith("subscription/")
+      bindingSelector: binding.selector!,
+      requirements: binding.selector!.startsWith("subscription/")
         ? ["document", "subscriptionTarget"]
         : ["document"],
     }));
@@ -423,7 +423,7 @@ function graphQLSynthesisCoverage(
       if (field.name.startsWith("__")) continue;
       entries.push({
         sourceIndex: 0,
-        sourceRef: `subscription/${field.name}`,
+        sourceSelector: `subscription/${field.name}`,
         scope: "target",
         status: "excluded",
         reasonCode: "graphql.subscription_lifecycle_not_representable",
@@ -432,7 +432,7 @@ function graphQLSynthesisCoverage(
         requirements: [],
       });
     }
-    entries.sort((a, b) => codePointCompare(a.sourceRef, b.sourceRef));
+    entries.sort((a, b) => codePointCompare(a.sourceSelector, b.sourceSelector));
   }
   return entries;
 }

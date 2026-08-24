@@ -35,7 +35,7 @@ describe("Usage authoring and expanded behavior", () => {
       const iface = await synth.synthesizeInterface({ sources: [{ bindingSpec: BINDING_SPEC, location: path }] });
       const inspection = await synth.inspectSource({ bindingSpec: BINDING_SPEC, location: path });
       expect(iface.sources?.default).toEqual({ bindingSpec: BINDING_SPEC, content });
-      expect(inspection.targets.map((target) => target.ref)).toEqual(["", "run"]);
+      expect(inspection.targets.map((target) => target.selector)).toEqual(["", "run"]);
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
@@ -46,8 +46,8 @@ describe("Usage authoring and expanded behavior", () => {
     const synth = new UsageSynthesizer();
     const iface = await synth.synthesizeInterface({ sources: [source] });
     const inspection = await synth.inspectSource(source);
-    expect(inspection.targets.map((target) => target.ref)).toEqual(["", "db", "db run"]);
-    expect(Object.values(iface.bindings ?? {}).map((binding) => binding.ref ?? "").sort()).toEqual(["", "db", "db run"]);
+    expect(inspection.targets.map((target) => target.selector)).toEqual(["", "db", "db run"]);
+    expect(Object.values(iface.bindings ?? {}).map((binding) => binding.selector ?? "").sort()).toEqual(["", "db", "db run"]);
     expect(iface.operations["db.run"]?.input).toMatchObject({
       type: "object",
       properties: { profile: { type: "string" }, force: { type: "boolean" }, file: { type: "string" } },
@@ -80,7 +80,7 @@ cmd "database" {
     const synth = new UsageSynthesizer();
     const result = await synth.synthesizeInterfaceWithCoverage({ sources: [source] });
     const refs = Object.values(result.interface.bindings ?? {})
-      .map((binding) => binding.ref ?? "")
+      .map((binding) => binding.selector ?? "")
       .sort();
     expect(refs).toEqual([
       "",
@@ -95,7 +95,7 @@ cmd "database" {
       exhaustive: true,
       fullyRepresented: true,
     });
-    expect(result.coverage.entries.map((entry) => entry.sourceRef).sort()).toEqual([
+    expect(result.coverage.entries.map((entry) => entry.sourceSelector).sort()).toEqual([
       "<root>",
       ...refs.filter(Boolean),
     ]);
@@ -114,29 +114,29 @@ cmd "beta" {
     const source = { bindingSpec: BINDING_SPEC, content };
     const synth = new UsageSynthesizer();
     const result = await synth.synthesizeInterfaceWithCoverage({ sources: [source] });
-    expect(Object.values(result.interface.bindings ?? {}).map((binding) => binding.ref ?? "").sort())
+    expect(Object.values(result.interface.bindings ?? {}).map((binding) => binding.selector ?? "").sort())
       .toEqual(["", "beta"]);
     expect(result.coverage.fullyRepresented).toBe(false);
     expect(result.coverage.entries).toEqual(expect.arrayContaining([
       expect.objectContaining({
-        sourceRef: "ambiguous-ref:x",
+        sourceSelector: "ambiguous-selector:x",
         scope: "alternative",
         status: "excluded",
         reasonCode: "usage.ambiguous_command_spelling",
       }),
       expect.objectContaining({
-        sourceRef: "command:x",
+        sourceSelector: "command:x",
         scope: "target",
         status: "excluded",
-        reasonCode: "usage.no_unique_command_ref",
+        reasonCode: "usage.no_unique_command_selector",
       }),
     ]));
 
     const invocation = new UsageInvoker({
-      executor: async () => { throw new Error("ambiguous ref must not dispatch"); },
-    }).invokeBinding({ source, ref: "x" });
+      executor: async () => { throw new Error("ambiguous selector must not dispatch"); },
+    }).invokeBinding({ source, selector: "x" });
     await invocation.close();
-    await expect(single(invocation.outputs)).rejects.toMatchObject({ code: "ERR_INVALID_REF" });
+    await expect(single(invocation.outputs)).rejects.toMatchObject({ code: "ERR_INVALID_SELECTOR" });
   });
 
   it("does not count navigation-only groups as interactions and still covers descendants", async () => {
@@ -152,13 +152,13 @@ cmd "group" subcommand_required=#true {
     expect(result.coverage.fullyRepresented).toBe(true);
     expect(result.coverage.entries).toEqual(expect.arrayContaining([
       expect.objectContaining({
-        sourceRef: "g run",
+        sourceSelector: "g run",
         status: "represented",
       }),
     ]));
     expect(result.coverage.entries).not.toEqual(expect.arrayContaining([
-      expect.objectContaining({ sourceRef: "group" }),
-      expect.objectContaining({ sourceRef: "g" }),
+      expect.objectContaining({ sourceSelector: "group" }),
+      expect.objectContaining({ sourceSelector: "g" }),
     ]));
   });
 
@@ -168,7 +168,7 @@ cmd "group" subcommand_required=#true {
       executor: async (request) => { dispatched = request; return { exitCode: 0, stdout: "done\r\n\n" }; },
     }).invokeBinding({
       source: { bindingSpec: BINDING_SPEC, content: descriptor },
-      ref: "db run",
+      selector: "db run",
     });
     await call.write({ profile: "ci", force: false, file: "plan.sql" });
     expect(await single(call.outputs)).toBe("done");
@@ -181,7 +181,7 @@ cmd "group" subcommand_required=#true {
       executor: async (request) => { dispatched = request; return { exitCode: 0 }; },
     }).invokeBinding({
       source: { bindingSpec: BINDING_SPEC, content: "bin \"tool\"\narg \"<profile>\" env=\"PROFILE\"\n" },
-      ref: "",
+      selector: "",
       context: { environment: { PROFILE: "ci" } },
     });
     await call.close();
@@ -201,7 +201,7 @@ cmd "run" help="Run it" {
     let dispatched: ProcessRequest | undefined;
     const call = new UsageInvoker({
       executor: async (request) => { dispatched = request; return { exitCode: 0 }; },
-    }).invokeBinding({ source: { bindingSpec: BINDING_SPEC, content }, ref: "run" });
+    }).invokeBinding({ source: { bindingSpec: BINDING_SPEC, content }, selector: "run" });
     await call.write({ verbose: true, tag: ["a", "b"], include: ["x", "y"], files: ["--one", "two"] });
     expect(await single(call.outputs)).toBe("");
     expect(dispatched?.argv).toEqual([
@@ -228,11 +228,11 @@ flag "--identity <id>" required_unless="--anonymous"
 flag "--anonymous"
 `;
     const executor = async () => ({ exitCode: 0 });
-    const missingIf = new UsageInvoker({ executor }).invokeBinding({ source: { bindingSpec: BINDING_SPEC, content }, ref: "" });
+    const missingIf = new UsageInvoker({ executor }).invokeBinding({ source: { bindingSpec: BINDING_SPEC, content }, selector: "" });
     await missingIf.write({ dir: "tmp", anonymous: true });
     await expect(single(missingIf.outputs)).rejects.toMatchObject({ code: "ERR_VALIDATION_FAILED" });
 
-    const missingUnless = new UsageInvoker({ executor }).invokeBinding({ source: { bindingSpec: BINDING_SPEC, content }, ref: "" });
+    const missingUnless = new UsageInvoker({ executor }).invokeBinding({ source: { bindingSpec: BINDING_SPEC, content }, selector: "" });
     await missingUnless.close();
     await expect(single(missingUnless.outputs)).rejects.toMatchObject({ code: "ERR_VALIDATION_FAILED" });
   });
@@ -249,7 +249,7 @@ flag "--environment" { arg "<environment>" { choices "dev" env="DEPLOY_ENVS" } }
   it("keeps process bytes intact for fatal UTF-8 decoding and byte encoders", async () => {
     const invalid = new UsageInvoker({
       executor: async () => ({ exitCode: 0, stdout: new Uint8Array([0xff]) }),
-    }).invokeBinding({ source: { bindingSpec: BINDING_SPEC, content: "bin \"tool\"" }, ref: "" });
+    }).invokeBinding({ source: { bindingSpec: BINDING_SPEC, content: "bin \"tool\"" }, selector: "" });
     await invalid.close();
     await expect(single(invalid.outputs)).rejects.toMatchObject({ code: "ERR_RESPONSE_ERROR" });
 
@@ -259,7 +259,7 @@ flag "--environment" { arg "<environment>" { choices "dev" env="DEPLOY_ENVS" } }
       executor: async (request) => { dispatched = request; return { exitCode: 0 }; },
     }).invokeBinding({
       source: { bindingSpec: BINDING_SPEC, content: "bin \"tool\"\narg \"[payload]\"" },
-      ref: "",
+      selector: "",
       context: { configuration: { route: { payload: { kind: "stdin", operand: "pure" } }, encode: { payload: "raw" } } },
     });
     await binary.write({ payload: { opaque: true } });

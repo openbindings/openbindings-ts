@@ -17,8 +17,8 @@ const authoring = new UsageSynthesizer();
 
 Content is pristine usage KDL text. A location is an absolute document URI or
 an `exec:` argv address; exec acquisition is denied unless the constructor's
-`authorizeExecAddress` approves that exact vector. Refs are exact,
-space-separated command paths; omitting the ref selects the root command, and
+`authorizeExecAddress` approves that exact vector. Selectors are exact,
+space-separated command paths; omitting the selector selects the root command, and
 artifact aliases ride into argv exactly as selected.
 
 The descriptor remains authoritative for field identities, spellings,

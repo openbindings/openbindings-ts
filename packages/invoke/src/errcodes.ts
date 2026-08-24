@@ -75,11 +75,11 @@ export const ERR_UNKNOWN_SOURCE = "ERR_UNKNOWN_SOURCE";
 // SDK implementation codes (not a cross-binding taxonomy)
 // ---------------------------------------------------------------------------
 
-/** Ref is malformed or can't be parsed. */
-export const ERR_INVALID_REF = "ERR_INVALID_REF";
+/** Selector is malformed or can't be parsed. */
+export const ERR_INVALID_SELECTOR = "ERR_INVALID_SELECTOR";
 
-/** Ref is syntactically valid but doesn't resolve to anything in the source. */
-export const ERR_REF_NOT_FOUND = "ERR_REF_NOT_FOUND";
+/** Selector is syntactically valid but doesn't resolve to anything in the source. */
+export const ERR_SELECTOR_NOT_FOUND = "ERR_SELECTOR_NOT_FOUND";
 
 /** Binding source couldn't be loaded or parsed. */
 export const ERR_SOURCE_LOAD_FAILED = "ERR_SOURCE_LOAD_FAILED";
@@ -197,8 +197,8 @@ export type InvocationErrorCode =
   | typeof CONTEXT_REQUIRED
   | typeof ERR_OPERATION_NOT_FOUND
   | typeof ERR_UNKNOWN_SOURCE
-  | typeof ERR_INVALID_REF
-  | typeof ERR_REF_NOT_FOUND
+  | typeof ERR_INVALID_SELECTOR
+  | typeof ERR_SELECTOR_NOT_FOUND
   | typeof ERR_SOURCE_LOAD_FAILED
   | typeof ERR_SOURCE_CONFIG_ERROR
   | typeof ERR_CONNECT_FAILED

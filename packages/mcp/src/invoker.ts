@@ -71,19 +71,19 @@ export class MCPInvoker implements BindingInvoker {
 
   /**
    * Returns the invocation handle synchronously; the MCP session work is
-   * scheduled asynchronously. The ref resolves against the listing before
+   * scheduled asynchronously. The selector resolves against the listing before
    * dispatch (openbindings.mcp@1 §7): offline against a pinned listing when
    * the source carries content, otherwise against the live
    * capability-gated, pagination-exhausted listing (MCP-P-02). Tool
    * arguments, prompt arguments, and a resource template's variables arrive
    * as the operation's single input message through the handle's `write`
    * channel; static resource reads take no input (the binding closes the
-   * input side once resolution says the ref names a static resource).
+   * input side once resolution says the selector names a static resource).
    * Progress notifications stream as outputs ahead of the result only when
    * solicited (§9.3's `solicit` configuration point — per-invocation
    * context.configuration.solicit, then the constructor's solicitProgress,
-   * default off). Pre-dispatch failures (bad ref, missing endpoint, invalid
-   * pin, invalid input, unresolvable ref) terminate the handle before the
+   * default off). Pre-dispatch failures (bad selector, missing endpoint, invalid
+   * pin, invalid input, unresolvable selector) terminate the handle before the
    * entity request is sent.
    */
   invokeBinding<I = unknown, O = unknown>(args: BindingInvocationArgs): Invocation<I, O> {
@@ -228,28 +228,28 @@ export class MCPSynthesizer implements InterfaceSynthesizer, CoverageSynthesizer
     const usedKeys = new Map<string, string>();
 
     for (const tool of disc.tools.sort((a, b) => codePointCompare(a.name, b.name))) {
-      const ref = `tools/${tool.name}`;
+      const selector = `tools/${tool.name}`;
       const operationKey = resolveKey(sanitizeKey(tool.name), "tool", usedKeys);
-      usedKeys.set(operationKey, ref);
-      targets.push({ ref, operationKey, operation: tool.description ? { description: tool.description } : undefined });
+      usedKeys.set(operationKey, selector);
+      targets.push({ selector, operationKey, operation: tool.description ? { description: tool.description } : undefined });
     }
     for (const res of disc.resources.sort((a, b) => codePointCompare(a.name, b.name))) {
-      const ref = `resources/${res.uri}`;
+      const selector = `resources/${res.uri}`;
       const operationKey = resolveKey(sanitizeKey(res.name), "resource", usedKeys);
-      usedKeys.set(operationKey, ref);
-      targets.push({ ref, operationKey, operation: res.description ? { description: res.description } : undefined });
+      usedKeys.set(operationKey, selector);
+      targets.push({ selector, operationKey, operation: res.description ? { description: res.description } : undefined });
     }
     for (const tmpl of disc.resourceTemplates.sort((a, b) => codePointCompare(a.name, b.name))) {
-      const ref = `resourceTemplates/${tmpl.uriTemplate}`;
+      const selector = `resourceTemplates/${tmpl.uriTemplate}`;
       const operationKey = resolveKey(sanitizeKey(tmpl.name), "resource_template", usedKeys);
-      usedKeys.set(operationKey, ref);
-      targets.push({ ref, operationKey, operation: tmpl.description ? { description: tmpl.description } : undefined });
+      usedKeys.set(operationKey, selector);
+      targets.push({ selector, operationKey, operation: tmpl.description ? { description: tmpl.description } : undefined });
     }
     for (const prompt of disc.prompts.sort((a, b) => codePointCompare(a.name, b.name))) {
-      const ref = `prompts/${prompt.name}`;
+      const selector = `prompts/${prompt.name}`;
       const operationKey = resolveKey(sanitizeKey(prompt.name), "prompt", usedKeys);
-      usedKeys.set(operationKey, ref);
-      targets.push({ ref, operationKey, operation: prompt.description ? { description: prompt.description } : undefined });
+      usedKeys.set(operationKey, selector);
+      targets.push({ selector, operationKey, operation: prompt.description ? { description: prompt.description } : undefined });
     }
 
     return { targets, exhaustive: true };

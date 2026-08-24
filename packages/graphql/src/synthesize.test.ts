@@ -44,7 +44,7 @@ describe("convertToInterface", () => {
       "status",
       "viewer",
     ]);
-    expect(Object.values(iface.bindings ?? {}).map((binding) => binding.ref).sort()).toEqual([
+    expect(Object.values(iface.bindings ?? {}).map((binding) => binding.selector).sort()).toEqual([
       "mutation/status",
       "query/status",
       "query/viewer",

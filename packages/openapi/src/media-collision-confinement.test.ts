@@ -71,7 +71,7 @@ async function assertRequestCell(fixture: MediaCollisionCase): Promise<void> {
   const alternatives = new Map(
     result.coverage.entries
       .filter((entry) => entry.scope === "alternative")
-      .map((entry) => [entry.sourceRef.replace(`${TARGET_REF}/requestBody/content/`, ""), entry]),
+      .map((entry) => [entry.sourceSelector.replace(`${TARGET_REF}/requestBody/content/`, ""), entry]),
   );
 
   const operationPresent = Object.keys(result.interface.operations).includes("createItem");

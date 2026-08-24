@@ -124,15 +124,15 @@ function protobufInterface(
   for (const service of services) {
     for (const method of Object.values(service.methods).sort((a, b) => compare(a.name, b.name))) {
       if (boundMethodRangeError(root, method)) continue;
-      const ref = `${qualifiedName(service)}/${method.name}`;
+      const selector = `${qualifiedName(service)}/${method.name}`;
       const operationKey = resolveKey(sanitizeKey(method.name), service.name, used);
-      used.set(operationKey, ref);
+      used.set(operationKey, selector);
       const operation: Operation = iface.operations[operationKey] = {
         input: new SchemaWalker("input", onWarning, `operations.${operationKey}.input`).root(root.lookupType(method.requestType)),
         output: new SchemaWalker("output", onWarning, `operations.${operationKey}.output`).root(root.lookupType(method.responseType)),
       };
       if (method.comment) operation.description = method.comment.trim();
-      iface.bindings![`${operationKey}.default`] = { operation: operationKey, source: "default", ref };
+      iface.bindings![`${operationKey}.default`] = { operation: operationKey, source: "default", selector };
     }
   }
   if (services.length === 1) iface.name = services[0]!.name;
@@ -146,11 +146,11 @@ function inspectProtobuf(root: protobuf.Root): SourceInspection {
   for (const service of collectServices(root)) {
     for (const method of Object.values(service.methods).sort((a, b) => compare(a.name, b.name))) {
       if (boundMethodRangeError(root, method)) continue;
-      const ref = `${qualifiedName(service)}/${method.name}`;
+      const selector = `${qualifiedName(service)}/${method.name}`;
       const operationKey = resolveKey(sanitizeKey(method.name), service.name, used);
-      used.set(operationKey, ref);
+      used.set(operationKey, selector);
       const description = method.comment?.trim();
-      targets.push({ ref, operationKey, operation: description ? { description } : undefined });
+      targets.push({ selector, operationKey, operation: description ? { description } : undefined });
     }
   }
   return { targets, exhaustive: true };

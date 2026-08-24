@@ -94,7 +94,7 @@ describe("WS receive backpressure", { timeout: 30_000 }, () => {
       try {
         const call = invoker.invokeBinding({
           source: { bindingSpec: BINDING_SPEC, content: spec(port) },
-          ref: "#/operations/subscribe",
+          selector: "#/operations/subscribe",
         });
         // Let the flood land in the buffer before this test ever iterates
         // outputs: the handle's own output buffer is only
@@ -152,7 +152,7 @@ describe("WS receive backpressure", { timeout: 30_000 }, () => {
       try {
         const call = invoker.invokeBinding({
           source: { bindingSpec: BINDING_SPEC, content: spec(port) },
-          ref: "#/operations/subscribe",
+          selector: "#/operations/subscribe",
         });
         await floodDone;
 
@@ -196,8 +196,8 @@ describe("WS receive backpressure", { timeout: 30_000 }, () => {
         const source = { bindingSpec: BINDING_SPEC, content: spec(port) };
         // Sequence the acquires so the second one provably reuses the first
         // socket (same server|address|credential pool key).
-        const slow = invoker.invokeBinding({ source, ref: "#/operations/subscribe" });
-        const fast = invoker.invokeBinding({ source, ref: "#/operations/subscribe" });
+        const slow = invoker.invokeBinding({ source, selector: "#/operations/subscribe" });
+        const fast = invoker.invokeBinding({ source, selector: "#/operations/subscribe" });
         const fastDrain = drainOutputs(fast);
 
         const fastResult = await fastDrain;
@@ -255,7 +255,7 @@ describe("WS receive backpressure", { timeout: 30_000 }, () => {
     try {
       const call = invoker.invokeBinding({
         source: { bindingSpec: BINDING_SPEC, content: spec(port) },
-        ref: "#/operations/subscribe",
+        selector: "#/operations/subscribe",
       });
       const vals: unknown[] = [];
       for await (const v of call.outputs) vals.push(v);

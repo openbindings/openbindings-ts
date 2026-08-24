@@ -33,7 +33,7 @@ describe("acceptance floor at synthesis", () => {
     expect(result.interface.operations["getBad"]).toBeUndefined();
     const invalid = result.coverage.entries.find((e) => e.status === "invalid");
     expect(invalid).toMatchObject({
-      sourceRef: "#/paths/~1bad/get",
+      sourceSelector: "#/paths/~1bad/get",
       scope: "target",
       reasonCode: "openapi.invalid_unit",
     });
@@ -99,7 +99,7 @@ describe("acceptance floor at synthesis", () => {
     expect(excluded?.reasonCode).toBe("openapi.unresolvable_request_body");
     const invalidAlt = result.coverage.entries.find((e) => e.status === "invalid" && e.scope === "alternative");
     expect(invalidAlt).toMatchObject({
-      sourceRef: "#/paths/~1pets/post/requestBody/content/and-another",
+      sourceSelector: "#/paths/~1pets/post/requestBody/content/and-another",
       reasonCode: "openapi.invalid_unit",
     });
   });
@@ -120,7 +120,7 @@ describe("acceptance floor at synthesis", () => {
     }));
     expect(result.interface.operations["getA"]).toBeDefined();
     const projection = result.coverage.entries.find((e) => e.scope === "projection" && e.status === "invalid");
-    expect(projection).toMatchObject({ sourceRef: "#/paths/~1a/get", reasonCode: "openapi.invalid_unit" });
+    expect(projection).toMatchObject({ sourceSelector: "#/paths/~1a/get", reasonCode: "openapi.invalid_unit" });
     expect(result.coverage.fullyRepresented).toBe(false);
   });
 
@@ -144,7 +144,7 @@ describe("acceptance floor at synthesis", () => {
     expect(result.interface.operations["getGood"]).toBeDefined();
     expect(result.interface.operations["getDangling"]).toBeUndefined();
     const invalid = result.coverage.entries.find((e) => e.status === "invalid" && e.scope === "target");
-    expect(invalid).toMatchObject({ sourceRef: "#/paths/~1dangling/get", reasonCode: "openapi.invalid_unit" });
+    expect(invalid).toMatchObject({ sourceSelector: "#/paths/~1dangling/get", reasonCode: "openapi.invalid_unit" });
     const defects = (invalid?.details as { defects: Array<{ authority: string; position: string }> }).defects;
     expect(defects[0]!.authority).toContain("RFC 6901");
   });

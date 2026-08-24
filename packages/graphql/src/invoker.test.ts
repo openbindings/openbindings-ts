@@ -2,8 +2,8 @@ import { describe, expect, it, vi } from "vitest";
 import {
   CONTEXT_REQUIRED,
   ERR_EXECUTION_FAILED,
-  ERR_INVALID_REF,
-  ERR_REF_NOT_FOUND,
+  ERR_INVALID_SELECTOR,
+  ERR_SELECTOR_NOT_FOUND,
   ERR_SOURCE_CONFIG_ERROR,
   type Invocation,
 } from "@openbindings/invoke";
@@ -97,7 +97,7 @@ describe("GraphQLInvoker HTTP", () => {
     });
     const invocation = new GraphQLInvoker().invokeBinding({
       source,
-      ref: "query/viewer",
+      selector: "query/viewer",
       inputSchema: { type: "object" },
       context: {
         configuration: {
@@ -125,7 +125,7 @@ describe("GraphQLInvoker HTTP", () => {
     let dispatched: Record<string, unknown> | undefined;
     const invocation = new GraphQLInvoker().invokeBinding({
       source,
-      ref: "query/health",
+      selector: "query/health",
       context: { configuration: { document: "query { health }" } },
       fetch: vi.fn(async (_url, init) => {
         dispatched = JSON.parse(String(init?.body)) as Record<string, unknown>;
@@ -140,7 +140,7 @@ describe("GraphQLInvoker HTTP", () => {
     const body = { errors: [{ message: "request rejected" }] };
     const invocation = new GraphQLInvoker().invokeBinding({
       source,
-      ref: "query/viewer",
+      selector: "query/viewer",
       context: { configuration: { document: "query { viewer }" } },
       fetch: vi.fn(async () => response(body, 400)),
     });
@@ -150,7 +150,7 @@ describe("GraphQLInvoker HTTP", () => {
   it("treats an application/json non-2xx response as terminal", async () => {
     const invocation = new GraphQLInvoker().invokeBinding({
       source,
-      ref: "query/viewer",
+      selector: "query/viewer",
       context: { configuration: { document: "query { viewer }" } },
       fetch: vi.fn(async () => response({ errors: [{ message: "rejected" }] }, 400, "application/json")),
     });
@@ -160,10 +160,10 @@ describe("GraphQLInvoker HTTP", () => {
   it("challenges for a missing document before source loading or dispatch", async () => {
     const fetchFn = vi.fn();
     const invoker = new GraphQLInvoker();
-    await expect(invoker.prepareBinding({ source, ref: "query/viewer" })).resolves.toMatchObject({
+    await expect(invoker.prepareBinding({ source, selector: "query/viewer" })).resolves.toMatchObject({
       alternatives: [{ requirements: [{ type: "config.value", point: "document", path: "" }] }],
     });
-    const invocation = invoker.invokeBinding({ source: { bindingSpec: BINDING_SPEC, location: endpoint }, ref: "query/viewer", fetch: fetchFn });
+    const invocation = invoker.invokeBinding({ source: { bindingSpec: BINDING_SPEC, location: endpoint }, selector: "query/viewer", fetch: fetchFn });
     await expect(invocation.closed).rejects.toMatchObject({ code: CONTEXT_REQUIRED });
     expect(fetchFn).not.toHaveBeenCalled();
   });
@@ -172,7 +172,7 @@ describe("GraphQLInvoker HTTP", () => {
     const fetchFn = vi.fn();
     const mismatch = new GraphQLInvoker().invokeBinding({
       source,
-      ref: "query/viewer",
+      selector: "query/viewer",
       context: { configuration: { document: "query { health }" } },
       fetch: fetchFn,
     });
@@ -180,7 +180,7 @@ describe("GraphQLInvoker HTTP", () => {
 
     const collision = new GraphQLInvoker().invokeBinding({
       source,
-      ref: "query/viewer",
+      selector: "query/viewer",
       context: {
         configuration: {
           document: "query { viewer }",
@@ -193,7 +193,7 @@ describe("GraphQLInvoker HTTP", () => {
 
     const unnamedCredential = new GraphQLInvoker().invokeBinding({
       source,
-      ref: "query/viewer",
+      selector: "query/viewer",
       context: {
         bearerToken: "ambiguous",
         configuration: { document: "query { viewer }" },
@@ -208,11 +208,11 @@ describe("GraphQLInvoker HTTP", () => {
     const fetchFn = vi.fn();
     const invocation = new GraphQLInvoker().invokeBinding({
       source,
-      ref: "query/missing",
+      selector: "query/missing",
       context: { configuration: { document: "query { missing }" } },
       fetch: fetchFn,
     });
-    await expect(invocation.closed).rejects.toMatchObject({ code: ERR_REF_NOT_FOUND });
+    await expect(invocation.closed).rejects.toMatchObject({ code: ERR_SELECTOR_NOT_FOUND });
     expect(fetchFn).not.toHaveBeenCalled();
   });
 });
@@ -222,7 +222,7 @@ describe("GraphQLInvoker excluded targets", () => {
     const fetchFn = vi.fn();
     const invocation = new GraphQLInvoker().invokeBinding({
       source,
-      ref: "subscription/updates",
+      selector: "subscription/updates",
       context: {
         configuration: {
           document: "subscription { updates }",
@@ -230,7 +230,7 @@ describe("GraphQLInvoker excluded targets", () => {
       },
       fetch: fetchFn,
     });
-    await expect(invocation.closed).rejects.toMatchObject({ code: ERR_INVALID_REF });
+    await expect(invocation.closed).rejects.toMatchObject({ code: ERR_INVALID_SELECTOR });
     expect(fetchFn).not.toHaveBeenCalled();
   });
 });
@@ -239,7 +239,7 @@ describe("GraphQLSynthesizer", () => {
   it("uses pinned content for exhaustive lower-case inspection", async () => {
     const inspection = await new GraphQLSynthesizer().inspectSource(source);
     expect(inspection.exhaustive).toBe(true);
-    expect(inspection.targets.map((target) => target.ref)).toEqual([
+    expect(inspection.targets.map((target) => target.selector)).toEqual([
       "query/health",
       "query/viewer",
     ]);

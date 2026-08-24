@@ -17,7 +17,7 @@ const authoring = new ConnectSynthesizer();
 
 The source location is an HTTP(S) service base URL. Embedded content is
 single-file proto text or a canonical-JSON `FileDescriptorSet` and enables
-schema mode: byte-exact ref resolution, canonical ProtoJSON, and the
+schema mode: byte-exact selector resolution, canonical ProtoJSON, and the
 protobuf-declared interaction kind. Without content, descriptorless mode is
 unary and carries exactly one JSON value verbatim. Because Connect provides no
 reflection lane, synthesis and source inspection require content rather than

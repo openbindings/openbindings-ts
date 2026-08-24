@@ -38,9 +38,9 @@ describe("AsyncAPISynthesizer.inspectSource operationKey", () => {
 
     expect(result.exhaustive).toBe(true);
     expect(result.targets).toHaveLength(2);
-    const byRef = new Map(result.targets.map((t) => [t.ref, t]));
-    expect(byRef.get("#/operations/receiveEvent")?.operationKey).toBe("receiveEvent");
-    expect(byRef.get("#/operations/sendMessage")?.operationKey).toBe("sendMessage");
+    const bySelector = new Map(result.targets.map((t) => [t.selector, t]));
+    expect(bySelector.get("#/operations/receiveEvent")?.operationKey).toBe("receiveEvent");
+    expect(bySelector.get("#/operations/sendMessage")?.operationKey).toBe("sendMessage");
   });
 
   it("matches the operation keys SynthesizeInterface assigns, including de-duplication", async () => {

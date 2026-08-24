@@ -48,7 +48,7 @@ describe("OpenBindings AsyncAPI WebSocket reply bridge", () => {
     try {
       const call = invoker.invokeBinding({
         source: { bindingSpec: BINDING_SPEC, content: document },
-        ref: "#/operations/submit",
+        selector: "#/operations/submit",
         context: { configuration: { websocketMessageType: "text" } },
       });
       await call.write({ id: 91 });

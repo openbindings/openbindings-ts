@@ -61,7 +61,7 @@ describe("defaultContentType fallback", () => {
     const invoker = new AsyncAPIInvoker();
     const call = invoker.invokeBinding({
       source: { bindingSpec: BINDING_SPEC, content: spec },
-      ref: "#/operations/ask",
+      selector: "#/operations/ask",
     });
     await call.write({});
     const outputs: unknown[] = [];

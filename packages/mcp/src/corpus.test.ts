@@ -1,7 +1,7 @@
 // Binding-specification conformance corpus adapter: runs the spec
 // repository's binding-specs/mcp fixtures (MCP-D-01..03) through this
 // package's own offline lanes — pinned-listing validation, endpoint
-// grammar, and ref grammar/resolution — under the subcorpus README's
+// grammar, and selector grammar/resolution — under the subcorpus README's
 // verdict semantics: valid:false means a conformant openbindings.mcp@1
 // processor refuses the document's family-scoped material at or before
 // bind time, decidable offline with no network and no live source.
@@ -19,8 +19,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { BINDING_SPEC } from "./constants.js";
-import { parseRef, validateEndpoint } from "./invoke.js";
-import { parsePinnedListing, resolveRef, type Listing } from "./listing.js";
+import { parseSelector, validateEndpoint } from "./invoke.js";
+import { parsePinnedListing, resolveSelector, type Listing } from "./listing.js";
 
 const FAMILY = "mcp";
 
@@ -35,7 +35,7 @@ function corpusDir(): string | undefined {
 // Fixture shapes per conformance/binding-specs/fixture.schema.json. The
 // document is kept as parsed JSON: `content !== undefined` asks member
 // PRESENCE (`content: null` is a present member per the core §7 presence
-// rule), and an omitted binding ref is distinct from a present empty string.
+// rule), and an omitted binding selector is distinct from a present empty string.
 interface CorpusFixture {
   rule: string;
   bindingSpec: string;
@@ -57,7 +57,7 @@ interface CorpusSource {
 }
 interface CorpusBinding {
   source?: string;
-  ref?: string;
+  selector?: string;
 }
 
 /**
@@ -89,7 +89,7 @@ function judgeDocument(doc: CorpusDocument): string | undefined {
       return e instanceof Error ? e.message : String(e);
     }
 
-    // Ref lane (MCP-D-03): ref is REQUIRED (an omitted ref reaches the
+    // Selector lane (MCP-D-03): selector is REQUIRED (an omitted selector reaches the
     // invoker as the empty string and is refused by the same grammar);
     // with a pin, resolution is offline — byte-exact and
     // multiplicity-aware, exactly as runMCPBinding does before any
@@ -99,16 +99,16 @@ function judgeDocument(doc: CorpusDocument): string | undefined {
       let entityType: string;
       let remainder: string;
       try {
-        ({ entityType, name: remainder } = parseRef(b.ref ?? ""));
+        ({ entityType, name: remainder } = parseSelector(b.selector ?? ""));
       } catch (e: unknown) {
         return e instanceof Error ? e.message : String(e);
       }
       if (entityType !== "tools") {
-        return `openbindings.mcp@1 ref must use tools/<name>, got ${JSON.stringify(b.ref ?? "")}`;
+        return `openbindings.mcp@1 selector must use tools/<name>, got ${JSON.stringify(b.selector ?? "")}`;
       }
       if (pin) {
         try {
-          resolveRef(pin, entityType, remainder, BINDING_SPEC);
+          resolveSelector(pin, entityType, remainder, BINDING_SPEC);
         } catch (e: unknown) {
           return e instanceof Error ? e.message : String(e);
         }

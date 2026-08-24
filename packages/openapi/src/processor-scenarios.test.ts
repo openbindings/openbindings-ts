@@ -11,8 +11,8 @@ import {
 } from "@openbindings/core";
 import {
   CONTEXT_REQUIRED,
-  ERR_INVALID_REF,
-  ERR_REF_NOT_FOUND,
+  ERR_INVALID_SELECTOR,
+  ERR_SELECTOR_NOT_FOUND,
   ERR_SOURCE_LOAD_FAILED,
   OperationInvoker,
   operationSignature,
@@ -123,7 +123,7 @@ async function runScenario(
     )
     : new OpenAPIInvoker().invokeBinding({
       source: invocationSource,
-      ref: typeof binding.ref === "string" ? binding.ref : "",
+      selector: typeof binding.selector === "string" ? binding.selector : "",
       context,
       fetch: fetchMock,
     });
@@ -251,6 +251,6 @@ function errorPhase(error: InvocationError, dispatched: boolean, scenarioId: str
   if (dispatched) return "response";
   if (error.code === ERR_SOURCE_LOAD_FAILED) return "load";
   if (["OAPI-PS-15", "OAPI-PS-16"].includes(scenarioId)) return "resolution";
-  if (error.code === ERR_INVALID_REF || error.code === ERR_REF_NOT_FOUND) return "resolution";
+  if (error.code === ERR_INVALID_SELECTOR || error.code === ERR_SELECTOR_NOT_FOUND) return "resolution";
   return "pre-dispatch";
 }

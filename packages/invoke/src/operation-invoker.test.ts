@@ -38,7 +38,7 @@ import {
 } from "./errcodes.js";
 
 // ---------------------------------------------------------------------------
-// Mock binding invoker (the design doc's reference mock, ref-dispatched)
+// Mock binding invoker (the design doc's reference mock, selector-dispatched)
 // ---------------------------------------------------------------------------
 
 const BEARER_DETAILS: ContextRequiredDetails = {
@@ -109,7 +109,7 @@ class MockBindingInvoker implements BindingInvoker {
     h: InvocationImpl<unknown, unknown>,
     reads: unknown[],
   ): Promise<void> {
-    switch (args.ref) {
+    switch (args.selector) {
       case "ping": {
         // No-input: close input immediately so the caller never has to.
         void h.closeInput();
@@ -323,20 +323,20 @@ function testInterface(): TestInterface {
       mock: { bindingSpec: "mock@1.0", location: "mem://mock" },
     },
     bindings: {
-      "ping.main": { operation: "ping", source: "mock", ref: "ping" },
-      "getUser.main": { operation: "getUser", source: "mock", ref: "getUser", preference: 99 },
-      "getUser.bad": { operation: "getUser", source: "mock", ref: "badUser", preference: 1 },
+      "ping.main": { operation: "ping", source: "mock", selector: "ping" },
+      "getUser.main": { operation: "getUser", source: "mock", selector: "getUser", preference: 99 },
+      "getUser.bad": { operation: "getUser", source: "mock", selector: "badUser", preference: 1 },
       "echo.transformed": {
-        operation: "echo", source: "mock", ref: "echoInput", inputTransform: "idToUserId",
+        operation: "echo", source: "mock", selector: "echoInput", inputTransform: "idToUserId",
       },
-      "watchOrders.main": { operation: "watchOrders", source: "mock", ref: "watchOrders", preference: 99 },
+      "watchOrders.main": { operation: "watchOrders", source: "mock", selector: "watchOrders", preference: 99 },
       "watchOrders.challenge": {
-        operation: "watchOrders", source: "mock", ref: "watchThenChallenge", preference: 1,
+        operation: "watchOrders", source: "mock", selector: "watchThenChallenge", preference: 1,
       },
-      "watchTyped.main": { operation: "watchTyped", source: "mock", ref: "streamBadSecond" },
-      "chat.main": { operation: "chat", source: "mock", ref: "chat" },
-      "uploadChunks.main": { operation: "uploadChunks", source: "mock", ref: "uploadChunks" },
-      "uploadAuth.main": { operation: "uploadAuth", source: "mock", ref: "collectThenChallenge" },
+      "watchTyped.main": { operation: "watchTyped", source: "mock", selector: "streamBadSecond" },
+      "chat.main": { operation: "chat", source: "mock", selector: "chat" },
+      "uploadChunks.main": { operation: "uploadChunks", source: "mock", selector: "uploadChunks" },
+      "uploadAuth.main": { operation: "uploadAuth", source: "mock", selector: "collectThenChallenge" },
     },
   };
 }
@@ -408,7 +408,7 @@ describe("OperationInvoker wiring", () => {
       openbindings: "0.2.0",
       operations: { doThing: {} },
       sources: { svc: { bindingSpec: "grpc@1.0" } },
-      bindings: { "doThing.svc": { operation: "doThing", source: "svc", ref: "x" } },
+      bindings: { "doThing.svc": { operation: "doThing", source: "svc", selector: "x" } },
     };
     let msg: string;
     try {
@@ -434,7 +434,7 @@ describe("OperationInvoker wiring", () => {
   it("invokeBinding passthrough throws NoInvokerError for an unknown binding spec", () => {
     const op = makeInvoker();
     expect(() =>
-      op.invokeBinding({ source: { bindingSpec: "unknown@1.0" }, ref: "x" }),
+      op.invokeBinding({ source: { bindingSpec: "unknown@1.0" }, selector: "x" }),
     ).toThrow(NoInvokerError);
   });
 
@@ -966,7 +966,7 @@ describe("defaultBindingSelector", () => {
   it("selects the only matching binding", () => {
     const { key, binding } = defaultBindingSelector(testInterface(), "ping");
     expect(key).toBe("ping.main");
-    expect(binding.ref).toBe("ping");
+    expect(binding.selector).toBe("ping");
   });
 
   it("throws when no binding matches", () => {

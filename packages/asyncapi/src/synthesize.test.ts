@@ -151,12 +151,12 @@ describe("convertToInterface", () => {
     expect(sendBinding).toBeDefined();
     expect(sendBinding.operation).toBe("sendMessage");
     expect(sendBinding.source).toBe("asyncapi");
-    expect(sendBinding.ref).toBe("#/operations/sendMessage");
+    expect(sendBinding.selector).toBe("#/operations/sendMessage");
 
     const recvBinding = iface.bindings!["receiveEvents.asyncapi"];
     if (!recvBinding) throw new Error("missing binding: receiveEvents.asyncapi");
     expect(recvBinding).toBeDefined();
-    expect(recvBinding.ref).toBe("#/operations/receiveEvents");
+    expect(recvBinding.selector).toBe("#/operations/receiveEvents");
   });
 
   it("creates source entry stamped with the exact binding-specification identifier", async () => {
@@ -289,10 +289,10 @@ describe("convertToInterface", () => {
   it("cuts cyclic schema graphs at the artifact's own component ref, one artifact-named $defs entry (F7 cut-point parity)", async () => {
     // The F7 mechanism: a self-referential component whose $ref carries a
     // sibling (protoc-generated artifacts do this with `title`), reached
-    // from the payload through TWO ref sites. The shared-graph pipeline
+    // from the payload through TWO selector sites. The shared-graph pipeline
     // used to cut at anonymous interior nodes and name entries from
     // registry pointers ("0", "constraints", "payload"); the raw lane cuts
-    // at the artifact's literal ref by construction, so both occurrences
+    // at the artifact's literal selector by construction, so both occurrences
     // collapse onto one component-named entry — byte-identical to Go.
     const doc = await parsedDoc({
       asyncapi: "3.0.0",
@@ -331,7 +331,7 @@ describe("convertToInterface", () => {
     expect(Object.keys(input["$defs"] as Record<string, unknown>)).toEqual(["Node"]);
     const properties = input["properties"] as Record<string, Record<string, unknown>>;
     // Every occurrence points at the single hoisted entry; the artifact's
-    // ref siblings survive beside the rewritten pointer.
+    // selector siblings survive beside the rewritten pointer.
     expect(properties["first"]).toMatchObject({
       $ref: "#/operations/sendNode/input/$defs/Node",
       title: "first child",
@@ -362,7 +362,7 @@ describe("AsyncAPI synthesis coverage", () => {
     const result = await new AsyncAPISynthesizer().synthesizeInterfaceWithCoverage({
       sources: [{ bindingSpec: BINDING_SPEC, content }],
     });
-    expect(Object.values(result.interface.bindings ?? {})[0]?.ref).toBe(
+    expect(Object.values(result.interface.bindings ?? {})[0]?.selector).toBe(
       "#/channels/events~1{tenant}/publish",
     );
     expect(Object.values(result.interface.operations)[0]?.input).toMatchObject({
@@ -371,7 +371,7 @@ describe("AsyncAPI synthesis coverage", () => {
     });
     expect(result.coverage.entries).toEqual(expect.arrayContaining([
       expect.objectContaining({ status: "represented", scope: "target" }),
-      expect.objectContaining({ sourceRef: expect.stringContaining("#server[0]=broker"), status: "represented" }),
+      expect.objectContaining({ sourceSelector: expect.stringContaining("#server[0]=broker"), status: "represented" }),
     ]));
   });
 
@@ -409,11 +409,11 @@ describe("AsyncAPI synthesis coverage", () => {
     });
     expect(current.coverage.entries).toEqual(expect.arrayContaining([
       expect.objectContaining({
-        sourceRef: "#/operations/subscribe",
+        sourceSelector: "#/operations/subscribe",
         status: "represented",
       }),
       expect.objectContaining({
-        sourceRef: "#/operations/subscribe#reply-message[0]=#/channels/commands/messages/command",
+        sourceSelector: "#/operations/subscribe#reply-message[0]=#/channels/commands/messages/command",
         status: "represented",
       }),
     ]));
@@ -462,7 +462,7 @@ describe("AsyncAPI synthesis coverage", () => {
     });
     expect(current.coverage.entries).toEqual(expect.arrayContaining([
       expect.objectContaining({
-        sourceRef: "#/operations/subscribe#reply-message[0]=#/channels/commands/messages/command",
+        sourceSelector: "#/operations/subscribe#reply-message[0]=#/channels/commands/messages/command",
       }),
     ]));
   });
@@ -509,15 +509,15 @@ describe("AsyncAPI synthesis coverage", () => {
     expect(result.coverage.entries.some((entry) => entry.reasonCode === "asyncapi.message_headers")).toBe(false);
     expect(result.coverage.entries).toEqual(expect.arrayContaining([
       expect.objectContaining({
-        sourceRef: "#/operations/publish",
+        sourceSelector: "#/operations/publish",
         status: "represented",
       }),
       expect.objectContaining({
-        sourceRef: "#/operations/publish#server[0]=broker",
+        sourceSelector: "#/operations/publish#server[0]=broker",
         status: "represented",
       }),
       expect.objectContaining({
-        sourceRef: "#/operations/publish#server[2]=ws",
+        sourceSelector: "#/operations/publish#server[2]=ws",
         status: "represented",
       }),
     ]));

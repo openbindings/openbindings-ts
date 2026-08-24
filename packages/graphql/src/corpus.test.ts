@@ -3,7 +3,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { BINDING_SPEC } from "./constants.js";
-import { parseIntrospectionContent, parseRef, resolveField } from "./invoke.js";
+import { parseIntrospectionContent, parseSelector, resolveField } from "./invoke.js";
 import { validateHTTPLocation } from "./configuration.js";
 
 interface CorpusFixture {
@@ -13,7 +13,7 @@ interface CorpusFixture {
 }
 interface CorpusDocument {
   sources?: Record<string, { bindingSpec?: string; location?: string; content?: unknown }>;
-  bindings?: Record<string, { source?: string; ref?: string }>;
+  bindings?: Record<string, { source?: string; selector?: string }>;
 }
 
 const root = process.env.OB_SPEC_CORPUS
@@ -34,7 +34,7 @@ function judge(document: CorpusDocument): string | undefined {
         : undefined;
       for (const binding of Object.values(document.bindings ?? {})) {
         if (binding.source !== sourceName) continue;
-        const { rootType, fieldName } = parseRef(binding.ref ?? "");
+        const { rootType, fieldName } = parseSelector(binding.selector ?? "");
         if (rootType === "subscription") throw new Error(`subscription refs are outside ${BINDING_SPEC}`);
         if (schema) resolveField(schema, rootType, fieldName);
       }

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   ERR_CANCELLED,
   ERR_EXECUTION_FAILED,
-  ERR_REF_NOT_FOUND,
+  ERR_SELECTOR_NOT_FOUND,
   ERR_RESPONSE_ERROR,
   ERR_SOURCE_CONFIG_ERROR,
   ERR_VALIDATION_FAILED,
@@ -43,7 +43,7 @@ describe("openbindings.mcp@1 invocation", () => {
     }));
     const call = new MCPInvoker().invokeBinding({
       source: sourceFor("probe"),
-      ref: "tools/probe",
+      selector: "tools/probe",
       fetch: server.fn,
     });
     await call.write({ q: "one" });
@@ -54,7 +54,7 @@ describe("openbindings.mcp@1 invocation", () => {
 
   it("omits arguments when the caller supplies no input", async () => {
     const server = mcpServer(() => ({ result: { content: [], structuredContent: { value: "ok" } } }));
-    const call = new MCPInvoker().invokeBinding({ source: sourceFor("probe"), ref: "tools/probe", fetch: server.fn });
+    const call = new MCPInvoker().invokeBinding({ source: sourceFor("probe"), selector: "tools/probe", fetch: server.fn });
     await call.close();
     await expect(single(call.outputs)).resolves.toEqual({ value: "ok" });
     expect(server.params("tools/call")[0]).not.toHaveProperty("arguments");
@@ -62,7 +62,7 @@ describe("openbindings.mcp@1 invocation", () => {
 
   it("refuses non-object caller input before network I/O", async () => {
     const server = mcpServer(() => ({ result: { content: [], structuredContent: { value: "unreachable" } } }));
-    const call = new MCPInvoker().invokeBinding({ source: sourceFor("probe"), ref: "tools/probe", fetch: server.fn });
+    const call = new MCPInvoker().invokeBinding({ source: sourceFor("probe"), selector: "tools/probe", fetch: server.fn });
     await call.write("not an object");
     await expect(call.closed).rejects.toMatchObject({ code: ERR_VALIDATION_FAILED });
     expect(server.fetches()).toBe(0);
@@ -76,7 +76,7 @@ describe("openbindings.mcp@1 invocation", () => {
         isError: true,
       },
     }));
-    const call = new MCPInvoker().invokeBinding({ source: sourceFor("probe"), ref: "tools/probe", fetch: server.fn });
+    const call = new MCPInvoker().invokeBinding({ source: sourceFor("probe"), selector: "tools/probe", fetch: server.fn });
     await call.write({});
     await expect(call.closed).rejects.toMatchObject({
       code: ERR_EXECUTION_FAILED,
@@ -89,7 +89,7 @@ describe("openbindings.mcp@1 invocation", () => {
     ["nonconforming structuredContent", { content: [], structuredContent: { value: 7 } }],
   ])("refuses %s as unsuccessful completion", async (_name, result) => {
     const server = mcpServer(() => ({ result }));
-    const call = new MCPInvoker().invokeBinding({ source: sourceFor("probe"), ref: "tools/probe", fetch: server.fn });
+    const call = new MCPInvoker().invokeBinding({ source: sourceFor("probe"), selector: "tools/probe", fetch: server.fn });
     await call.write({});
     await expect(call.closed).rejects.toMatchObject({ code: ERR_RESPONSE_ERROR });
   });
@@ -101,7 +101,7 @@ describe("openbindings.mcp@1 invocation", () => {
     }));
     const call = new MCPInvoker({ solicitProgress: true }).invokeBinding({
       source: sourceFor("probe"),
-      ref: "tools/probe",
+      selector: "tools/probe",
       context: { configuration: { solicit: true } },
       fetch: server.fn,
     });
@@ -114,7 +114,7 @@ describe("openbindings.mcp@1 invocation", () => {
     const server = mcpServer(() => ({ result: { content: [], structuredContent: { value: "ok" } } }));
     const call = new MCPInvoker().invokeBinding({
       source: sourceFor("probe"),
-      ref: "tools/probe",
+      selector: "tools/probe",
       context: { bearerToken: "secret" },
       fetch: server.fn,
     });
@@ -128,10 +128,10 @@ describe("openbindings.mcp@1 invocation", () => {
     ["required-task tool", { ...sourceFor("probe"), content: { tools: [{ name: "probe", outputSchema: {}, execution: { taskSupport: "required" } }] } }, "tools/probe"],
     ["resource", { ...sourceFor("probe"), content: { resources: [{ uri: "app://x" }] } }, "resources/app://x"],
     ["prompt", { ...sourceFor("probe"), content: { prompts: [{ name: "review" }] } }, "prompts/review"],
-  ])("refuses excluded %s offline", async (_name, source, ref) => {
+  ])("refuses excluded %s offline", async (_name, source, selector) => {
     const server = mcpServer(() => ({ result: {} }));
-    const call = new MCPInvoker().invokeBinding({ source, ref, fetch: server.fn });
-    await expect(call.closed).rejects.toMatchObject({ code: ERR_REF_NOT_FOUND });
+    const call = new MCPInvoker().invokeBinding({ source, selector, fetch: server.fn });
+    await expect(call.closed).rejects.toMatchObject({ code: ERR_SELECTOR_NOT_FOUND });
     expect(server.fetches()).toBe(0);
   });
 
@@ -139,7 +139,7 @@ describe("openbindings.mcp@1 invocation", () => {
     const server = mcpServer(() => ({ result: {} }));
     const call = new MCPInvoker().invokeBinding({
       source: { ...sourceFor("probe"), bindingSpec: "openbindings.mcp@2" },
-      ref: "tools/probe",
+      selector: "tools/probe",
       fetch: server.fn,
     });
     await expect(call.closed).rejects.toMatchObject({ code: ERR_SOURCE_CONFIG_ERROR });
@@ -148,7 +148,7 @@ describe("openbindings.mcp@1 invocation", () => {
 
   it("cancels an in-flight tool call", async () => {
     const server = mcpServer(() => ({ hang: true }));
-    const call = new MCPInvoker().invokeBinding({ source: sourceFor("slow"), ref: "tools/slow", fetch: server.fn });
+    const call = new MCPInvoker().invokeBinding({ source: sourceFor("slow"), selector: "tools/slow", fetch: server.fn });
     await call.write({});
     await new Promise<void>((resolve) => {
       const poll = () => server.count("tools/call") > 0 ? resolve() : setTimeout(poll, 0);

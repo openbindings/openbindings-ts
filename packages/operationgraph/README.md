@@ -56,7 +56,7 @@ for await (const event of call.outputs) {
 ## Conventions
 
 - **Binding specification identifier**: `openbindings.operation-graph@1` (opaque; the `bindingSpec` value). The graph-unit format edition is separate — each graph declares it in its own `openbindings.operation-graph` field (currently `0.2.0`).
-- **Binding `ref`**: a REQUIRED JSON Pointer fragment addressing the graph definition within the source document (`"#/graphs/summarizeOrder"`, or `"#"` for a document whose root is a graph). Bare graph keys are rejected.
+- **Binding `selector`**: a REQUIRED JSON Pointer fragment addressing the graph definition within the source document (`"#/graphs/summarizeOrder"`, or `"#"` for a document whose root is a graph). Bare graph keys are rejected.
 - **Source document**: any JSON document; the conventional shape is a top-level `graphs` map. Each graph declares its own `openbindings.operation-graph` version, refused per OG-T-02 when unsupported.
 
 ## Synthesis boundary

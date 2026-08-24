@@ -119,16 +119,16 @@ export interface NormalizedSynthesis {
 
 export interface SynthesisBindingIdentity {
   operationKey: string;
-  bindingRef: string;
+  bindingSelector: string;
 }
 
 export interface NormalizedSynthesisCoverageEntry {
   sourceIndex: number;
-  sourceRef: string;
+  sourceSelector: string;
   scope: SynthesisCoverageEntry["scope"];
   status: SynthesisCoverageEntry["status"];
   operationKey?: string;
-  bindingRef?: string;
+  bindingSelector?: string;
   reasonCode?: string;
   rule?: string;
   requirements: string[];
@@ -213,7 +213,7 @@ function normalizeBindings(iface: OBInterface): SynthesisBindingIdentity[] {
   return Object.values(iface.bindings ?? {})
     .map((binding) => ({
       operationKey: binding.operation,
-      bindingRef: binding.ref ?? "",
+      bindingSelector: binding.selector ?? "",
     }))
     .sort(compareBindings);
 }
@@ -221,13 +221,13 @@ function normalizeBindings(iface: OBInterface): SynthesisBindingIdentity[] {
 function normalizeCoverageEntry(entry: SynthesisCoverageEntry): NormalizedSynthesisCoverageEntry {
   const normalized: NormalizedSynthesisCoverageEntry = {
     sourceIndex: entry.sourceIndex,
-    sourceRef: entry.sourceRef,
+    sourceSelector: entry.sourceSelector,
     scope: entry.scope,
     status: entry.status,
     requirements: [...(entry.requirements ?? [])].sort(codePointCompare),
   };
   if (entry.operationKey !== undefined) normalized.operationKey = entry.operationKey;
-  if (entry.bindingRef !== undefined) normalized.bindingRef = entry.bindingRef;
+  if (entry.bindingSelector !== undefined) normalized.bindingSelector = entry.bindingSelector;
   if (entry.reasonCode !== undefined) normalized.reasonCode = entry.reasonCode;
   if (entry.rule !== undefined) normalized.rule = entry.rule;
   return normalized;
@@ -235,7 +235,7 @@ function normalizeCoverageEntry(entry: SynthesisCoverageEntry): NormalizedSynthe
 
 function compareBindings(a: SynthesisBindingIdentity, b: SynthesisBindingIdentity): number {
   return codePointCompare(a.operationKey, b.operationKey)
-    || codePointCompare(a.bindingRef, b.bindingRef);
+    || codePointCompare(a.bindingSelector, b.bindingSelector);
 }
 
 function compareCoverage(
@@ -244,7 +244,7 @@ function compareCoverage(
 ): number {
   return a.sourceIndex - b.sourceIndex
     || codePointCompare(a.scope, b.scope)
-    || codePointCompare(a.sourceRef, b.sourceRef);
+    || codePointCompare(a.sourceSelector, b.sourceSelector);
 }
 
 function codePointCompare(a: string, b: string): number {

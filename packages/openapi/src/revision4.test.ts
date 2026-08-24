@@ -31,7 +31,7 @@ async function invokeResponse(
 ): Promise<{ outputs: unknown[]; error?: InvocationError }> {
   const call = new OpenAPIInvoker().invokeBinding({
     source: { bindingSpec, content: spec },
-    ref: "#/paths/~1payload/get",
+    selector: "#/paths/~1payload/get",
     fetch: async () => response,
   });
   await call.close();

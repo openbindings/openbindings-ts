@@ -429,9 +429,9 @@ export function convertToInterface(
 
   // Tools
   for (const tool of tools) {
-    const ref = `tools/${tool.name}`;
+    const selector = `tools/${tool.name}`;
     const opKey = resolveKey(sanitizeKey(tool.name), "tool", usedKeys);
-    usedKeys.set(opKey, ref);
+    usedKeys.set(opKey, selector);
 
     const op: Operation = {};
     if (tool.description) op.description = tool.description;
@@ -441,31 +441,31 @@ export function convertToInterface(
       : toolResultOutputSchema(tool.outputSchema);
 
     operations[opKey] = op;
-    bindings[`${opKey}.${DEFAULT_SOURCE_NAME}`] = { operation: opKey, source: DEFAULT_SOURCE_NAME, ref };
+    bindings[`${opKey}.${DEFAULT_SOURCE_NAME}`] = { operation: opKey, source: DEFAULT_SOURCE_NAME, selector };
   }
 
   // Resources: static resources take no input value (openbindings.mcp@1
-  // §8/§9.1): the URI is the binding's ref, not caller input, so the
+  // §8/§9.1): the URI is the binding's selector, not caller input, so the
   // operation declares no input schema.
   for (const res of resources) {
-    const ref = `resources/${res.uri}`;
+    const selector = `resources/${res.uri}`;
     const opKey = resolveKey(sanitizeKey(res.name), "resource", usedKeys);
-    usedKeys.set(opKey, ref);
+    usedKeys.set(opKey, selector);
 
     const op: Operation = {};
     if (res.description) op.description = res.description;
     op.output = resourceOutputSchema();
 
     operations[opKey] = op;
-    bindings[`${opKey}.${DEFAULT_SOURCE_NAME}`] = { operation: opKey, source: DEFAULT_SOURCE_NAME, ref };
+    bindings[`${opKey}.${DEFAULT_SOURCE_NAME}`] = { operation: opKey, source: DEFAULT_SOURCE_NAME, selector };
   }
 
   // Resource templates: the operation's input value is the object of the
   // template's RFC 6570 variables (§8/§9.1).
   for (const tmpl of templates) {
-    const ref = `resourceTemplates/${tmpl.uriTemplate}`;
+    const selector = `resourceTemplates/${tmpl.uriTemplate}`;
     const opKey = resolveKey(sanitizeKey(tmpl.name), "resource_template", usedKeys);
-    usedKeys.set(opKey, ref);
+    usedKeys.set(opKey, selector);
 
     const op: Operation = {};
     if (tmpl.description) op.description = tmpl.description;
@@ -474,14 +474,14 @@ export function convertToInterface(
     op.output = resourceOutputSchema();
 
     operations[opKey] = op;
-    bindings[`${opKey}.${DEFAULT_SOURCE_NAME}`] = { operation: opKey, source: DEFAULT_SOURCE_NAME, ref };
+    bindings[`${opKey}.${DEFAULT_SOURCE_NAME}`] = { operation: opKey, source: DEFAULT_SOURCE_NAME, selector };
   }
 
   // Prompts
   for (const prompt of prompts) {
-    const ref = `prompts/${prompt.name}`;
+    const selector = `prompts/${prompt.name}`;
     const opKey = resolveKey(sanitizeKey(prompt.name), "prompt", usedKeys);
-    usedKeys.set(opKey, ref);
+    usedKeys.set(opKey, selector);
 
     const op: Operation = {};
     if (prompt.description) op.description = prompt.description;
@@ -505,7 +505,7 @@ export function convertToInterface(
     op.output = promptOutputSchema();
 
     operations[opKey] = op;
-    bindings[`${opKey}.${DEFAULT_SOURCE_NAME}`] = { operation: opKey, source: DEFAULT_SOURCE_NAME, ref };
+    bindings[`${opKey}.${DEFAULT_SOURCE_NAME}`] = { operation: opKey, source: DEFAULT_SOURCE_NAME, selector };
   }
 
   const iface: OBInterface = {
@@ -525,7 +525,7 @@ export function convertToInterface(
  * Applies the binding specification's own resolution boundary. Ambiguous
  * identities, required-task tools, and malformed RFC 6570 templates are not
  * binding targets in revision 1. Synthesis and inspection share this helper
- * so neither can advertise a ref invocation is statically bound to refuse.
+ * so neither can advertise a selector invocation is statically bound to refuse.
  */
 export function bindableDiscovery(
   disc: MCPDiscovery,

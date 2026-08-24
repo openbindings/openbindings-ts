@@ -61,22 +61,22 @@ describe("per-operation tolerant coverage synthesis", () => {
 
     // The clean operation is bound; the unrepresentable ones are omitted.
     expect(Object.keys(result.interface.operations)).toEqual(["getGood"]);
-    expect(Object.values(result.interface.bindings ?? {}).map((b) => b.ref)).toEqual(["#/paths/~1good/get"]);
+    expect(Object.values(result.interface.bindings ?? {}).map((b) => b.selector)).toEqual(["#/paths/~1good/get"]);
 
     // Every omission is a spec-governed excluded target, never an
     // implementation-unsupported invariant violation.
     const targets = result.coverage.entries.filter((e) => e.scope === "target");
-    const byRef = new Map(targets.map((e) => [e.sourceRef, e]));
+    const bySelector = new Map(targets.map((e) => [e.sourceSelector, e]));
 
-    expect(byRef.get("#/paths/~1good/get")?.status).toBe("represented");
+    expect(bySelector.get("#/paths/~1good/get")?.status).toBe("represented");
 
-    const conditional = byRef.get("#/paths/~1conditional/post");
+    const conditional = bySelector.get("#/paths/~1conditional/post");
     expect(conditional?.status).toBe("excluded");
     expect(conditional?.reasonCode).toMatch(/^openapi\.(unresolvable_request_body|media_schema_mismatch)$/);
     expect(conditional?.rule).toBe("OAPI-P-04");
     expect(conditional?.message).toBeTruthy();
 
-    const collide = byRef.get("#/paths/~1collide/get");
+    const collide = bySelector.get("#/paths/~1collide/get");
     expect(collide?.status).toBe("excluded");
     expect(collide?.reasonCode).toBe("openapi.flattening_collision");
     expect(collide?.rule).toBe("OAPI-P-03");
@@ -91,7 +91,7 @@ describe("per-operation tolerant coverage synthesis", () => {
   it("source inspection filters unrepresentable targets instead of refusing the document", async () => {
     const synth = new OpenAPISynthesizer();
     const inspection = await synth.inspectSource({ bindingSpec: BINDING_SPEC, content: MIXED_DOC });
-    expect(inspection.targets.map((t) => t.ref)).toEqual(["#/paths/~1good/get"]);
+    expect(inspection.targets.map((t) => t.selector)).toEqual(["#/paths/~1good/get"]);
     expect(inspection.exhaustive).toBe(true);
   });
 

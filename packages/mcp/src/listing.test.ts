@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { ERR_REF_NOT_FOUND, type InvocationError } from "@openbindings/invoke";
-import { parsePinnedListing, resolveRef, type Listing } from "./listing.js";
+import { ERR_SELECTOR_NOT_FOUND, type InvocationError } from "@openbindings/invoke";
+import { parsePinnedListing, resolveSelector, type Listing } from "./listing.js";
 
 function listing(overrides: Partial<Listing> = {}): Listing {
   return {
@@ -17,7 +17,7 @@ function listing(overrides: Partial<Listing> = {}): Listing {
 
 describe("openbindings.mcp@1 listing resolution", () => {
   it("resolves exactly one ordinary tool with an application output schema", () => {
-    expect(resolveRef(listing({
+    expect(resolveSelector(listing({
       tools: ["weather"],
       toolOutputSchemas: { weather: { type: "object" } },
     }), "tools", "weather")).toBe("tool");
@@ -34,11 +34,11 @@ describe("openbindings.mcp@1 listing resolution", () => {
   ])("refuses %s", (_name, inventory, family, identity) => {
     let thrown: InvocationError | undefined;
     try {
-      resolveRef(inventory, family, identity);
+      resolveSelector(inventory, family, identity);
     } catch (error) {
       thrown = error as InvocationError;
     }
-    expect(thrown).toMatchObject({ code: ERR_REF_NOT_FOUND });
+    expect(thrown).toMatchObject({ code: ERR_SELECTOR_NOT_FOUND });
   });
 });
 

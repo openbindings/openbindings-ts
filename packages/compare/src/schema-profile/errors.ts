@@ -37,7 +37,7 @@ export class NotNormalizedError extends Error {
   }
 }
 
-export class RefError extends Error {
+export class SelectorError extends Error {
   path: string;
   ref: string;
 
@@ -48,7 +48,7 @@ export class RefError extends Error {
       path ? `${loc}.$ref "${ref}": ${msg}` : `$ref "${ref}": ${msg}`,
       cause instanceof Error ? { cause } : undefined,
     );
-    this.name = "RefError";
+    this.name = "SelectorError";
     this.path = path;
     this.ref = ref;
   }

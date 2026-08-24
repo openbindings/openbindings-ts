@@ -39,7 +39,7 @@ describe("Connect default runtime schema carriages", () => {
     let requestURL = "";
     const call = new ConnectInvoker().invokeBinding({
       source: { bindingSpec: BINDING_SPEC, location: "https://connect.example.test/api", content: descriptorSet },
-      ref: "demo.Echo/Call",
+      selector: "demo.Echo/Call",
       fetch: async (input) => {
         requestURL = String(input);
         return new Response(JSON.stringify({ message: "hello" }), {
@@ -62,7 +62,7 @@ describe("Connect default runtime schema carriages", () => {
         location: "https://connect.example.test",
         content: { ...descriptorSet, invented: true },
       },
-      ref: "demo.Echo/Call",
+      selector: "demo.Echo/Call",
       fetch: async () => { dispatches++; return new Response(null, { status: 200 }); },
     });
     await expect(call.closed).rejects.toMatchObject({ code: "ERR_SOURCE_LOAD_FAILED" });

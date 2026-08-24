@@ -79,17 +79,17 @@ async function runScenario(scenario: ProcessorScenario, joined = false): Promise
       ...(typeof scenario.given.source.location === "string" ? { location: scenario.given.source.location } : {}),
       ...(Object.hasOwn(scenario.given.source, "content") ? { content: scenario.given.source.content } : {}),
     };
-    const ref = String(scenario.given.binding.ref ?? "");
+    const selector = String(scenario.given.binding.selector ?? "");
     let invocation: Invocation<unknown, unknown>;
     if (joined) {
       const iface = await new AsyncAPISynthesizer().synthesizeInterface({ sources: [source] });
       invocation = new OperationInvoker([invoker], { fetch: fetchImpl }).invoke(
         iface,
-        operationSignature(operationForRef(iface, ref)),
+        operationSignature(operationForSelector(iface, selector)),
         { context },
       );
     } else {
-      invocation = invoker.invokeBinding({ source, ref, context, fetch: fetchImpl });
+      invocation = invoker.invokeBinding({ source, selector, context, fetch: fetchImpl });
     }
     if (scenario.given.invocation.inputPresent) {
       await invocation.write(scenario.given.invocation.input).catch(() => {});
@@ -127,9 +127,9 @@ async function runScenario(scenario: ProcessorScenario, joined = false): Promise
   }
 }
 
-function operationForRef(iface: OBInterface, ref: string): string {
-  const match = Object.values(iface.bindings ?? {}).find((binding) => binding.ref === ref);
-  if (!match) throw new Error(`synthesized AsyncAPI interface has no binding for ${JSON.stringify(ref)}`);
+function operationForSelector(iface: OBInterface, selector: string): string {
+  const match = Object.values(iface.bindings ?? {}).find((binding) => binding.selector === selector);
+  if (!match) throw new Error(`synthesized AsyncAPI interface has no binding for ${JSON.stringify(selector)}`);
   return match.operation;
 }
 

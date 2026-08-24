@@ -27,10 +27,10 @@ describe("ConnectSynthesizer", () => {
     const synth = new ConnectSynthesizer();
     const iface = await synth.synthesizeInterface({ sources: [source] });
     const inspection = await synth.inspectSource(source);
-    expect(inspection.targets.map((target) => target.ref)).toEqual([
+    expect(inspection.targets.map((target) => target.selector)).toEqual([
       "demo.Echo/Call", "demo.Echo/Chat", "demo.Echo/Upload", "demo.Echo/Watch",
     ]);
-    expect(Object.values(iface.bindings ?? {}).map((binding) => binding.ref)).toEqual([
+    expect(Object.values(iface.bindings ?? {}).map((binding) => binding.selector)).toEqual([
       "demo.Echo/Call", "demo.Echo/Chat", "demo.Echo/Upload", "demo.Echo/Watch",
     ]);
     expect(iface.sources?.default).toEqual(source);
@@ -58,16 +58,16 @@ describe("ConnectSynthesizer", () => {
     };
     const synth = new ConnectSynthesizer();
     const result = await synth.synthesizeInterfaceWithCoverage({ sources: [source] });
-    expect(Object.values(result.interface.bindings ?? {}).map((binding) => binding.ref)).toEqual([
+    expect(Object.values(result.interface.bindings ?? {}).map((binding) => binding.selector)).toEqual([
       "demo.Echo/Accepted",
     ]);
     expect(result.coverage).toMatchObject({
       exhaustive: true,
       fullyRepresented: false,
       entries: [
-        { sourceRef: "demo.Echo/Accepted", status: "represented" },
+        { sourceSelector: "demo.Echo/Accepted", status: "represented" },
         {
-          sourceRef: "demo.Echo/Excluded",
+          sourceSelector: "demo.Echo/Excluded",
           status: "excluded",
           reasonCode: "connect.schema_range",
           rule: "CONN-P-02",
@@ -76,7 +76,7 @@ describe("ConnectSynthesizer", () => {
     });
     await expect(synth.inspectSource(source)).resolves.toMatchObject({
       exhaustive: true,
-      targets: [{ ref: "demo.Echo/Accepted" }],
+      targets: [{ selector: "demo.Echo/Accepted" }],
     });
   });
 
@@ -138,7 +138,7 @@ describe("ConnectSynthesizer", () => {
     const source = { bindingSpec: BINDING_SPEC, location: "https://connect.example.test", content };
     const iface = await new ConnectSynthesizer().synthesizeInterface({ sources: [source] });
     const binding = Object.values(iface.bindings ?? {}).find((candidate) => candidate.operation === "Upload");
-    expect(binding?.ref).toBe("demo.Echo/Upload");
+    expect(binding?.selector).toBe("demo.Echo/Upload");
     let requestBytes = 0;
     const fetchImpl = (async (_url: RequestInfo | URL, init?: RequestInit) => {
       const reader = (init?.body as ReadableStream<Uint8Array>).getReader();
@@ -155,7 +155,7 @@ describe("ConnectSynthesizer", () => {
     }) as typeof fetch;
     const call = new ConnectInvoker({ fullDuplex: true }).invokeBinding({
       source: iface.sources!.default!,
-      ref: binding!.ref!,
+      selector: binding!.selector!,
       fetch: fetchImpl,
     });
     await call.write({ value: "a" });

@@ -291,10 +291,10 @@ function artifactForServer(scenario: ProcessorScenario, baseURL: string): Record
 }
 
 function nativeTarget(scenario: ProcessorScenario): { method: string; path: string } {
-  const ref = String(scenario.given.binding.ref ?? "");
+  const selector = String(scenario.given.binding.selector ?? "");
   const prefix = "#/paths/";
-  if (!ref.startsWith(prefix)) throw new Error(`${scenario.id} is outside the bounded paths-operation slice`);
-  const parts = ref.slice(prefix.length).split("/");
+  if (!selector.startsWith(prefix)) throw new Error(`${scenario.id} is outside the bounded paths-operation slice`);
+  const parts = selector.slice(prefix.length).split("/");
   if (parts.length !== 2) throw new Error(`${scenario.id} does not identify one paths operation`);
   return {
     method: parts[1]!.toUpperCase(),

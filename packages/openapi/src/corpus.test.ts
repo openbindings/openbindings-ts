@@ -1,6 +1,6 @@
 // Binding-specification conformance corpus adapter: runs the spec
 // repository's binding-specs/openapi fixtures (OAPI-D-01..03) through this
-// package's own offline lanes — content load, location grammar, and ref
+// package's own offline lanes — content load, location grammar, and selector
 // grammar/resolution — under the subcorpus README's verdict semantics:
 // valid:false means a conformant openbindings.openapi@1 processor refuses
 // the document's family-scoped material at or before bind time, decidable
@@ -19,7 +19,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { BINDING_SPEC } from "./constants.js";
-import { loadOpenAPIDocument, parseRef, validateDocumentAddress, errorMessage } from "./util.js";
+import { loadOpenAPIDocument, parseSelector, validateDocumentAddress, errorMessage } from "./util.js";
 
 const FAMILY = "openapi";
 
@@ -34,7 +34,7 @@ function corpusDir(): string | undefined {
 // Fixture shapes per conformance/binding-specs/fixture.schema.json. The
 // document is kept as parsed JSON: `content !== undefined` asks member
 // PRESENCE (`content: null` is a present member per the core §7 presence
-// rule), and an omitted binding ref is distinct from a present empty string.
+// rule), and an omitted binding selector is distinct from a present empty string.
 interface CorpusFixture {
   rule: string;
   bindingSpec: string;
@@ -56,7 +56,7 @@ interface CorpusSource {
 }
 interface CorpusBinding {
   source?: string;
-  ref?: string;
+  selector?: string;
 }
 
 /**
@@ -91,7 +91,7 @@ async function judgeDocument(doc: CorpusDocument): Promise<string | undefined> {
       }
     }
 
-    // Ref lane (OAPI-D-03): ref is REQUIRED (an omitted ref reaches the
+    // Selector lane (OAPI-D-03): selector is REQUIRED (an omitted selector reaches the
     // invoker as the empty string and is refused by the same grammar);
     // pointer evaluation follows OAS reference resolution — the loader
     // dereferences path-item $refs (3.1 components.pathItems included)
@@ -100,7 +100,7 @@ async function judgeDocument(doc: CorpusDocument): Promise<string | undefined> {
       if (b.source !== name) continue;
       let target: { path: string; method: string };
       try {
-        target = parseRef(b.ref ?? "");
+        target = parseSelector(b.selector ?? "");
       } catch (e: unknown) {
         return errorMessage(e);
       }

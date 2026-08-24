@@ -177,7 +177,7 @@ describe("AsyncAPI binding invoker (real HTTP)", () => {
   it("challenges CONTEXT_REQUIRED before any I/O when context lacks declared credentials", async () => {
     const before = requestCount;
     const invoker = new AsyncAPIInvoker();
-    const call = invoker.invokeBinding({ source: source(), ref: "#/operations/sendMessage" });
+    const call = invoker.invokeBinding({ source: source(), selector: "#/operations/sendMessage" });
 
     await expect(call.closed).rejects.toMatchObject({
       code: CONTEXT_REQUIRED,
@@ -194,12 +194,12 @@ describe("AsyncAPI binding invoker (real HTTP)", () => {
   it("applies bearer credentials on unary send and yields the response", async () => {
     const obi = await buildOBI();
     const binding = obi.bindings?.["sendMessage.asyncapi"];
-    if (!binding?.ref) throw new Error("expected sendMessage.asyncapi binding with ref");
+    if (!binding?.selector) throw new Error("expected sendMessage.asyncapi binding with selector");
 
     const invoker = new AsyncAPIInvoker();
     const call = invoker.invokeBinding({
       source: source(),
-      ref: binding.ref,
+      selector: binding.selector,
       context: { bearerToken: SECRET },
     });
 
@@ -211,7 +211,7 @@ describe("AsyncAPI binding invoker (real HTTP)", () => {
 
   it("keeps a server 401 structural without exposing native evidence", async () => {
     const invoker = new AsyncAPIInvoker();
-    const call = invoker.invokeBinding({ source: source(), ref: "#/operations/sendOpenMessage" });
+    const call = invoker.invokeBinding({ source: source(), selector: "#/operations/sendOpenMessage" });
 
     await call.write({ text: "hi" });
     const error = await call.closed.catch((caught: unknown) => caught) as InvocationError;
@@ -222,7 +222,7 @@ describe("AsyncAPI binding invoker (real HTTP)", () => {
 
   it("fires ERR_MISSING_INPUT when input closes without a message on send", async () => {
     const invoker = new AsyncAPIInvoker();
-    const call = invoker.invokeBinding({ source: source(), ref: "#/operations/sendOpenMessage" });
+    const call = invoker.invokeBinding({ source: source(), selector: "#/operations/sendOpenMessage" });
 
     await call.close();
     await expect(call.closed).rejects.toMatchObject({ code: "ERR_REFUSED" });
@@ -232,13 +232,13 @@ describe("AsyncAPI binding invoker (real HTTP)", () => {
     const before = requestCount;
     const obi = await buildOBI();
     expect(obi.bindings?.["receiveEvents.asyncapi"]).toMatchObject({
-      ref: "#/operations/receiveEvents",
+      selector: "#/operations/receiveEvents",
     });
 
     const invoker = new AsyncAPIInvoker();
     const call = invoker.invokeBinding({
       source: source(),
-      ref: "#/operations/receiveEvents",
+      selector: "#/operations/receiveEvents",
       context: { bearerToken: SECRET },
     });
 
@@ -246,11 +246,11 @@ describe("AsyncAPI binding invoker (real HTTP)", () => {
     expect(requestCount).toBe(before);
   });
 
-  it("fires ERR_REF_NOT_FOUND for an unknown operation", async () => {
+  it("fires ERR_SELECTOR_NOT_FOUND for an unknown operation", async () => {
     const invoker = new AsyncAPIInvoker();
-    const call = invoker.invokeBinding({ source: source(), ref: "#/operations/nope" });
+    const call = invoker.invokeBinding({ source: source(), selector: "#/operations/nope" });
 
-    await expect(call.closed).rejects.toMatchObject({ code: "ERR_REF_NOT_FOUND" });
+    await expect(call.closed).rejects.toMatchObject({ code: "ERR_SELECTOR_NOT_FOUND" });
   });
 
   describe("prepareBinding", () => {
@@ -258,7 +258,7 @@ describe("AsyncAPI binding invoker (real HTTP)", () => {
       const invoker = new AsyncAPIInvoker();
       const details = await invoker.prepareBinding({
         source: source(),
-        ref: "#/operations/sendMessage",
+        selector: "#/operations/sendMessage",
       });
 
       expect(details).toMatchObject({
@@ -271,7 +271,7 @@ describe("AsyncAPI binding invoker (real HTTP)", () => {
       const invoker = new AsyncAPIInvoker();
       const details = await invoker.prepareBinding({
         source: source(),
-        ref: "#/operations/sendMessage",
+        selector: "#/operations/sendMessage",
         context: { bearerToken: SECRET },
       });
 
@@ -282,7 +282,7 @@ describe("AsyncAPI binding invoker (real HTTP)", () => {
       const invoker = new AsyncAPIInvoker();
       const details = await invoker.prepareBinding({
         source: source(),
-        ref: "#/operations/sendOpenMessage",
+        selector: "#/operations/sendOpenMessage",
       });
 
       expect(details).toBeNull();
@@ -311,7 +311,7 @@ describe("AsyncAPI binding invoker (real HTTP)", () => {
       const invoker = new AsyncAPIInvoker();
       const details = await invoker.prepareBinding({
         source: { bindingSpec: BINDING_SPEC, content: spec },
-        ref: "#/operations/publish",
+        selector: "#/operations/publish",
       });
       expect(details).toMatchObject({
         target: "https://api.example.com",
@@ -329,7 +329,7 @@ describe("AsyncAPI binding invoker (real HTTP)", () => {
       // Satisfying any one alternative suffices.
       const withKey = await invoker.prepareBinding({
         source: { bindingSpec: BINDING_SPEC, content: spec },
-        ref: "#/operations/publish",
+        selector: "#/operations/publish",
         context: { apiKey: "k-123" },
       });
       expect(withKey).toBeNull();

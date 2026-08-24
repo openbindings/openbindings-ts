@@ -31,8 +31,8 @@ describe("GrpcSynthesizer", () => {
     const iface = await synth.synthesizeInterface({ sources: [source] });
     const inspection = await synth.inspectSource(source);
     expect(inspection.exhaustive).toBe(true);
-    expect(inspection.targets.map((target) => target.ref)).toEqual(["demo.Echo/Call", "demo.Echo/Watch"]);
-    expect(Object.values(iface.bindings ?? {}).map((binding) => binding.ref)).toEqual(inspection.targets.map((target) => target.ref));
+    expect(inspection.targets.map((target) => target.selector)).toEqual(["demo.Echo/Call", "demo.Echo/Watch"]);
+    expect(Object.values(iface.bindings ?? {}).map((binding) => binding.selector)).toEqual(inspection.targets.map((target) => target.selector));
     expect(iface.sources?.default).toEqual(source);
   });
 
@@ -51,16 +51,16 @@ describe("GrpcSynthesizer", () => {
     };
     const synth = new GrpcSynthesizer();
     const result = await synth.synthesizeInterfaceWithCoverage({ sources: [source] });
-    expect(Object.values(result.interface.bindings ?? {}).map((binding) => binding.ref)).toEqual([
+    expect(Object.values(result.interface.bindings ?? {}).map((binding) => binding.selector)).toEqual([
       "demo.Echo/Accepted",
     ]);
     expect(result.coverage).toMatchObject({
       exhaustive: true,
       fullyRepresented: false,
       entries: [
-        { sourceRef: "demo.Echo/Accepted", status: "represented" },
+        { sourceSelector: "demo.Echo/Accepted", status: "represented" },
         {
-          sourceRef: "demo.Echo/Excluded",
+          sourceSelector: "demo.Echo/Excluded",
           status: "excluded",
           reasonCode: "grpc.schema_range",
           rule: "GRPC-P-03",
@@ -69,7 +69,7 @@ describe("GrpcSynthesizer", () => {
     });
     await expect(synth.inspectSource(source)).resolves.toMatchObject({
       exhaustive: true,
-      targets: [{ ref: "demo.Echo/Accepted" }],
+      targets: [{ selector: "demo.Echo/Accepted" }],
     });
   });
 

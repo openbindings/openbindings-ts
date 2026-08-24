@@ -4,6 +4,23 @@
 
 ### Changed
 
+- **The OBI binding member `ref` is renamed `selector`, and every public API
+  name for the binding-target-selector concept follows** (pre-launch clean
+  rename, no aliases). Documents now write `bindings[*].selector`; the
+  document schema, `BindingEntry.selector`, `BindingInvocationArgs.selector`,
+  `InvokeSite.selector`, and `BindableTarget.selector` rename with it, as do
+  `SynthesisCoverageEntry.sourceRef`/`bindingRef` → `sourceSelector`/
+  `bindingSelector`, the error codes `ERR_INVALID_REF`/`ERR_REF_NOT_FOUND` →
+  `ERR_INVALID_SELECTOR`/`ERR_SELECTOR_NOT_FOUND`, the usage reason code
+  `usage.no_unique_command_ref` → `usage.no_unique_command_selector` (and its
+  `ambiguous-ref:` coverage-identity prefix → `ambiguous-selector:`), and
+  selector-concept helpers across the format packages (`parseSelector`,
+  `operationSelector`, `buildJsonPointerSelector`, `resolveSelector`,
+  operationgraph's `SelectorError`). JSON Schema `$ref` handling — transform
+  `$ref` objects, schema resolution, and the standalone client packages' own
+  `ref`-named surfaces — is unchanged; the format packages adapt those client
+  names at their re-export boundaries.
+
 - **A `config.value` context requirement may carry an engine-asserted
   `schema` (JSON Schema) for the value at (point, path); the `choices` member
   is removed** (pre-launch working-draft amendment of the binding-invoker

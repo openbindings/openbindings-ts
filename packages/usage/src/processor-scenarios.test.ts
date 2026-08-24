@@ -90,17 +90,17 @@ async function runScenario(
     ...(typeof scenario.given.source.location === "string" ? { location: scenario.given.source.location } : {}),
     ...(Object.prototype.hasOwnProperty.call(scenario.given.source, "content") ? { content: scenario.given.source.content } : {}),
   };
-  const ref = typeof scenario.given.binding.ref === "string" ? scenario.given.binding.ref : "";
+  const selector = typeof scenario.given.binding.selector === "string" ? scenario.given.binding.selector : "";
   let call: Invocation<unknown, unknown>;
   if (joined) {
     const iface = await new UsageSynthesizer().synthesizeInterface({ sources: [source] });
     call = new OperationInvoker([invoker]).invoke(
       iface,
-      operationSignature(operationForRef(iface, ref)),
+      operationSignature(operationForSelector(iface, selector)),
       { context },
     );
   } else {
-    call = invoker.invokeBinding({ source, ref, context });
+    call = invoker.invokeBinding({ source, selector, context });
   }
   if (scenario.given.invocation.inputPresent) await call.write(scenario.given.invocation.input).catch(() => {});
   else await call.close();
@@ -139,9 +139,9 @@ async function runScenario(
   };
 }
 
-function operationForRef(iface: OBInterface, ref: string): string {
-  const match = Object.values(iface.bindings ?? {}).find((binding) => (binding.ref ?? "") === ref);
-  if (!match) throw new Error(`synthesized Usage interface has no binding for ${JSON.stringify(ref)}`);
+function operationForSelector(iface: OBInterface, selector: string): string {
+  const match = Object.values(iface.bindings ?? {}).find((binding) => (binding.selector ?? "") === selector);
+  if (!match) throw new Error(`synthesized Usage interface has no binding for ${JSON.stringify(selector)}`);
   return match.operation;
 }
 

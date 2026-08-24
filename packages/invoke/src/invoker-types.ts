@@ -22,8 +22,8 @@ export interface InvocationSource {
  */
 export interface BindingInvocationArgs {
   source: InvocationSource;
-  /** Format-specific pointer into the source artifact. Empty when the format doesn't use refs. */
-  ref: string;
+  /** Format-specific pointer into the source artifact. Empty when the format doesn't use selectors. */
+  selector: string;
   /** The selected binding entry. Populated by the operation invoker; optional for direct calls. */
   binding?: BindingEntry;
   context?: Record<string, unknown>;
@@ -51,7 +51,7 @@ export interface BindingInvocationArgs {
   hooks?: InvokeHooks | null;
   /**
    * The consultation site (canonical operation key, binding key, format,
-   * ref). Populated by the operation invoker; format invokers complete the
+   * selector). Populated by the operation invoker; format invokers complete the
    * target where they know it.
    */
   site?: InvokeSite;

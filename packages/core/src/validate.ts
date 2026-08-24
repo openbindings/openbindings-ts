@@ -26,7 +26,7 @@ const KNOWN_OPERATION_FIELDS = new Set([
 
 const KNOWN_SOURCE_FIELDS = new Set(["bindingSpec", "location", "content", "description"]);
 const KNOWN_BINDING_FIELDS = new Set([
-  "operation", "source", "ref", "preference", "description", "deprecated",
+  "operation", "source", "selector", "preference", "description", "deprecated",
   "inputTransform", "outputTransform",
 ]);
 const KNOWN_EXAMPLE_FIELDS = new Set(["description", "input", "output"]);

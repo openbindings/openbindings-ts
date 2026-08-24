@@ -76,7 +76,7 @@ describe("OperationInvoker delivery-unit stamping", () => {
   it("stamps OperationInvokerOptions.maxDeliveryUnitBytes into binding args like fetch", async () => {
     const { invoker, seen } = capturingInvoker();
     const op = new OperationInvoker([invoker], { maxDeliveryUnitBytes: 2048 });
-    const call = op.invokeBinding({ source: { bindingSpec: "test.spec@1" }, ref: "" });
+    const call = op.invokeBinding({ source: { bindingSpec: "test.spec@1" }, selector: "" });
     await call.closed;
     expect(seen).toHaveLength(1);
     expect(seen[0]?.maxDeliveryUnitBytes).toBe(2048);
@@ -87,7 +87,7 @@ describe("OperationInvoker delivery-unit stamping", () => {
     const op = new OperationInvoker([invoker], { maxDeliveryUnitBytes: 2048 });
     const call = op.invokeBinding({
       source: { bindingSpec: "test.spec@1" },
-      ref: "",
+      selector: "",
       maxDeliveryUnitBytes: 512,
     });
     await call.closed;
@@ -98,7 +98,7 @@ describe("OperationInvoker delivery-unit stamping", () => {
   it("leaves the field absent when the invoker has no bound (formats then default)", async () => {
     const { invoker, seen } = capturingInvoker();
     const op = new OperationInvoker([invoker]);
-    const call = op.invokeBinding({ source: { bindingSpec: "test.spec@1" }, ref: "" });
+    const call = op.invokeBinding({ source: { bindingSpec: "test.spec@1" }, selector: "" });
     await call.closed;
     // Length asserted first so the optional chain cannot mask an empty array.
     expect(seen).toHaveLength(1);
@@ -108,7 +108,7 @@ describe("OperationInvoker delivery-unit stamping", () => {
   it("rides withRuntime copies", async () => {
     const { invoker, seen } = capturingInvoker();
     const op = new OperationInvoker([invoker], { maxDeliveryUnitBytes: 4096 }).withRuntime();
-    const call = op.invokeBinding({ source: { bindingSpec: "test.spec@1" }, ref: "" });
+    const call = op.invokeBinding({ source: { bindingSpec: "test.spec@1" }, selector: "" });
     await call.closed;
     expect(seen).toHaveLength(1);
     expect(seen[0]?.maxDeliveryUnitBytes).toBe(4096);

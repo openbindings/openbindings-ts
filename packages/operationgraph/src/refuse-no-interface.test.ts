@@ -32,7 +32,7 @@ describe("operation-graph direct binding without an interface (C3f)", () => {
     };
     const call = invoker().invokeBinding({
       source: { bindingSpec: BINDING_SPEC, content: { graphs: { g: graph } } },
-      ref: "#/graphs/g",
+      selector: "#/graphs/g",
       // no interface
     });
     void call.write({});
@@ -59,7 +59,7 @@ describe("operation-graph direct binding without an interface (C3f)", () => {
     };
     const call = invoker().invokeBinding({
       source: { bindingSpec: BINDING_SPEC, content: { graphs: { g: graph } } },
-      ref: "#/graphs/g",
+      selector: "#/graphs/g",
     });
     void call.write({ ok: true });
     void call.close();

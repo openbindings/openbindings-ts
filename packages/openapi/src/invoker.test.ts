@@ -5,9 +5,9 @@ import {
   ERR_CANCELLED,
   ERR_CONNECT_FAILED,
   ERR_EXECUTION_FAILED,
-  ERR_INVALID_REF,
+  ERR_INVALID_SELECTOR,
   ERR_PROTOCOL,
-  ERR_REF_NOT_FOUND,
+  ERR_SELECTOR_NOT_FOUND,
   ERR_RESPONSE_ERROR,
   ERR_REFUSED,
   ERR_SOURCE_CONFIG_ERROR,
@@ -168,7 +168,7 @@ describe("invokeBinding — request construction", () => {
     const { fetch, requests } = mockFetch(() => new Response(null, { status: 204 }));
     const call = new OpenAPIInvoker().invokeBinding({
       source: { bindingSpec: "openbindings.openapi@1", content: spec },
-      ref: "#/paths/~1health/get",
+      selector: "#/paths/~1health/get",
       fetch,
     });
 
@@ -179,7 +179,7 @@ describe("invokeBinding — request construction", () => {
 
   it("dispatches a no-input operation immediately and emits the parsed body", async () => {
     const { fetch, requests } = mockFetch(() => jsonResponse({ pong: true }));
-    const call = new OpenAPIInvoker().invokeBinding({ source: SOURCE, ref: REF_PING, fetch });
+    const call = new OpenAPIInvoker().invokeBinding({ source: SOURCE, selector: REF_PING, fetch });
 
     const out = await single(call.outputs);
 
@@ -193,7 +193,7 @@ describe("invokeBinding — request construction", () => {
 
   it("classifies input fields into path, query, and header parameters", async () => {
     const { fetch, requests } = mockFetch(() => jsonResponse({ id: "42" }));
-    const call = new OpenAPIInvoker().invokeBinding({ source: SOURCE, ref: REF_GET_USER, fetch });
+    const call = new OpenAPIInvoker().invokeBinding({ source: SOURCE, selector: REF_GET_USER, fetch });
 
     await call.write({ id: "42", verbose: true, "X-Trace": "abc" });
     const out = await single(call.outputs);
@@ -205,7 +205,7 @@ describe("invokeBinding — request construction", () => {
 
   it("serializes unclassified fields into the JSON request body", async () => {
     const { fetch, requests } = mockFetch(() => jsonResponse({ id: "u1" }, 201));
-    const call = new OpenAPIInvoker().invokeBinding({ source: SOURCE, ref: REF_CREATE_USER, fetch });
+    const call = new OpenAPIInvoker().invokeBinding({ source: SOURCE, selector: REF_CREATE_USER, fetch });
 
     await call.write({ name: "Ada", email: "ada@example.com" });
     const out = await single(call.outputs);
@@ -257,7 +257,7 @@ describe("invokeBinding — request construction", () => {
     const { fetch, requests } = mockFetch(() => jsonResponse({ ok: true }));
     const call = new OpenAPIInvoker().invokeBinding({
       source: { bindingSpec: "openbindings.openapi@1", content: spec },
-      ref: "#/paths/~1objects/post",
+      selector: "#/paths/~1objects/post",
       fetch,
     });
 
@@ -296,7 +296,7 @@ describe("invokeBinding — request construction", () => {
     const { fetch, requests } = mockFetch(() => jsonResponse({ ok: true }));
     const call = new OpenAPIInvoker().invokeBinding({
       source: { bindingSpec: "openbindings.openapi@1", content: spec },
-      ref: "#/paths/~1users~1{id}/put",
+      selector: "#/paths/~1users~1{id}/put",
       fetch,
     });
 
@@ -307,7 +307,7 @@ describe("invokeBinding — request construction", () => {
 
   it("refuses ERR_REFUSED when input closes bare and the path parameter is unsupplied", async () => {
     const { fetch, requests } = mockFetch(() => jsonResponse({}));
-    const call = new OpenAPIInvoker().invokeBinding({ source: SOURCE, ref: REF_GET_USER, fetch });
+    const call = new OpenAPIInvoker().invokeBinding({ source: SOURCE, selector: REF_GET_USER, fetch });
 
     await call.close();
 
@@ -317,7 +317,7 @@ describe("invokeBinding — request construction", () => {
 
   it("dispatches with an empty input when all parameters are optional", async () => {
     const { fetch, requests } = mockFetch(() => jsonResponse([]));
-    const call = new OpenAPIInvoker().invokeBinding({ source: SOURCE, ref: REF_SEARCH, fetch });
+    const call = new OpenAPIInvoker().invokeBinding({ source: SOURCE, selector: REF_SEARCH, fetch });
 
     await call.close();
     const out = await single(call.outputs);
@@ -328,7 +328,7 @@ describe("invokeBinding — request construction", () => {
 
   it("percent-encodes path parameter values so reserved characters cannot corrupt the URL", async () => {
     const { fetch, requests } = mockFetch(() => jsonResponse({ id: "x" }));
-    const call = new OpenAPIInvoker().invokeBinding({ source: SOURCE, ref: REF_GET_USER, fetch });
+    const call = new OpenAPIInvoker().invokeBinding({ source: SOURCE, selector: REF_GET_USER, fetch });
 
     await call.write({ id: "a/b?c#d" });
     await single(call.outputs);
@@ -343,7 +343,7 @@ describe("invokeBinding — request construction", () => {
   // characters.
   it("percent-encodes multibyte UTF-8 path values byte-identically to Go's encodePathValue", async () => {
     const { fetch, requests } = mockFetch(() => jsonResponse({ id: "x" }));
-    const call = new OpenAPIInvoker().invokeBinding({ source: SOURCE, ref: REF_GET_USER, fetch });
+    const call = new OpenAPIInvoker().invokeBinding({ source: SOURCE, selector: REF_GET_USER, fetch });
 
     await call.write({ id: "héllo" });
     await single(call.outputs);
@@ -382,7 +382,7 @@ describe("invokeBinding — request construction", () => {
     const { fetch, requests } = mockFetch(() => jsonResponse({ ok: true }));
     const call = new OpenAPIInvoker().invokeBinding({
       source: { bindingSpec: "openbindings.openapi@1", content: spec },
-      ref: "#/paths/~1users~1{id}/get",
+      selector: "#/paths/~1users~1{id}/get",
       fetch,
     });
 
@@ -424,7 +424,7 @@ describe("invokeBinding — request construction", () => {
     const { fetch, requests } = mockFetch(() => jsonResponse({ ok: true }));
     const call = new OpenAPIInvoker().invokeBinding({
       source: { bindingSpec: "openbindings.openapi@1", content: spec },
-      ref: "#/paths/~1session/get",
+      selector: "#/paths/~1session/get",
       fetch,
     });
 
@@ -469,7 +469,7 @@ describe("invokeBinding — request construction", () => {
     const { fetch, requests } = mockFetch(() => jsonResponse({ ok: true }));
     const call = new OpenAPIInvoker().invokeBinding({
       source: { bindingSpec: "openbindings.openapi@1", content: spec },
-      ref: "#/paths/~1users~1{id}/put",
+      selector: "#/paths/~1users~1{id}/put",
       fetch,
     });
 
@@ -487,8 +487,8 @@ describe("invokeBinding — request construction", () => {
     const { fetch, requests } = mockFetch(() => jsonResponse({ id: "u1" }, 201));
     const call = new OpenAPIInvoker().invokeBinding({
       source: SOURCE,
-      ref: REF_CREATE_USER,
-      binding: { operation: "createUser", source: "api", ref: REF_CREATE_USER },
+      selector: REF_CREATE_USER,
+      binding: { operation: "createUser", source: "api", selector: REF_CREATE_USER },
       fetch,
     });
 
@@ -499,23 +499,23 @@ describe("invokeBinding — request construction", () => {
 });
 
 describe("invokeBinding — pre-dispatch failures", () => {
-  it("errors ERR_INVALID_REF on a malformed ref without dispatching", async () => {
+  it("errors ERR_INVALID_SELECTOR on a malformed selector without dispatching", async () => {
     const { fetch, requests } = mockFetch(() => jsonResponse({}));
-    const call = new OpenAPIInvoker().invokeBinding({ source: SOURCE, ref: "#/nope", fetch });
+    const call = new OpenAPIInvoker().invokeBinding({ source: SOURCE, selector: "#/nope", fetch });
 
-    await expect(call.closed).rejects.toMatchObject({ code: ERR_INVALID_REF });
+    await expect(call.closed).rejects.toMatchObject({ code: ERR_INVALID_SELECTOR });
     expect(requests).toHaveLength(0);
   });
 
-  it("errors ERR_REF_NOT_FOUND when the ref resolves to no operation", async () => {
+  it("errors ERR_SELECTOR_NOT_FOUND when the selector resolves to no operation", async () => {
     const { fetch, requests } = mockFetch(() => jsonResponse({}));
     const call = new OpenAPIInvoker().invokeBinding({
       source: SOURCE,
-      ref: "#/paths/~1missing/get",
+      selector: "#/paths/~1missing/get",
       fetch,
     });
 
-    await expect(call.closed).rejects.toMatchObject({ code: ERR_REF_NOT_FOUND });
+    await expect(call.closed).rejects.toMatchObject({ code: ERR_SELECTOR_NOT_FOUND });
     expect(requests).toHaveLength(0);
   });
 
@@ -524,7 +524,7 @@ describe("invokeBinding — pre-dispatch failures", () => {
     const spec = { ...SPEC, servers: undefined };
     const call = new OpenAPIInvoker().invokeBinding({
       source: { bindingSpec: "openbindings.openapi@1", content: spec },
-      ref: REF_PING,
+      selector: REF_PING,
       fetch,
     });
 
@@ -541,7 +541,7 @@ describe("invokeBinding — pre-dispatch failures", () => {
     const { fetch } = mockFetch(() => new Response("nope", { status: 500 }));
     const call = new OpenAPIInvoker().invokeBinding({
       source: { bindingSpec: "openbindings.openapi@1", location: "https://example.com/openapi.json" },
-      ref: REF_PING,
+      selector: REF_PING,
       fetch,
     });
 
@@ -551,7 +551,7 @@ describe("invokeBinding — pre-dispatch failures", () => {
   it("maps a network-level fetch rejection to ERR_CONNECT_FAILED", async () => {
     const fetch = (() =>
       Promise.reject(new TypeError("fetch failed"))) as typeof globalThis.fetch;
-    const call = new OpenAPIInvoker().invokeBinding({ source: SOURCE, ref: REF_PING, fetch });
+    const call = new OpenAPIInvoker().invokeBinding({ source: SOURCE, selector: REF_PING, fetch });
 
     const error = await call.closed.catch((caught: unknown) => caught);
     expect(error).toMatchObject({ code: ERR_CONNECT_FAILED });
@@ -565,7 +565,7 @@ describe("invokeBinding — responses", () => {
   it("preserves declaration-selected JSON failure values exactly", async () => {
     for (const value of [{ error: "not found" }, ["missing"], "missing", 0, false, null]) {
       const { fetch } = mockFetch(() => jsonResponse(value, 404));
-      const call = new OpenAPIInvoker().invokeBinding({ source: SOURCE, ref: REF_PING, fetch });
+      const call = new OpenAPIInvoker().invokeBinding({ source: SOURCE, selector: REF_PING, fetch });
       const error = await call.closed.catch((caught: unknown) => caught);
       expect(JSON.parse(JSON.stringify(error))).toEqual({
         code: ERR_EXECUTION_FAILED,
@@ -579,7 +579,7 @@ describe("invokeBinding — responses", () => {
     const { fetch } = mockFetch(() => jsonResponse({ accepted: false }, 200));
     const call = new OpenAPIInvoker().invokeBinding({
       source: SOURCE,
-      ref: REF_PING,
+      selector: REF_PING,
       fetch,
       hooks,
     });
@@ -598,7 +598,7 @@ describe("invokeBinding — responses", () => {
     const { fetch } = mockFetch(() => jsonResponse({ pong: true }));
     const authoredCall = new OpenAPIInvoker().invokeBinding({
       source: SOURCE,
-      ref: REF_PING,
+      selector: REF_PING,
       fetch,
       hooks: deliberate,
     });
@@ -617,7 +617,7 @@ describe("invokeBinding — responses", () => {
     } as unknown as OpenAPIEngine;
     const nativeCall = new OpenAPIInvoker({ engine }).invokeBinding({
       source: SOURCE,
-      ref: REF_PING,
+      selector: REF_PING,
     });
     const error = await nativeCall.closed.catch((caught: unknown) => caught);
     expect(JSON.parse(JSON.stringify(error))).toEqual({ code: "NATIVE_FAILURE" });
@@ -634,7 +634,7 @@ describe("invokeBinding — responses", () => {
     } as unknown as OpenAPIEngine;
     const call = new OpenAPIInvoker({ engine }).invokeBinding({
       source: SOURCE,
-      ref: REF_PING,
+      selector: REF_PING,
     });
 
     await expect(call.closed).rejects.toMatchObject({ code: "ERR_RUNTIME" });
@@ -647,7 +647,7 @@ describe("invokeBinding — responses", () => {
     const { fetch } = mockFetch(
       () => new Response("missing", { status: 404, headers: { "Content-Type": "text/plain" } }),
     );
-    const call = new OpenAPIInvoker().invokeBinding({ source: SOURCE, ref: REF_PING, fetch });
+    const call = new OpenAPIInvoker().invokeBinding({ source: SOURCE, selector: REF_PING, fetch });
     const error = await call.closed.catch((caught: unknown) => caught);
     expect(JSON.parse(JSON.stringify(error))).toEqual({ code: ERR_EXECUTION_FAILED, data: "missing" });
   });
@@ -656,7 +656,7 @@ describe("invokeBinding — responses", () => {
     const { fetch } = mockFetch(
       () => new Response("<html>oops</html>", { status: 404, headers: { "Content-Type": "text/html" } }),
     );
-    const call = new OpenAPIInvoker().invokeBinding({ source: SOURCE, ref: REF_PING, fetch });
+    const call = new OpenAPIInvoker().invokeBinding({ source: SOURCE, selector: REF_PING, fetch });
     const error = await call.closed.catch((caught: unknown) => caught);
     expect(JSON.parse(JSON.stringify(error))).toEqual({ code: ERR_EXECUTION_FAILED });
   });
@@ -666,12 +666,12 @@ describe("invokeBinding — responses", () => {
 
     const { fetch: f401 } = mockFetch(() => jsonResponse({}, 401));
     await expect(
-      inv.invokeBinding({ source: SOURCE, ref: REF_PING, fetch: f401 }).closed,
+      inv.invokeBinding({ source: SOURCE, selector: REF_PING, fetch: f401 }).closed,
     ).rejects.toMatchObject({ code: ERR_EXECUTION_FAILED, data: {} });
 
     const { fetch: f403 } = mockFetch(() => jsonResponse({}, 403));
     await expect(
-      inv.invokeBinding({ source: SOURCE, ref: REF_PING, fetch: f403 }).closed,
+      inv.invokeBinding({ source: SOURCE, selector: REF_PING, fetch: f403 }).closed,
     ).rejects.toMatchObject({ code: ERR_EXECUTION_FAILED, data: {} });
   });
 
@@ -690,7 +690,7 @@ describe("invokeBinding — responses", () => {
     const { fetch } = mockFetch(
       () => new Response("no such pet", { status: 404, headers: { "Content-Type": "text/plain" } }),
     );
-    const call = new OpenAPIInvoker().invokeBinding({ source: SOURCE, ref: REF_PING, fetch, hooks });
+    const call = new OpenAPIInvoker().invokeBinding({ source: SOURCE, selector: REF_PING, fetch, hooks });
 
     const out = await single(call.outputs);
     expect(out).toEqual({ missing: true, note: "no such pet" });
@@ -703,7 +703,7 @@ describe("invokeBinding — responses", () => {
     const { fetch } = mockFetch(
       () => new Response("not json {", { status: 200, headers: { "Content-Type": "application/json" } }),
     );
-    const call = new OpenAPIInvoker().invokeBinding({ source: SOURCE, ref: REF_PING, fetch });
+    const call = new OpenAPIInvoker().invokeBinding({ source: SOURCE, selector: REF_PING, fetch });
     const error = await call.closed.catch((caught: unknown) => caught);
     expect(error).toMatchObject({ code: ERR_RESPONSE_ERROR });
     expect((error as Error).message).toBe(ERR_RESPONSE_ERROR);
@@ -716,7 +716,7 @@ describe("invokeBinding — responses", () => {
     const { fetch } = mockFetch(
       () => new Response(JSON.stringify({ ok: true }), { status: 200, headers: { "Content-Type": "text/plain" } }),
     );
-    const call = new OpenAPIInvoker().invokeBinding({ source: SOURCE, ref: REF_PING, fetch });
+    const call = new OpenAPIInvoker().invokeBinding({ source: SOURCE, selector: REF_PING, fetch });
     const out = await single(call.outputs);
     expect(out).toBe(JSON.stringify({ ok: true }));
     await call.closed;
@@ -725,7 +725,7 @@ describe("invokeBinding — responses", () => {
 
   it("does not expose response headers through the abstract invocation", async () => {
     const { fetch } = mockFetch(() => jsonResponse({ ok: true }, 200, { "X-Request-Id": "r1" }));
-    const call = new OpenAPIInvoker().invokeBinding({ source: SOURCE, ref: REF_PING, fetch });
+    const call = new OpenAPIInvoker().invokeBinding({ source: SOURCE, selector: REF_PING, fetch });
 
     await expect(single(call.outputs)).resolves.toEqual({ ok: true });
     expect(Object.hasOwn(call as object, "diagnostics")).toBe(false);
@@ -735,14 +735,14 @@ describe("invokeBinding — responses", () => {
     const { fetch } = mockFetch(
       () => new Response("plain text", { status: 200, headers: { "Content-Type": "text/plain" } }),
     );
-    const call = new OpenAPIInvoker().invokeBinding({ source: SOURCE, ref: REF_PING, fetch });
+    const call = new OpenAPIInvoker().invokeBinding({ source: SOURCE, selector: REF_PING, fetch });
 
     await expect(single(call.outputs)).resolves.toBe("plain text");
   });
 
   it("emits no output for an empty body", async () => {
     const { fetch } = mockFetch(() => new Response(null, { status: 204 }));
-    const call = new OpenAPIInvoker().invokeBinding({ source: SOURCE, ref: REF_PING, fetch });
+    const call = new OpenAPIInvoker().invokeBinding({ source: SOURCE, selector: REF_PING, fetch });
 
     const outs: unknown[] = [];
     for await (const o of call.outputs) outs.push(o);
@@ -761,7 +761,7 @@ describe("invokeBinding — responses", () => {
       },
     });
     const { fetch } = mockFetch(() => new Response(stream, { status: 200 }));
-    const call = new OpenAPIInvoker().invokeBinding({ source: SOURCE, ref: REF_PING, fetch });
+    const call = new OpenAPIInvoker().invokeBinding({ source: SOURCE, selector: REF_PING, fetch });
 
     await expect(call.closed).rejects.toMatchObject({ code: ERR_RESPONSE_ERROR });
     expect(bodyCancelled).toBe(true);
@@ -775,7 +775,7 @@ describe("invokeBinding — responses", () => {
     );
     const call = new OpenAPIInvoker().invokeBinding({
       source: SOURCE,
-      ref: REF_PING,
+      selector: REF_PING,
       fetch,
       maxDeliveryUnitBytes: 1024,
     });
@@ -792,7 +792,7 @@ describe("invokeBinding — responses", () => {
           });
         }),
     );
-    const call = new OpenAPIInvoker().invokeBinding({ source: SOURCE, ref: REF_PING, fetch });
+    const call = new OpenAPIInvoker().invokeBinding({ source: SOURCE, selector: REF_PING, fetch });
 
     await vi.waitFor(() => {
       expect(requests).toHaveLength(1);
@@ -852,7 +852,7 @@ const REF_EVENTS = "#/paths/~1events/get";
 describe("invokeBinding — SSE responses", () => {
   it("advertises the declared success media — text/event-stream included — via Accept", async () => {
     const { fetch, requests } = mockFetch(() => jsonResponse({ pong: true }));
-    const call = new OpenAPIInvoker().invokeBinding({ source: SSE_SOURCE, ref: REF_EVENTS, fetch });
+    const call = new OpenAPIInvoker().invokeBinding({ source: SSE_SOURCE, selector: REF_EVENTS, fetch });
     await single(call.outputs);
     expect(requests[0]?.headers.get("Accept")).toBe("application/json, text/event-stream");
   });
@@ -861,7 +861,7 @@ describe("invokeBinding — SSE responses", () => {
     const { fetch } = mockFetch(() =>
       sseResponse(['data: {"id":"1","msg":"first"}\n\n', 'data: {"id":"2","msg":"second"}\n\n']),
     );
-    const call = new OpenAPIInvoker().invokeBinding({ source: SSE_SOURCE, ref: REF_EVENTS, fetch });
+    const call = new OpenAPIInvoker().invokeBinding({ source: SSE_SOURCE, selector: REF_EVENTS, fetch });
 
     const events: unknown[] = [];
     for await (const e of call.outputs) events.push(e);
@@ -875,7 +875,7 @@ describe("invokeBinding — SSE responses", () => {
 
   it("joins multiple data: lines for one event with a literal newline", async () => {
     const { fetch } = mockFetch(() => sseResponse(["data: line one\ndata: line two\ndata: line three\n\n"]));
-    const call = new OpenAPIInvoker().invokeBinding({ source: SSE_SOURCE, ref: REF_EVENTS, fetch });
+    const call = new OpenAPIInvoker().invokeBinding({ source: SSE_SOURCE, selector: REF_EVENTS, fetch });
 
     await expect(single(call.outputs)).resolves.toBe("line one\nline two\nline three");
   });
@@ -898,7 +898,7 @@ describe("invokeBinding — SSE responses", () => {
         'event: progress\nid: 42\ndata: {"msg":"third"}\n\n',
       ]),
     );
-    const call = new OpenAPIInvoker().invokeBinding({ source: SSE_SOURCE, ref: REF_EVENTS, fetch, hooks });
+    const call = new OpenAPIInvoker().invokeBinding({ source: SSE_SOURCE, selector: REF_EVENTS, fetch, hooks });
 
     const events: unknown[] = [];
     for await (const e of call.outputs) events.push(e);
@@ -913,14 +913,14 @@ describe("invokeBinding — SSE responses", () => {
     const { fetch } = mockFetch(() =>
       sseResponse([": this is a comment, should be ignored\n\n", 'data: {"id":"survivor"}\n\n']),
     );
-    const call = new OpenAPIInvoker().invokeBinding({ source: SSE_SOURCE, ref: REF_EVENTS, fetch });
+    const call = new OpenAPIInvoker().invokeBinding({ source: SSE_SOURCE, selector: REF_EVENTS, fetch });
 
     await expect(single(call.outputs)).resolves.toBe('{"id":"survivor"}');
   });
 
   it("a non-2xx text/event-stream response is a normal HTTP failure, not a stream", async () => {
     const { fetch } = mockFetch(() => sseResponse(["data: nope\n\n"], { status: 500 }));
-    const call = new OpenAPIInvoker().invokeBinding({ source: SSE_SOURCE, ref: REF_EVENTS, fetch });
+    const call = new OpenAPIInvoker().invokeBinding({ source: SSE_SOURCE, selector: REF_EVENTS, fetch });
 
     const error = await call.closed.catch((caught: unknown) => caught) as InvocationError;
     expect(error.code).toBe(ERR_EXECUTION_FAILED);
@@ -929,7 +929,7 @@ describe("invokeBinding — SSE responses", () => {
 
   it("a 2xx JSON (non-SSE) response on a streaming-capable operation stays unary (framing selects)", async () => {
     const { fetch } = mockFetch(() => jsonResponse({ pong: true }));
-    const call = new OpenAPIInvoker().invokeBinding({ source: SSE_SOURCE, ref: REF_EVENTS, fetch });
+    const call = new OpenAPIInvoker().invokeBinding({ source: SSE_SOURCE, selector: REF_EVENTS, fetch });
 
     const events: unknown[] = [];
     for await (const e of call.outputs) events.push(e);
@@ -941,7 +941,7 @@ describe("invokeBinding — SSE responses", () => {
     // streaming-capable, so an SSE response contradicts the declaration
     // (OAPI-P-06).
     const { fetch } = mockFetch(() => sseResponse(["data: hi\n\n"]));
-    const call = new OpenAPIInvoker().invokeBinding({ source: SOURCE, ref: REF_PING, fetch });
+    const call = new OpenAPIInvoker().invokeBinding({ source: SOURCE, selector: REF_PING, fetch });
 
     await expect(call.closed).rejects.toMatchObject({ code: ERR_PROTOCOL });
   });
@@ -957,7 +957,7 @@ describe("invokeBinding — context negotiation", () => {
     const { fetch, requests } = mockFetch(() => jsonResponse({}));
     const call = new OpenAPIInvoker().invokeBinding({
       source: authSource(BEARER),
-      ref: REF_DATA,
+      selector: REF_DATA,
       fetch,
     });
 
@@ -976,7 +976,7 @@ describe("invokeBinding — context negotiation", () => {
     const { fetch, requests } = mockFetch(() => jsonResponse({ ok: true }));
     const call = new OpenAPIInvoker().invokeBinding({
       source: authSource(BEARER),
-      ref: REF_DATA,
+      selector: REF_DATA,
       context: { bearerToken: "tok_123" },
       fetch,
     });
@@ -989,7 +989,7 @@ describe("invokeBinding — context negotiation", () => {
     const { fetch, requests } = mockFetch(() => jsonResponse({ ok: true }));
     const call = new OpenAPIInvoker().invokeBinding({
       source: authSource(BEARER),
-      ref: REF_DATA,
+      selector: REF_DATA,
       context: { credentials: { bearerAuth: "tok_named" } },
       fetch,
     });
@@ -1006,7 +1006,7 @@ describe("invokeBinding — context negotiation", () => {
     const { fetch, requests } = mockFetch(() => jsonResponse({}));
     const call = new OpenAPIInvoker().invokeBinding({
       source: authSource(spec),
-      ref: REF_DATA,
+      selector: REF_DATA,
       context: { basic: { username: "u", password: "p" } },
       fetch,
     });
@@ -1023,7 +1023,7 @@ describe("invokeBinding — context negotiation", () => {
     const { fetch } = mockFetch(() => jsonResponse({}));
     const call = new OpenAPIInvoker().invokeBinding({
       source: authSource(spec),
-      ref: REF_DATA,
+      selector: REF_DATA,
       fetch,
     });
 
@@ -1041,7 +1041,7 @@ describe("invokeBinding — context negotiation", () => {
     const { fetch, requests } = mockFetch(() => jsonResponse({}));
     const call = new OpenAPIInvoker().invokeBinding({
       source: authSource(spec),
-      ref: REF_DATA,
+      selector: REF_DATA,
       context: { apiKey: "k1" },
       fetch,
     });
@@ -1057,7 +1057,7 @@ describe("invokeBinding — context negotiation", () => {
     });
     const { fetch } = mockFetch(() => jsonResponse({}));
     await expect(
-      new OpenAPIInvoker().invokeBinding({ source: authSource(spec), ref: REF_DATA, fetch }).closed,
+      new OpenAPIInvoker().invokeBinding({ source: authSource(spec), selector: REF_DATA, fetch }).closed,
     ).rejects.toMatchObject({
       code: CONTEXT_REQUIRED,
       // "key" (the securitySchemes key) is the requirement's name, NOT
@@ -1082,7 +1082,7 @@ describe("invokeBinding — context negotiation", () => {
     // Missing context: the AND-requirement challenge names both schemes.
     const { fetch: f1 } = mockFetch(() => jsonResponse({}));
     await expect(
-      inv.invokeBinding({ source: authSource(spec), ref: REF_DATA, fetch: f1 }).closed,
+      inv.invokeBinding({ source: authSource(spec), selector: REF_DATA, fetch: f1 }).closed,
     ).rejects.toMatchObject({
       code: CONTEXT_REQUIRED,
       data: {
@@ -1102,7 +1102,7 @@ describe("invokeBinding — context negotiation", () => {
     const { fetch: f2, requests: r2 } = mockFetch(() => jsonResponse({}));
     const call = inv.invokeBinding({
       source: authSource(spec),
-      ref: REF_DATA,
+      selector: REF_DATA,
       context: { apiKeys: { headerKey: "hk-1", queryKey: "qk-1" } },
       fetch: f2,
     });
@@ -1119,7 +1119,7 @@ describe("invokeBinding — context negotiation", () => {
     const { fetch, requests } = mockFetch(() => jsonResponse({}));
     const call = new OpenAPIInvoker().invokeBinding({
       source: authSource(spec),
-      ref: REF_DATA,
+      selector: REF_DATA,
       context: { apiKey: "k1" },
       fetch,
     });
@@ -1136,7 +1136,7 @@ describe("invokeBinding — context negotiation", () => {
     const { fetch, requests } = mockFetch(() => jsonResponse({}));
     const call = new OpenAPIInvoker().invokeBinding({
       source: authSource(spec),
-      ref: REF_DATA,
+      selector: REF_DATA,
       context: { apiKey: "k1" },
       fetch,
     });
@@ -1168,7 +1168,7 @@ describe("invokeBinding — context negotiation", () => {
 
     const { fetch: f1, requests: r1 } = mockFetch(() => jsonResponse({}));
     await expect(
-      inv.invokeBinding({ source: authSource(spec), ref: REF_DATA, fetch: f1 }).closed,
+      inv.invokeBinding({ source: authSource(spec), selector: REF_DATA, fetch: f1 }).closed,
     ).rejects.toMatchObject({
       code: CONTEXT_REQUIRED,
       data: {
@@ -1192,7 +1192,7 @@ describe("invokeBinding — context negotiation", () => {
     const { fetch: f2, requests: r2 } = mockFetch(() => jsonResponse({}));
     const call = inv.invokeBinding({
       source: authSource(spec),
-      ref: REF_DATA,
+      selector: REF_DATA,
       context: { accessToken: "at_1" },
       fetch: f2,
     });
@@ -1218,7 +1218,7 @@ describe("invokeBinding — context negotiation", () => {
     });
     const { fetch, requests } = mockFetch(() => jsonResponse({}));
     await expect(
-      new OpenAPIInvoker().invokeBinding({ source: authSource(spec), ref: REF_DATA, fetch }).closed,
+      new OpenAPIInvoker().invokeBinding({ source: authSource(spec), selector: REF_DATA, fetch }).closed,
     ).rejects.toMatchObject({
       code: CONTEXT_REQUIRED,
       data: {
@@ -1252,7 +1252,7 @@ describe("invokeBinding — context negotiation", () => {
     });
     const { fetch } = mockFetch(() => jsonResponse({}));
     await expect(
-      new OpenAPIInvoker().invokeBinding({ source: authSource(spec), ref: REF_DATA, fetch }).closed,
+      new OpenAPIInvoker().invokeBinding({ source: authSource(spec), selector: REF_DATA, fetch }).closed,
     ).rejects.toMatchObject({
       data: {
         alternatives: [
@@ -1284,7 +1284,7 @@ describe("invokeBinding — context negotiation", () => {
     });
     const { fetch } = mockFetch(() => jsonResponse({}));
     const err = await new OpenAPIInvoker()
-      .invokeBinding({ source: authSource(spec), ref: REF_DATA, fetch })
+      .invokeBinding({ source: authSource(spec), selector: REF_DATA, fetch })
       .closed.catch((e: unknown) => e);
     const req = (
       err as { data: { alternatives: Array<{ requirements: Array<Record<string, unknown>> }> } }
@@ -1307,7 +1307,7 @@ describe("invokeBinding — context negotiation", () => {
 
     const { fetch: f1, requests: r1 } = mockFetch(() => jsonResponse({}));
     await expect(
-      inv.invokeBinding({ source: authSource(spec), ref: REF_DATA, fetch: f1 }).closed,
+      inv.invokeBinding({ source: authSource(spec), selector: REF_DATA, fetch: f1 }).closed,
     ).rejects.toMatchObject({
       code: CONTEXT_REQUIRED,
       data: { alternatives: [{ requirements: [{ type: "auth.oauth2" }] }] },
@@ -1317,7 +1317,7 @@ describe("invokeBinding — context negotiation", () => {
     const { fetch: f2, requests: r2 } = mockFetch(() => jsonResponse({}));
     const call = inv.invokeBinding({
       source: authSource(spec),
-      ref: REF_DATA,
+      selector: REF_DATA,
       context: { accessToken: "at_2" },
       fetch: f2,
     });
@@ -1346,7 +1346,7 @@ describe("invokeBinding — context negotiation", () => {
     });
     const { fetch } = mockFetch(() => jsonResponse({}));
     await expect(
-      new OpenAPIInvoker().invokeBinding({ source: authSource(spec), ref: REF_DATA, fetch }).closed,
+      new OpenAPIInvoker().invokeBinding({ source: authSource(spec), selector: REF_DATA, fetch }).closed,
     ).rejects.toMatchObject({
       code: CONTEXT_REQUIRED,
       data: {
@@ -1391,7 +1391,7 @@ describe("invokeBinding — context negotiation", () => {
     });
     const { fetch } = mockFetch(() => jsonResponse({}));
     await expect(
-      new OpenAPIInvoker().invokeBinding({ source: authSource(spec), ref: REF_DATA, fetch }).closed,
+      new OpenAPIInvoker().invokeBinding({ source: authSource(spec), selector: REF_DATA, fetch }).closed,
     ).rejects.toMatchObject({
       code: CONTEXT_REQUIRED,
       data: {
@@ -1441,7 +1441,7 @@ describe("invokeBinding — context negotiation", () => {
     });
     const { fetch } = mockFetch(() => jsonResponse({}));
     await expect(
-      new OpenAPIInvoker().invokeBinding({ source: authSource(spec), ref: REF_DATA, fetch }).closed,
+      new OpenAPIInvoker().invokeBinding({ source: authSource(spec), selector: REF_DATA, fetch }).closed,
     ).rejects.toMatchObject({
       code: CONTEXT_REQUIRED,
       data: {
@@ -1504,7 +1504,7 @@ describe("invokeBinding — context negotiation", () => {
 
     const { fetch: f1 } = mockFetch(() => jsonResponse({}));
     await expect(
-      inv.invokeBinding({ source: authSource(spec), ref: REF_DATA, fetch: f1 }).closed,
+      inv.invokeBinding({ source: authSource(spec), selector: REF_DATA, fetch: f1 }).closed,
     ).rejects.toMatchObject({
       code: CONTEXT_REQUIRED,
       data: {
@@ -1519,7 +1519,7 @@ describe("invokeBinding — context negotiation", () => {
     const { fetch: f2, requests: r2 } = mockFetch(() => jsonResponse({}));
     const call = inv.invokeBinding({
       source: authSource(spec),
-      ref: REF_DATA,
+      selector: REF_DATA,
       context: { apiKey: "k1" },
       fetch: f2,
     });
@@ -1538,7 +1538,7 @@ describe("invokeBinding — context negotiation", () => {
     const { fetch, requests } = mockFetch(() => jsonResponse({}));
     const call = new OpenAPIInvoker().invokeBinding({
       source: authSource(spec),
-      ref: REF_DATA,
+      selector: REF_DATA,
       context: { bearerToken: "tok", apiKey: "k1" },
       fetch,
     });
@@ -1563,7 +1563,7 @@ describe("invokeBinding — context negotiation", () => {
     await expect(
       inv.invokeBinding({
         source: authSource(spec),
-        ref: REF_DATA,
+        selector: REF_DATA,
         context: { bearerToken: "tok" },
         fetch: f1,
       }).closed,
@@ -1580,7 +1580,7 @@ describe("invokeBinding — context negotiation", () => {
     const { fetch: f2, requests: r2 } = mockFetch(() => jsonResponse({}));
     const call = inv.invokeBinding({
       source: authSource(spec),
-      ref: REF_DATA,
+      selector: REF_DATA,
       context: { bearerToken: "tok", apiKey: "k1" },
       fetch: f2,
     });
@@ -1600,7 +1600,7 @@ describe("invokeBinding — context negotiation", () => {
     const { fetch, requests } = mockFetch(() => jsonResponse({}));
     const call = new OpenAPIInvoker().invokeBinding({
       source: authSource(spec),
-      ref: REF_DATA,
+      selector: REF_DATA,
       context: { bearerToken: "tok" },
       fetch,
     });
@@ -1620,7 +1620,7 @@ describe("invokeBinding — context negotiation", () => {
     const { fetch, requests } = mockFetch(() => jsonResponse({}));
     const call = new OpenAPIInvoker().invokeBinding({
       source: authSource(spec),
-      ref: REF_DATA,
+      selector: REF_DATA,
       fetch,
     });
 
@@ -1637,7 +1637,7 @@ describe("invokeBinding — context negotiation", () => {
     const { fetch, requests } = mockFetch(() => jsonResponse({}));
     const call = new OpenAPIInvoker().invokeBinding({
       source: authSource(spec),
-      ref: REF_DATA,
+      selector: REF_DATA,
       fetch,
     });
 
@@ -1662,7 +1662,7 @@ describe("invokeBinding — context negotiation", () => {
     await expect(
       new OpenAPIInvoker().invokeBinding({
         source: authSource(spec),
-        ref: REF_DATA,
+        selector: REF_DATA,
         context: { "auth.http.digest": "present" },
         fetch,
       }).closed,
@@ -1696,13 +1696,13 @@ describe("invokeBinding — context negotiation", () => {
     });
     await expect(invoker.prepareBinding({
       source: authSource(spec),
-      ref: REF_DATA,
+      selector: REF_DATA,
       fetch,
     })).resolves.toBeNull();
 
     const call = invoker.invokeBinding({
       source: authSource(spec),
-      ref: REF_DATA,
+      selector: REF_DATA,
       fetch,
     });
     await single(call.outputs);
@@ -1717,7 +1717,7 @@ describe("invokeBinding — context negotiation", () => {
     });
     const { fetch, requests } = mockFetch(() => jsonResponse({}));
     await expect(
-      new OpenAPIInvoker().invokeBinding({ source: authSource(spec), ref: REF_DATA, fetch }).closed,
+      new OpenAPIInvoker().invokeBinding({ source: authSource(spec), selector: REF_DATA, fetch }).closed,
     ).rejects.toMatchObject({
       code: CONTEXT_REQUIRED,
       data: { alternatives: [{ requirements: [{ type: "auth.mutualTLS", name: "mtls" }] }] },
@@ -1734,7 +1734,7 @@ describe("invokeBinding — context negotiation", () => {
     });
     const { fetch } = mockFetch(() => jsonResponse({}));
     await expect(
-      new OpenAPIInvoker().invokeBinding({ source: authSource(spec), ref: REF_DATA, fetch }).closed,
+      new OpenAPIInvoker().invokeBinding({ source: authSource(spec), selector: REF_DATA, fetch }).closed,
     ).rejects.toMatchObject({
       data: {
         alternatives: [
@@ -1759,7 +1759,7 @@ describe("invokeBinding — context negotiation", () => {
     const { fetch, requests } = mockFetch(() => jsonResponse({}));
     const call = new OpenAPIInvoker().invokeBinding({
       source: authSource(spec),
-      ref: REF_DATA,
+      selector: REF_DATA,
       context: { bearerToken: "tok" },
       fetch,
     });
@@ -1777,7 +1777,7 @@ describe("invokeBinding — context negotiation", () => {
     });
     const { fetch, requests } = mockFetch(() => jsonResponse({}));
     await expect(
-      new OpenAPIInvoker().invokeBinding({ source: authSource(spec), ref: REF_DATA, fetch }).closed,
+      new OpenAPIInvoker().invokeBinding({ source: authSource(spec), selector: REF_DATA, fetch }).closed,
     ).rejects.toMatchObject({
       code: CONTEXT_REQUIRED,
       data: {
@@ -1795,7 +1795,7 @@ describe("invokeBinding — context negotiation", () => {
     const { fetch, requests } = mockFetch(() => jsonResponse({}));
     const call = new OpenAPIInvoker().invokeBinding({
       source: authSource(spec),
-      ref: REF_DATA,
+      selector: REF_DATA,
       fetch,
     });
 
@@ -1813,7 +1813,7 @@ describe("invokeBinding — context negotiation", () => {
     const { fetch, requests } = mockFetch(() => jsonResponse({}));
     const call = new OpenAPIInvoker().invokeBinding({
       source: authSource(spec),
-      ref: REF_DATA,
+      selector: REF_DATA,
       context: { bearerToken: "tok" },
       fetch,
     });
@@ -1828,7 +1828,7 @@ describe("invokeBinding — context negotiation", () => {
     const { fetch, requests } = mockFetch(() => jsonResponse({ pong: true }));
     const call = new OpenAPIInvoker().invokeBinding({
       source: SOURCE,
-      ref: REF_PING,
+      selector: REF_PING,
       context: { headers: { "X-Custom": "v" }, cookies: { session: "s1" } },
       fetch,
     });
@@ -1842,7 +1842,7 @@ describe("invokeBinding — context negotiation", () => {
     const { fetch, requests } = mockFetch(() => jsonResponse({ pong: true }));
     const call = new OpenAPIInvoker().invokeBinding({
       source: SOURCE,
-      ref: REF_PING,
+      selector: REF_PING,
       context: { bearerToken: "tok" },
       fetch,
     });
@@ -1859,7 +1859,7 @@ describe("invokeBinding — context negotiation", () => {
       const { fetch, requests } = mockFetch(() => jsonResponse({}));
       const call = new OpenAPIInvoker().invokeBinding({
         source: authSource(spec),
-        ref: REF_DATA,
+        selector: REF_DATA,
         fetch,
       });
 
@@ -1880,7 +1880,7 @@ describe("invokeBinding — context negotiation", () => {
     const { fetch, requests } = mockFetch(() => jsonResponse({}));
     const call = new OpenAPIInvoker().invokeBinding({
       source: authSource(spec),
-      ref: REF_DATA,
+      selector: REF_DATA,
       fetch,
     });
 
@@ -1894,7 +1894,7 @@ describe("invokeBinding — context negotiation", () => {
     const { fetch, requests } = mockFetch(() => jsonResponse({ pong: true }));
     const call = new OpenAPIInvoker().invokeBinding({
       source: SOURCE,
-      ref: REF_PING,
+      selector: REF_PING,
       context: {
         headers: { Cookie: "raw=1" },
         cookies: { session: "structured" },
@@ -1918,7 +1918,7 @@ describe("invokeBinding — context negotiation", () => {
     const { fetch, requests } = mockFetch(() => jsonResponse({}));
     const call = new OpenAPIInvoker().invokeBinding({
       source: authSource(spec),
-      ref: REF_DATA,
+      selector: REF_DATA,
       context: {
         apiKey: "structured-secret",
         headers: { Cookie: "raw=1" },
@@ -1943,7 +1943,7 @@ describe("invokeBinding — context negotiation", () => {
     const { fetch, requests } = mockFetch(() => jsonResponse({}));
     const call = new OpenAPIInvoker().invokeBinding({
       source: authSource(spec),
-      ref: REF_DATA,
+      selector: REF_DATA,
       context: { apiKey: "raw-cookie-secret" },
       fetch,
     });
@@ -1966,7 +1966,7 @@ describe("invokeBinding — context negotiation", () => {
     const { fetch, requests } = mockFetch(() => jsonResponse({}));
     const call = new OpenAPIInvoker().invokeBinding({
       source: authSource(spec),
-      ref: REF_DATA,
+      selector: REF_DATA,
       context: { apiKey: "cookie-secret", bearerToken: "bearer-secret" },
       fetch,
     });
@@ -1987,7 +1987,7 @@ describe("prepareBinding", () => {
   it("reports the requirement when context is insufficient", async () => {
     const details = await new OpenAPIInvoker().prepareBinding({
       source: authSource(BEARER),
-      ref: REF_DATA,
+      selector: REF_DATA,
     });
 
     expect(details).toEqual({
@@ -2021,12 +2021,12 @@ describe("prepareBinding", () => {
     try {
       const details = await new OpenAPIInvoker().prepareBinding({
         source: authSource(spec),
-        ref: REF_DATA,
+        selector: REF_DATA,
       });
       expect(fetchCalled).toBe(false);
       // Go parity: kin-openapi's loader rejects the WHOLE document the
-      // instant it meets a disallowed external ref (loader.go:
-      // allowsExternalRefs), regardless of where that ref sits — prepareDoc
+      // instant it meets a disallowed external selector (loader.go:
+      // allowsExternalRefs), regardless of where that selector sits — prepareDoc
       // returns nil on that error, so PrepareBinding reports no requirement
       // rather than fetching. Silent-fallback, never a thrown error.
       expect(details).toBeNull();
@@ -2038,7 +2038,7 @@ describe("prepareBinding", () => {
   it("returns null when context satisfies the requirement", async () => {
     const details = await new OpenAPIInvoker().prepareBinding({
       source: authSource(BEARER),
-      ref: REF_DATA,
+      selector: REF_DATA,
       context: { bearerToken: "tok" },
     });
 
@@ -2048,7 +2048,7 @@ describe("prepareBinding", () => {
   it("returns null when the operation requires no auth", async () => {
     const details = await new OpenAPIInvoker().prepareBinding({
       source: SOURCE,
-      ref: REF_PING,
+      selector: REF_PING,
     });
 
     expect(details).toBeNull();
@@ -2057,7 +2057,7 @@ describe("prepareBinding", () => {
   it("returns null instead of fetching a location-only source", async () => {
     const details = await new OpenAPIInvoker().prepareBinding({
       source: { bindingSpec: "openbindings.openapi@1", location: "https://example.com/openapi.json" },
-      ref: REF_DATA,
+      selector: REF_DATA,
     });
 
     expect(details).toBeNull();
@@ -2073,14 +2073,14 @@ describe("prepareBinding", () => {
     // The challenged invocation loads and caches the document.
     const call = inv.invokeBinding({
       source: { bindingSpec: "openbindings.openapi@1", location: SPEC_URL },
-      ref: REF_DATA,
+      selector: REF_DATA,
       fetch,
     });
     await expect(call.closed).rejects.toMatchObject({ code: CONTEXT_REQUIRED });
 
     const details = await inv.prepareBinding({
       source: { bindingSpec: "openbindings.openapi@1", location: SPEC_URL },
-      ref: REF_DATA,
+      selector: REF_DATA,
     });
     expect(details).toMatchObject({ target: "https://api.example.com" });
   });
@@ -2097,7 +2097,7 @@ describe("prepareBinding", () => {
     // parse must still land in the location-keyed cache.
     const call = inv.invokeBinding({
       source: { bindingSpec: "openbindings.openapi@1", location: SPEC_URL, content: BEARER },
-      ref: REF_DATA,
+      selector: REF_DATA,
       fetch,
     });
     await expect(call.closed).rejects.toMatchObject({ code: CONTEXT_REQUIRED });
@@ -2107,7 +2107,7 @@ describe("prepareBinding", () => {
     // fetches, so a non-null result here proves the cache was warm.
     const details = await inv.prepareBinding({
       source: { bindingSpec: "openbindings.openapi@1", location: SPEC_URL },
-      ref: REF_DATA,
+      selector: REF_DATA,
     });
     expect(details).toMatchObject({ target: "https://api.example.com" });
   });
@@ -2139,9 +2139,9 @@ describe("G-1: absent `input` is not a no-input signal", () => {
     const { fetch, requests } = mockFetch(() => jsonResponse({ created: true }, 201));
     const call = new OpenAPIInvoker().invokeBinding({
       source: SOURCE,
-      ref: REF_CREATE_USER,
+      selector: REF_CREATE_USER,
       fetch,
-      binding: { operation: "createUser", source: "api", ref: REF_CREATE_USER },
+      binding: { operation: "createUser", source: "api", selector: REF_CREATE_USER },
       // inputSchema omitted — the document makes no claim at this boundary.
     });
 
