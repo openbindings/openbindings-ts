@@ -58,9 +58,9 @@ describe("GrpcSynthesizer", () => {
       exhaustive: true,
       fullyRepresented: false,
       entries: [
-        { sourceSelector: "demo.Echo/Accepted", status: "represented" },
+        { sourceRef: "demo.Echo/Accepted", status: "represented" },
         {
-          sourceSelector: "demo.Echo/Excluded",
+          sourceRef: "demo.Echo/Excluded",
           status: "excluded",
           reasonCode: "grpc.schema_range",
           rule: "GRPC-P-03",

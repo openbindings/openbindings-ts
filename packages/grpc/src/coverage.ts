@@ -28,7 +28,7 @@ export function protobufSynthesisCoverage(
       if (reason) {
         entries.push({
           sourceIndex: 0,
-          sourceSelector: selector,
+          sourceRef: selector,
           scope: "target",
           status: "excluded",
           reasonCode: "grpc.schema_range",
@@ -41,7 +41,7 @@ export function protobufSynthesisCoverage(
       if (!identity) {
         entries.push({
           sourceIndex: 0,
-          sourceSelector: selector,
+          sourceRef: selector,
           scope: "target",
           status: "implementation-unsupported",
           reasonCode: "grpc.missing_emitted_binding",
@@ -51,7 +51,7 @@ export function protobufSynthesisCoverage(
       }
       entries.push({
         sourceIndex: 0,
-        sourceSelector: selector,
+        sourceRef: selector,
         scope: "target",
         status: "represented",
         operationKey: identity.operationKey,
@@ -65,7 +65,7 @@ export function protobufSynthesisCoverage(
     if (!identity) continue;
     entries.push({
       sourceIndex: 0,
-      sourceSelector: `${identity.bindingSelector}::projection::${warning.path ?? ""}::${warning.code}::${index}`,
+      sourceRef: `${identity.bindingSelector}::projection::${warning.path ?? ""}::${warning.code}::${index}`,
       scope: "projection",
       status: "lossy",
       operationKey: identity.operationKey,

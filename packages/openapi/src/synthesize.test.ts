@@ -458,11 +458,11 @@ describe("synthesis coverage", () => {
       exhaustive: true,
       fullyRepresented: false,
     });
-    const statusBySelector = new Map(result.coverage.entries.map((entry) => [entry.sourceSelector, entry.status]));
-    expect(statusBySelector.get("#/paths/~1jobs/post")).toBe("represented");
-    expect(statusBySelector.get("#/paths/~1jobs/post/requestBody/content/application~1json")).toBe("represented");
-    expect(statusBySelector.get("#/paths/~1jobs/post/requestBody/content/application~1x-custom")).toBe("excluded");
-    expect(statusBySelector.get("#/webhooks/jobChanged/post")).toBe("excluded");
+    const statusByRef = new Map(result.coverage.entries.map((entry) => [entry.sourceRef, entry.status]));
+    expect(statusByRef.get("#/paths/~1jobs/post")).toBe("represented");
+    expect(statusByRef.get("#/paths/~1jobs/post/requestBody/content/application~1json")).toBe("represented");
+    expect(statusByRef.get("#/paths/~1jobs/post/requestBody/content/application~1x-custom")).toBe("excluded");
+    expect(statusByRef.get("#/webhooks/jobChanged/post")).toBe("excluded");
   });
 
   it("can prove full representation for an ordinary paths-only document", async () => {
@@ -748,7 +748,7 @@ describe("synthesis coverage disposition identity", () => {
       }],
     });
     expect(result.coverage.entries).toContainEqual(expect.objectContaining({
-      sourceSelector: "#/paths/~1jobs/post/requestBody/content/application~1x-custom",
+      sourceRef: "#/paths/~1jobs/post/requestBody/content/application~1x-custom",
       status: "excluded",
       reasonCode: "openapi.request_media_excluded",
       rule: "OAPI-P-04",

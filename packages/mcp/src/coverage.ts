@@ -34,11 +34,11 @@ export function mcpSynthesisCoverage(
     disposition?: { status: "invalid" | "excluded"; reasonCode: string; rule?: string; message: string },
   ): void => {
     const selector = `${family}/${value}`;
-    const sourceSelector = count > 1 || value === "" ? `${selector}#listing-index=${index}` : selector;
+    const sourceRef = count > 1 || value === "" ? `${selector}#listing-index=${index}` : selector;
     if (disposition) {
       entries.push({
         sourceIndex: 0,
-        sourceSelector,
+        sourceRef,
         scope: "target",
         ...disposition,
       });
@@ -48,7 +48,7 @@ export function mcpSynthesisCoverage(
     if (!identity) {
       entries.push({
         sourceIndex: 0,
-        sourceSelector,
+        sourceRef,
         scope: "target",
         status: "implementation-unsupported",
         reasonCode: "mcp.missing_emitted_binding",
@@ -58,7 +58,7 @@ export function mcpSynthesisCoverage(
     }
     entries.push({
       sourceIndex: 0,
-      sourceSelector,
+      sourceRef,
       scope: "target",
       status: "represented",
       operationKey: identity.operationKey,

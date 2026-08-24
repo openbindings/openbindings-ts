@@ -95,7 +95,7 @@ cmd "database" {
       exhaustive: true,
       fullyRepresented: true,
     });
-    expect(result.coverage.entries.map((entry) => entry.sourceSelector).sort()).toEqual([
+    expect(result.coverage.entries.map((entry) => entry.sourceRef).sort()).toEqual([
       "<root>",
       ...refs.filter(Boolean),
     ]);
@@ -119,13 +119,13 @@ cmd "beta" {
     expect(result.coverage.fullyRepresented).toBe(false);
     expect(result.coverage.entries).toEqual(expect.arrayContaining([
       expect.objectContaining({
-        sourceSelector: "ambiguous-selector:x",
+        sourceRef: "ambiguous-selector:x",
         scope: "alternative",
         status: "excluded",
         reasonCode: "usage.ambiguous_command_spelling",
       }),
       expect.objectContaining({
-        sourceSelector: "command:x",
+        sourceRef: "command:x",
         scope: "target",
         status: "excluded",
         reasonCode: "usage.no_unique_command_selector",
@@ -152,13 +152,13 @@ cmd "group" subcommand_required=#true {
     expect(result.coverage.fullyRepresented).toBe(true);
     expect(result.coverage.entries).toEqual(expect.arrayContaining([
       expect.objectContaining({
-        sourceSelector: "g run",
+        sourceRef: "g run",
         status: "represented",
       }),
     ]));
     expect(result.coverage.entries).not.toEqual(expect.arrayContaining([
-      expect.objectContaining({ sourceSelector: "group" }),
-      expect.objectContaining({ sourceSelector: "g" }),
+      expect.objectContaining({ sourceRef: "group" }),
+      expect.objectContaining({ sourceRef: "g" }),
     ]));
   });
 

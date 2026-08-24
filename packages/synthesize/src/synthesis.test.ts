@@ -67,7 +67,7 @@ describe("shared synthesis behavior", () => {
     const result = finalizeSynthesisCoverage(iface, [
       {
         sourceIndex: 0,
-        sourceSelector: "#/getUser",
+        sourceRef: "#/getUser",
         scope: "target",
         status: "represented",
         operationKey: "getUser",
@@ -75,7 +75,7 @@ describe("shared synthesis behavior", () => {
       },
       {
         sourceIndex: 0,
-        sourceSelector: "#/callbacks/onUser",
+        sourceRef: "#/callbacks/onUser",
         scope: "target",
         status: "excluded",
         reasonCode: "example.reverse_direction",
@@ -108,7 +108,7 @@ describe("shared synthesis behavior", () => {
     const result = finalizeSynthesisCoverage(iface, [
       {
         sourceIndex: 0,
-        sourceSelector: "#/getUser",
+        sourceRef: "#/getUser",
         scope: "target",
         status: "represented",
         operationKey: "getUser",
@@ -116,7 +116,7 @@ describe("shared synthesis behavior", () => {
       },
       {
         sourceIndex: 0,
-        sourceSelector: "#/operations/broken",
+        sourceRef: "#/operations/broken",
         scope: "target",
         status: "invalid",
         reasonCode: "example.invalid_target",
@@ -137,7 +137,7 @@ describe("shared synthesis behavior", () => {
     };
     expect(() => finalizeSynthesisCoverage(iface, [{
       sourceIndex: 0,
-      sourceSelector: "#/missing",
+      sourceRef: "#/missing",
       scope: "target",
       status: "represented",
       operationKey: "getUser",

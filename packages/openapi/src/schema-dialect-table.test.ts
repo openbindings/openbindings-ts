@@ -78,7 +78,7 @@ describe("the shared Schema Object dialect case table, through synthesis", () =>
       const targets = new Map<string, string>();
       for (const entry of result.coverage?.entries ?? []) {
         if (entry.scope !== "target") continue;
-        targets.set(entry.sourceSelector, `${entry.status} ${entry.reasonCode ?? ""}`.trim());
+        targets.set(entry.sourceRef, `${entry.status} ${entry.reasonCode ?? ""}`.trim());
       }
       expect(targets.get(SUBJECT_REF), cell.why).toBe(
         cell.disposition === "invalid" ? "invalid openapi.invalid_unit" : "represented",

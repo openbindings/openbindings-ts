@@ -66,17 +66,17 @@ describe("per-operation tolerant coverage synthesis", () => {
     // Every omission is a spec-governed excluded target, never an
     // implementation-unsupported invariant violation.
     const targets = result.coverage.entries.filter((e) => e.scope === "target");
-    const bySelector = new Map(targets.map((e) => [e.sourceSelector, e]));
+    const byRef = new Map(targets.map((e) => [e.sourceRef, e]));
 
-    expect(bySelector.get("#/paths/~1good/get")?.status).toBe("represented");
+    expect(byRef.get("#/paths/~1good/get")?.status).toBe("represented");
 
-    const conditional = bySelector.get("#/paths/~1conditional/post");
+    const conditional = byRef.get("#/paths/~1conditional/post");
     expect(conditional?.status).toBe("excluded");
     expect(conditional?.reasonCode).toMatch(/^openapi\.(unresolvable_request_body|media_schema_mismatch)$/);
     expect(conditional?.rule).toBe("OAPI-P-04");
     expect(conditional?.message).toBeTruthy();
 
-    const collide = bySelector.get("#/paths/~1collide/get");
+    const collide = byRef.get("#/paths/~1collide/get");
     expect(collide?.status).toBe("excluded");
     expect(collide?.reasonCode).toBe("openapi.flattening_collision");
     expect(collide?.rule).toBe("OAPI-P-03");

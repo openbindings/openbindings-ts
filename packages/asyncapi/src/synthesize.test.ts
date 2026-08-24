@@ -371,7 +371,7 @@ describe("AsyncAPI synthesis coverage", () => {
     });
     expect(result.coverage.entries).toEqual(expect.arrayContaining([
       expect.objectContaining({ status: "represented", scope: "target" }),
-      expect.objectContaining({ sourceSelector: expect.stringContaining("#server[0]=broker"), status: "represented" }),
+      expect.objectContaining({ sourceRef: expect.stringContaining("#server[0]=broker"), status: "represented" }),
     ]));
   });
 
@@ -409,11 +409,11 @@ describe("AsyncAPI synthesis coverage", () => {
     });
     expect(current.coverage.entries).toEqual(expect.arrayContaining([
       expect.objectContaining({
-        sourceSelector: "#/operations/subscribe",
+        sourceRef: "#/operations/subscribe",
         status: "represented",
       }),
       expect.objectContaining({
-        sourceSelector: "#/operations/subscribe#reply-message[0]=#/channels/commands/messages/command",
+        sourceRef: "#/operations/subscribe#reply-message[0]=#/channels/commands/messages/command",
         status: "represented",
       }),
     ]));
@@ -462,7 +462,7 @@ describe("AsyncAPI synthesis coverage", () => {
     });
     expect(current.coverage.entries).toEqual(expect.arrayContaining([
       expect.objectContaining({
-        sourceSelector: "#/operations/subscribe#reply-message[0]=#/channels/commands/messages/command",
+        sourceRef: "#/operations/subscribe#reply-message[0]=#/channels/commands/messages/command",
       }),
     ]));
   });
@@ -509,15 +509,15 @@ describe("AsyncAPI synthesis coverage", () => {
     expect(result.coverage.entries.some((entry) => entry.reasonCode === "asyncapi.message_headers")).toBe(false);
     expect(result.coverage.entries).toEqual(expect.arrayContaining([
       expect.objectContaining({
-        sourceSelector: "#/operations/publish",
+        sourceRef: "#/operations/publish",
         status: "represented",
       }),
       expect.objectContaining({
-        sourceSelector: "#/operations/publish#server[0]=broker",
+        sourceRef: "#/operations/publish#server[0]=broker",
         status: "represented",
       }),
       expect.objectContaining({
-        sourceSelector: "#/operations/publish#server[2]=ws",
+        sourceRef: "#/operations/publish#server[2]=ws",
         status: "represented",
       }),
     ]));

@@ -40,7 +40,7 @@ function coverageSynthesizer(): CoverageSynthesizer {
       finalizeSynthesisCoverage(iface, [{
         sourceIndex: 0,
         sourceKey: "source",
-        sourceSelector: "ping",
+        sourceRef: "ping",
         scope: "target",
         status: "represented",
         operationKey: "ping",

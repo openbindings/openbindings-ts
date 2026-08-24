@@ -515,20 +515,20 @@ function synthesisCoverage(descriptor: Descriptor, iface: OBInterface): Synthesi
   }
   const entries: SynthesisCoverageEntry[] = [];
   const add = (
-    sourceSelector: string,
+    sourceRef: string,
     bindingSelector: string,
     scope: "target" | "alternative" | "projection" = "target",
-    exclusion?: Omit<SynthesisCoverageEntry, "sourceIndex" | "sourceSelector" | "scope">,
+    exclusion?: Omit<SynthesisCoverageEntry, "sourceIndex" | "sourceRef" | "scope">,
   ): void => {
     if (exclusion) {
-      entries.push({ sourceIndex: 0, sourceSelector, scope, ...exclusion });
+      entries.push({ sourceIndex: 0, sourceRef, scope, ...exclusion });
       return;
     }
     const match = represented.get(bindingSelector);
     if (match) {
       entries.push({
         sourceIndex: 0,
-        sourceSelector,
+        sourceRef,
         scope,
         status: "represented",
         ...match,
@@ -537,7 +537,7 @@ function synthesisCoverage(descriptor: Descriptor, iface: OBInterface): Synthesi
     }
     entries.push({
       sourceIndex: 0,
-      sourceSelector,
+      sourceRef,
       scope,
       status: "implementation-unsupported",
       reasonCode: "usage.missing_emitted_binding",
@@ -549,7 +549,7 @@ function synthesisCoverage(descriptor: Descriptor, iface: OBInterface): Synthesi
     reasonCode: string,
     rule: string,
     message: string,
-  ): Omit<SynthesisCoverageEntry, "sourceIndex" | "sourceSelector" | "scope"> => ({
+  ): Omit<SynthesisCoverageEntry, "sourceIndex" | "sourceRef" | "scope"> => ({
     status, reasonCode, rule, message,
   });
 
@@ -588,7 +588,7 @@ function synthesisCoverage(descriptor: Descriptor, iface: OBInterface): Synthesi
       const spellings = [...new Set([command.name, ...command.aliases].filter(Boolean))];
       const nextPrefixes = refPrefixes.flatMap((prefix) => spellings.map((spelling) => [...prefix, spelling]));
       const effective = { ...command, fields: [...inherited, ...command.fields] };
-      let disposition: Omit<SynthesisCoverageEntry, "sourceIndex" | "sourceSelector" | "scope"> | undefined;
+      let disposition: Omit<SynthesisCoverageEntry, "sourceIndex" | "sourceRef" | "scope"> | undefined;
       if (!command.name) {
         disposition = excluded(
           "invalid",

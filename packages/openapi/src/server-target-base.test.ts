@@ -64,7 +64,7 @@ describe("server target base: emitted coverage requirements", () => {
         sources: [{ bindingSpec: BINDING_SPEC, content: caseDocument(c) }],
       });
       const entry = result.coverage.entries.find(
-        (e) => e.sourceSelector === "#/paths/~1things/get" && e.scope === "target",
+        (e) => e.sourceRef === "#/paths/~1things/get" && e.scope === "target",
       );
       expect(entry, `${c.name}: no target coverage entry`).toBeDefined();
       expect(entry?.requirements ?? [], `${c.name}\nbasis: ${c.basis}`).toEqual(c.requirements);

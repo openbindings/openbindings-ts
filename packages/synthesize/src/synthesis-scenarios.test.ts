@@ -71,7 +71,8 @@ describe("portable synthesis corpus revision", () => {
   it("refuses a revision it does not implement rather than running it silently", () => {
     for (const format of [
       "openbindings.binding-spec-synthesis-scenarios@2",
-      "openbindings.binding-spec-synthesis-scenarios@4",
+      "openbindings.binding-spec-synthesis-scenarios@3",
+      "openbindings.binding-spec-synthesis-scenarios@5",
       undefined,
     ]) {
       expect(() => parseSynthesisScenarioFile({ ...wellFormed, format }, "openapi"))

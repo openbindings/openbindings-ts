@@ -406,7 +406,7 @@ function graphQLSynthesisCoverage(
     .sort(([, a], [, b]) => codePointCompare(a.selector ?? "", b.selector ?? ""))
     .map(([bindingKey, binding]) => ({
       sourceIndex: 0,
-      sourceSelector: binding.selector!,
+      sourceRef: binding.selector!,
       scope: "target" as const,
       status: "represented" as const,
       operationKey: binding.operation,
@@ -423,7 +423,7 @@ function graphQLSynthesisCoverage(
       if (field.name.startsWith("__")) continue;
       entries.push({
         sourceIndex: 0,
-        sourceSelector: `subscription/${field.name}`,
+        sourceRef: `subscription/${field.name}`,
         scope: "target",
         status: "excluded",
         reasonCode: "graphql.subscription_lifecycle_not_representable",
@@ -432,7 +432,7 @@ function graphQLSynthesisCoverage(
         requirements: [],
       });
     }
-    entries.sort((a, b) => codePointCompare(a.sourceSelector, b.sourceSelector));
+    entries.sort((a, b) => codePointCompare(a.sourceRef, b.sourceRef));
   }
   return entries;
 }

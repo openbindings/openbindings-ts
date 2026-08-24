@@ -12,7 +12,7 @@ import type { OBInterface } from "@openbindings/core";
  * skips what it does not understand reports green having verified none of it.
  * `synthesisscenarios.Format` in openbindings-go is the twin.
  */
-export const SYNTHESIS_SCENARIO_FORMAT = "openbindings.binding-spec-synthesis-scenarios@3";
+export const SYNTHESIS_SCENARIO_FORMAT = "openbindings.binding-spec-synthesis-scenarios@4";
 
 export interface SynthesisScenarioFile {
   format: typeof SYNTHESIS_SCENARIO_FORMAT;
@@ -124,7 +124,7 @@ export interface SynthesisBindingIdentity {
 
 export interface NormalizedSynthesisCoverageEntry {
   sourceIndex: number;
-  sourceSelector: string;
+  sourceRef: string;
   scope: SynthesisCoverageEntry["scope"];
   status: SynthesisCoverageEntry["status"];
   operationKey?: string;
@@ -221,7 +221,7 @@ function normalizeBindings(iface: OBInterface): SynthesisBindingIdentity[] {
 function normalizeCoverageEntry(entry: SynthesisCoverageEntry): NormalizedSynthesisCoverageEntry {
   const normalized: NormalizedSynthesisCoverageEntry = {
     sourceIndex: entry.sourceIndex,
-    sourceSelector: entry.sourceSelector,
+    sourceRef: entry.sourceRef,
     scope: entry.scope,
     status: entry.status,
     requirements: [...(entry.requirements ?? [])].sort(codePointCompare),
@@ -244,7 +244,7 @@ function compareCoverage(
 ): number {
   return a.sourceIndex - b.sourceIndex
     || codePointCompare(a.scope, b.scope)
-    || codePointCompare(a.sourceSelector, b.sourceSelector);
+    || codePointCompare(a.sourceRef, b.sourceRef);
 }
 
 function codePointCompare(a: string, b: string): number {

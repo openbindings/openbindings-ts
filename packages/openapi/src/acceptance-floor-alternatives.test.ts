@@ -51,7 +51,7 @@ describe("acceptance floor: a ladder-invalid request media alternative is not ca
       scope: "alternative",
       status: "invalid",
       reasonCode: "openapi.invalid_unit",
-      sourceSelector: "#/paths/~1a/post/requestBody/content/application~1json",
+      sourceRef: "#/paths/~1a/post/requestBody/content/application~1json",
     }));
   });
 
@@ -94,12 +94,12 @@ describe("acceptance floor: a ladder-invalid request media alternative is not ca
       scope: "alternative",
       status: "invalid",
       reasonCode: "openapi.invalid_unit",
-      sourceSelector: "#/paths/~1uploads/post/requestBody/content/multipart~1form-data",
+      sourceRef: "#/paths/~1uploads/post/requestBody/content/multipart~1form-data",
     }));
     expect(result.coverage.entries).toContainEqual(expect.objectContaining({
       scope: "alternative",
       status: "represented",
-      sourceSelector: "#/paths/~1uploads/post/requestBody/content/application~1json",
+      sourceRef: "#/paths/~1uploads/post/requestBody/content/application~1json",
     }));
   });
 
@@ -112,7 +112,7 @@ describe("acceptance floor: a ladder-invalid request media alternative is not ca
       scope: "target",
       status: "excluded",
       reasonCode: "openapi.unresolvable_request_body",
-      sourceSelector: "#/paths/~1a/post",
+      sourceRef: "#/paths/~1a/post",
     }));
     expect(result.coverage.fullyRepresented).toBe(false);
   });

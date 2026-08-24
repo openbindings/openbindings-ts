@@ -112,7 +112,7 @@ export interface SynthesisCoverageEntry {
   /** Emitted source key; required for represented and lossy entries. */
   sourceKey?: string;
   /** Stable source-local identifier; need not be a conformant binding selector. */
-  sourceSelector: string;
+  sourceRef: string;
   scope: SynthesisCoverageScope;
   status: SynthesisCoverageStatus;
   /** Required for represented and lossy entries. */
@@ -210,15 +210,15 @@ export function finalizeSynthesisCoverage(
     if (!Number.isInteger(entry.sourceIndex) || entry.sourceIndex < 0) {
       throw new Error(`synthesis coverage entry ${index} has invalid sourceIndex`);
     }
-    if (!entry.sourceSelector) {
-      throw new Error(`synthesis coverage entry ${index} has empty sourceSelector`);
+    if (!entry.sourceRef) {
+      throw new Error(`synthesis coverage entry ${index} has empty sourceRef`);
     }
     if (entry.scope !== "target" && entry.scope !== "alternative" && entry.scope !== "projection") {
       throw new Error(`synthesis coverage entry ${index} has invalid scope`);
     }
-    const key = `${entry.sourceIndex}\0${entry.scope}\0${entry.sourceSelector}`;
+    const key = `${entry.sourceIndex}\0${entry.scope}\0${entry.sourceRef}`;
     if (seen.has(key)) {
-      throw new Error(`duplicate synthesis coverage entry for source ${entry.sourceIndex} ${entry.scope} ${JSON.stringify(entry.sourceSelector)}`);
+      throw new Error(`duplicate synthesis coverage entry for source ${entry.sourceIndex} ${entry.scope} ${JSON.stringify(entry.sourceRef)}`);
     }
     seen.add(key);
 
@@ -318,7 +318,7 @@ export function representedCoverageEntries(
     .map(([bindingKey, binding]) => ({
       sourceIndex,
       sourceKey: binding.source,
-      sourceSelector: binding.selector ?? "",
+      sourceRef: binding.selector ?? "",
       scope: "target" as const,
       status: "represented" as const,
       operationKey: binding.operation,

@@ -90,7 +90,7 @@ export function openAPISynthesisCoverage(
         // entries.
         entries.push({
           sourceIndex: 0,
-          sourceSelector: selector,
+          sourceRef: selector,
           scope: "target",
           status: "invalid",
           reasonCode: INVALID_UNIT_REASON_CODE,
@@ -116,7 +116,7 @@ export function openAPISynthesisCoverage(
         if (skipped) {
           entries.push({
             sourceIndex: 0,
-            sourceSelector: selector,
+            sourceRef: selector,
             scope: "target",
             status: "excluded",
             reasonCode: skipped.reasonCode,
@@ -131,7 +131,7 @@ export function openAPISynthesisCoverage(
         } else {
           entries.push({
             sourceIndex: 0,
-            sourceSelector: selector,
+            sourceRef: selector,
             scope: "target",
             status: "implementation-unsupported",
             reasonCode: "openapi.missing_emitted_binding",
@@ -142,7 +142,7 @@ export function openAPISynthesisCoverage(
       }
       entries.push({
         sourceIndex: 0,
-        sourceSelector: selector,
+        sourceRef: selector,
         scope: "target",
         status: "represented",
         operationKey: identity.operationKey,
@@ -168,7 +168,7 @@ function floorInvalidAlternativeEntries(verdict: FloorOp | undefined): Synthesis
     const defects = verdict.invalidAlternatives.get(altSelector) ?? [];
     return {
       sourceIndex: 0,
-      sourceSelector: altSelector,
+      sourceRef: altSelector,
       scope: "alternative",
       status: "invalid",
       reasonCode: INVALID_UNIT_REASON_CODE,
@@ -191,7 +191,7 @@ function floorProjectionEntries(verdict: FloorOp | undefined): SynthesisCoverage
     const defects = verdict.projections.get(unit) ?? [];
     return {
       sourceIndex: 0,
-      sourceSelector: unit,
+      sourceRef: unit,
       scope: "projection",
       status: "invalid",
       reasonCode: INVALID_UNIT_REASON_CODE,
@@ -267,15 +267,15 @@ function requestMediaCoverage(
       .map((plan) => plan.mediaKey),
   );
   return Object.keys(content).sort(codePointCompare).map((mediaType): SynthesisCoverageEntry => {
-    const sourceSelector = `${identity.selector}/requestBody/content/${escapeJSONPointerToken(mediaType)}`;
-    const invalidDefects = verdict?.invalidAlternatives.get(sourceSelector);
+    const sourceRef = `${identity.selector}/requestBody/content/${escapeJSONPointerToken(mediaType)}`;
+    const invalidDefects = verdict?.invalidAlternatives.get(sourceRef);
     if (invalidDefects) {
       // The ladder invalidates this alternative: `invalid`, not `excluded`
       // -- the unit is malformed under its upstream authority, not declined
       // by the revision.
       return {
         sourceIndex: 0,
-        sourceSelector,
+        sourceRef,
         scope: "alternative",
         status: "invalid",
         reasonCode: INVALID_UNIT_REASON_CODE,
@@ -289,7 +289,7 @@ function requestMediaCoverage(
     if (represented.has(mediaType)) {
       const entry: SynthesisCoverageEntry = {
         sourceIndex: 0,
-        sourceSelector,
+        sourceRef,
         scope: "alternative",
         status: "represented",
         operationKey: identity.operationKey,
@@ -312,7 +312,7 @@ function requestMediaCoverage(
     }
     return {
       sourceIndex: 0,
-      sourceSelector,
+      sourceRef,
       scope: "alternative",
       status: "excluded",
       reasonCode: collision ? "openapi.flattening_collision" : "openapi.request_media_excluded",
@@ -348,7 +348,7 @@ function webhookCoverage(doc: OpenAPIDocument): SynthesisCoverageEntry[] {
   if (!webhooks || typeof webhooks !== "object" || Array.isArray(webhooks)) {
     return [{
       sourceIndex: 0,
-      sourceSelector: "#/webhooks",
+      sourceRef: "#/webhooks",
       scope: "target",
       status: "invalid",
       reasonCode: "openapi.invalid_webhooks",
@@ -360,7 +360,7 @@ function webhookCoverage(doc: OpenAPIDocument): SynthesisCoverageEntry[] {
     if (!rawPathItem || typeof rawPathItem !== "object" || Array.isArray(rawPathItem)) {
       entries.push({
         sourceIndex: 0,
-        sourceSelector: `#/webhooks/${escapeJSONPointerToken(name)}`,
+        sourceRef: `#/webhooks/${escapeJSONPointerToken(name)}`,
         scope: "target",
         status: "invalid",
         reasonCode: "openapi.invalid_webhook",
@@ -376,10 +376,10 @@ function webhookCoverage(doc: OpenAPIDocument): SynthesisCoverageEntry[] {
   return entries;
 }
 
-function excludedReverseInteraction(sourceSelector: string): SynthesisCoverageEntry {
+function excludedReverseInteraction(sourceRef: string): SynthesisCoverageEntry {
   return {
     sourceIndex: 0,
-    sourceSelector,
+    sourceRef,
     scope: "target",
     status: "excluded",
     reasonCode: "openapi.reverse_direction",

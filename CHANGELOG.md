@@ -9,8 +9,8 @@
   rename, no aliases). Documents now write `bindings[*].selector`; the
   document schema, `BindingEntry.selector`, `BindingInvocationArgs.selector`,
   `InvokeSite.selector`, and `BindableTarget.selector` rename with it, as do
-  `SynthesisCoverageEntry.sourceRef`/`bindingRef` → `sourceSelector`/
-  `bindingSelector`, the error codes `ERR_INVALID_REF`/`ERR_REF_NOT_FOUND` →
+  `SynthesisCoverageEntry.bindingRef` → `bindingSelector`, the error codes
+  `ERR_INVALID_REF`/`ERR_REF_NOT_FOUND` →
   `ERR_INVALID_SELECTOR`/`ERR_SELECTOR_NOT_FOUND`, the usage reason code
   `usage.no_unique_command_ref` → `usage.no_unique_command_selector` (and its
   `ambiguous-ref:` coverage-identity prefix → `ambiguous-selector:`), and
@@ -19,7 +19,14 @@
   operationgraph's `SelectorError`). JSON Schema `$ref` handling — transform
   `$ref` objects, schema resolution, and the standalone client packages' own
   `ref`-named surfaces — is unchanged; the format packages adapt those client
-  names at their re-export boundaries.
+  names at their re-export boundaries. `SynthesisCoverageEntry.sourceRef` is
+  deliberately NOT renamed: it is a distinct concept — a stable source-local
+  unit identifier that need not be a conformant binding selector — and keeps
+  its name across the Go SDK, the spec conformance format, and the interfaces
+  contract. The portable synthesis corpus revision this rename lands in is
+  `openbindings.binding-spec-synthesis-scenarios@4` (`bindingRef` →
+  `bindingSelector` in scenario expectations; `sourceRef` unchanged), and
+  `SYNTHESIS_SCENARIO_FORMAT` moves to `@4` with it.
 
 - **A `config.value` context requirement may carry an engine-asserted
   `schema` (JSON Schema) for the value at (point, path); the `choices` member
@@ -60,7 +67,7 @@
   facade keeps existing consumers unbroken.
 
 - **The portable synthesis corpus runs at
-  `openbindings.binding-spec-synthesis-scenarios@3`, and this runner checks the
+  `openbindings.binding-spec-synthesis-scenarios@4`, and this runner checks the
   corpus revision at all.** It previously performed **no** runtime format check:
   the only artifact was a compile-time literal type, which is erased, and the
   family tests cast with `as SynthesisScenarioFile` — so a corpus revision this

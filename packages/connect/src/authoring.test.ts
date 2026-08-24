@@ -65,9 +65,9 @@ describe("ConnectSynthesizer", () => {
       exhaustive: true,
       fullyRepresented: false,
       entries: [
-        { sourceSelector: "demo.Echo/Accepted", status: "represented" },
+        { sourceRef: "demo.Echo/Accepted", status: "represented" },
         {
-          sourceSelector: "demo.Echo/Excluded",
+          sourceRef: "demo.Echo/Excluded",
           status: "excluded",
           reasonCode: "connect.schema_range",
           rule: "CONN-P-02",

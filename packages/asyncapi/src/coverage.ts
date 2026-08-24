@@ -30,7 +30,7 @@ interface BindingIdentity {
 }
 
 interface ObservedMessage {
-  sourceSelector: string;
+  sourceRef: string;
   message?: AsyncAPIMessage;
 }
 
@@ -60,7 +60,7 @@ export function synthesisCoverage(
     } else if (!identity) {
       entries.push({
         sourceIndex: 0,
-        sourceSelector: selector,
+        sourceRef: selector,
         scope: "target",
         status: "implementation-unsupported",
         reasonCode: "asyncapi.missing_emitted_binding",
@@ -69,7 +69,7 @@ export function synthesisCoverage(
     } else {
       entries.push({
         sourceIndex: 0,
-        sourceSelector: selector,
+        sourceRef: selector,
         scope: "target",
         status: "represented",
         ...identity,
@@ -88,11 +88,11 @@ export function synthesisCoverage(
       }
     }
     for (const [index, member] of effectiveServers(doc, channel).entries()) {
-      const sourceSelector = `${selector}#server[${index}]=${member.name}`;
+      const sourceRef = `${selector}#server[${index}]=${member.name}`;
       if (identity) {
         entries.push({
           sourceIndex: 0,
-          sourceSelector,
+          sourceRef,
           scope: "alternative",
           status: "represented",
           ...identity,
@@ -100,7 +100,7 @@ export function synthesisCoverage(
       } else {
         entries.push({
           sourceIndex: 0,
-          sourceSelector,
+          sourceRef,
           scope: "alternative",
           status: "excluded",
           reasonCode: "asyncapi.parent_target_excluded",
@@ -114,13 +114,13 @@ export function synthesisCoverage(
 }
 
 function coverageExclusion(
-  sourceSelector: string,
+  sourceRef: string,
   scope: "target" | "alternative",
   exclusion: AuthoringExclusion,
 ): SynthesisCoverageEntry {
   return {
     sourceIndex: 0,
-    sourceSelector,
+    sourceRef,
     scope,
     status: exclusion.status,
     reasonCode: exclusion.code,
@@ -153,14 +153,14 @@ function governingMessageInventory(
 ): ObservedMessage[] {
   if (operation.messages && operation.messages.length > 0) {
     return operation.messages.map((message, index) => ({
-      sourceSelector: `${prefix}[${index}]=${messageIdentity(message, index)}`,
+      sourceRef: `${prefix}[${index}]=${messageIdentity(message, index)}`,
       message: unresolvedMessage(message) ? undefined : message,
     }));
   }
   return Object.entries(channel.messages ?? {})
     .sort(([a], [b]) => codePointCompare(a, b))
     .map(([name, message], index) => ({
-      sourceSelector: `${prefix}[${index}]=${channelSourceSelector(channel)}/messages/${name}`,
+      sourceRef: `${prefix}[${index}]=${channelSourceRef(channel)}/messages/${name}`,
       message: unresolvedMessage(message) ? undefined : message,
     }));
 }
@@ -173,18 +173,18 @@ function replyMessageInventory(
   if (!reply) return [];
   if (reply.messages && reply.messages.length > 0) {
     return reply.messages.map((message, index) => ({
-      sourceSelector: `${prefix}[${index}]=${messageIdentity(message, index)}`,
+      sourceRef: `${prefix}[${index}]=${messageIdentity(message, index)}`,
       message: unresolvedMessage(message) ? undefined : message,
     }));
   }
   if (!reply.channel) return [];
   if (typeof (reply.channel as unknown as Record<string, unknown>)["$ref"] === "string") {
-    return [{ sourceSelector: `${prefix}=<dangling-reply-channel>` }];
+    return [{ sourceRef: `${prefix}=<dangling-reply-channel>` }];
   }
   return Object.entries(reply.channel.messages ?? {})
     .sort(([a], [b]) => codePointCompare(a, b))
     .map(([name, message], index) => ({
-      sourceSelector: `${prefix}[${index}]=${channelSourceSelector(reply.channel!)}/messages/${name}`,
+      sourceRef: `${prefix}[${index}]=${channelSourceRef(reply.channel!)}/messages/${name}`,
       message: unresolvedMessage(message) ? undefined : message,
     }));
 }
@@ -198,7 +198,7 @@ function messageCoverage(
   if (!candidate.message) {
     return {
       sourceIndex: 0,
-      sourceSelector: candidate.sourceSelector,
+      sourceRef: candidate.sourceRef,
       scope: "alternative",
       status: "invalid",
       reasonCode: "asyncapi.dangling_message_ref",
@@ -209,7 +209,7 @@ function messageCoverage(
   if (!messageBindable(doc, candidate.message)) {
     return {
       sourceIndex: 0,
-      sourceSelector: candidate.sourceSelector,
+      sourceRef: candidate.sourceRef,
       scope: "alternative",
       status: "excluded",
       reasonCode: "asyncapi.message_unresolvable",
@@ -229,7 +229,7 @@ function messageCoverage(
     if (lossReason === "asyncapi.payload_carriage_unsupported") {
       return {
         sourceIndex: 0,
-        sourceSelector: candidate.sourceSelector,
+        sourceRef: candidate.sourceRef,
         scope: "alternative",
         status: "implementation-unsupported",
         ...identity,
@@ -241,7 +241,7 @@ function messageCoverage(
     if (lossReason !== undefined) {
       return {
         sourceIndex: 0,
-        sourceSelector: candidate.sourceSelector,
+        sourceRef: candidate.sourceRef,
         scope: "alternative",
         status: "lossy",
         ...identity,
@@ -252,7 +252,7 @@ function messageCoverage(
     }
     return {
       sourceIndex: 0,
-      sourceSelector: candidate.sourceSelector,
+      sourceRef: candidate.sourceRef,
       scope: "alternative",
       status: "represented",
       ...identity,
@@ -260,7 +260,7 @@ function messageCoverage(
   }
   return {
     sourceIndex: 0,
-    sourceSelector: candidate.sourceSelector,
+    sourceRef: candidate.sourceRef,
     scope: "alternative",
     status: "excluded",
     reasonCode: "asyncapi.parent_target_excluded",
@@ -278,8 +278,8 @@ function messageIdentity(message: AsyncAPIMessage, index: number): string {
   const raw = message as unknown as Record<string, unknown>;
   const ref = raw["$ref"];
   if (typeof ref === "string") return ref;
-  const sourceSelector = raw[MESSAGE_REF_TAG];
-  if (typeof sourceSelector === "string") return sourceSelector;
+  const sourceRef = raw[MESSAGE_REF_TAG];
+  if (typeof sourceRef === "string") return sourceRef;
   const tagged = raw[MESSAGE_NAME_TAG];
   if (typeof tagged === "string") return tagged;
   return message.name ?? `<inline:${index}>`;
@@ -290,7 +290,7 @@ function channelName(channel: AsyncAPIChannel): string {
   return typeof tagged === "string" ? tagged : "<inline>";
 }
 
-function channelSourceSelector(channel: AsyncAPIChannel): string {
+function channelSourceRef(channel: AsyncAPIChannel): string {
   const external = (channel as unknown as Record<string, unknown>)[CHANNEL_REF_TAG];
   if (typeof external === "string" && external !== "") return external;
   return `#/channels/${channelName(channel)}`;
