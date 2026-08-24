@@ -47,7 +47,7 @@ async function invoke(
   const captured = captureFetch();
   const call = new OpenAPIInvoker().invokeBinding({
     source: { bindingSpec: BINDING_SPEC, content: spec },
-    ref: "#/paths/~1payload/put",
+    selector: "#/paths/~1payload/put",
     context,
     fetch: captured.fetch,
   });
@@ -68,7 +68,7 @@ async function invokeResponse(
 ): Promise<{ outputs: unknown[]; error?: InvocationError }> {
   const call = new OpenAPIInvoker().invokeBinding({
     source: { bindingSpec: BINDING_SPEC, content: spec },
-    ref: "#/paths/~1payload/put",
+    selector: "#/paths/~1payload/put",
     fetch: async () => response,
   });
   await call.write(input).catch(() => {});
@@ -153,7 +153,7 @@ describe("openbindings.openapi@1 request carriage", () => {
     const spec = document("3.1.2", { "image/*": {} });
     const details = await new OpenAPIInvoker().prepareBinding({
       source: { bindingSpec: BINDING_SPEC, content: spec },
-      ref: "#/paths/~1payload/put",
+      selector: "#/paths/~1payload/put",
     });
     expect(details).toMatchObject({
       target: "https://api.example",
@@ -380,7 +380,7 @@ describe("openbindings.openapi@1 request carriage", () => {
     const context = { configuration: { requestMedia: "" } };
     expect(await new OpenAPIInvoker().prepareBinding({
       source,
-      ref: "#/paths/~1payload/put",
+      selector: "#/paths/~1payload/put",
       context,
     })).toBeNull();
     const result = await invoke(spec, { body: {} }, context);

@@ -1,4 +1,4 @@
-// Binding-specification conformance corpus adapter. GrpcInvoker owns ref and
+// Binding-specification conformance corpus adapter. GrpcInvoker owns selector and
 // dial-address parsing; the injected runtime owns the same embedded-schema
 // load and byte-exact method-resolution lane as a real runtime. A sentinel
 // resolution error marks accepted material without dialing a server.
@@ -34,7 +34,7 @@ interface CorpusSource {
 interface CorpusBinding {
   operation?: string;
   source?: string;
-  ref?: string;
+  selector?: string;
 }
 
 const accepted = "OPENBINDINGS_CORPUS_ACCEPTED";
@@ -77,11 +77,11 @@ async function judge(document: CorpusDocument): Promise<string | undefined> {
           ...(Object.hasOwn(source, "location") ? { location } : {}),
           ...(Object.hasOwn(source, "content") ? { content: source.content } : {}),
         },
-        ref: binding.ref ?? "",
+        selector: binding.selector ?? "",
         binding: {
           operation: binding.operation ?? "fixture",
           source: sourceName,
-          ...(Object.hasOwn(binding, "ref") ? { ref: binding.ref } : {}),
+          ...(Object.hasOwn(binding, "selector") ? { selector: binding.selector } : {}),
         },
         // A bare host:port intentionally leaves transport to consumer
         // configuration (GRPC-P-02). Supply one so this D-rule adapter can

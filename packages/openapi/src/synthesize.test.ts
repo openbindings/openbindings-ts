@@ -147,7 +147,7 @@ describe("convertToInterface", () => {
     expect(binding).toBeDefined();
     expect(binding?.operation).toBe("listUsers");
     expect(binding?.source).toBe("openapi");
-    expect(binding?.ref).toBe("#/paths/~1users/get");
+    expect(binding?.selector).toBe("#/paths/~1users/get");
   });
 
   it("creates source entries", async () => {
@@ -560,7 +560,7 @@ describe("free-form object bodies", () => {
 
     const call = new OpenAPIInvoker().invokeBinding({
       source: { bindingSpec: "openbindings.openapi@1", content: spec },
-      ref: "#/paths/~1things/post",
+      selector: "#/paths/~1things/post",
       fetch: fetchFn,
     });
     await call.write({ anything: "goes", n: 1 });
@@ -843,11 +843,11 @@ describe("inspectSource", () => {
       bindingSpec: "openbindings.openapi@1",
       content: SPEC_WITH_COLLISION,
     });
-    const byRef = Object.fromEntries(inspection.targets.map((t) => [t.ref, t.operationKey]));
+    const bySelector = Object.fromEntries(inspection.targets.map((t) => [t.selector, t.operationKey]));
 
-    expect(byRef["#/paths/~1users/get"]).toBe("users.get");
-    expect(byRef["#/paths/~1users/post"]).toBe("createUser");
-    expect(byRef["#/paths/~1users~1{id}/get"]).toBe("users.get_2");
+    expect(bySelector["#/paths/~1users/get"]).toBe("users.get");
+    expect(bySelector["#/paths/~1users/post"]).toBe("createUser");
+    expect(bySelector["#/paths/~1users~1{id}/get"]).toBe("users.get_2");
   });
 
   it("matches convertToInterface's own operation keys exactly", async () => {
@@ -859,7 +859,7 @@ describe("inspectSource", () => {
 
     for (const target of inspection.targets) {
       expect(Object.keys(iface.operations)).toContain(target.operationKey);
-      expect(iface.bindings?.[`${target.operationKey}.${DEFAULT_SOURCE_NAME}`]?.ref).toBe(target.ref);
+      expect(iface.bindings?.[`${target.operationKey}.${DEFAULT_SOURCE_NAME}`]?.selector).toBe(target.selector);
     }
   });
 });

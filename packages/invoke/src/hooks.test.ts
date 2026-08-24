@@ -20,7 +20,7 @@ const site: InvokeSite = {
   invokedAs: "op",
   bindingKey: "op.usage",
   bindingSpec: "usage@2.13.1",
-  ref: "check",
+  selector: "check",
   target: "example",
 };
 

@@ -9,6 +9,6 @@ export type { Fetcher, JSONValue, JSONObject, CompatResult } from "./schema-prof
 export {
   NotNormalizedError,
   OutsideProfileError,
-  RefError,
+  SelectorError,
   SchemaError,
 } from "./schema-profile/index.js";

@@ -291,7 +291,7 @@ describe("BEC Integration (real HTTP)", () => {
 
     const args = {
       source: { bindingSpec: "openbindings.openapi@1", location: specURL },
-      ref: "#/paths/~1items/get",
+      selector: "#/paths/~1items/get",
     };
 
     // Nothing cached yet: preflight declines rather than fetching.

@@ -61,7 +61,7 @@ describe("SSE size cap is per-event, not cumulative", () => {
     const invoker = new OpenAPIInvoker();
     const call = invoker.invokeBinding({
       source: { bindingSpec: BINDING_SPEC, content: spec() },
-      ref: "#/paths/~1events/get",
+      selector: "#/paths/~1events/get",
     });
     const events: unknown[] = [];
     for await (const v of call.outputs) events.push(v);
@@ -89,7 +89,7 @@ describe("SSE size cap is per-event, not cumulative", () => {
     const invoker = new OpenAPIInvoker();
     const call = invoker.invokeBinding({
       source: { bindingSpec: BINDING_SPEC, content: spec() },
-      ref: "#/paths/~1events/get",
+      selector: "#/paths/~1events/get",
     });
 
     await expect(call.closed).rejects.toMatchObject({ code: "ERR_RESPONSE_ERROR" });
@@ -116,7 +116,7 @@ describe("SSE size cap is per-event, not cumulative", () => {
     const invoker = new OpenAPIInvoker();
     const call = invoker.invokeBinding({
       source: { bindingSpec: BINDING_SPEC, content: spec() },
-      ref: "#/paths/~1events/get",
+      selector: "#/paths/~1events/get",
       maxDeliveryUnitBytes: 1024,
     });
 

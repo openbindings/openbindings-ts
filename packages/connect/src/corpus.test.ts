@@ -1,5 +1,5 @@
 // Binding-specification conformance corpus adapter. Every fixture is routed
-// through ConnectInvoker's pre-dispatch ref, base-URL, and schema lanes. A
+// through ConnectInvoker's pre-dispatch selector, base-URL, and schema lanes. A
 // sentinel fetch proves that valid family material reached dispatch without
 // performing network I/O; any earlier terminal error is a bind-time refusal.
 
@@ -29,7 +29,7 @@ interface CorpusSource {
 interface CorpusBinding {
   operation?: string;
   source?: string;
-  ref?: string;
+  selector?: string;
 }
 
 const accepted = "OPENBINDINGS_CORPUS_ACCEPTED";
@@ -54,11 +54,11 @@ async function judge(document: CorpusDocument): Promise<string | undefined> {
           ...(Object.hasOwn(source, "location") ? { location: source.location } : {}),
           ...(Object.hasOwn(source, "content") ? { content: source.content } : {}),
         },
-        ref: binding.ref ?? "",
+        selector: binding.selector ?? "",
         binding: {
           operation: binding.operation ?? "fixture",
           source: sourceName,
-          ...(Object.hasOwn(binding, "ref") ? { ref: binding.ref } : {}),
+          ...(Object.hasOwn(binding, "selector") ? { selector: binding.selector } : {}),
         },
         fetch: async () => {
           dispatched = true;

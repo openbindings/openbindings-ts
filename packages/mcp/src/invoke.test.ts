@@ -1,41 +1,41 @@
 import { describe, it, expect } from "vitest";
-import { parseRef, parseContent } from "./invoke.js";
+import { parseSelector, parseContent } from "./invoke.js";
 
-describe("parseRef", () => {
-  it("parses tool ref", () => {
-    const result = parseRef("tools/get_weather");
+describe("parseSelector", () => {
+  it("parses tool selector", () => {
+    const result = parseSelector("tools/get_weather");
     expect(result).toEqual({ entityType: "tools", name: "get_weather" });
   });
 
-  it("parses resource ref with URI", () => {
-    const result = parseRef("resources/file:///data.csv");
+  it("parses resource selector with URI", () => {
+    const result = parseSelector("resources/file:///data.csv");
     expect(result).toEqual({ entityType: "resources", name: "file:///data.csv" });
   });
 
-  it("parses resource template ref under its own entity (R5)", () => {
-    const result = parseRef("resourceTemplates/users/{id}");
+  it("parses resource template selector under its own entity (R5)", () => {
+    const result = parseSelector("resourceTemplates/users/{id}");
     expect(result).toEqual({ entityType: "resourceTemplates", name: "users/{id}" });
   });
 
-  it("parses prompt ref", () => {
-    const result = parseRef("prompts/summarize");
+  it("parses prompt selector", () => {
+    const result = parseSelector("prompts/summarize");
     expect(result).toEqual({ entityType: "prompts", name: "summarize" });
   });
 
-  it("rejects empty ref", () => {
-    expect(() => parseRef("")).toThrow();
+  it("rejects empty selector", () => {
+    expect(() => parseSelector("")).toThrow();
   });
 
-  it("rejects ref without slash", () => {
-    expect(() => parseRef("toolsgetweather")).toThrow();
+  it("rejects selector without slash", () => {
+    expect(() => parseSelector("toolsgetweather")).toThrow();
   });
 
   it("rejects unknown entity type", () => {
-    expect(() => parseRef("unknown/foo")).toThrow(/invalid entity type/);
+    expect(() => parseSelector("unknown/foo")).toThrow(/invalid entity type/);
   });
 
   it("rejects trailing slash", () => {
-    expect(() => parseRef("tools/")).toThrow();
+    expect(() => parseSelector("tools/")).toThrow();
   });
 });
 

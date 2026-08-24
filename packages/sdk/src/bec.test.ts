@@ -657,7 +657,7 @@ const iface: OBInterface = {
   openbindings: "0.2.0",
   operations: { ping: {} },
   sources: { mock: { bindingSpec: "mock@1.0", location: "mem://" } },
-  bindings: { "ping.main": { operation: "ping", source: "mock", ref: "ping" } },
+  bindings: { "ping.main": { operation: "ping", source: "mock", selector: "ping" } },
 };
 
 describe("context flow", () => {

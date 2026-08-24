@@ -28,7 +28,7 @@ import type { AsyncAPIDocument } from "./asyncapi-types.js";
 import { BINDING_SPEC, DEFAULT_SOURCE_NAME } from "./constants.js";
 import { bindableOperationEntries, convertToInterface } from "./synthesize.js";
 import { synthesisCoverage } from "./coverage.js";
-import { operationRef, parseAsyncAPIDocument, errorMessage, sanitizeKey, uniqueKey, validateDocumentAddress } from "./util.js";
+import { operationSelector, parseAsyncAPIDocument, errorMessage, sanitizeKey, uniqueKey, validateDocumentAddress } from "./util.js";
 import {
   normalizeAuthoringLocation,
   readAuthoringArtifact,
@@ -90,7 +90,8 @@ export class AsyncAPIInvoker implements BindingInvoker {
     try {
       const prepared = await this.engine.prepareCached({
         source: { location: args.source.location, content: args.source.content },
-        ref: args.ref,
+        // The standalone client engine's own API names the selector `ref`.
+        ref: args.selector,
         profile: profileForBindingSpec(args.source.bindingSpec),
         context: args.context,
         signal: args.signal,
@@ -111,7 +112,8 @@ export class AsyncAPIInvoker implements BindingInvoker {
   ): Promise<void> {
     const prepared = await this.engine.prepare({
       source: { location: args.source.location, content: args.source.content },
-      ref: args.ref,
+      // The standalone client engine's own API names the selector `ref`.
+      ref: args.selector,
       profile: profileForBindingSpec(args.source.bindingSpec),
       context: args.context,
       signal: outer.signal,
@@ -169,7 +171,7 @@ function adaptHooks(args: BindingInvocationArgs): AsyncAPIExecutionHooks | undef
       invokedAs: "",
       bindingKey: "",
       bindingSpec: args.source.bindingSpec,
-      ref: args.ref,
+      selector: args.selector,
       target: "",
     }),
     target,
@@ -212,8 +214,8 @@ function mapSDKError(error: unknown): InvocationError {
     const authored = sdkInvocationCause(error);
     if (authored) return new InvocationError(authored.code, authored.data);
     const code = error.code === "SOURCE_LOAD_FAILED" ? "ERR_SOURCE_LOAD_FAILED"
-      : error.code === "INVALID_OPERATION_REF" ? "ERR_INVALID_REF"
-      : error.code === "OPERATION_NOT_FOUND" ? "ERR_REF_NOT_FOUND"
+      : error.code === "INVALID_OPERATION_REF" ? "ERR_INVALID_SELECTOR"
+      : error.code === "OPERATION_NOT_FOUND" ? "ERR_SELECTOR_NOT_FOUND"
       : error.code;
     if (code === "CONTEXT_REQUIRED" && isContextRequiredDetails(error.details)) {
       return new InvocationError(code, error.details);
@@ -363,7 +365,7 @@ export class AsyncAPISynthesizer implements InterfaceSynthesizer, CoverageSynthe
         const operationKey = uniqueKey(sanitizeKey(opID), usedKeys);
         usedKeys.add(operationKey);
         targets.push({
-          ref: operationRef(opID),
+          selector: operationSelector(opID),
           operationKey,
           operation: desc ? { description: desc } : undefined,
         });

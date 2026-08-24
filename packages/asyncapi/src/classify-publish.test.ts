@@ -62,7 +62,7 @@ describe("AsyncAPI unary-publish classification (§9.4)", () => {
 
   it("fails a unary publish whose final status is 3xx (ASYNC-P-06)", async () => {
     const invoker = new AsyncAPIInvoker();
-    const call = invoker.invokeBinding({ source: source(), ref: "#/operations/sendOpenMessage" });
+    const call = invoker.invokeBinding({ source: source(), selector: "#/operations/sendOpenMessage" });
 
     await call.write({ text: "hi" });
     const error = await call.closed.catch((caught: unknown) => caught) as {

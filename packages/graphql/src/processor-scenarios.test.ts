@@ -88,19 +88,19 @@ async function runScenario(scenario: ProcessorScenario, joined = false): Promise
     ...(typeof scenario.given.source.location === "string" ? { location: scenario.given.source.location } : {}),
     ...(Object.hasOwn(scenario.given.source, "content") ? { content: scenario.given.source.content } : {}),
   };
-  const ref = typeof scenario.given.binding.ref === "string" ? scenario.given.binding.ref : "";
+  const selector = typeof scenario.given.binding.selector === "string" ? scenario.given.binding.selector : "";
   let invocation: Invocation<unknown, unknown>;
   if (joined) {
     const iface = await new GraphQLSynthesizer().synthesizeInterface({ sources: [source] });
     invocation = new OperationInvoker([invoker], { fetch: fetchImpl }).invoke(
       iface,
-      operationSignature(operationForRef(iface, ref)),
+      operationSignature(operationForSelector(iface, selector)),
       { context },
     );
   } else {
     invocation = invoker.invokeBinding({
       source,
-      ref,
+      selector,
       context,
       ...(scenario.given.invocation.inputPresent ? { inputSchema: { type: "object" } } : {}),
       fetch: fetchImpl,
@@ -114,8 +114,8 @@ async function runScenario(scenario: ProcessorScenario, joined = false): Promise
 
   const outputTask = collectOutputs(invocation);
   if (
-    typeof scenario.given.binding.ref === "string"
-    && scenario.given.binding.ref.startsWith("subscription/")
+    typeof scenario.given.binding.selector === "string"
+    && scenario.given.binding.selector.startsWith("subscription/")
   ) {
     for (let i = 0; i < 20 && !socket; i++) await Promise.resolve();
     if (socket) {
@@ -157,9 +157,9 @@ async function runScenario(scenario: ProcessorScenario, joined = false): Promise
   };
 }
 
-function operationForRef(iface: OBInterface, ref: string): string {
-  const match = Object.values(iface.bindings ?? {}).find((binding) => binding.ref === ref);
-  if (!match) throw new Error(`synthesized GraphQL interface has no binding for ${JSON.stringify(ref)}`);
+function operationForSelector(iface: OBInterface, selector: string): string {
+  const match = Object.values(iface.bindings ?? {}).find((binding) => binding.selector === selector);
+  if (!match) throw new Error(`synthesized GraphQL interface has no binding for ${JSON.stringify(selector)}`);
   return match.operation;
 }
 

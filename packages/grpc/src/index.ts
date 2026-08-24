@@ -21,9 +21,9 @@ import {
   ERR_CANCELLED,
   ERR_CONNECT_FAILED,
   ERR_EXECUTION_FAILED,
-  ERR_INVALID_REF,
+  ERR_INVALID_SELECTOR,
   ERR_PROTOCOL,
-  ERR_REF_NOT_FOUND,
+  ERR_SELECTOR_NOT_FOUND,
   ERR_RUNTIME,
   ERR_SOURCE_CONFIG_ERROR,
   ERR_SOURCE_LOAD_FAILED,
@@ -112,9 +112,9 @@ export class GrpcInvoker implements BindingInvoker {
     let service: string;
     let methodName: string;
     try {
-      ({ service, method: methodName } = parseRef(args.ref));
+      ({ service, method: methodName } = parseSelector(args.selector));
     } catch (error: unknown) {
-      invocation.fireError(new InvocationError(ERR_INVALID_REF));
+      invocation.fireError(new InvocationError(ERR_INVALID_SELECTOR));
       return;
     }
     let target: string;
@@ -149,7 +149,7 @@ export class GrpcInvoker implements BindingInvoker {
       if (grpcCode(error) !== undefined) {
         invocation.fireError(grpcInvocationError(error, ERR_SOURCE_LOAD_FAILED));
       } else {
-        const code = message(error).includes("not found") ? ERR_REF_NOT_FOUND : ERR_SOURCE_LOAD_FAILED;
+        const code = message(error).includes("not found") ? ERR_SELECTOR_NOT_FOUND : ERR_SOURCE_LOAD_FAILED;
         invocation.fireError(new InvocationError(code));
       }
       return;
@@ -232,12 +232,12 @@ export class GrpcInvoker implements BindingInvoker {
 
 class UnplacedCredential extends Error {}
 
-function parseRef(ref: string): { service: string; method: string } {
-  const index = ref.indexOf("/");
-  if (index <= 0 || index !== ref.lastIndexOf("/") || index === ref.length - 1) {
-    throw new Error(`gRPC ref ${JSON.stringify(ref)} must be <fully-qualified-service>/<method> with exactly one "/"`);
+function parseSelector(selector: string): { service: string; method: string } {
+  const index = selector.indexOf("/");
+  if (index <= 0 || index !== selector.lastIndexOf("/") || index === selector.length - 1) {
+    throw new Error(`gRPC selector ${JSON.stringify(selector)} must be <fully-qualified-service>/<method> with exactly one "/"`);
   }
-  return { service: ref.slice(0, index), method: ref.slice(index + 1) };
+  return { service: selector.slice(0, index), method: selector.slice(index + 1) };
 }
 
 function resolveTarget(args: BindingInvocationArgs): { target: string; transport: "plaintext" | "tls" } {
@@ -434,7 +434,7 @@ export async function discoverReflectedSchema(
   try {
     const resolved = resolveTarget({
       source: { bindingSpec: BINDING_SPEC, location },
-      ref: "reflection/authoring",
+      selector: "reflection/authoring",
       context: options.transport ? { configuration: { transport: options.transport } } : undefined,
     });
     const metadata = options.metadata ?? {};

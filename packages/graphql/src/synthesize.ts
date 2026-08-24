@@ -14,7 +14,7 @@ export function convertToInterface(
   if (location) source.location = location;
 
   const operations: Record<string, Operation> = {};
-  const bindings: Record<string, { operation: string; source: string; ref: string }> = {};
+  const bindings: Record<string, { operation: string; source: string; selector: string }> = {};
   const usedKeys = new Map<string, string>();
   const tm = buildTypeMap(schema);
 
@@ -33,9 +33,9 @@ export function convertToInterface(
     for (const f of fields) {
       if (f.name.startsWith("__")) continue;
 
-      const ref = `${rt.label}/${f.name}`;
+      const selector = `${rt.label}/${f.name}`;
       const opKey = resolveKey(sanitizeKey(f.name), rt.label.toLowerCase(), usedKeys);
-      usedKeys.set(opKey, ref);
+      usedKeys.set(opKey, selector);
 
       const op: Operation = {};
       if (f.description) op.description = f.description;
@@ -45,7 +45,7 @@ export function convertToInterface(
       op.output = graphQLValueSchema(f.type, tm);
 
       operations[opKey] = op;
-      bindings[`${opKey}.${DEFAULT_SOURCE_NAME}`] = { operation: opKey, source: DEFAULT_SOURCE_NAME, ref };
+      bindings[`${opKey}.${DEFAULT_SOURCE_NAME}`] = { operation: opKey, source: DEFAULT_SOURCE_NAME, selector };
     }
   }
 

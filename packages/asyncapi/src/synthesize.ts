@@ -22,7 +22,7 @@ import {
   BINDING_SPEC,
   DEFAULT_SOURCE_NAME,
 } from "./constants.js";
-import { codePointCompare, operationRef, sanitizeKey, uniqueKey } from "./util.js";
+import { codePointCompare, operationSelector, sanitizeKey, uniqueKey } from "./util.js";
 import { governingMessages, isJSONMediaType, messageEffectiveContentType, parseMedia } from "./content.js";
 import { translateSchemaDialect } from "./translate.js";
 
@@ -76,7 +76,7 @@ export async function convertToInterface(
     // Schema direction follows the complementary perspective (ASYNC-P-02):
     // the artifact describes the application, the invocation is the
     // counterparty. Boundary schemas derive from the raw lane
-    // (resolve-refs.ts) so cyclic cut points carry the artifact's own ref
+    // (resolve-refs.ts) so cyclic cut points carry the artifact's own selector
     // spellings; hoisting then runs on each direction so recursion the
     // artifact declared survives the projection ($defs, decycle.ts).
     const boundary = boundaryDocument(doc);
@@ -87,12 +87,12 @@ export async function convertToInterface(
 
     iface.operations[opKey] = obiOp;
 
-    const ref = operationRef(opID);
+    const selector = operationSelector(opID);
     const bindingKey = `${opKey}.${DEFAULT_SOURCE_NAME}`;
     iface.bindings![bindingKey] = {
       operation: opKey,
       source: DEFAULT_SOURCE_NAME,
-      ref,
+      selector,
     };
   }
 
@@ -283,7 +283,7 @@ function rawObjectAt(map: unknown, key: string): RawObject | undefined {
 }
 
 /** The operation channel by the Go rule: the channels-map entry named by the
- *  channel ref's trailing segment (Go twin: extractRefName + doc.Channels). */
+ *  channel selector's trailing segment (Go twin: extractRefName + doc.Channels). */
 function rawOperationChannel(boundary: BoundaryDocument, channelRef: string): RawObject | undefined {
   return rawObjectAt(boundary.doc["channels"], extractRefName(channelRef));
 }

@@ -1,11 +1,11 @@
 import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { InvocationError, ERR_REF_NOT_FOUND, ERR_PROTOCOL } from "@openbindings/invoke";
+import { InvocationError, ERR_SELECTOR_NOT_FOUND, ERR_PROTOCOL } from "@openbindings/invoke";
 import { BINDING_SPEC } from "./constants.js";
 
 /**
  * A listing is this family's artifact (openbindings.mcp@1 §3): the aggregate
  * of a server's declared tools, resources, resource templates, and prompts,
- * always pagination-exhausted. Only entity identities are kept — ref matching
+ * always pagination-exhausted. Only entity identities are kept — selector matching
  * is byte-exact against them (MCP-D-03), and the matched remainder itself is
  * what dispatch uses — but multiplicity matters: MCP names are only
  * SHOULD-unique, so ambiguity detection needs every occurrence.
@@ -23,7 +23,7 @@ export interface Listing {
 }
 
 /**
- * The outcome of resolving a ref against the listing: which entity family
+ * The outcome of resolving a selector against the listing: which entity family
  * the binding invokes through (§8).
  */
 export type TargetKind = "tool" | "prompt" | "staticResource" | "templateResource";
@@ -140,7 +140,7 @@ function pinEntityIdentities(raw: unknown, member: string, idKey: string): strin
 /**
  * Follows one MCP list request to pagination exhaustion (MCP-P-02): the
  * request is issued repeatedly, feeding each nextCursor back, until the
- * server stops returning one. Shared by ref resolution (liveListing) and
+ * server stops returning one. Shared by selector resolution (liveListing) and
  * interface synthesis (discover), whose artifact is the same
  * pagination-exhausted aggregate (§3).
  */
@@ -175,9 +175,9 @@ export async function exhaustPages<P extends { nextCursor?: string }>(
 }
 
 /**
- * Obtains the entity family a ref needs from the addressed server,
+ * Obtains the entity family a selector needs from the addressed server,
  * capability-gated and followed to pagination exhaustion (MCP-P-02). Only
- * the family the ref addresses is fetched — resolution consults nothing
+ * the family the selector addresses is fetched — resolution consults nothing
  * else, so the other families cannot affect it. The resources capability
  * gates both resource lists.
  */
@@ -233,7 +233,7 @@ export async function liveListing(client: Client, entityType: string, signal: Ab
 }
 
 /**
- * Resolves a parsed ref against the (pinned or live, exhausted) listing
+ * Resolves a parsed selector against the (pinned or live, exhausted) listing
  * BEFORE dispatch (§7, MCP-P-02): a remainder matching nothing makes the
  * binding unresolvable, and a remainder matching more than one entry is
  * ambiguous WITHIN its entity's collection and likewise unresolvable —
@@ -241,27 +241,27 @@ export async function liveListing(client: Client, entityType: string, signal: Ab
  * resourceTemplates matches only declared template strings (§7, R5): the two
  * are separate namespaces, so a resource URI and a byte-identical template
  * string never collide — each is reached by its own entity token. Throws
- * InvocationError(ERR_REF_NOT_FOUND) on refusal.
+ * InvocationError(ERR_SELECTOR_NOT_FOUND) on refusal.
  */
-export function resolveRef(
+export function resolveSelector(
   l: Listing,
   entityType: string,
   remainder: string,
   bindingSpec = BINDING_SPEC,
 ): TargetKind {
   const count = (ids: string[]): number => ids.filter((id) => id === remainder).length;
-  const notFound = (): InvocationError => new InvocationError(ERR_REF_NOT_FOUND);
-  const ambiguous = (): InvocationError => new InvocationError(ERR_REF_NOT_FOUND);
+  const notFound = (): InvocationError => new InvocationError(ERR_SELECTOR_NOT_FOUND);
+  const ambiguous = (): InvocationError => new InvocationError(ERR_SELECTOR_NOT_FOUND);
 
   switch (entityType) {
     case "tools": {
       const n = count(l.tools);
       if (n === 1) {
         if ((l.requiredTaskTools ?? []).includes(remainder)) {
-          throw new InvocationError(ERR_REF_NOT_FOUND);
+          throw new InvocationError(ERR_SELECTOR_NOT_FOUND);
         }
         if (bindingSpec === BINDING_SPEC && l.toolOutputSchemas?.[remainder] === undefined) {
-          throw new InvocationError(ERR_REF_NOT_FOUND);
+          throw new InvocationError(ERR_SELECTOR_NOT_FOUND);
         }
         return "tool";
       }
@@ -269,27 +269,27 @@ export function resolveRef(
       throw notFound();
     }
     case "prompts": {
-      if (bindingSpec === BINDING_SPEC) throw new InvocationError(ERR_REF_NOT_FOUND);
+      if (bindingSpec === BINDING_SPEC) throw new InvocationError(ERR_SELECTOR_NOT_FOUND);
       const n = count(l.prompts);
       if (n === 1) return "prompt";
       if (n > 1) throw ambiguous();
       throw notFound();
     }
     case "resources": {
-      if (bindingSpec === BINDING_SPEC) throw new InvocationError(ERR_REF_NOT_FOUND);
+      if (bindingSpec === BINDING_SPEC) throw new InvocationError(ERR_SELECTOR_NOT_FOUND);
       const n = count(l.resources);
       if (n === 1) return "staticResource";
       if (n > 1) throw ambiguous();
       throw notFound();
     }
     case "resourceTemplates": {
-      if (bindingSpec === BINDING_SPEC) throw new InvocationError(ERR_REF_NOT_FOUND);
+      if (bindingSpec === BINDING_SPEC) throw new InvocationError(ERR_SELECTOR_NOT_FOUND);
       const t = count(l.templates);
       if (t === 1) return "templateResource";
       if (t > 1) throw ambiguous();
       throw notFound();
     }
     default:
-      throw new InvocationError(ERR_REF_NOT_FOUND);
+      throw new InvocationError(ERR_SELECTOR_NOT_FOUND);
   }
 }

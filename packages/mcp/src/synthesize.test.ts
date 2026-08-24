@@ -37,7 +37,7 @@ describe("openbindings.mcp@1 synthesis", () => {
       input: { type: "object" },
       output: outputSchema,
     });
-    expect(iface.bindings?.["get_weather.mcpServer"]?.ref).toBe("tools/get weather");
+    expect(iface.bindings?.["get_weather.mcpServer"]?.selector).toBe("tools/get weather");
     expect(iface.sources?.mcpServer).toEqual({
       bindingSpec: BINDING_SPEC,
       location: "https://mcp.example.test",

@@ -18,8 +18,8 @@ import {
   ERR_EXECUTION_FAILED,
   ERR_CANCELLED,
   ERR_CONNECT_FAILED,
-  ERR_INVALID_REF,
-  ERR_REF_NOT_FOUND,
+  ERR_INVALID_SELECTOR,
+  ERR_SELECTOR_NOT_FOUND,
   ERR_RESPONSE_ERROR,
   ERR_SOURCE_CONFIG_ERROR,
   ERR_SOURCE_LOAD_FAILED,
@@ -28,7 +28,7 @@ import {
   type BindingInvocationArgs,
 } from "@openbindings/invoke";
 import { BINDING_SPEC, CLIENT_NAME, CLIENT_VERSION } from "./constants.js";
-import { liveListing, parsePinnedListing, resolveRef, type Listing, type TargetKind } from "./listing.js";
+import { liveListing, parsePinnedListing, resolveSelector, type Listing, type TargetKind } from "./listing.js";
 
 /** Consumer-level knobs the invoker threads into each run (openbindings.mcp@1 §9.3). */
 export interface RunOptions {
@@ -37,21 +37,21 @@ export interface RunOptions {
 }
 
 /**
- * Parse a ref like "tools/name", "resources/uri",
+ * Parse a selector like "tools/name", "resources/uri",
  * "resourceTemplates/uriTemplate", or "prompts/name". The four entities
  * mirror MCP's four listable collections (§7, R5); resources and
  * resourceTemplates are distinct namespaces, so a resource URI and a
  * byte-identical template string never collide.
  */
-export function parseRef(ref: string): { entityType: string; name: string } {
-  const idx = ref.indexOf("/");
-  if (idx < 0 || idx === 0 || idx === ref.length - 1) {
+export function parseSelector(selector: string): { entityType: string; name: string } {
+  const idx = selector.indexOf("/");
+  if (idx < 0 || idx === 0 || idx === selector.length - 1) {
     throw new Error(
-      `MCP ref "${ref}" must be in the form tools/<name>, resources/<uri>, resourceTemplates/<uriTemplate>, or prompts/<name>`,
+      `MCP selector "${selector}" must be in the form tools/<name>, resources/<uri>, resourceTemplates/<uriTemplate>, or prompts/<name>`,
     );
   }
-  const entityType = ref.slice(0, idx);
-  const name = ref.slice(idx + 1);
+  const entityType = selector.slice(0, idx);
+  const name = selector.slice(idx + 1);
   if (
     entityType !== "tools" &&
     entityType !== "resources" &&
@@ -59,7 +59,7 @@ export function parseRef(ref: string): { entityType: string; name: string } {
     entityType !== "prompts"
   ) {
     throw new Error(
-      `MCP ref "${ref}" has invalid entity type "${entityType}" (must be tools, resources, resourceTemplates, or prompts)`,
+      `MCP selector "${selector}" has invalid entity type "${entityType}" (must be tools, resources, resourceTemplates, or prompts)`,
     );
   }
   return { entityType, name };
@@ -191,11 +191,11 @@ function buildMCPHeaders(context: Record<string, unknown> | undefined): Record<s
 
 /**
  * Runs one MCP binding invocation against the handle. Pre-dispatch failures
- * (bad ref, missing or non-HTTP endpoint, invalid pin, non-object input,
- * unresolvable ref) fire BEFORE the entity request is dispatched
- * (openbindings.mcp@1 §7, §9.1); ref/location/pin/input-shape failures fire
+ * (bad selector, missing or non-HTTP endpoint, invalid pin, non-object input,
+ * unresolvable selector) fire BEFORE the entity request is dispatched
+ * (openbindings.mcp@1 §7, §9.1); selector/location/pin/input-shape failures fire
  * before any network I/O at all. Each call opens a fresh MCP session
- * (Streamable HTTP), resolves the ref against the listing, dispatches the
+ * (Streamable HTTP), resolves the selector against the listing, dispatches the
  * entity call, emits outputs, and closes.
  */
 export async function runMCPBinding(
@@ -211,10 +211,10 @@ export async function runMCPBinding(
   let entityType: string;
   let name: string;
   try {
-    ({ entityType, name } = parseRef(args.ref));
+    ({ entityType, name } = parseSelector(args.selector));
   } catch {
     inv.fireError(
-      new InvocationError(ERR_INVALID_REF),
+      new InvocationError(ERR_INVALID_SELECTOR),
     );
     return;
   }
@@ -255,10 +255,10 @@ export async function runMCPBinding(
   let applicationOutputSchema: unknown;
   if (pin) {
     try {
-      kind = resolveRef(pin, entityType, name, args.source.bindingSpec);
+      kind = resolveSelector(pin, entityType, name, args.source.bindingSpec);
       if (args.source.bindingSpec === BINDING_SPEC) applicationOutputSchema = pin.toolOutputSchemas?.[name];
     } catch (e: unknown) {
-      inv.fireError(mapError(e, inv.signal, ERR_REF_NOT_FOUND));
+      inv.fireError(mapError(e, inv.signal, ERR_SELECTOR_NOT_FOUND));
       return;
     }
   }
@@ -267,7 +267,7 @@ export async function runMCPBinding(
   // Tools and prompts take one named-arguments object. Resource input
   // handling waits for resolution below: a template takes one input (its
   // variables), a static resource none, and only the listing can say which
-  // the ref names.
+  // the selector names.
   //
   // No-input convention: when the operation layer drives an operation that
   // declares no input (binding set, inputSchema absent — e.g. a
@@ -364,9 +364,9 @@ export async function runMCPBinding(
 
   try {
     // --- Live resolution (no pin): the capability-gated, pagination-
-    // exhausted listing for the ref's entity family, then the same
+    // exhausted listing for the selector's entity family, then the same
     // byte-exact match the pin path ran above (MCP-P-02). The entity
-    // request is never dispatched blind on the ref name.
+    // request is never dispatched blind on the selector name.
     if (kind === undefined) {
       let listing: Listing;
       try {
@@ -375,7 +375,7 @@ export async function runMCPBinding(
         inv.fireError(mapError(e, inv.signal, ERR_SOURCE_LOAD_FAILED));
         return;
       }
-      kind = resolveRef(listing, entityType, name, args.source.bindingSpec); // throws ERR_REF_NOT_FOUND
+      kind = resolveSelector(listing, entityType, name, args.source.bindingSpec); // throws ERR_SELECTOR_NOT_FOUND
       if (args.source.bindingSpec === BINDING_SPEC) applicationOutputSchema = listing.toolOutputSchemas?.[name];
     }
 

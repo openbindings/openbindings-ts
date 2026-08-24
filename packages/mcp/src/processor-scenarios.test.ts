@@ -59,18 +59,18 @@ async function runScenario(
     location: String(scenario.given.source.location ?? ""),
     ...(Object.hasOwn(scenario.given.source, "content") ? { content: scenario.given.source.content } : {}),
   };
-  const ref = String(scenario.given.binding.ref ?? "");
+  const selector = String(scenario.given.binding.selector ?? "");
   const bindingInvoker = new MCPInvoker();
   let invocation: Invocation<unknown, unknown>;
   if (joined) {
     const iface = await new MCPSynthesizer({ fetch: wire.fetch }).synthesizeInterface({ sources: [source] });
     invocation = new OperationInvoker([bindingInvoker], { fetch: wire.fetch }).invoke(
       iface,
-      operationSignature(operationForRef(iface, ref)),
+      operationSignature(operationForSelector(iface, selector)),
       { context },
     );
   } else {
-    invocation = bindingInvoker.invokeBinding({ source, ref, context, fetch: wire.fetch });
+    invocation = bindingInvoker.invokeBinding({ source, selector, context, fetch: wire.fetch });
   }
 
   if (scenario.given.invocation.inputPresent) {
@@ -113,9 +113,9 @@ async function runScenario(
   return { disposition: wire.dispatch && ["MCP-PS-06", "MCP-PS-10", "MCP-PS-14", "MCP-PS-16"].includes(scenario.id) ? "error" : "refusal", phase, data };
 }
 
-function operationForRef(iface: OBInterface, ref: string): string {
-  const match = Object.values(iface.bindings ?? {}).find((binding) => binding.ref === ref);
-  if (!match) throw new Error(`synthesized MCP interface has no binding for ${JSON.stringify(ref)}`);
+function operationForSelector(iface: OBInterface, selector: string): string {
+  const match = Object.values(iface.bindings ?? {}).find((binding) => binding.selector === selector);
+  if (!match) throw new Error(`synthesized MCP interface has no binding for ${JSON.stringify(selector)}`);
   return match.operation;
 }
 

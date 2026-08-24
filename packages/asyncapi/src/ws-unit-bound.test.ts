@@ -72,7 +72,7 @@ describe("WS delivery-unit bound", { timeout: 15_000 }, () => {
     try {
       const call = invoker.invokeBinding({
         source: { bindingSpec: BINDING_SPEC, content: spec(port) },
-        ref: "#/operations/subscribe",
+        selector: "#/operations/subscribe",
         maxDeliveryUnitBytes: bound,
       });
       const { vals, err } = await drainOutputs(call);
@@ -102,7 +102,7 @@ describe("WS delivery-unit bound", { timeout: 15_000 }, () => {
     try {
       const call = invoker.invokeBinding({
         source: { bindingSpec: BINDING_SPEC, content: spec(port) },
-        ref: "#/operations/subscribe",
+        selector: "#/operations/subscribe",
       });
       const { vals, err } = await drainOutputs(call);
       expect(err).toBeUndefined();

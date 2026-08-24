@@ -98,7 +98,7 @@ export interface TransformRef {
 export interface BindingEntry {
   operation: string;
   source: string;
-  ref?: string;
+  selector?: string;
   preference?: number;
   description?: string;
   deprecated?: boolean;

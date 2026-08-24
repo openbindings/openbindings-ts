@@ -10,7 +10,7 @@ no older compatibility meaning for `@1`.
 
 The layering is deliberate:
 
-- this package owns OBI source/ref validation, invocation-frame bridging,
+- this package owns OBI source/selector validation, invocation-frame bridging,
   protocol-independent unsuccessful completion, synthesis, and coverage;
 - the standalone runtime owns AsyncAPI loading, normalization, target and
   message resolution, security interpretation, and execution;
@@ -44,7 +44,7 @@ It normalizes authored operations without rewriting the source artifact:
   addressed as `#/channels/<escaped-channel>/subscribe`;
 - v3 `receive` becomes a caller-input/publish interaction;
 - v3 `send` becomes a caller-output/subscribe interaction;
-- v3 refs are `#/operations/<escaped-operation-key>`.
+- v3 selectors are `#/operations/<escaped-operation-key>`.
 
 The complementary perspective is intentional: AsyncAPI describes the
 application, while an OpenBindings invocation acts as its counterparty.
@@ -59,7 +59,7 @@ const call = new AsyncAPIInvoker().invokeBinding({
     bindingSpec: "openbindings.asyncapi@1",
     location: "https://api.example.com/asyncapi.yaml",
   },
-  ref: "#/operations/receiveOrder",
+  selector: "#/operations/receiveOrder",
   context: { bearerToken: "tok_123" },
 });
 
@@ -138,7 +138,7 @@ const result = await new AsyncAPISynthesizer().synthesizeInterfaceWithCoverage({
 ```
 
 Synthesis is deterministic and protocol-independent. It preserves the source
-artifact and exact native ref, derives input/output schemas only from authored
+artifact and exact native selector, derives input/output schemas only from authored
 payload contracts, and reports every target as represented, excluded, lossy,
 or failed. It does not emit protocol names, channel addresses, headers,
 methods, status codes, or driver requirements into operation schemas.

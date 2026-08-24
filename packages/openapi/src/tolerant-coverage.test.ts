@@ -61,7 +61,7 @@ describe("per-operation tolerant coverage synthesis", () => {
 
     // The clean operation is bound; the unrepresentable ones are omitted.
     expect(Object.keys(result.interface.operations)).toEqual(["getGood"]);
-    expect(Object.values(result.interface.bindings ?? {}).map((b) => b.ref)).toEqual(["#/paths/~1good/get"]);
+    expect(Object.values(result.interface.bindings ?? {}).map((b) => b.selector)).toEqual(["#/paths/~1good/get"]);
 
     // Every omission is a spec-governed excluded target, never an
     // implementation-unsupported invariant violation.
@@ -91,7 +91,7 @@ describe("per-operation tolerant coverage synthesis", () => {
   it("source inspection filters unrepresentable targets instead of refusing the document", async () => {
     const synth = new OpenAPISynthesizer();
     const inspection = await synth.inspectSource({ bindingSpec: BINDING_SPEC, content: MIXED_DOC });
-    expect(inspection.targets.map((t) => t.ref)).toEqual(["#/paths/~1good/get"]);
+    expect(inspection.targets.map((t) => t.selector)).toEqual(["#/paths/~1good/get"]);
     expect(inspection.exhaustive).toBe(true);
   });
 

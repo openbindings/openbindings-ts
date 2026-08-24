@@ -81,7 +81,7 @@ export class OpenAPIInvoker implements BindingInvoker {
   /**
    * Returns the invocation handle synchronously; the HTTP work is scheduled
    * asynchronously. Input messages flow through the handle's `write`
-   * channel. All pre-dispatch failures (bad ref, missing server URL,
+   * channel. All pre-dispatch failures (bad selector, missing server URL,
    * unresolvable operation, missing context) terminate the handle before
    * any network side effect.
    */
@@ -110,7 +110,8 @@ export class OpenAPIInvoker implements BindingInvoker {
     try {
       const prepared = await this.engine.prepareCached({
         source: { location: args.source.location, content: args.source.content },
-        ref: args.ref,
+        // The standalone client engine's own API names the selector `ref`.
+        ref: args.selector,
         profile: profileForBindingSpec(args.source.bindingSpec),
         context: args.context,
         signal: args.signal,
@@ -133,7 +134,8 @@ export class OpenAPIInvoker implements BindingInvoker {
   ): Promise<void> {
     const prepared = await this.engine.prepare({
       source: { location: args.source.location, content: args.source.content },
-      ref: args.ref,
+      // The standalone client engine's own API names the selector `ref`.
+      ref: args.selector,
       profile: profileForBindingSpec(args.source.bindingSpec),
       context: args.context,
       signal: outer.signal,
@@ -193,7 +195,7 @@ function adaptHooks(args: BindingInvocationArgs): OpenAPIExecutionHooks | undefi
       invokedAs: "",
       bindingKey: "",
       bindingSpec: args.source.bindingSpec,
-      ref: args.ref,
+      selector: args.selector,
       target: "",
     }),
     target,
@@ -251,8 +253,8 @@ function mapSDKError(error: unknown): InvocationError {
     const authored = sdkInvocationCause(error);
     if (authored) return new InvocationError(authored.code, authored.data);
     const code = error.code === "SOURCE_LOAD_FAILED" ? "ERR_SOURCE_LOAD_FAILED"
-      : error.code === "INVALID_OPERATION_REF" ? "ERR_INVALID_REF"
-      : error.code === "OPERATION_NOT_FOUND" ? "ERR_REF_NOT_FOUND"
+      : error.code === "INVALID_OPERATION_REF" ? "ERR_INVALID_SELECTOR"
+      : error.code === "OPERATION_NOT_FOUND" ? "ERR_SELECTOR_NOT_FOUND"
       : error.code === "INVALID_DOCUMENT" ? "ERR_SOURCE_CONFIG_ERROR"
       : error.code === "RUNTIME_ERROR" || error.code === "EXECUTION_COMPLETED_BEFORE_READY" ? "ERR_RUNTIME"
       : error.code;
@@ -347,7 +349,7 @@ export class OpenAPISynthesizer implements InterfaceSynthesizer, CoverageSynthes
     const { iface, document, floor } = await this.synthesizeObserved(
       input,
       options,
-      (target) => unrealizable.set(target.ref, target),
+      (target) => unrealizable.set(target.selector, target),
     );
     // synthesizeObserved already ran finalizeSynthesis (which validates this
     // same interface value); skip the redundant second validation.
@@ -416,7 +418,7 @@ export class OpenAPISynthesizer implements InterfaceSynthesizer, CoverageSynthes
     source: Source,
     options?: { signal?: AbortSignal },
   ): Promise<SourceInspection> {
-    // Inspection and synthesis share the same realizability filter. A ref
+    // Inspection and synthesis share the same realizability filter. A selector
     // whose revision-1 flattened boundary cannot be represented is not
     // advertised as a bindable target merely because it appears in paths —
     // it is filtered per operation (tolerant mode), never a reason to refuse
@@ -434,12 +436,12 @@ export class OpenAPISynthesizer implements InterfaceSynthesizer, CoverageSynthes
     const targets: SourceInspection["targets"] = [];
     for (const binding of Object.values(iface.bindings ?? {})) {
       targets.push({
-        ref: binding.ref ?? "",
+        selector: binding.selector ?? "",
         operationKey: binding.operation,
         operation: iface.operations[binding.operation],
       });
     }
-    targets.sort((a, b) => codePointCompare(a.ref, b.ref));
+    targets.sort((a, b) => codePointCompare(a.selector, b.selector));
     return { targets, exhaustive: true };
   }
 }

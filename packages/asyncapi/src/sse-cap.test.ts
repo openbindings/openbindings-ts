@@ -32,7 +32,7 @@ describe("standalone HTTP send operations", () => {
     };
     const call = new AsyncAPIInvoker().invokeBinding({
       source,
-      ref: "#/operations/receiveCaps",
+      selector: "#/operations/receiveCaps",
       fetch: async () => {
         dispatches++;
         return new Response(null, { status: 204 });

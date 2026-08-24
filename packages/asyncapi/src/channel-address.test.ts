@@ -58,7 +58,7 @@ describe("channel without address", () => {
     const invoker = new AsyncAPIInvoker();
     const call = invoker.invokeBinding({
       source: { bindingSpec: BINDING_SPEC, content: spec() },
-      ref: "#/operations/notifyOp",
+      selector: "#/operations/notifyOp",
     });
     await call.write({}).catch(() => {});
     await call.close().catch(() => {});
@@ -78,7 +78,7 @@ describe("channel without address", () => {
     const invoker = new AsyncAPIInvoker();
     const call = invoker.invokeBinding({
       source: { bindingSpec: BINDING_SPEC, content: spec() },
-      ref: "#/operations/notifyOp",
+      selector: "#/operations/notifyOp",
       context: { configuration: { address: "/inbox" } },
     });
     await call.write({});

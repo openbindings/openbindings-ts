@@ -1,5 +1,5 @@
 import canonicalize from "canonicalize";
-import { OutsideProfileError, RefError, SchemaError } from "./errors.js";
+import { OutsideProfileError, SelectorError, SchemaError } from "./errors.js";
 import { inputCompatible, outputCompatible } from "./compat.js";
 import type { CompatResult } from "./compat.js";
 import type { JSONValue, JSONObject } from "./helpers.js";
@@ -84,7 +84,7 @@ export class Normalizer {
       const { value, cleanup } = await this.resolveRef(ref, path);
       try {
         const rm = asMap(value);
-        if (!rm) throw new RefError(path, ref, "resolved $ref is not an object");
+        if (!rm) throw new SelectorError(path, ref, "resolved $ref is not an object");
         return this.normalizeAt(rm, path);
       } finally {
         cleanup();
@@ -176,7 +176,7 @@ export class Normalizer {
     try {
       u = new URL(ref, this.base ?? "resolve://local/");
     } catch (e: unknown) {
-      throw new RefError(pathOrRoot(path), ref, e instanceof Error ? e : String(e));
+      throw new SelectorError(pathOrRoot(path), ref, e instanceof Error ? e : String(e));
     }
 
     // "resolve:" is the placeholder scheme, so it survives parsing only
@@ -192,7 +192,7 @@ export class Normalizer {
       const [beforeHash = ""] = ref.split("#");
       const [pathPart = ""] = beforeHash.split("?");
       if (pathPart !== "") {
-        throw new RefError(pathOrRoot(path), ref, "relative $ref with no base");
+        throw new SelectorError(pathOrRoot(path), ref, "relative $ref with no base");
       }
     }
 
@@ -200,7 +200,7 @@ export class Normalizer {
     const key = isFragmentOnly ? `#${u.hash.slice(1) || ""}` : u.href;
 
     if (this.refStack.has(key)) {
-      throw new RefError(pathOrRoot(path), ref, "cycle detected");
+      throw new SelectorError(pathOrRoot(path), ref, "cycle detected");
     }
 
     this.refStack.add(key);
@@ -212,7 +212,7 @@ export class Normalizer {
     } else {
       if (!this.fetcher) {
         cleanup();
-        throw new RefError(pathOrRoot(path), ref, "external $ref unsupported (no fetcher)");
+        throw new SelectorError(pathOrRoot(path), ref, "external $ref unsupported (no fetcher)");
       }
       try {
         const raw = await this.fetcher.fetch(u);
@@ -220,7 +220,7 @@ export class Normalizer {
         doc = JSON.parse(text);
       } catch (e: unknown) {
         cleanup();
-        throw new RefError(pathOrRoot(path), ref, e instanceof Error ? e : String(e));
+        throw new SelectorError(pathOrRoot(path), ref, e instanceof Error ? e : String(e));
       }
     }
 
@@ -339,7 +339,7 @@ function normalizeStringSet(v: JSONValue, path: string): string[] {
 function resolveJSONPointer(doc: JSONValue, fragment: string, ref: string, path: string): JSONValue {
   if (!fragment) return doc;
   if (!fragment.startsWith("/")) {
-    throw new RefError(pathOrRoot(path), ref, "unsupported fragment (must be JSON Pointer)");
+    throw new SelectorError(pathOrRoot(path), ref, "unsupported fragment (must be JSON Pointer)");
   }
   const toks = fragment.split("/").slice(1);
   let cur: JSONValue = doc;
@@ -347,16 +347,16 @@ function resolveJSONPointer(doc: JSONValue, fragment: string, ref: string, path:
     const tok = rawTok.replaceAll("~1", "/").replaceAll("~0", "~");
     if (cur && typeof cur === "object" && !Array.isArray(cur)) {
       const obj = cur as JSONObject;
-      if (!(tok in obj)) throw new RefError(pathOrRoot(path), ref, `pointer not found: "${tok}"`);
+      if (!(tok in obj)) throw new SelectorError(pathOrRoot(path), ref, `pointer not found: "${tok}"`);
       cur = obj[tok];
     } else if (Array.isArray(cur)) {
       const idx = parseInt(tok, 10);
       if (isNaN(idx) || idx < 0 || idx >= cur.length) {
-        throw new RefError(pathOrRoot(path), ref, `array index out of range: "${tok}"`);
+        throw new SelectorError(pathOrRoot(path), ref, `array index out of range: "${tok}"`);
       }
       cur = cur[idx];
     } else {
-      throw new RefError(pathOrRoot(path), ref, "pointer traversed non-container");
+      throw new SelectorError(pathOrRoot(path), ref, "pointer traversed non-container");
     }
   }
   return cur;

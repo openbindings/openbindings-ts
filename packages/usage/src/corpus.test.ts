@@ -29,7 +29,7 @@ interface CorpusSource {
 
 interface CorpusBinding {
   source?: string;
-  ref?: string;
+  selector?: string;
 }
 
 const validationDescriptor = "name \"fixture\"\nbin \"fixture\"\ncmd \"status\"\n";
@@ -48,13 +48,13 @@ async function judge(document: CorpusDocument): Promise<string | undefined> {
     for (const [sourceName, source] of Object.entries(document.sources ?? {})) {
       if (source.bindingSpec !== BINDING_SPEC) continue;
 
-      let availableRefs: Set<string> | undefined;
+      let availableSelectors: Set<string> | undefined;
       if (Object.hasOwn(source, "content")) {
         const inspection = await synthesizer.inspectSource({
           bindingSpec: BINDING_SPEC,
           content: source.content,
         });
-        availableRefs = new Set(inspection.targets.map((target) => target.ref));
+        availableSelectors = new Set(inspection.targets.map((target) => target.selector));
       }
 
       if (Object.hasOwn(source, "location")) {
@@ -68,13 +68,13 @@ async function judge(document: CorpusDocument): Promise<string | undefined> {
       }
 
       for (const binding of Object.values(document.bindings ?? {})) {
-        if (binding.source !== sourceName || !Object.hasOwn(binding, "ref")) continue;
-        const ref = binding.ref ?? "";
-        if (ref === "" || ref.split(" ").some((segment) => segment === "")) {
-          return `usage ref ${JSON.stringify(ref)} is not a non-empty single-space-separated command path`;
+        if (binding.source !== sourceName || !Object.hasOwn(binding, "selector")) continue;
+        const selector = binding.selector ?? "";
+        if (selector === "" || selector.split(" ").some((segment) => segment === "")) {
+          return `usage selector ${JSON.stringify(selector)} is not a non-empty single-space-separated command path`;
         }
-        if (availableRefs && !availableRefs.has(ref)) {
-          return `usage ref ${JSON.stringify(ref)} does not resolve uniquely in the embedded descriptor`;
+        if (availableSelectors && !availableSelectors.has(selector)) {
+          return `usage selector ${JSON.stringify(selector)} does not resolve uniquely in the embedded descriptor`;
         }
       }
     }

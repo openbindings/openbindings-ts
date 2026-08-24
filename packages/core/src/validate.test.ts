@@ -28,7 +28,7 @@ function minimalInterface(): MinimalInterface {
       "getUser.main": {
         operation: "getUser",
         source: "main",
-        ref: "#/paths/~1users/get",
+        selector: "#/paths/~1users/get",
       },
     },
   };
@@ -393,7 +393,7 @@ describe("validateInterface example validation (OBI-D-11)", () => {
         main: { bindingSpec: "openbindings.openapi@1", location: "https://example.com/api.json" },
       },
       bindings: {
-        "createUser.main": { operation: "createUser", source: "main", ref: "#/paths/~1users/post" },
+        "createUser.main": { operation: "createUser", source: "main", selector: "#/paths/~1users/post" },
       },
     };
   }
@@ -451,7 +451,7 @@ describe("validateInterface example validation (OBI-D-11)", () => {
         main: { bindingSpec: "openbindings.openapi@1", location: "https://example.com/api.json" },
       },
       bindings: {
-        "noExamples.main": { operation: "noExamples", source: "main", ref: "#/paths/~1foo/get" },
+        "noExamples.main": { operation: "noExamples", source: "main", selector: "#/paths/~1foo/get" },
       },
     };
     expect(() => validateInterface(iface,)).not.toThrow();

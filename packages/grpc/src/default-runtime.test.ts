@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ERR_REF_NOT_FOUND, ERR_VALIDATION_FAILED } from "@openbindings/invoke";
+import { ERR_SELECTOR_NOT_FOUND, ERR_VALIDATION_FAILED } from "@openbindings/invoke";
 import { BINDING_SPEC, GrpcInvoker, loadProtobufSchema } from "./index.js";
 
 const descriptorSet = {
@@ -38,18 +38,18 @@ describe("Node gRPC runtime descriptor-set carriage", () => {
   it("resolves a canonical-JSON FileDescriptorSet before dispatch", async () => {
     const call = new GrpcInvoker().invokeBinding({
       source: { bindingSpec: BINDING_SPEC, location: "grpc://127.0.0.1:1", content: descriptorSet },
-      ref: "demo.Echo/Call",
+      selector: "demo.Echo/Call",
     });
     await call.write({ unknown: true }).catch(() => {});
     await expect(call.closed).rejects.toMatchObject({ code: ERR_VALIDATION_FAILED });
   });
 
-  it("checks a bound ref offline and does not dial for a missing method", async () => {
+  it("checks a bound selector offline and does not dial for a missing method", async () => {
     const call = new GrpcInvoker().invokeBinding({
       source: { bindingSpec: BINDING_SPEC, location: "grpc://127.0.0.1:1", content: descriptorSet },
-      ref: "demo.Echo/Missing",
+      selector: "demo.Echo/Missing",
     });
-    await expect(call.closed).rejects.toMatchObject({ code: ERR_REF_NOT_FOUND });
+    await expect(call.closed).rejects.toMatchObject({ code: ERR_SELECTOR_NOT_FOUND });
   });
 
   it("refuses unknown descriptor-set members loudly", async () => {
@@ -59,7 +59,7 @@ describe("Node gRPC runtime descriptor-set carriage", () => {
         location: "grpc://127.0.0.1:1",
         content: { ...descriptorSet, invented: true },
       },
-      ref: "demo.Echo/Call",
+      selector: "demo.Echo/Call",
     });
     await expect(call.closed).rejects.toMatchObject({ code: "ERR_SOURCE_LOAD_FAILED" });
   });

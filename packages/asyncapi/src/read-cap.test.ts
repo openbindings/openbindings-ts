@@ -46,7 +46,7 @@ describe("AsyncAPI readResponseText cap (C6f)", () => {
     const invoker = new AsyncAPIInvoker();
     const call = invoker.invokeBinding({
       source: source(),
-      ref: "#/operations/sendOpenMessage",
+      selector: "#/operations/sendOpenMessage",
       fetch: customFetch,
     });
     await call.write({ text: "hi" });
@@ -71,7 +71,7 @@ describe("AsyncAPI readResponseText cap (C6f)", () => {
     const invoker = new AsyncAPIInvoker();
     const call = invoker.invokeBinding({
       source: source(),
-      ref: "#/operations/sendOpenMessage",
+      selector: "#/operations/sendOpenMessage",
       fetch: customFetch,
     });
     await call.write({ text: "hi" });
@@ -92,7 +92,7 @@ describe("AsyncAPI readResponseText cap (C6f)", () => {
     const invoker = new AsyncAPIInvoker();
     const call = invoker.invokeBinding({
       source: source(),
-      ref: "#/operations/sendOpenMessage",
+      selector: "#/operations/sendOpenMessage",
       fetch: customFetch,
       maxDeliveryUnitBytes: 1024,
     });

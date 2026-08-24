@@ -97,18 +97,18 @@ async function runScenario(scenario: ProcessorScenario, joined = false): Promise
     ...(typeof scenario.given.source.location === "string" ? { location: scenario.given.source.location } : {}),
     ...(Object.hasOwn(scenario.given.source, "content") ? { content: scenario.given.source.content } : {}),
   };
-  const ref = typeof scenario.given.binding.ref === "string" ? scenario.given.binding.ref : "";
+  const selector = typeof scenario.given.binding.selector === "string" ? scenario.given.binding.selector : "";
   const bindingInvoker = new ConnectInvoker({ fullDuplex });
   let invocation: Invocation<unknown, unknown>;
   if (joined) {
     const iface = await new ConnectSynthesizer().synthesizeInterface({ sources: [source] });
     invocation = new OperationInvoker([bindingInvoker], { fetch: fetchImpl }).invoke(
       iface,
-      operationSignature(operationForRef(iface, ref)),
+      operationSignature(operationForSelector(iface, selector)),
       { context },
     );
   } else {
-    invocation = bindingInvoker.invokeBinding({ source, ref, context, fetch: fetchImpl });
+    invocation = bindingInvoker.invokeBinding({ source, selector, context, fetch: fetchImpl });
   }
 
   const writes = Array.isArray(scenario.given.invocation.writes) ? scenario.given.invocation.writes : undefined;
@@ -148,9 +148,9 @@ async function runScenario(scenario: ProcessorScenario, joined = false): Promise
   return { disposition: "error", phase: responsePhase ? "response" : "completion", data };
 }
 
-function operationForRef(iface: OBInterface, ref: string): string {
-  const match = Object.values(iface.bindings ?? {}).find((binding) => binding.ref === ref);
-  if (!match) throw new Error(`synthesized Connect interface has no binding for ${JSON.stringify(ref)}`);
+function operationForSelector(iface: OBInterface, selector: string): string {
+  const match = Object.values(iface.bindings ?? {}).find((binding) => binding.selector === selector);
+  if (!match) throw new Error(`synthesized Connect interface has no binding for ${JSON.stringify(selector)}`);
   return match.operation;
 }
 

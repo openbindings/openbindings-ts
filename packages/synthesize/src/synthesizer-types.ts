@@ -111,7 +111,7 @@ export interface SynthesisCoverageEntry {
   sourceIndex: number;
   /** Emitted source key; required for represented and lossy entries. */
   sourceKey?: string;
-  /** Stable source-local identifier; need not be a conformant binding ref. */
+  /** Stable source-local identifier; need not be a conformant binding selector. */
   sourceRef: string;
   scope: SynthesisCoverageScope;
   status: SynthesisCoverageStatus;
@@ -119,8 +119,8 @@ export interface SynthesisCoverageEntry {
   operationKey?: string;
   /** Emitted binding key; required for represented and lossy entries. */
   bindingKey?: string;
-  /** Required for represented and lossy entries; empty denotes a binding with omitted ref. */
-  bindingRef?: string;
+  /** Required for represented and lossy entries; empty denotes a binding with omitted selector. */
+  bindingSelector?: string;
   /** Stable family-namespaced code; required for non-represented entries. */
   reasonCode?: string;
   /** Governing binding-specification rule or section, when applicable. */
@@ -232,8 +232,8 @@ export function finalizeSynthesisCoverage(
     }
 
     if (entry.status === "represented" || entry.status === "lossy") {
-      if (!entry.operationKey || entry.bindingRef === undefined) {
-        throw new Error(`${entry.status} synthesis coverage entry ${index} requires operationKey and bindingRef`);
+      if (!entry.operationKey || entry.bindingSelector === undefined) {
+        throw new Error(`${entry.status} synthesis coverage entry ${index} requires operationKey and bindingSelector`);
       }
       if (entry.status === "represented" && entry.reasonCode) {
         throw new Error(`represented synthesis coverage entry ${index} must not carry reasonCode`);
@@ -245,7 +245,7 @@ export function finalizeSynthesisCoverage(
         const matches = Object.entries(iface.bindings ?? {}).filter(
           ([, binding]) =>
             binding.operation === entry.operationKey
-            && (binding.ref ?? "") === entry.bindingRef,
+            && (binding.selector ?? "") === entry.bindingSelector,
         );
         if (matches.length > 1) {
           throw new Error(`${entry.status} synthesis coverage entry ${index} matches several bindings; bindingKey is required to disambiguate`);
@@ -258,9 +258,9 @@ export function finalizeSynthesisCoverage(
       if (
         !matchingBinding
         || matchingBinding.operation !== entry.operationKey
-        || (matchingBinding.ref ?? "") !== entry.bindingRef
+        || (matchingBinding.selector ?? "") !== entry.bindingSelector
       ) {
-        throw new Error(`${entry.status} synthesis coverage entry ${index} has no matching binding for operation ${JSON.stringify(entry.operationKey)} and ref ${JSON.stringify(entry.bindingRef)}`);
+        throw new Error(`${entry.status} synthesis coverage entry ${index} has no matching binding for operation ${JSON.stringify(entry.operationKey)} and selector ${JSON.stringify(entry.bindingSelector)}`);
       }
       entry.sourceKey ??= matchingBinding.source;
       if (matchingBinding.source !== entry.sourceKey) {
@@ -318,19 +318,19 @@ export function representedCoverageEntries(
     .map(([bindingKey, binding]) => ({
       sourceIndex,
       sourceKey: binding.source,
-      sourceRef: binding.ref ?? "",
+      sourceRef: binding.selector ?? "",
       scope: "target" as const,
       status: "represented" as const,
       operationKey: binding.operation,
       bindingKey,
-      bindingRef: binding.ref ?? "",
+      bindingSelector: binding.selector ?? "",
     }));
 }
 
 /** A target within a source document that can be framed as an OpenBindings operation. */
 export interface BindableTarget {
-  /** The reference string to use in a binding entry. */
-  ref: string;
+  /** The selector string to use in a binding entry. */
+  selector: string;
   /** Optional suggested operation key for this target. */
   operationKey?: string;
   /** Optional OpenBindings operation framing for this target. */

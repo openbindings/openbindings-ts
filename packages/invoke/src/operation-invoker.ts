@@ -239,7 +239,7 @@ export class OperationInvoker {
         invokedAs: args.binding?.operation ?? "",
         bindingKey: "",
         bindingSpec: args.source.bindingSpec,
-        ref: args.ref,
+        selector: args.selector,
         target: "",
       };
     }
@@ -283,7 +283,7 @@ export class OperationInvoker {
       invokedAs: sig.key,
       bindingKey,
       bindingSpec: source.bindingSpec,
-      ref: binding.ref ?? "",
+      selector: binding.selector ?? "",
       target: "",
     };
 
@@ -321,7 +321,7 @@ export class OperationInvoker {
         // flow to the family as a value — only undefined means absent.
         ...(source.content !== undefined ? { content: source.content } : {}),
       },
-      ref: binding.ref ?? "",
+      selector: binding.selector ?? "",
       binding,
       inputSchema: op.input ?? undefined,
       interface: obi,
@@ -455,7 +455,7 @@ export class OperationInvoker {
           // content: null is a PRESENT member — see prepareOperation.
           ...(source.content !== undefined ? { content: source.content } : {}),
         },
-        ref: binding.ref ?? "",
+        selector: binding.selector ?? "",
         binding,
         inputSchema: op.input ?? undefined,
         interface: iface,
@@ -916,7 +916,7 @@ async function applyTransformRef(
     if (typeof transformOrRef === "object" && transformOrRef !== null && transformOrRef.$ref) {
       throw new TransformRefNotFoundError(transformOrRef.$ref);
     }
-    throw new Error("openbindings: invalid transform: neither ref nor inline");
+    throw new Error("openbindings: invalid transform: neither selector nor inline");
   }
   if (expr === "") throw new EmptyTransformExpressionError();
   return evaluator.evaluate(expr, data);

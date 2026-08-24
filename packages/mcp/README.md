@@ -31,7 +31,7 @@ const call = new MCPInvoker().invokeBinding({
     bindingSpec: "openbindings.mcp@1",
     location: "https://mcp.example.com/mcp",
   },
-  ref: "tools/search",
+  selector: "tools/search",
   context: { bearerToken: "tok_123" },
 });
 
@@ -71,7 +71,7 @@ tool becomes one operation:
 
 | OBI field | MCP source |
 | --- | --- |
-| `binding.ref` | `tools/<name>` |
+| `binding.selector` | `tools/<name>` |
 | operation input | tool `inputSchema` |
 | operation output | tool `outputSchema` |
 | successful output value | `CallToolResult.structuredContent` |

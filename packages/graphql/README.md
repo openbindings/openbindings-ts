@@ -36,7 +36,7 @@ const call = new GraphQLInvoker().invokeBinding({
     bindingSpec: BINDING_SPEC,
     location: "https://api.example.com/graphql",
   },
-  ref: "query/viewer",
+  selector: "query/viewer",
   inputSchema: { type: "object" },
   context: {
     configuration: {

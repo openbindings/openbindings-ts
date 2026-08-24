@@ -33,7 +33,7 @@ export interface InvokeSite {
   invokedAs: string;
   bindingKey: string;
   bindingSpec: string;
-  ref: string;
+  selector: string;
   target: string;
 }
 

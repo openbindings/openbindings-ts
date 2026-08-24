@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { parseExecutableDocument } from "./document.js";
 import {
   parseIntrospectionContent,
-  parseRef,
+  parseSelector,
   wellFormedGraphQLResponse,
 } from "./invoke.js";
 import type { IntrospectionSchema } from "./introspection.js";
@@ -31,16 +31,16 @@ const schema: IntrospectionSchema = {
   ],
 };
 
-describe("parseRef", () => {
+describe("parseSelector", () => {
   it.each([
     ["query/viewer", { rootType: "query", fieldName: "viewer" }],
     ["mutation/save", { rootType: "mutation", fieldName: "save" }],
     ["subscription/updates", { rootType: "subscription", fieldName: "updates" }],
-  ])("accepts %s", (ref, expected) => expect(parseRef(ref)).toEqual(expected));
+  ])("accepts %s", (selector, expected) => expect(parseSelector(selector)).toEqual(expected));
 
   it.each(["Query/viewer", "query/", "query/viewer/nested", "query/not-valid", ""])(
     "rejects noncanonical %s",
-    (ref) => expect(() => parseRef(ref)).toThrow(),
+    (selector) => expect(() => parseSelector(selector)).toThrow(),
   );
 });
 

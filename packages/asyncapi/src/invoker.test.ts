@@ -21,7 +21,7 @@ describe("AsyncAPI standalone-runtime error bridge", () => {
     } as unknown as AsyncAPIEngine;
     const call = new AsyncAPIInvoker(engine).invokeBinding({
       source: { bindingSpec: BINDING_SPEC, content: {} },
-      ref: "#/operations/example",
+      selector: "#/operations/example",
     });
 
     try {
@@ -47,7 +47,7 @@ describe("AsyncAPI standalone-runtime error bridge", () => {
       } as unknown as AsyncAPIEngine;
       const call = new AsyncAPIInvoker(engine).invokeBinding({
         source: { bindingSpec: BINDING_SPEC, content: {} },
-        ref: "#/operations/example",
+        selector: "#/operations/example",
       });
 
       const error = await call.closed.catch((caught: unknown) => caught);
@@ -70,7 +70,7 @@ describe("AsyncAPI standalone-runtime error bridge", () => {
     } as unknown as AsyncAPIEngine;
     const call = new AsyncAPIInvoker(engine).invokeBinding({
       source: { bindingSpec: BINDING_SPEC, content: {} },
-      ref: "#/operations/example",
+      selector: "#/operations/example",
     });
 
     await expect(call.closed).rejects.toMatchObject({ code: "ERR_RUNTIME" });
@@ -146,7 +146,7 @@ describe("AsyncAPIInvoker.prepareBinding", () => {
 
     const details = await new AsyncAPIInvoker().prepareBinding({
       source: { bindingSpec: BINDING_SPEC, content: spec },
-      ref: "#/operations/pub",
+      selector: "#/operations/pub",
     });
 
     // The requirements are not knowable without I/O: report null, never fetch.
@@ -177,7 +177,7 @@ describe("AsyncAPIInvoker.prepareBinding", () => {
 
     const details = await new AsyncAPIInvoker().prepareBinding({
       source: { bindingSpec: BINDING_SPEC, content: spec },
-      ref: "#/operations/pub",
+      selector: "#/operations/pub",
     });
 
     expect(details).toMatchObject({
@@ -220,8 +220,8 @@ describe("AsyncAPIInvoker no-input publish refusal", () => {
     // before any dispatch, and never parks on a read.
     const call = new AsyncAPIInvoker().invokeBinding({
       source: { bindingSpec: BINDING_SPEC, content: spec },
-      ref: "#/operations/notify",
-      binding: { operation: "notify", source: "api", ref: "#/operations/notify" },
+      selector: "#/operations/notify",
+      binding: { operation: "notify", source: "api", selector: "#/operations/notify" },
       fetch: fetchFn,
     });
 
@@ -322,7 +322,7 @@ describe("context requirements — oauth2 flows (R2.b ruling)", () => {
     });
     const details = await new AsyncAPIInvoker().prepareBinding({
       source: { bindingSpec: BINDING_SPEC, content: spec },
-      ref: "#/operations/publish",
+      selector: "#/operations/publish",
     });
     expect(details).toMatchObject({
       target: "https://api.example.com",
@@ -349,7 +349,7 @@ describe("context requirements — oauth2 flows (R2.b ruling)", () => {
     });
     const details = await new AsyncAPIInvoker().prepareBinding({
       source: { bindingSpec: BINDING_SPEC, content: spec },
-      ref: "#/operations/publish",
+      selector: "#/operations/publish",
     });
     expect(details).toMatchObject({
       alternatives: [
@@ -374,7 +374,7 @@ describe("context requirements — oauth2 flows (R2.b ruling)", () => {
     });
     const details = await new AsyncAPIInvoker().prepareBinding({
       source: { bindingSpec: BINDING_SPEC, content: spec },
-      ref: "#/operations/publish",
+      selector: "#/operations/publish",
     });
     expect(details).toMatchObject({
       alternatives: [
@@ -396,7 +396,7 @@ describe("context requirements — oauth2 flows (R2.b ruling)", () => {
     const spec = oauth2Spec({});
     const details = await new AsyncAPIInvoker().prepareBinding({
       source: { bindingSpec: BINDING_SPEC, content: spec },
-      ref: "#/operations/publish",
+      selector: "#/operations/publish",
     });
     const req = (details as { alternatives: Array<{ requirements: Array<Record<string, unknown>> }> })
       .alternatives.at(0)?.requirements.at(0);
@@ -430,7 +430,7 @@ describe("context requirements — unmapped schemes surfaced (R2.c ruling)", () 
     };
     const details = await new AsyncAPIInvoker().prepareBinding({
       source: { bindingSpec: BINDING_SPEC, content: spec },
-      ref: "#/operations/publish",
+      selector: "#/operations/publish",
     });
     expect(details).toMatchObject({
       alternatives: [{ requirements: [{ type: "auth.http.digest", name: "digestAuth" }] }],
@@ -453,7 +453,7 @@ describe("context requirements — unmapped schemes surfaced (R2.c ruling)", () 
     };
     const details = await new AsyncAPIInvoker().prepareBinding({
       source: { bindingSpec: BINDING_SPEC, content: spec },
-      ref: "#/operations/publish",
+      selector: "#/operations/publish",
     });
     expect(details).toMatchObject({
       alternatives: [
@@ -487,7 +487,7 @@ describe("context requirements — unmapped schemes surfaced (R2.c ruling)", () 
     };
     const details = await new AsyncAPIInvoker().prepareBinding({
       source: { bindingSpec: BINDING_SPEC, content: spec },
-      ref: "#/operations/publish",
+      selector: "#/operations/publish",
     });
     expect(details).toMatchObject({ alternatives: [{ requirements: [{ type: "auth.futureSasl" }] }] });
   });
@@ -510,7 +510,7 @@ describe("context requirements — unmapped schemes surfaced (R2.c ruling)", () 
     const { fetch, requests } = mockFetch(() => jsonResponse({}));
     const call = new AsyncAPIInvoker().invokeBinding({
       source: { bindingSpec: BINDING_SPEC, content: spec },
-      ref: "#/operations/publish",
+      selector: "#/operations/publish",
       fetch,
     });
     await call.write({});
@@ -569,7 +569,7 @@ describe("context requirements — conjunctive server + operation security (ASYN
   it("pairs the server entry with the operation entry in one conjunctive alternative", async () => {
     const details = await new AsyncAPIInvoker().prepareBinding({
       source: { bindingSpec: BINDING_SPEC, content: conjunctiveSpec([{ $ref: "#/components/securitySchemes/key" }]) },
-      ref: "#/operations/publish",
+      selector: "#/operations/publish",
     });
     expect(details?.alternatives).toHaveLength(1);
     expect(details).toMatchObject({
@@ -581,28 +581,28 @@ describe("context requirements — conjunctive server + operation security (ASYN
     const spec = conjunctiveSpec([{ $ref: "#/components/securitySchemes/key" }]);
     const bearerOnly = await new AsyncAPIInvoker().prepareBinding({
       source: { bindingSpec: BINDING_SPEC, content: spec },
-      ref: "#/operations/publish",
+      selector: "#/operations/publish",
       context: { bearerToken: "t" },
     });
     expect(bearerOnly).not.toBeNull();
 
     const keyOnly = await new AsyncAPIInvoker().prepareBinding({
       source: { bindingSpec: BINDING_SPEC, content: spec },
-      ref: "#/operations/publish",
+      selector: "#/operations/publish",
       context: { apiKeys: { key: "k-1" } },
     });
     expect(keyOnly).not.toBeNull();
 
     const both = await new AsyncAPIInvoker().prepareBinding({
       source: { bindingSpec: BINDING_SPEC, content: spec },
-      ref: "#/operations/publish",
+      selector: "#/operations/publish",
       context: { bearerToken: "t", apiKeys: { key: "k-1" } },
     });
     expect(both).toBeNull();
 
     const named = await new AsyncAPIInvoker().prepareBinding({
       source: { bindingSpec: BINDING_SPEC, content: spec },
-      ref: "#/operations/publish",
+      selector: "#/operations/publish",
       context: { credentials: { bearer: "t", key: "k-1" } },
     });
     expect(named).toBeNull();
@@ -611,7 +611,7 @@ describe("context requirements — conjunctive server + operation security (ASYN
   it("a scheme declared on both levels is one requirement, not a duplicated conjunct", async () => {
     const details = await new AsyncAPIInvoker().prepareBinding({
       source: { bindingSpec: BINDING_SPEC, content: conjunctiveSpec([{ $ref: "#/components/securitySchemes/bearer" }]) },
-      ref: "#/operations/publish",
+      selector: "#/operations/publish",
     });
     expect(details?.alternatives).toHaveLength(1);
     expect(details?.alternatives[0]!.requirements).toHaveLength(1);
@@ -654,7 +654,7 @@ describe("credential application — apiKeys keyed lookup (R2.d ruling)", () => 
     const { fetch, requests } = mockFetch(() => jsonResponse({}));
     const call = new AsyncAPIInvoker().invokeBinding({
       source: { bindingSpec: BINDING_SPEC, content: spec },
-      ref: "#/operations/publish",
+      selector: "#/operations/publish",
       context: { apiKeys: { headerKey: "hk-1", queryKey: "qk-1" } },
       fetch,
     });

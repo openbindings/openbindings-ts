@@ -12,7 +12,7 @@ import type { OBInterface } from "@openbindings/core";
  * skips what it does not understand reports green having verified none of it.
  * `synthesisscenarios.Format` in openbindings-go is the twin.
  */
-export const SYNTHESIS_SCENARIO_FORMAT = "openbindings.binding-spec-synthesis-scenarios@3";
+export const SYNTHESIS_SCENARIO_FORMAT = "openbindings.binding-spec-synthesis-scenarios@4";
 
 export interface SynthesisScenarioFile {
   format: typeof SYNTHESIS_SCENARIO_FORMAT;
@@ -119,7 +119,7 @@ export interface NormalizedSynthesis {
 
 export interface SynthesisBindingIdentity {
   operationKey: string;
-  bindingRef: string;
+  bindingSelector: string;
 }
 
 export interface NormalizedSynthesisCoverageEntry {
@@ -128,7 +128,7 @@ export interface NormalizedSynthesisCoverageEntry {
   scope: SynthesisCoverageEntry["scope"];
   status: SynthesisCoverageEntry["status"];
   operationKey?: string;
-  bindingRef?: string;
+  bindingSelector?: string;
   reasonCode?: string;
   rule?: string;
   requirements: string[];
@@ -213,7 +213,7 @@ function normalizeBindings(iface: OBInterface): SynthesisBindingIdentity[] {
   return Object.values(iface.bindings ?? {})
     .map((binding) => ({
       operationKey: binding.operation,
-      bindingRef: binding.ref ?? "",
+      bindingSelector: binding.selector ?? "",
     }))
     .sort(compareBindings);
 }
@@ -227,7 +227,7 @@ function normalizeCoverageEntry(entry: SynthesisCoverageEntry): NormalizedSynthe
     requirements: [...(entry.requirements ?? [])].sort(codePointCompare),
   };
   if (entry.operationKey !== undefined) normalized.operationKey = entry.operationKey;
-  if (entry.bindingRef !== undefined) normalized.bindingRef = entry.bindingRef;
+  if (entry.bindingSelector !== undefined) normalized.bindingSelector = entry.bindingSelector;
   if (entry.reasonCode !== undefined) normalized.reasonCode = entry.reasonCode;
   if (entry.rule !== undefined) normalized.rule = entry.rule;
   return normalized;
@@ -235,7 +235,7 @@ function normalizeCoverageEntry(entry: SynthesisCoverageEntry): NormalizedSynthe
 
 function compareBindings(a: SynthesisBindingIdentity, b: SynthesisBindingIdentity): number {
   return codePointCompare(a.operationKey, b.operationKey)
-    || codePointCompare(a.bindingRef, b.bindingRef);
+    || codePointCompare(a.bindingSelector, b.bindingSelector);
 }
 
 function compareCoverage(

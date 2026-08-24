@@ -71,7 +71,7 @@ function candidateInterface(
       createTodo: {
         operation: "createTodo",
         source: "service",
-        ref: "create",
+        selector: "create",
       },
     },
   };

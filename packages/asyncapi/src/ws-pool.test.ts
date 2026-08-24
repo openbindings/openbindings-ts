@@ -165,7 +165,7 @@ describe("AsyncAPIInvoker WebSocket pool credential isolation (real ws server)",
   async function publish(invoker: AsyncAPIInvoker, bearerToken: string, seq: number) {
     const call = invoker.invokeBinding({
       source: { bindingSpec: BINDING_SPEC, content: spec() },
-      ref: "#/operations/publish",
+      selector: "#/operations/publish",
       context: { bearerToken, configuration: { websocketMessageType: "text" } },
     });
     await call.write({ seq });
@@ -194,7 +194,7 @@ describe("AsyncAPIInvoker WebSocket pool credential isolation (real ws server)",
     try {
       const call = invoker.invokeBinding({
         source: { bindingSpec: BINDING_SPEC, content: spec() },
-        ref: "#/operations/publish",
+        selector: "#/operations/publish",
         context: {
           bearerToken: "tenant-zero",
           configuration: { websocketMessageType: "text" },
@@ -260,7 +260,7 @@ describe("AsyncAPIInvoker no in-band auth (ASYNC-P-07)", () => {
     try {
       const call = invoker.invokeBinding({
         source: { bindingSpec: BINDING_SPEC, content: subscribeSpec(port, true) },
-        ref: "#/operations/subscribe",
+        selector: "#/operations/subscribe",
         context: { bearerToken: "test-bearer-xyz" },
       });
       let first: unknown;
@@ -289,7 +289,7 @@ describe("AsyncAPIInvoker no in-band auth (ASYNC-P-07)", () => {
     try {
       const call = invoker.invokeBinding({
         source: { bindingSpec: BINDING_SPEC, content: subscribeSpec(port, false) },
-        ref: "#/operations/subscribe",
+        selector: "#/operations/subscribe",
         context: { bearerToken: "tok" },
       });
       let first: unknown;
@@ -319,7 +319,7 @@ describe("AsyncAPIInvoker no in-band auth (ASYNC-P-07)", () => {
     try {
       const call = invoker.invokeBinding({
         source: { bindingSpec: BINDING_SPEC, content: subscribeSpec(port, true) },
-        ref: "#/operations/publish",
+        selector: "#/operations/publish",
         context: {
           bearerToken: "tok",
           configuration: { websocketMessageType: "text" },

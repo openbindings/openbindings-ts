@@ -37,7 +37,7 @@ import {
   type OpenAPISchemaProjector,
 } from "./schema-direction.js";
 import {
-  buildJsonPointerRef,
+  buildJsonPointerSelector,
   codePointCompare,
   componentSchemaNames,
   type DeclaredComponent,
@@ -68,8 +68,8 @@ import {
  * "sound partial OBI").
  */
 export interface UnrealizableTarget {
-  /** JSON-pointer ref of the paths operation. */
-  ref: string;
+  /** JSON-pointer selector of the paths operation. */
+  selector: string;
   /** The operation key synthesis would have assigned. */
   operationKey: string;
   /** Stable family-namespaced reason code. */
@@ -188,15 +188,15 @@ export async function convertToInterface(
       // target is not addressed. Tolerant surfaces skip it (its invalid
       // coverage entry is emitted by the coverage walk); the strict surface
       // throws. Skipped BEFORE key derivation, in every engine identically.
-      const floorVerdict = floorOpVerdict(floor, buildJsonPointerRef(pathStr, method));
+      const floorVerdict = floorOpVerdict(floor, buildJsonPointerSelector(pathStr, method));
       if (floorVerdict && floorVerdict.disposition === "invalid") {
         if (onUnrealizable) continue;
-        throw new Error(`cannot synthesize OpenAPI operation at ${JSON.stringify(buildJsonPointerRef(pathStr, method))}: ${floorInvalidTargetMessage(floorVerdict.defects.length)}; synthesis would return a statically unbindable partial interface`);
+        throw new Error(`cannot synthesize OpenAPI operation at ${JSON.stringify(buildJsonPointerSelector(pathStr, method))}: ${floorInvalidTargetMessage(floorVerdict.defects.length)}; synthesis would return a statically unbindable partial interface`);
       }
 
       const opKey = deriveOperationKey(opObj, pathStr, method, usedKeys);
       usedKeys.add(opKey);
-      const ref = buildJsonPointerRef(pathStr, method);
+      const selector = buildJsonPointerSelector(pathStr, method);
 
       const params = effectiveParameters(pathItem, opObj);
       const unflattenable = unflattenableParam(params, profileForBindingSpec(bindingSpec));
@@ -204,7 +204,7 @@ export async function convertToInterface(
         const reason = `parameter ${JSON.stringify(unflattenable)} has no unique flattened identity`;
         if (onUnrealizable) {
           onUnrealizable({
-            ref,
+            selector,
             operationKey: opKey,
             reasonCode: "openapi.flattening_collision",
             rule: "OAPI-P-03",
@@ -220,7 +220,7 @@ export async function convertToInterface(
         const reason = `parameter ${JSON.stringify(unsupportedParameter)} declares content with no faithful candidate carriage`;
         if (onUnrealizable) {
           onUnrealizable({
-            ref,
+            selector,
             operationKey: opKey,
             reasonCode: "openapi.parameter_content_excluded",
             rule: "OAPI-P-02",
@@ -243,7 +243,7 @@ export async function convertToInterface(
           const reason = safeErrorMessage(serializationError);
           if (onUnrealizable) {
             onUnrealizable({
-              ref,
+              selector,
               operationKey: opKey,
               reasonCode: "openapi.parameter_serialization_excluded",
               rule: "OAPI-P-02",
@@ -272,7 +272,7 @@ export async function convertToInterface(
         const reason = `parameter member ${JSON.stringify(undefinedExpansionMember)} has no expansion defined by its governing OAS style row`;
         if (onUnrealizable) {
           onUnrealizable({
-            ref,
+            selector,
             operationKey: opKey,
             reasonCode: "openapi.parameter_style_expansion_excluded",
             rule: "OAPI-P-02",
@@ -301,7 +301,7 @@ export async function convertToInterface(
           const plans = filterLadderInvalidAlternatives(
             planRequestBodies(opObj, { profile: profileForBindingSpec(bindingSpec), openapiVersion: doc.openapi }),
             floorVerdict,
-            ref,
+            selector,
           );
           plannedCount = plans.length;
           requestPlans = plans.filter((plan) => hasRoutedInputs(bindingSpec) || !candidateCollides(params, plan));
@@ -322,7 +322,7 @@ export async function convertToInterface(
             // media-carriage refusal (OAPI-P-04).
             const allCollided = planError === undefined && plannedCount > 0;
             onUnrealizable({
-              ref,
+              selector,
               operationKey: opKey,
               reasonCode: allCollided
                 ? "openapi.flattening_collision"
@@ -351,7 +351,7 @@ export async function convertToInterface(
         const reason = `${dialectIssue.side} schema inherits unsupported dialect ${JSON.stringify(dialectIssue.dialect)} and cannot be projected into OBI's JSON Schema 2020-12 contract`;
         if (onUnrealizable) {
           onUnrealizable({
-            ref,
+            selector,
             operationKey: opKey,
             reasonCode: "openapi.unsupported_schema_dialect",
             rule: "OBI-D-06",
@@ -417,7 +417,7 @@ export async function convertToInterface(
       const binding: BindingEntry = {
         operation: opKey,
         source: DEFAULT_SOURCE_NAME,
-        ref,
+        selector,
       };
       if (hasRoutedInputs(bindingSpec) && routes.needsTransform) {
         binding.inputTransform = routes.transformExpression();
@@ -1091,10 +1091,10 @@ function majorMinor(version: string): string {
  * never a ladder unit. Mirrors the Go SDK's filterLadderInvalidAlternatives
  * (formats/openapi/acceptance_floor.go).
  */
-function filterLadderInvalidAlternatives(plans: BodyPlan[], verdict: FloorOp | undefined, opRef: string): BodyPlan[] {
+function filterLadderInvalidAlternatives(plans: BodyPlan[], verdict: FloorOp | undefined, opSelector: string): BodyPlan[] {
   if (!verdict || verdict.invalidAlternatives.size === 0) return plans;
   return plans.filter((plan) => {
     if (!plan.declared) return true;
-    return !verdict.invalidAlternatives.has(`${opRef}/requestBody/content/${escapePointerSegment(plan.mediaKey)}`);
+    return !verdict.invalidAlternatives.has(`${opSelector}/requestBody/content/${escapePointerSegment(plan.mediaKey)}`);
   });
 }

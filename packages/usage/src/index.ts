@@ -18,7 +18,7 @@ import {
   contextConfiguration,
   contextEnvironment,
   contextRequiredError,
-  ERR_INVALID_REF,
+  ERR_INVALID_SELECTOR,
   ERR_EXECUTION_FAILED,
   ERR_RUNTIME,
   ERR_RESPONSE_ERROR,
@@ -168,9 +168,9 @@ export class UsageInvoker implements BindingInvoker {
     let command: Command;
     let selectedPath: string[];
     try {
-      ({ command, selectedPath } = resolveCommand(descriptor.root, args.ref));
+      ({ command, selectedPath } = resolveCommand(descriptor.root, args.selector));
     } catch (error: unknown) {
-      invocation.fireError(new InvocationError(ERR_INVALID_REF));
+      invocation.fireError(new InvocationError(ERR_INVALID_SELECTOR));
       return;
     }
 
@@ -328,12 +328,12 @@ export class UsageSynthesizer implements InterfaceSynthesizer, CoverageSynthesiz
     });
     const descriptor = parseDescriptor(text);
     const targets = commandPlans(descriptor).flatMap(({ refs, operationKey, command }) =>
-      refs.map((ref) => ({
-        ref,
+      refs.map((selector) => ({
+        selector,
         operationKey,
         operation: command.help ? { description: command.help } : undefined,
       })));
-    return { targets: targets.sort((a, b) => compare(a.ref, b.ref)), exhaustive: true };
+    return { targets: targets.sort((a, b) => compare(a.selector, b.selector)), exhaustive: true };
   }
 }
 
@@ -408,14 +408,14 @@ function interfaceFromUsage(descriptor: Descriptor, source: Source): OBInterface
       output: { type: "string", "x-ob": { floor: "text" } },
       ...(refs[0]?.includes(" ") ? { tags: refs[0].split(" ").slice(0, -1) } : {}),
     };
-    for (const [index, ref] of refs.entries()) {
+    for (const [index, selector] of refs.entries()) {
       const bindingKey = index === 0
         ? `${operationKey}.default`
         : `${operationKey}.default.alias${index}`;
       iface.bindings![bindingKey] = {
         operation: operationKey,
         source: "default",
-        ...(ref ? { ref } : {}),
+        ...(selector ? { selector } : {}),
       };
     }
   }
@@ -457,7 +457,7 @@ function commandPlans(descriptor: Descriptor): CommandPlan[] {
       const nextPrefixes = refPrefixes.flatMap((prefix) => spellings.map((spelling) => [...prefix, spelling]));
       if (!command.subcommandRequired && command.name) {
         try {
-          const refs = uniquelyResolvableRefs(descriptor, nextPath, nextPrefixes);
+          const refs = uniquelyResolvableSelectors(descriptor, nextPath, nextPrefixes);
           if (refs.length > 0) {
             plans.push({
               refs,
@@ -482,16 +482,16 @@ function commandPlans(descriptor: Descriptor): CommandPlan[] {
   return plans;
 }
 
-function uniquelyResolvableRefs(
+function uniquelyResolvableSelectors(
   descriptor: Descriptor,
   canonicalPath: string[],
   candidates: string[][],
 ): string[] {
   const refs: string[] = [];
   for (const segments of candidates) {
-    const ref = segments.join(" ");
+    const selector = segments.join(" ");
     try {
-      if (samePath(resolveCommand(descriptor.root, ref).canonicalPath, canonicalPath)) refs.push(ref);
+      if (samePath(resolveCommand(descriptor.root, selector).canonicalPath, canonicalPath)) refs.push(selector);
     } catch {
       // The artifact is authoritative about its spellings, but declaration
       // order is not target identity. Ambiguous alternatives are accounted
@@ -506,17 +506,17 @@ function samePath(left: string[], right: string[]): boolean {
 }
 
 function synthesisCoverage(descriptor: Descriptor, iface: OBInterface): SynthesisCoverageEntry[] {
-  const represented = new Map<string, { operationKey: string; bindingRef: string }>();
+  const represented = new Map<string, { operationKey: string; bindingSelector: string }>();
   for (const binding of Object.values(iface.bindings ?? {})) {
-    represented.set(binding.ref ?? "", {
+    represented.set(binding.selector ?? "", {
       operationKey: binding.operation,
-      bindingRef: binding.ref ?? "",
+      bindingSelector: binding.selector ?? "",
     });
   }
   const entries: SynthesisCoverageEntry[] = [];
   const add = (
     sourceRef: string,
-    bindingRef: string,
+    bindingSelector: string,
     scope: "target" | "alternative" | "projection" = "target",
     exclusion?: Omit<SynthesisCoverageEntry, "sourceIndex" | "sourceRef" | "scope">,
   ): void => {
@@ -524,7 +524,7 @@ function synthesisCoverage(descriptor: Descriptor, iface: OBInterface): Synthesi
       entries.push({ sourceIndex: 0, sourceRef, scope, ...exclusion });
       return;
     }
-    const match = represented.get(bindingRef);
+    const match = represented.get(bindingSelector);
     if (match) {
       entries.push({
         sourceIndex: 0,
@@ -609,15 +609,15 @@ function synthesisCoverage(descriptor: Descriptor, iface: OBInterface): Synthesi
       }
       const refs: string[] = [];
       for (const segments of nextPrefixes) {
-        const ref = segments.join(" ");
+        const selector = segments.join(" ");
         try {
-          const resolved = resolveCommand(descriptor.root, ref);
-          if (samePath(resolved.canonicalPath, nextPath)) refs.push(ref);
+          const resolved = resolveCommand(descriptor.root, selector);
+          if (samePath(resolved.canonicalPath, nextPath)) refs.push(selector);
         } catch (error: unknown) {
-          if (error instanceof AmbiguousCommandSpellingError && !ambiguousReported.has(ref)) {
-            ambiguousReported.add(ref);
+          if (error instanceof AmbiguousCommandSpellingError && !ambiguousReported.has(selector)) {
+            ambiguousReported.add(selector);
             add(
-              `ambiguous-ref:${ref}`,
+              `ambiguous-selector:${selector}`,
               "",
               "alternative",
               excluded(
@@ -637,7 +637,7 @@ function synthesisCoverage(descriptor: Descriptor, iface: OBInterface): Synthesi
           "target",
           excluded(
             "excluded",
-            "usage.no_unique_command_ref",
+            "usage.no_unique_command_selector",
             "USAGE-D-03",
             "the command has no spelling path that resolves uniquely through the descriptor",
           ),
@@ -682,7 +682,7 @@ function synthesisCoverage(descriptor: Descriptor, iface: OBInterface): Synthesi
           ),
         );
       } else {
-        for (const ref of refs) add(ref, ref, "target", disposition);
+        for (const selector of refs) add(selector, selector, "target", disposition);
       }
       walk(
         command.commands,
@@ -853,11 +853,11 @@ class AmbiguousCommandSpellingError extends Error {}
 
 function resolveCommand(
   root: Command,
-  ref: string,
+  selector: string,
 ): { command: Command; selectedPath: string[]; canonicalPath: string[] } {
-  const segments = ref === "" ? [] : ref.split(" ");
+  const segments = selector === "" ? [] : selector.split(" ");
   if (segments.some((segment) => segment === "")) {
-    throw new Error(`usage ref ${JSON.stringify(ref)} is malformed: command-path segments are separated by single spaces`);
+    throw new Error(`usage selector ${JSON.stringify(selector)} is malformed: command-path segments are separated by single spaces`);
   }
   let current = root;
   const inherited: Field[] = root.fields.filter((field) => field.global);
@@ -865,10 +865,10 @@ function resolveCommand(
   const canonicalPath: string[] = [];
   for (const [index, segment] of segments.entries()) {
     const matches = current.commands.filter((command) => command.name === segment || command.aliases.includes(segment));
-    if (matches.length === 0) throw new Error(`usage ref segment ${JSON.stringify(segment)} does not resolve`);
+    if (matches.length === 0) throw new Error(`usage selector segment ${JSON.stringify(segment)} does not resolve`);
     if (matches.length > 1) {
       throw new AmbiguousCommandSpellingError(
-        `usage ref segment ${JSON.stringify(segment)} matches ${matches.length} sibling commands (USAGE-D-03)`,
+        `usage selector segment ${JSON.stringify(segment)} matches ${matches.length} sibling commands (USAGE-D-03)`,
       );
     }
     const next = matches[0]!;

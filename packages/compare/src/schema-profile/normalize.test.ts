@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import canonicalize from "canonicalize";
 import { Normalizer } from "./normalize.js";
-import { OutsideProfileError, RefError, SchemaError } from "./errors.js";
+import { OutsideProfileError, SelectorError, SchemaError } from "./errors.js";
 
 describe("Normalizer.normalize", () => {
   it("strips annotation keywords", async () => {
@@ -59,16 +59,16 @@ describe("Normalizer.normalize", () => {
       },
     };
     const n = new Normalizer({ root });
-    await expect(n.normalize({ $ref: "#/schemas/Self" })).rejects.toThrow(RefError);
+    await expect(n.normalize({ $ref: "#/schemas/Self" })).rejects.toThrow(SelectorError);
   });
 
   it("fails a relative $ref with no base", async () => {
     // A path-carrying relative ref cannot resolve without a base; it must
     // fail closed, never silently fall back to root-fragment resolution.
     // Mirrors the Go SDK's TestNormalize_RefResolutionRelativeWithoutBase;
-    // the full message is the parity-pinned RefError rendering.
+    // the full message is the parity-pinned SelectorError rendering.
     const n = new Normalizer({ root: { schemas: { Foo: { type: "string" } } } });
-    await expect(n.normalize({ $ref: "schemas.json#/schemas/Foo" })).rejects.toThrow(RefError);
+    await expect(n.normalize({ $ref: "schemas.json#/schemas/Foo" })).rejects.toThrow(SelectorError);
     await expect(n.normalize({ $ref: "schemas.json#/schemas/Foo" })).rejects.toThrow(
       '<root>.$ref "schemas.json#/schemas/Foo": relative $ref with no base',
     );

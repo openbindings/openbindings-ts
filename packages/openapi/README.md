@@ -59,7 +59,7 @@ const call = invoker.invokeBinding({
     bindingSpec: "openbindings.openapi@1",
     location: "https://api.example.com/openapi.json",
   },
-  ref: "#/paths/~1users~1{id}/get",
+  selector: "#/paths/~1users~1{id}/get",
   context: { bearerToken: "tok_123" },
 });
 

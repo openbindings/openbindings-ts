@@ -1,7 +1,7 @@
 // Binding-specification conformance corpus adapter: runs the spec
 // repository's binding-specs/asyncapi fixtures (ASYNC-D-01..03) through
 // this package's own offline lanes — content load, location grammar, and
-// ref grammar/resolution — under the subcorpus README's verdict semantics:
+// selector grammar/resolution — under the subcorpus README's verdict semantics:
 // valid:false means a conformant openbindings.asyncapi@1 processor refuses
 // the document's family-scoped material at or before bind time, decidable
 // offline with no network and no live source. Positive location-only
@@ -20,7 +20,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { BINDING_SPEC } from "./constants.js";
-import { errorMessage, parseAsyncAPIDocument, parseRef, validateDocumentAddress } from "./util.js";
+import { errorMessage, parseAsyncAPIDocument, parseSelector, validateDocumentAddress } from "./util.js";
 import type { AsyncAPIDocument } from "./asyncapi-types.js";
 
 const FAMILY = "asyncapi";
@@ -41,7 +41,7 @@ const rejectingFetch = (() => {
 // Fixture shapes per conformance/binding-specs/fixture.schema.json. The
 // document is kept as parsed JSON: `content !== undefined` asks member
 // PRESENCE (`content: null` is a present member per the core §7 presence
-// rule), and an omitted binding ref is distinct from a present empty string.
+// rule), and an omitted binding selector is distinct from a present empty string.
 interface CorpusFixture {
   rule: string;
   bindingSpec: string;
@@ -63,7 +63,7 @@ interface CorpusSource {
 }
 interface CorpusBinding {
   source?: string;
-  ref?: string;
+  selector?: string;
 }
 
 /**
@@ -96,7 +96,7 @@ async function judgeDocument(doc: CorpusDocument): Promise<string | undefined> {
       }
     }
 
-    // Ref lane (ASYNC-D-03): ref is REQUIRED (an omitted ref reaches the
+    // Selector lane (ASYNC-D-03): selector is REQUIRED (an omitted selector reaches the
     // invoker as the empty string and is refused by the same grammar);
     // against an embedded artifact the pointer must address an
     // operations-map entry, with Reference Objects resolved through before
@@ -106,7 +106,7 @@ async function judgeDocument(doc: CorpusDocument): Promise<string | undefined> {
       if (b.source !== name) continue;
       let opID: string;
       try {
-        opID = parseRef(b.ref ?? "");
+        opID = parseSelector(b.selector ?? "");
       } catch (e: unknown) {
         return errorMessage(e);
       }

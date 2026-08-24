@@ -296,7 +296,7 @@ describe.skipIf(!dir)("conformance corpus: execution", () => {
 
       const call = opInvoker.invokeBinding({
         source: { bindingSpec: BINDING_SPEC, content: { graphs: { g: fx.graph } } },
-        ref: "#/graphs/g",
+        selector: "#/graphs/g",
         interface: iface as unknown as OBInterface,
       });
 
@@ -314,7 +314,7 @@ describe.skipIf(!dir)("conformance corpus: execution", () => {
           closed = true;
         });
         // The corpus schedule begins writes after graph startup. Yield through
-        // the adapter's asynchronous source/ref/validation startup so an
+        // the adapter's asynchronous source/selector/validation startup so an
         // immediately non-accepting inner session can back-close first.
         await Promise.race([watchClosed, sleep(0)]);
         while (
@@ -477,7 +477,7 @@ describe("loadDocument: location-only sources", () => {
 
     const call = opInvoker.invokeBinding({
       source: { bindingSpec: BINDING_SPEC, location },
-      ref: "#/graphs/g",
+      selector: "#/graphs/g",
       interface: iface,
       fetch: fetch,
     });
@@ -497,7 +497,7 @@ describe("loadDocument: location-only sources", () => {
     // Use a dedicated invoker instance so the docCache is observable in isolation.
     const args = (): Parameters<typeof ogInvoker.invokeBinding>[0] => ({
       source: { bindingSpec: BINDING_SPEC, location },
-      ref: "#/graphs/g",
+      selector: "#/graphs/g",
       interface: iface,
       fetch: fetch,
     });
@@ -518,7 +518,7 @@ describe("loadDocument: location-only sources", () => {
     const fetch = vi.fn(async () => httpResponse("not found", 404));
     const call = opInvoker.invokeBinding({
       source: { bindingSpec: BINDING_SPEC, location: "https://graphs.example.com/missing.json" },
-      ref: "#/graphs/g",
+      selector: "#/graphs/g",
       interface: iface,
       fetch: fetch,
     });
@@ -531,7 +531,7 @@ describe("loadDocument: location-only sources", () => {
     const fetch = vi.fn(async () => httpResponse(huge));
     const call = opInvoker.invokeBinding({
       source: { bindingSpec: BINDING_SPEC, location: "https://graphs.example.com/huge.json" },
-      ref: "#/graphs/g",
+      selector: "#/graphs/g",
       interface: iface,
       fetch: fetch,
     });
@@ -542,7 +542,7 @@ describe("loadDocument: location-only sources", () => {
     const { opInvoker, iface } = makeInvoker(USERS_GET);
     const call = opInvoker.invokeBinding({
       source: { bindingSpec: BINDING_SPEC },
-      ref: "#/graphs/g",
+      selector: "#/graphs/g",
       interface: iface,
     });
     await expect(call.closed).rejects.toMatchObject({ code: ERR_SOURCE_LOAD_FAILED });

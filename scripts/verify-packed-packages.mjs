@@ -108,7 +108,7 @@ const prepared = await new OpenAPIEngine().prepare({
       "200": { description: "ok", content: { "application/json": { schema: { type: "object" } } } },
     } } } },
   } },
-  ref: "#/paths/~1ping/get",
+  selector: "#/paths/~1ping/get",
   fetch: async input => {
     if (String(input) !== "https://api.example.test/ping") throw new Error("packed runtime planned the wrong request");
     return new Response('{"ok":true}', { status: 200, headers: { "content-type": "application/json" } });

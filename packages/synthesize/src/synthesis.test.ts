@@ -25,7 +25,7 @@ describe("shared synthesis behavior", () => {
       openbindings: "0.2.0",
       operations: { run: {} },
       sources: { default: { bindingSpec: "example.spec@1", location: "https://old.example/spec" } },
-      bindings: { "run.default": { operation: "run", source: "default", ref: "run" } },
+      bindings: { "run.default": { operation: "run", source: "default", selector: "run" } },
     };
     expect(finalizeSynthesis(iface, {
       name: "contract",
@@ -62,7 +62,7 @@ describe("shared synthesis behavior", () => {
       openbindings: "0.2.0",
       operations: { getUser: {} },
       sources: { api: { bindingSpec: "example.spec@1", location: "https://example.com/spec" } },
-      bindings: { "getUser.api": { operation: "getUser", source: "api", ref: "#/getUser" } },
+      bindings: { "getUser.api": { operation: "getUser", source: "api", selector: "#/getUser" } },
     };
     const result = finalizeSynthesisCoverage(iface, [
       {
@@ -71,7 +71,7 @@ describe("shared synthesis behavior", () => {
         scope: "target",
         status: "represented",
         operationKey: "getUser",
-        bindingRef: "#/getUser",
+        bindingSelector: "#/getUser",
       },
       {
         sourceIndex: 0,
@@ -103,7 +103,7 @@ describe("shared synthesis behavior", () => {
       openbindings: "0.2.0",
       operations: { getUser: {} },
       sources: { api: { bindingSpec: "example.spec@1", location: "https://example.com/spec" } },
-      bindings: { "getUser.api": { operation: "getUser", source: "api", ref: "#/getUser" } },
+      bindings: { "getUser.api": { operation: "getUser", source: "api", selector: "#/getUser" } },
     };
     const result = finalizeSynthesisCoverage(iface, [
       {
@@ -112,7 +112,7 @@ describe("shared synthesis behavior", () => {
         scope: "target",
         status: "represented",
         operationKey: "getUser",
-        bindingRef: "#/getUser",
+        bindingSelector: "#/getUser",
       },
       {
         sourceIndex: 0,
@@ -133,7 +133,7 @@ describe("shared synthesis behavior", () => {
       openbindings: "0.2.0",
       operations: { getUser: {} },
       sources: { api: { bindingSpec: "example.spec@1", location: "https://example.com/spec" } },
-      bindings: { "getUser.api": { operation: "getUser", source: "api", ref: "#/getUser" } },
+      bindings: { "getUser.api": { operation: "getUser", source: "api", selector: "#/getUser" } },
     };
     expect(() => finalizeSynthesisCoverage(iface, [{
       sourceIndex: 0,
@@ -141,7 +141,7 @@ describe("shared synthesis behavior", () => {
       scope: "target",
       status: "represented",
       operationKey: "getUser",
-      bindingRef: "#/missing",
+      bindingSelector: "#/missing",
     }], true)).toThrow(/no matching binding/);
   });
 
@@ -150,7 +150,7 @@ describe("shared synthesis behavior", () => {
       openbindings: "0.2.0",
       operations: { getUser: {} },
       sources: { api: { bindingSpec: "example.spec@1", location: "https://example.com/spec" } },
-      bindings: { "getUser.api": { operation: "getUser", source: "api", ref: "#/getUser" } },
+      bindings: { "getUser.api": { operation: "getUser", source: "api", selector: "#/getUser" } },
     };
     const result = finalizeSynthesisCoverage(iface, representedCoverageEntries(iface, 0), false);
     expect(result.coverage.fullyRepresented).toBe(false);
@@ -164,7 +164,7 @@ describe("shared synthesis behavior", () => {
       openbindings: "0.2.0",
       operations: { getUser: {} },
       sources: { api: { bindingSpec: "example.spec@1", location: "https://example.com/spec" } },
-      bindings: { "getUser.api": { operation: "getUser", source: "api", ref: "#/getUser" } },
+      bindings: { "getUser.api": { operation: "getUser", source: "api", selector: "#/getUser" } },
     };
     const result = finalizeSynthesisCoverage(
       iface,

@@ -11,8 +11,8 @@ import type { BindingSpecInfo } from "@openbindings/core";
 import type { BindingInvocationArgs, BindingInvoker, Invocation, OperationInvoker } from "@openbindings/invoke";
 import { isHttpUrl } from "@openbindings/core";
 import {
-  ERR_INVALID_REF,
-  ERR_REF_NOT_FOUND,
+  ERR_INVALID_SELECTOR,
+  ERR_SELECTOR_NOT_FOUND,
   ERR_RUNTIME,
   ERR_SOURCE_LOAD_FAILED,
   ERR_UNSUPPORTED_FORMAT_VERSION,
@@ -22,7 +22,7 @@ import {
 } from "@openbindings/invoke";
 import { BINDING_SPEC } from "./constants.js";
 import { Engine } from "./engine.js";
-import { RefError, resolveRef } from "./jsonpointer.js";
+import { SelectorError, resolveSelector } from "./jsonpointer.js";
 import { SchemaCache } from "./state.js";
 import { graphFromValue, type Graph } from "./types.js";
 import { SEMVER_RE, checkVersion, validate } from "./validate.js";
@@ -58,7 +58,7 @@ export class OperationGraphInvoker implements BindingInvoker {
    * graph's input node, rooting a lineage) and graph events stream out
    * through the output side.
    *
-   * Pre-flight failures (source load, ref resolution, version refusal per
+   * Pre-flight failures (source load, selector resolution, version refusal per
    * OG-T-02, validation per OG-T-01) surface as a terminal error without
    * consuming any caller input.
    */
@@ -81,14 +81,14 @@ export class OperationGraphInvoker implements BindingInvoker {
       return;
     }
 
-    // The ref is a REQUIRED JSON Pointer fragment addressing the graph
+    // The selector is a REQUIRED JSON Pointer fragment addressing the graph
     // definition within the (otherwise unconstrained) host document.
     let graph: Graph;
     try {
-      graph = graphFromValue(resolveRef(doc, args.ref));
+      graph = graphFromValue(resolveSelector(doc, args.selector));
     } catch (err) {
-      if (err instanceof RefError) {
-        inv.fireError(new InvocationError(err.invalid ? ERR_INVALID_REF : ERR_REF_NOT_FOUND));
+      if (err instanceof SelectorError) {
+        inv.fireError(new InvocationError(err.invalid ? ERR_INVALID_SELECTOR : ERR_SELECTOR_NOT_FOUND));
       } else {
         inv.fireError(new InvocationError(ERR_VALIDATION_FAILED));
       }

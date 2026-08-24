@@ -48,7 +48,7 @@ export class ExecutableDocument {
       operation = this.operations[0]!;
     }
     if (operation.kind !== wantKind) {
-      throw new Error(`selected operation kind ${JSON.stringify(operation.kind)} does not match binding ref kind ${JSON.stringify(wantKind)}`);
+      throw new Error(`selected operation kind ${JSON.stringify(operation.kind)} does not match binding selector kind ${JSON.stringify(wantKind)}`);
     }
     const rootName = rootTypeName(schema, wantKind);
     if (!rootName) throw new Error(`schema has no ${wantKind} root type`);
@@ -60,7 +60,7 @@ export class ExecutableDocument {
     for (const fields of groups.values()) {
       for (const field of fields) {
         if (field !== wantField) {
-          throw new Error(`selected root field ${JSON.stringify(field)} does not match binding ref field ${JSON.stringify(wantField)}`);
+          throw new Error(`selected root field ${JSON.stringify(field)} does not match binding selector field ${JSON.stringify(wantField)}`);
         }
       }
     }

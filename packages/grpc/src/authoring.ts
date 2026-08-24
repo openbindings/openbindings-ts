@@ -162,9 +162,9 @@ export function protobufInterface(
     for (const method of Object.values(service.methods).sort((a, b) => codePointCompare(a.name, b.name))) {
       if (!includeClientStreaming && method.requestStream) continue;
       if (boundMethodRangeError(root, method)) continue;
-      const ref = `${qualifiedName(service)}/${method.name}`;
+      const selector = `${qualifiedName(service)}/${method.name}`;
       const operationKey = resolveKey(sanitizeKey(method.name), service.name, used);
-      used.set(operationKey, ref);
+      used.set(operationKey, selector);
       const operation: Operation = {};
       if (method.comment) operation.description = method.comment.trim();
       const requestType = root.lookupType(method.requestType);
@@ -172,7 +172,7 @@ export function protobufInterface(
       operation.input = new SchemaWalker("input", onWarning, `operations.${operationKey}.input`).root(requestType);
       operation.output = new SchemaWalker("output", onWarning, `operations.${operationKey}.output`).root(responseType);
       iface.operations[operationKey] = operation;
-      iface.bindings![`${operationKey}.default`] = { operation: operationKey, source: "default", ref };
+      iface.bindings![`${operationKey}.default`] = { operation: operationKey, source: "default", selector };
     }
   }
   if (services.length === 1) iface.name = services[0]!.name;
@@ -187,11 +187,11 @@ export function inspectProtobuf(root: protobuf.Root, includeClientStreaming: boo
     for (const method of Object.values(service.methods).sort((a, b) => codePointCompare(a.name, b.name))) {
       if (!includeClientStreaming && method.requestStream) continue;
       if (boundMethodRangeError(root, method)) continue;
-      const ref = `${qualifiedName(service)}/${method.name}`;
+      const selector = `${qualifiedName(service)}/${method.name}`;
       const operationKey = resolveKey(sanitizeKey(method.name), service.name, used);
-      used.set(operationKey, ref);
+      used.set(operationKey, selector);
       const description = method.comment?.trim();
-      targets.push({ ref, operationKey, operation: description ? { description } : undefined });
+      targets.push({ selector, operationKey, operation: description ? { description } : undefined });
     }
   }
   return { targets, exhaustive: true };

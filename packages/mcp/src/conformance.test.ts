@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  ERR_REF_NOT_FOUND,
+  ERR_SELECTOR_NOT_FOUND,
   ERR_SOURCE_LOAD_FAILED,
   single,
   type Invocation,
@@ -46,7 +46,7 @@ describe("openbindings.mcp@1 pinned artifact conformance", () => {
     ["missing identity", { tools: [{ outputSchema: {} }] }],
   ])("refuses invalid pinned content before I/O: %s", async (_name, content) => {
     const fixture = server();
-    const call = new MCPInvoker().invokeBinding({ source: { ...source, content }, ref: "tools/probe", fetch: fixture.fn });
+    const call = new MCPInvoker().invokeBinding({ source: { ...source, content }, selector: "tools/probe", fetch: fixture.fn });
     const result = await drain(call);
     expect(result.values).toEqual([]);
     expect(result.error).toMatchObject({ code: ERR_SOURCE_LOAD_FAILED });
@@ -56,7 +56,7 @@ describe("openbindings.mcp@1 pinned artifact conformance", () => {
   it("lets the pin answer resolution and never consults live listings", async () => {
     const fixture = server();
     const content = { tools: [{ name: "probe", inputSchema: { type: "object" }, outputSchema: { type: "object", properties: { value: { type: "string" } }, required: ["value"] } }] };
-    const call = new MCPInvoker().invokeBinding({ source: { ...source, content }, ref: "tools/probe", fetch: fixture.fn });
+    const call = new MCPInvoker().invokeBinding({ source: { ...source, content }, selector: "tools/probe", fetch: fixture.fn });
     await call.write({ q: 1 });
     await expect(single(call.outputs)).resolves.toEqual({ value: "probe" });
     expect(fixture.count("tools/list")).toBe(0);
@@ -68,10 +68,10 @@ describe("openbindings.mcp@1 pinned artifact conformance", () => {
     ["ambiguous", { tools: [{ name: "probe", outputSchema: {} }, { name: "probe", outputSchema: {} }] }, "tools/probe"],
     ["missing application contract", { tools: [{ name: "probe" }] }, "tools/probe"],
     ["resource inventory", { resources: [{ uri: "app://x" }] }, "resources/app://x"],
-  ])("refuses %s offline", async (_name, content, ref) => {
+  ])("refuses %s offline", async (_name, content, selector) => {
     const fixture = server();
-    const call = new MCPInvoker().invokeBinding({ source: { ...source, content }, ref, fetch: fixture.fn });
-    await expect(call.closed).rejects.toMatchObject({ code: ERR_REF_NOT_FOUND });
+    const call = new MCPInvoker().invokeBinding({ source: { ...source, content }, selector, fetch: fixture.fn });
+    await expect(call.closed).rejects.toMatchObject({ code: ERR_SELECTOR_NOT_FOUND });
     expect(fixture.fetches()).toBe(0);
   });
 });
@@ -79,7 +79,7 @@ describe("openbindings.mcp@1 pinned artifact conformance", () => {
 describe("openbindings.mcp@1 live artifact conformance", () => {
   it("follows listing pagination to exhaustion before resolving", async () => {
     const fixture = server({ pageSize: 1 });
-    const call = new MCPInvoker().invokeBinding({ source, ref: "tools/last", fetch: fixture.fn });
+    const call = new MCPInvoker().invokeBinding({ source, selector: "tools/last", fetch: fixture.fn });
     await call.write({});
     await expect(single(call.outputs)).resolves.toEqual({ value: "last" });
     expect(fixture.count("tools/list")).toBe(2);
@@ -87,7 +87,7 @@ describe("openbindings.mcp@1 live artifact conformance", () => {
 
   it("omits an absent arguments member", async () => {
     const fixture = server();
-    const call = new MCPInvoker().invokeBinding({ source, ref: "tools/probe", fetch: fixture.fn });
+    const call = new MCPInvoker().invokeBinding({ source, selector: "tools/probe", fetch: fixture.fn });
     await call.close();
     await expect(single(call.outputs)).resolves.toEqual({ value: "probe" });
     expect(fixture.params("tools/call")[0]).not.toHaveProperty("arguments");
@@ -97,7 +97,7 @@ describe("openbindings.mcp@1 live artifact conformance", () => {
     const fixture = server();
     const call = new MCPInvoker({ solicitProgress: true }).invokeBinding({
       source,
-      ref: "tools/probe",
+      selector: "tools/probe",
       context: { configuration: { solicit: true } },
       fetch: fixture.fn,
     });
@@ -108,13 +108,13 @@ describe("openbindings.mcp@1 live artifact conformance", () => {
 
   it("keeps resources and prompts in inventory but excludes them as operations", async () => {
     const fixture = server();
-    const resource = new MCPInvoker().invokeBinding({ source, ref: "resources/app://x", fetch: fixture.fn });
-    await expect(resource.closed).rejects.toMatchObject({ code: ERR_REF_NOT_FOUND });
+    const resource = new MCPInvoker().invokeBinding({ source, selector: "resources/app://x", fetch: fixture.fn });
+    await expect(resource.closed).rejects.toMatchObject({ code: ERR_SELECTOR_NOT_FOUND });
     expect(fixture.count("resources/read")).toBe(0);
 
-    const prompt = new MCPInvoker().invokeBinding({ source, ref: "prompts/review", fetch: fixture.fn });
+    const prompt = new MCPInvoker().invokeBinding({ source, selector: "prompts/review", fetch: fixture.fn });
     await prompt.close();
-    await expect(prompt.closed).rejects.toMatchObject({ code: ERR_REF_NOT_FOUND });
+    await expect(prompt.closed).rejects.toMatchObject({ code: ERR_SELECTOR_NOT_FOUND });
     expect(fixture.count("prompts/get")).toBe(0);
   });
 });

@@ -22,11 +22,11 @@ import {
   operationExclusion,
 } from "./synthesize.js";
 import { defaultServer, effectiveServers } from "./target.js";
-import { codePointCompare, operationRef } from "./util.js";
+import { codePointCompare, operationSelector } from "./util.js";
 
 interface BindingIdentity {
   operationKey: string;
-  bindingRef: string;
+  bindingSelector: string;
 }
 
 interface ObservedMessage {
@@ -42,9 +42,9 @@ export function synthesisCoverage(
   const bindingSpec = iface.sources?.[DEFAULT_SOURCE_NAME]?.bindingSpec ?? BINDING_SPEC;
   const represented = new Map<string, BindingIdentity>();
   for (const binding of Object.values(iface.bindings ?? {})) {
-    represented.set(binding.ref ?? "", {
+    represented.set(binding.selector ?? "", {
       operationKey: binding.operation,
-      bindingRef: binding.ref ?? "",
+      bindingSelector: binding.selector ?? "",
     });
   }
 
@@ -52,15 +52,15 @@ export function synthesisCoverage(
   const operations = Object.entries(doc.operations ?? {})
     .sort(([a], [b]) => codePointCompare(a, b));
   for (const [operationID, operation] of operations) {
-    const ref = operationRef(operationID);
-    const identity = represented.get(ref);
+    const selector = operationSelector(operationID);
+    const identity = represented.get(selector);
     const exclusion = operationExclusion(doc, operation, operationID, bindingSpec);
     if (exclusion) {
-      entries.push(coverageExclusion(ref, "target", exclusion));
+      entries.push(coverageExclusion(selector, "target", exclusion));
     } else if (!identity) {
       entries.push({
         sourceIndex: 0,
-        sourceRef: ref,
+        sourceRef: selector,
         scope: "target",
         status: "implementation-unsupported",
         reasonCode: "asyncapi.missing_emitted_binding",
@@ -69,7 +69,7 @@ export function synthesisCoverage(
     } else {
       entries.push({
         sourceIndex: 0,
-        sourceRef: ref,
+        sourceRef: selector,
         scope: "target",
         status: "represented",
         ...identity,
@@ -79,16 +79,16 @@ export function synthesisCoverage(
 
     const channel = operation.channel;
     if (!channel || typeof (channel as unknown as Record<string, unknown>)["$ref"] === "string") continue;
-    for (const candidate of governingMessageInventory(operation, channel, `${ref}#message`)) {
+    for (const candidate of governingMessageInventory(operation, channel, `${selector}#message`)) {
       entries.push(messageCoverage(doc, candidate, identity, exclusion));
     }
     if (operation.reply) {
-      for (const candidate of replyMessageInventory(operation, `${ref}#reply-message`)) {
+      for (const candidate of replyMessageInventory(operation, `${selector}#reply-message`)) {
         entries.push(messageCoverage(doc, candidate, identity, exclusion));
       }
     }
     for (const [index, member] of effectiveServers(doc, channel).entries()) {
-      const sourceRef = `${ref}#server[${index}]=${member.name}`;
+      const sourceRef = `${selector}#server[${index}]=${member.name}`;
       if (identity) {
         entries.push({
           sourceIndex: 0,

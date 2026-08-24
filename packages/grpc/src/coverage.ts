@@ -11,24 +11,24 @@ export function protobufSynthesisCoverage(
   requirements: string[] = [],
 ): SynthesisCoverageEntry[] {
   if (!root) return [];
-  const byRef = new Map<string, { operationKey: string; bindingRef: string }>();
-  const byOperation = new Map<string, { operationKey: string; bindingRef: string }>();
+  const bySelector = new Map<string, { operationKey: string; bindingSelector: string }>();
+  const byOperation = new Map<string, { operationKey: string; bindingSelector: string }>();
   for (const binding of Object.values(iface.bindings ?? {})) {
-    if (!binding.ref) continue;
-    const identity = { operationKey: binding.operation, bindingRef: binding.ref };
-    byRef.set(binding.ref, identity);
+    if (!binding.selector) continue;
+    const identity = { operationKey: binding.operation, bindingSelector: binding.selector };
+    bySelector.set(binding.selector, identity);
     byOperation.set(binding.operation, identity);
   }
 
   const entries: SynthesisCoverageEntry[] = [];
   for (const service of collectServices(root)) {
     for (const method of Object.values(service.methods).sort((a, b) => compare(a.name, b.name))) {
-      const ref = `${qualifiedName(service)}/${method.name}`;
+      const selector = `${qualifiedName(service)}/${method.name}`;
       const reason = boundMethodRangeError(root, method);
       if (reason) {
         entries.push({
           sourceIndex: 0,
-          sourceRef: ref,
+          sourceRef: selector,
           scope: "target",
           status: "excluded",
           reasonCode: "grpc.schema_range",
@@ -37,11 +37,11 @@ export function protobufSynthesisCoverage(
         });
         continue;
       }
-      const identity = byRef.get(ref);
+      const identity = bySelector.get(selector);
       if (!identity) {
         entries.push({
           sourceIndex: 0,
-          sourceRef: ref,
+          sourceRef: selector,
           scope: "target",
           status: "implementation-unsupported",
           reasonCode: "grpc.missing_emitted_binding",
@@ -51,11 +51,11 @@ export function protobufSynthesisCoverage(
       }
       entries.push({
         sourceIndex: 0,
-        sourceRef: ref,
+        sourceRef: selector,
         scope: "target",
         status: "represented",
         operationKey: identity.operationKey,
-        bindingRef: identity.bindingRef,
+        bindingSelector: identity.bindingSelector,
         requirements: [...requirements],
       });
     }
@@ -65,11 +65,11 @@ export function protobufSynthesisCoverage(
     if (!identity) continue;
     entries.push({
       sourceIndex: 0,
-      sourceRef: `${identity.bindingRef}::projection::${warning.path ?? ""}::${warning.code}::${index}`,
+      sourceRef: `${identity.bindingSelector}::projection::${warning.path ?? ""}::${warning.code}::${index}`,
       scope: "projection",
       status: "lossy",
       operationKey: identity.operationKey,
-      bindingRef: identity.bindingRef,
+      bindingSelector: identity.bindingSelector,
       reasonCode: warning.code,
       message: warning.message,
       details: warning.details,
@@ -80,8 +80,8 @@ export function protobufSynthesisCoverage(
 
 function warningIdentity(
   path: string | undefined,
-  byOperation: Map<string, { operationKey: string; bindingRef: string }>,
-): { operationKey: string; bindingRef: string } | undefined {
+  byOperation: Map<string, { operationKey: string; bindingSelector: string }>,
+): { operationKey: string; bindingSelector: string } | undefined {
   if (!path) return undefined;
   for (const [operationKey, identity] of byOperation) {
     if (path === `operations.${operationKey}.input` || path === `operations.${operationKey}.output`) return identity;

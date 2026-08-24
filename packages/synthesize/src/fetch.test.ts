@@ -30,7 +30,7 @@ function coverageSynthesizer(): CoverageSynthesizer {
       source: { bindingSpec: "fake.coverage@1", location: "https://api.example.com/" },
     },
     bindings: {
-      "ping.source": { operation: "ping", source: "source", ref: "ping" },
+      "ping.source": { operation: "ping", source: "source", selector: "ping" },
     },
   };
   return {
@@ -45,7 +45,7 @@ function coverageSynthesizer(): CoverageSynthesizer {
         status: "represented",
         operationKey: "ping",
         bindingKey: "ping.source",
-        bindingRef: "ping",
+        bindingSelector: "ping",
       }], true),
   };
 }

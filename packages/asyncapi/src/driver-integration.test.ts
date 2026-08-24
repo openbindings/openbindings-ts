@@ -22,7 +22,7 @@ describe("OpenBindings to standalone AsyncAPI driver bridge", () => {
     const invoker = new AsyncAPIInvoker(new AsyncAPIEngine({ drivers: [driver] }));
     const call = invoker.invokeBinding({
       source: { bindingSpec: BINDING_SPEC, content: mqttArtifact() },
-      ref: "#/operations/publish",
+      selector: "#/operations/publish",
     });
     await call.write({ id: 7 });
     await call.close();
