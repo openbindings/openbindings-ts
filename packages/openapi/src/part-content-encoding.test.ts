@@ -193,7 +193,7 @@ export async function assertContentEncodingChangesOnlyTheDeclaredStringRow(
 
 describe("part content-encoding case table", () => {
   const table = loadPartContentEncodingTable(
-    readFileSync(new URL("./testdata/part-content-encoding-cases.json", import.meta.url)),
+    readFileSync(new URL("../testdata/part-content-encoding-cases.json", import.meta.url)),
   );
 
   it("has the 768 shared cells", () => {

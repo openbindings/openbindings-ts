@@ -31,9 +31,10 @@ import {
   type FloorOp,
 } from "@openbindings/openapi-client/analysis";
 import {
-  BINDING_SPEC,
   hasMediaFidelity,
   hasRoutedInputs,
+  isImplementedOpenAPIBindingSpec,
+  openAPIRule,
   profileForBindingSpec,
 } from "./constants.js";
 
@@ -56,14 +57,11 @@ export function openAPISynthesisCoverage(
     if (binding.selector) bySelector.set(binding.selector, { operationKey: binding.operation, selector: binding.selector });
   }
   const source = Object.values(iface.sources ?? {})
-    .find((candidate) => candidate.bindingSpec === BINDING_SPEC
-      || candidate.bindingSpec === BINDING_SPEC
-      || candidate.bindingSpec === BINDING_SPEC
-      || candidate.bindingSpec === BINDING_SPEC
-      || candidate.bindingSpec === BINDING_SPEC
-      || candidate.bindingSpec === BINDING_SPEC);
+    .find((candidate) => isImplementedOpenAPIBindingSpec(candidate.bindingSpec));
+  // Coverage cannot make a family claim without an exact warranted source.
+  if (!source) return [];
   const sourceLocation = source?.location ?? "";
-  const bindingSpec = source?.bindingSpec ?? BINDING_SPEC;
+  const bindingSpec = source.bindingSpec;
 
   // The walk is driven from the UNION of the loaded document's path×method
   // inventory and the acceptance floor's raw-tree inventory (block 8d design
@@ -316,7 +314,7 @@ function requestMediaCoverage(
       scope: "alternative",
       status: "excluded",
       reasonCode: collision ? "openapi.flattening_collision" : "openapi.request_media_excluded",
-      rule: collision ? "OAPI-P-03" : "OAPI-P-04",
+      rule: openAPIRule(bindingSpec, collision ? "P-02" : "P-03"),
       message,
       details: { mediaType },
     };
@@ -384,7 +382,7 @@ function excludedReverseInteraction(sourceRef: string): SynthesisCoverageEntry {
     status: "excluded",
     reasonCode: "openapi.reverse_direction",
     rule: "OAPI-D-03",
-    message: "callbacks and webhooks describe service-to-consumer requests outside openbindings.openapi@1",
+    message: "callbacks and webhooks describe service-to-consumer requests outside the registered OpenAPI family specifications",
   };
 }
 

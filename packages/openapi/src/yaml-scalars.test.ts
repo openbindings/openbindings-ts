@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { OpenAPISynthesizer } from "./invoker.js";
+import { OpenAPISynthesizer } from "./test-helpers.js";
 
 // A declared example crosses into the OBI as the value the artifact wrote.
 // String content parses as YAML 1.2.2, whose core tag resolution (§10.3.2)
@@ -39,7 +39,7 @@ paths:
   const emittedExample = async (spelling: string): Promise<unknown> => {
     const result = await new OpenAPISynthesizer().synthesizeInterfaceWithCoverage({
       sources: [{
-        bindingSpec: "openbindings.openapi@1",
+        bindingSpec: "openbindings.openapi-3.1@1",
         location: "https://scalars.example/openapi.yaml",
         content: document(spelling),
       }],
@@ -80,7 +80,7 @@ paths:
     async (spelling) => {
       await expect(new OpenAPISynthesizer().synthesizeInterfaceWithCoverage({
         sources: [{
-          bindingSpec: "openbindings.openapi@1",
+          bindingSpec: "openbindings.openapi-3.1@1",
           location: "https://scalars.example/openapi.yaml",
           content: document(spelling),
         }],

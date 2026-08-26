@@ -12,10 +12,11 @@ import type { OBInterface } from "@openbindings/core";
  * skips what it does not understand reports green having verified none of it.
  * `synthesisscenarios.Format` in openbindings-go is the twin.
  */
-export const SYNTHESIS_SCENARIO_FORMAT = "openbindings.binding-spec-synthesis-scenarios@4";
+export const SYNTHESIS_SCENARIO_FORMAT = "openbindings.binding-spec-synthesis-scenarios@5";
+const LEGACY_SYNTHESIS_SCENARIO_FORMAT = "openbindings.binding-spec-synthesis-scenarios@4";
 
 export interface SynthesisScenarioFile {
-  format: typeof SYNTHESIS_SCENARIO_FORMAT;
+  format: typeof SYNTHESIS_SCENARIO_FORMAT | typeof LEGACY_SYNTHESIS_SCENARIO_FORMAT;
   bindingSpec: string;
   family: string;
   description: string;
@@ -46,7 +47,7 @@ export function parseSynthesisScenarioFile(raw: unknown, family: string): Synthe
     throw new Error(`${family}: malformed synthesis family file`);
   }
   const file = raw as Partial<SynthesisScenarioFile>;
-  if (file.format !== SYNTHESIS_SCENARIO_FORMAT) {
+  if (file.format !== SYNTHESIS_SCENARIO_FORMAT && file.format !== LEGACY_SYNTHESIS_SCENARIO_FORMAT) {
     throw new Error(
       `${family}: unsupported synthesis scenario format ${JSON.stringify(file.format)}`,
     );

@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { type InvocationError } from "@openbindings/invoke";
-import { BINDING_SPEC } from "./constants.js";
-import { OpenAPIInvoker } from "./invoker.js";
+import { BINDING_SPEC_OPENAPI_31 as BINDING_SPEC } from "./constants.js";
+import { OpenAPIInvoker } from "./test-helpers.js";
 import { governingResponseMediaMatch } from "./media.js";
-import { convertToInterface } from "./synthesize.js";
+import { convertToInterface } from "./test-helpers.js";
 
 function responseDocument(
   openapi: string,
@@ -45,7 +45,7 @@ async function invokeResponse(
   return { outputs, error };
 }
 
-describe("openbindings.openapi@1 response carriage", () => {
+describe("openbindings.openapi-3.1@1 response carriage", () => {
   it("emits exact OAS 3.0 binary response octets as canonical Base64", async () => {
     const spec = responseDocument("3.0.4", {
       "image/png": { schema: { type: "string", format: "binary" } },

@@ -72,7 +72,7 @@ describe("portable synthesis corpus revision", () => {
     for (const format of [
       "openbindings.binding-spec-synthesis-scenarios@2",
       "openbindings.binding-spec-synthesis-scenarios@3",
-      "openbindings.binding-spec-synthesis-scenarios@5",
+      "openbindings.binding-spec-synthesis-scenarios@6",
       undefined,
     ]) {
       expect(() => parseSynthesisScenarioFile({ ...wellFormed, format }, "openapi"))

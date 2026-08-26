@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import jsonata from "jsonata";
 import { type OBInterface } from "@openbindings/core";
 import {
   OperationInvoker,
@@ -7,7 +8,7 @@ import {
   resolveOperationRequirement,
   single,
 } from "@openbindings/invoke";
-import { OpenAPIInvoker, OpenAPISynthesizer } from "./invoker.js";
+import { OpenAPIInvoker, OpenAPISynthesizer } from "./test-helpers.js";
 
 type CreateTaskInput = { title: string };
 type CreateTaskOutput = { id: string };
@@ -78,11 +79,14 @@ describe("operation requirement — synthesized OpenAPI vertical slice", () => {
 
     const candidate = await new OpenAPISynthesizer().synthesizeInterface({
       sources: [{
-        bindingSpec: "openbindings.openapi@1",
+        bindingSpec: "openbindings.openapi-3.1@1",
         content: OPENAPI,
       }],
     });
-    const invoker = new OperationInvoker([new OpenAPIInvoker()], { fetch });
+    const invoker = new OperationInvoker([new OpenAPIInvoker()], {
+      fetch,
+      transformEvaluator: { evaluate: (expression, data) => jsonata(expression).evaluate(data) },
+    });
     const requirement = operationRequirement(
       REQUIRED,
       operationSignature<CreateTaskInput, CreateTaskOutput>("example.tasks.create"),

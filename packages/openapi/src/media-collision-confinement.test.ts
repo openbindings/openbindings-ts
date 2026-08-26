@@ -12,7 +12,7 @@
 // of the BUILT dist, which is what this package ships.
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { OpenAPISynthesizer } from "./invoker.js";
+import { OpenAPISynthesizer } from "./test-helpers.js";
 import { governingResponseMedia, successMediaTypes } from "./media.js";
 
 interface MediaCollisionCase {
@@ -64,7 +64,7 @@ function requestDocument(fixture: MediaCollisionCase): Record<string, unknown> {
 
 async function assertRequestCell(fixture: MediaCollisionCase): Promise<void> {
   const result = await new OpenAPISynthesizer().synthesizeInterfaceWithCoverage({
-    sources: [{ bindingSpec: "openbindings.openapi@1", content: JSON.stringify(requestDocument(fixture)) }],
+    sources: [{ bindingSpec: "openbindings.openapi-3.1@1", content: JSON.stringify(requestDocument(fixture)) }],
   });
   const target = result.coverage.entries.find((entry) => entry.scope === "target");
   expect(target, "no target coverage entry emitted").toBeDefined();
@@ -82,7 +82,10 @@ async function assertRequestCell(fixture: MediaCollisionCase): Promise<void> {
     expect(operationPresent, "operation present, want the target excluded").toBe(false);
     expect(target!.status).toBe("excluded");
     expect(target!.reasonCode).toBe(fixture.targetReasonCode);
-    expect(target!.rule).toBe(fixture.targetRule);
+    const targetRule = fixture.targetRule === "OAPI-P-04"
+      ? fixture.openapi.startsWith("3.0.") ? "OAPI30-P-03" : "OAPI31-P-03"
+      : fixture.targetRule;
+    expect(target!.rule).toBe(targetRule);
   }
 
   const represented = fixture.represented ?? [];
@@ -98,10 +101,10 @@ async function assertRequestCell(fixture: MediaCollisionCase): Promise<void> {
     expect(entry, `no alternative entry for ${mediaKey}`).toBeDefined();
     expect(entry!.status).toBe("excluded");
     // The reason vocabulary is unchanged by confinement: a colliding
-    // alternative is the OAPI-P-04 media exclusion, never OAPI-P-03's
+    // alternative is the family-specific media exclusion, never the
     // parameter-boundary flattening collision.
     expect(entry!.reasonCode).toBe("openapi.request_media_excluded");
-    expect(entry!.rule).toBe("OAPI-P-04");
+    expect(entry!.rule).toBe(fixture.openapi.startsWith("3.0.") ? "OAPI30-P-03" : "OAPI31-P-03");
     expect(entry!.message, "the exclusion must name the colliding identity")
       .toContain(fixture.collidingIdentity);
   }

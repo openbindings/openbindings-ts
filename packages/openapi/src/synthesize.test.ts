@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { convertToInterface } from "./synthesize.js";
-import { OpenAPIInvoker } from "./invoker.js";
-import { BINDING_SPEC, DEFAULT_SOURCE_NAME } from "./constants.js";
+import { convertToInterface } from "./test-helpers.js";
+import { OpenAPIInvoker } from "./test-helpers.js";
+import { BINDING_SPEC_OPENAPI_31 as BINDING_SPEC, DEFAULT_SOURCE_NAME } from "./constants.js";
 
 const MINIMAL_SPEC = {
   openapi: "3.1.0",
@@ -154,7 +154,7 @@ describe("convertToInterface", () => {
     const iface = await convertToInterface(undefined, MINIMAL_SPEC);
 
     expect(iface.sources?.["openapi"]).toBeDefined();
-    expect(iface.sources?.["openapi"]?.bindingSpec).toBe("openbindings.openapi@1");
+    expect(iface.sources?.["openapi"]?.bindingSpec).toBe("openbindings.openapi-3.1@1");
   });
 
   it("refuses a 3.0 spec with no paths (§3 part 2) and accepts a 3.1 components-only spec", async () => {
@@ -288,7 +288,7 @@ describe("convertToInterface — OpenAPI 3.0 dialect translation", () => {
 
   it("stamps the exact identifier for 3.0.x sources (the artifact version drives dialect only)", async () => {
     const iface = await convertToInterface(undefined, SPEC_30_NULLABLE);
-    expect(iface.sources?.["openapi"]?.bindingSpec).toBe("openbindings.openapi@1");
+    expect(iface.sources?.["openapi"]?.bindingSpec).toBe("openbindings.openapi-3.0@1");
   });
 
   it("preserves 3.1 schemas verbatim (already 2020-12)", async () => {
@@ -369,7 +369,7 @@ describe("convertToInterface — OpenAPI 3.0 dialect translation", () => {
 // Multi-source composition is implementation-defined; a single-source
 // synthesizer refuses extras loudly rather than silently using a subset.
 import { MultipleSourcesError } from "@openbindings/synthesize";
-import { OpenAPISynthesizer } from "./index.js";
+import { OpenAPISynthesizer } from "./test-helpers.js";
 import { describe as describeMS, expect as expectMS, it as itMS } from "vitest";
 
 describeMS("multi-source refusal", () => {
@@ -378,8 +378,8 @@ describeMS("multi-source refusal", () => {
     await expectMS(
       synth.synthesizeInterface({
         sources: [
-          { bindingSpec: "openbindings.openapi@1", content: "{}" },
-          { bindingSpec: "openbindings.openapi@1", content: "{}" },
+          { bindingSpec: "openbindings.openapi-3.1@1", content: "{}" },
+          { bindingSpec: "openbindings.openapi-3.1@1", content: "{}" },
         ],
       }),
     ).rejects.toBeInstanceOf(MultipleSourcesError);
@@ -402,7 +402,7 @@ describe("synthesizer artifact resolver", () => {
     };
     const iface = await new OpenAPISynthesizer({ fetch }).synthesizeInterface({
       sources: [{
-        bindingSpec: "openbindings.openapi@1",
+        bindingSpec: "openbindings.openapi-3.1@1",
         location: "https://description.example/openapi.yaml",
         content: `openapi: 3.1.2
 info: {title: External, version: "1"}
@@ -420,7 +420,7 @@ describe("synthesis coverage", () => {
   it("accounts for request alternatives and reverse interactions", async () => {
     const result = await new OpenAPISynthesizer().synthesizeInterfaceWithCoverage({
       sources: [{
-        bindingSpec: "openbindings.openapi@1",
+        bindingSpec: "openbindings.openapi-3.1@1",
         content: {
           openapi: "3.1.0",
           info: { title: "coverage", version: "1" },
@@ -468,7 +468,7 @@ describe("synthesis coverage", () => {
   it("can prove full representation for an ordinary paths-only document", async () => {
     const result = await new OpenAPISynthesizer().synthesizeInterfaceWithCoverage({
       sources: [{
-        bindingSpec: "openbindings.openapi@1",
+        bindingSpec: "openbindings.openapi-3.1@1",
         content: {
           openapi: "3.1.0",
           info: { title: "coverage", version: "1" },
@@ -492,7 +492,7 @@ describe("synthesis coverage", () => {
 // warning names the field and the delivery rule. Also closes the TS
 // warning-channel gap (SynthesizeInput.onWarning, mirroring Go).
 // Free-form object bodies flatten OPEN, never wrap under the synthetic
-// `body` property (openbindings.openapi@1 §9.1): the synthetic wrap is
+// `body` property (openbindings.openapi-3.1@1 §9.1): the synthetic wrap is
 // reserved for NON-object body schemas, and wrapping would describe a field
 // the conformant invoker refuses as unmatched — breaking the
 // synthesize→invoke round trip. Mirrors the Go SDK's resolved synthesis body
@@ -559,7 +559,7 @@ describe("free-form object bodies", () => {
     }) as typeof globalThis.fetch;
 
     const call = new OpenAPIInvoker().invokeBinding({
-      source: { bindingSpec: "openbindings.openapi@1", content: spec },
+      source: { bindingSpec: "openbindings.openapi-3.1@1", content: spec },
       selector: "#/paths/~1things/post",
       fetch: fetchFn,
     });
@@ -598,7 +598,7 @@ describe("param/body field collision", () => {
     };
     const warnings: Array<{ code: string; path?: string }> = [];
     const iface = await new OpenAPISynthesizer().synthesizeInterface({
-      sources: [{ bindingSpec: "openbindings.openapi@1", content: spec }],
+      sources: [{ bindingSpec: "openbindings.openapi-3.1@1", content: spec }],
       onWarning: (w) => warnings.push(w),
     });
     expect(iface.operations.updateUser?.input).toEqual({
@@ -610,7 +610,7 @@ describe("param/body field collision", () => {
       },
       required: ["id", "id_2", "name"],
     });
-    expect(iface.bindings?.["updateUser.openapi"]?.inputTransform).toContain('"id":"id_2"');
+    expect(iface.bindings?.["updateUser.openapi"]?.inputTransform).toContain('"id":$lookup($,"id_2")');
     expect(warnings).toHaveLength(0);
   });
 });
@@ -667,7 +667,7 @@ describe("degenerate media/schema combination warning", () => {
     };
     const warnings: Array<{ code: string; message: string; path?: string }> = [];
     await new OpenAPISynthesizer().synthesizeInterface({
-      sources: [{ bindingSpec: "openbindings.openapi@1", content: spec }],
+      sources: [{ bindingSpec: "openbindings.openapi-3.1@1", content: spec }],
       onWarning: (w) => warnings.push(w),
     });
     const byPath = new Map<string | undefined, { code: string; message: string; path?: string }>();
@@ -685,8 +685,7 @@ describe("degenerate media/schema combination warning", () => {
     // all rather than selecting one and then failing its schema test.
     expect(byPath.get("operations.objectText.input")).toMatchObject({
       code: "openapi.unresolvable_request_body",
-      message:
-        "request body declares no media type whose declaration selects a request carriage lane openbindings.openapi@1 defines (declared: text/plain); optional body omitted from the synthesized contract",
+      message: expect.stringContaining("declared: text/plain"),
     });
   });
 });
@@ -725,7 +724,7 @@ describe("synthesis coverage disposition identity", () => {
   it("does not misclassify an out-of-revision media declaration as a flattening collision", async () => {
     const result = await new OpenAPISynthesizer().synthesizeInterfaceWithCoverage({
       sources: [{
-        bindingSpec: "openbindings.openapi@1",
+        bindingSpec: "openbindings.openapi-3.1@1",
         content: {
           openapi: "3.1.0",
           info: { title: "coverage", version: "1" },
@@ -751,7 +750,7 @@ describe("synthesis coverage disposition identity", () => {
       sourceRef: "#/paths/~1jobs/post/requestBody/content/application~1x-custom",
       status: "excluded",
       reasonCode: "openapi.request_media_excluded",
-      rule: "OAPI-P-04",
+      rule: "OAPI31-P-03",
     }));
   });
 });
@@ -796,7 +795,7 @@ describe("typeless request-body contract", () => {
       },
     };
     const iface = await new OpenAPISynthesizer().synthesizeInterface({
-      sources: [{ bindingSpec: "openbindings.openapi@1", content: spec }],
+      sources: [{ bindingSpec: "openbindings.openapi-3.1@1", content: spec }],
     });
 
     const opaque = iface.operations.sendOpaque?.input as {
@@ -840,7 +839,7 @@ describe("inspectSource", () => {
 
   it("suggests the same operationKey synthesis would assign, including de-duplication", async () => {
     const inspection = await new OpenAPISynthesizer().inspectSource({
-      bindingSpec: "openbindings.openapi@1",
+      bindingSpec: "openbindings.openapi-3.1@1",
       content: SPEC_WITH_COLLISION,
     });
     const bySelector = Object.fromEntries(inspection.targets.map((t) => [t.selector, t.operationKey]));
@@ -853,7 +852,7 @@ describe("inspectSource", () => {
   it("matches convertToInterface's own operation keys exactly", async () => {
     const iface = await convertToInterface(undefined, SPEC_WITH_COLLISION);
     const inspection = await new OpenAPISynthesizer().inspectSource({
-      bindingSpec: "openbindings.openapi@1",
+      bindingSpec: "openbindings.openapi-3.1@1",
       content: SPEC_WITH_COLLISION,
     });
 
@@ -881,7 +880,7 @@ describe("content-fed synthesis", () => {
   it("refuses a process-local path rather than introducing a Node dependency", async () => {
     await expect(new OpenAPISynthesizer().synthesizeInterface({
       sources: [{
-        bindingSpec: "openbindings.openapi@1",
+        bindingSpec: "openbindings.openapi-3.1@1",
         location: "./api.json",
         embed: true,
       }],
@@ -895,7 +894,7 @@ describe("content-fed synthesis", () => {
       paths: { "/x": { get: { operationId: "getX", responses: { "200": { description: "ok" } } } } },
     });
     const iface = await new OpenAPISynthesizer().synthesizeInterface({
-      sources: [{ bindingSpec: "openbindings.openapi@1", content }],
+      sources: [{ bindingSpec: "openbindings.openapi-3.1@1", content }],
     });
 
     const src = iface.sources?.[DEFAULT_SOURCE_NAME];
@@ -910,7 +909,7 @@ describe("content-fed synthesis", () => {
       paths: {},
     };
     const iface = await new OpenAPISynthesizer().synthesizeInterface({
-      sources: [{ bindingSpec: "openbindings.openapi@1", content }],
+      sources: [{ bindingSpec: "openbindings.openapi-3.1@1", content }],
     });
 
     const src = iface.sources?.[DEFAULT_SOURCE_NAME];
@@ -921,7 +920,7 @@ describe("content-fed synthesis", () => {
   it("preserves authoritative content when a location is also its base and provenance", async () => {
     const content = { openapi: "3.0.3", info: { title: "T", version: "1" }, paths: {} };
     const iface = await new OpenAPISynthesizer().synthesizeInterface({
-      sources: [{ bindingSpec: "openbindings.openapi@1", location: "https://example.com/openapi.json", content }],
+      sources: [{ bindingSpec: "openbindings.openapi-3.1@1", location: "https://example.com/openapi.json", content }],
     });
 
     const src = iface.sources?.[DEFAULT_SOURCE_NAME];

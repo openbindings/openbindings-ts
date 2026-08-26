@@ -1,6 +1,7 @@
 import { checkBindingSpecs as checkBindingSpecSupport } from "@openbindings/core";
 import { type BindingSpecInfo, type BindingSpecVerdict, type OBInterface, type Source } from "@openbindings/core";
 import {
+  CONTEXT_REQUIRED,
   InvocationError,
   InvocationImpl,
   isContextRequiredDetails,
@@ -28,20 +29,51 @@ import {
   OpenAPIExecutionError,
   openAPIPortableFailureData,
   type OpenAPIExecution,
+  type OpenAPIExecutionProfile,
   type OpenAPIExecutionHooks,
   type OpenAPIEngineSecurityHandler,
   type OpenAPIHookResult,
 } from "@openbindings/openapi-client/engine";
-import type { OpenAPIDocument } from "./types.js";
+import type {
+  OpenAPIDocument,
+  OpenAPIOperation,
+  OpenAPIParameter,
+  OpenAPIPathItem,
+} from "./types.js";
 import {
   DEFAULT_SOURCE_NAME,
-  BINDING_SPEC,
+  BINDING_SPEC_OPENAPI_30,
+  BINDING_SPEC_OPENAPI_31,
+  ERR_UNSUPPORTED_BINDING_SPEC,
+  checkAcceptedOpenAPIEdition,
   profileForBindingSpec,
 } from "./constants.js";
 import { convertToInterface, type UnrealizableTarget } from "./synthesize.js";
 import type { AcceptanceFloor } from "@openbindings/openapi-client/analysis";
 import { openAPISynthesisCoverage } from "./coverage.js";
-import { codePointCompare, validateDocumentAddress } from "./util.js";
+import {
+  codePointCompare,
+  loadOpenAPIDocument,
+  parseSelector,
+  validateDocumentAddress,
+} from "./util.js";
+import {
+  FAMILY_JSON,
+  configureRequestMedia,
+  isJSONMediaType,
+  planRequestBodies,
+  type BodyPlan,
+} from "./media.js";
+import {
+  duplicateEffectiveParameterIdentity,
+  effectiveParameters,
+  requestBodyIgnoredForBindingSpec,
+} from "./params.js";
+import {
+  engineInputForCallerEnvelope,
+  planAbstractInputRoutes,
+  type AbstractInputRoutes,
+} from "./input-routes-v2.js";
 import {
   normalizeAuthoringLocation,
   readAuthoringArtifact,
@@ -52,7 +84,10 @@ import {
 // ---------------------------------------------------------------------------
 
 function openAPIBindingSpecs(): BindingSpecInfo[] {
-  return [{ bindingSpec: BINDING_SPEC, description: "OpenAPI 3.x HTTP APIs" }];
+  return [
+    { bindingSpec: BINDING_SPEC_OPENAPI_30, description: "OpenAPI 3.0 HTTP APIs" },
+    { bindingSpec: BINDING_SPEC_OPENAPI_31, description: "OpenAPI 3.1 HTTP APIs" },
+  ];
 }
 
 function checkOpenAPIBindingSpecs(bindingSpecs: readonly string[]): BindingSpecVerdict[] {
@@ -118,12 +153,13 @@ export class OpenAPIInvoker implements BindingInvoker {
    * raise the challenge instead.
    */
   async prepareBinding(args: BindingInvocationArgs): Promise<ContextRequiredDetails | null> {
+    const profile = profileForInvocation(args.source.bindingSpec);
     try {
       const prepared = await this.engine.prepareCached({
         source: { location: args.source.location, content: args.source.content },
         // The standalone client engine's own API names the selector `ref`.
         ref: args.selector,
-        profile: profileForBindingSpec(args.source.bindingSpec),
+        profile,
         context: args.context,
         signal: args.signal,
         fetch: args.fetch,
@@ -143,14 +179,20 @@ export class OpenAPIInvoker implements BindingInvoker {
     args: BindingInvocationArgs,
     outer: InvocationImpl<I, O>,
   ): Promise<void> {
+    const bindingSpec = args.source.bindingSpec;
+    const profile = profileForInvocation(bindingSpec);
+    const model = await loadRuntimeOperationModel(args, bindingSpec);
     const prepared = await this.engine.prepare({
-      source: { location: args.source.location, content: args.source.content },
+      // The model is an adapter-local loaded view: edition and method-body
+      // gates have already run, and ignored requestBody declarations have
+      // been removed before the standalone engine sees the operation.
+      source: { location: args.source.location, content: model.engineContent },
       // The standalone client engine's own API names the selector `ref`.
       ref: args.selector,
-      profile: profileForBindingSpec(args.source.bindingSpec),
+      profile,
       context: args.context,
       signal: outer.signal,
-      fetch: args.fetch,
+      fetch: adaptRuntimeFetch(args.fetch ?? globalThis.fetch, model),
       hooks: adaptHooks(args),
       maxDeliveryUnitBytes: args.maxDeliveryUnitBytes,
       securityHandlers: this.securityHandlers,
@@ -159,19 +201,401 @@ export class OpenAPIInvoker implements BindingInvoker {
     // not require application input. Only then does the bridge acquire the
     // SDK input sequence.
     const execution = await prepared.start<I, O>();
-    await bridgeExecution(execution, outer);
+    const selectedPlans = configuredRequestPlans(
+      model.plans,
+      args.context,
+      profile,
+      model.document.openapi,
+    );
+    await bridgeExecution(execution, outer, (input) => engineInputForCallerEnvelope(
+      input,
+      model.parameters,
+      selectedPlans,
+      model.routes,
+      profile,
+    ));
   }
+}
+
+interface RuntimeOperationModel {
+  document: OpenAPIDocument;
+  engineContent: unknown;
+  operation: OpenAPIOperation;
+  parameters: OpenAPIParameter[];
+  plans: BodyPlan[];
+  routes: AbstractInputRoutes;
+  typeAbsentParts: string[];
+}
+
+function unsupportedBindingSpecError(bindingSpec: string): InvocationError {
+  const data: Record<string, unknown> = { bindingSpec };
+  if (bindingSpec === "") {
+    data.message = "name an exact OpenAPI family token in Source.BindingSpec";
+  }
+  return new InvocationError(ERR_UNSUPPORTED_BINDING_SPEC, data);
+}
+
+function profileForInvocation(bindingSpec: string): OpenAPIExecutionProfile {
+  try {
+    return profileForBindingSpec(bindingSpec);
+  } catch {
+    throw unsupportedBindingSpecError(bindingSpec);
+  }
+}
+
+async function loadRuntimeOperationModel(
+  args: BindingInvocationArgs,
+  bindingSpec: string,
+): Promise<RuntimeOperationModel> {
+  let document: OpenAPIDocument;
+  let rawDocument: unknown;
+  try {
+    document = await loadOpenAPIDocument(
+      args.source.location,
+      args.source.content,
+      {
+        signal: args.signal,
+        onRawDocument: (raw) => { rawDocument = structuredClone(raw); },
+      },
+      args.fetch,
+    );
+  } catch {
+    throw new InvocationError("ERR_SOURCE_LOAD_FAILED");
+  }
+  try {
+    checkAcceptedOpenAPIEdition(bindingSpec, document.openapi);
+  } catch {
+    throw new InvocationError("ERR_SOURCE_LOAD_FAILED");
+  }
+
+  let target: { path: string; method: string };
+  try {
+    target = parseSelector(args.selector);
+  } catch {
+    throw new InvocationError("ERR_INVALID_SELECTOR");
+  }
+  const rawPathItem = document.paths?.[target.path];
+  if (!rawPathItem || typeof rawPathItem !== "object") {
+    throw new InvocationError("ERR_SELECTOR_NOT_FOUND");
+  }
+  const pathItem = rawPathItem as OpenAPIPathItem;
+  const rawOperation = pathItem[target.method];
+  if (!rawOperation || typeof rawOperation !== "object") {
+    throw new InvocationError("ERR_SELECTOR_NOT_FOUND");
+  }
+  const operation = rawOperation as OpenAPIOperation;
+  const parameters = effectiveParameters(pathItem, operation);
+  if (duplicateEffectiveParameterIdentity(parameters)) {
+    throw new InvocationError("ERR_REFUSED");
+  }
+
+  if (requestBodyIgnoredForBindingSpec(bindingSpec, target.method)) {
+    delete operation.requestBody;
+  }
+  const typeAbsentParts = multipartTypeAbsentParts(operation);
+  if (bindingSpec === BINDING_SPEC_OPENAPI_30 && typeAbsentParts.length > 0) {
+    const configuration = asRecord(args.context?.configuration);
+    const partMedia = asRecord(configuration?.partMedia);
+    const missing = typeAbsentParts.find((name) => typeof partMedia?.[name] !== "string");
+    if (missing !== undefined) {
+      throw new InvocationError(CONTEXT_REQUIRED, {
+        target: args.source.location ?? "",
+        alternatives: [{ requirements: [{
+          type: "config.value",
+          point: "partMedia",
+          path: `/${missing.replaceAll("~", "~0").replaceAll("/", "~1")}`,
+        }] }],
+      });
+    }
+  }
+  if (bindingSpec === BINDING_SPEC_OPENAPI_31) {
+    adaptOpenAPI31TypeAbsentParts(operation);
+  }
+  prioritizeNoncollidingRequestMedia(operation, parameters);
+  let plans: BodyPlan[] = [];
+  let forcedJSONEnvelope = false;
+  if (operation.requestBody) {
+    try {
+      plans = planRequestBodies(operation, {
+        profile: profileForInvocation(bindingSpec),
+        openapiVersion: document.openapi,
+        inventoryUnsupported: true,
+      });
+      if (forceJSONBodyEnvelopeCarriage(plans)) {
+        forcedJSONEnvelope = true;
+        plans = planRequestBodies(operation, {
+          profile: profileForInvocation(bindingSpec),
+          openapiVersion: document.openapi,
+          inventoryUnsupported: true,
+        });
+      }
+    } catch {
+      throw new InvocationError("ERR_SOURCE_CONFIG_ERROR");
+    }
+  }
+  const routes = planAbstractInputRoutes(parameters, plans);
+  // A fully dereferenced recursive schema is cyclic. Passing that adapter
+  // view through the standalone engine's loader a second time cannot preserve
+  // its graph, so let the engine load the original authored artifact in that
+  // one case. Non-cyclic views retain the method/body adaptations above.
+  const engineContent = hasObjectCycle(document)
+    ? cyclicEngineDocument(rawDocument, target, bindingSpec, forcedJSONEnvelope)
+    : document;
+  return { document, engineContent, operation, parameters, plans, routes, typeAbsentParts };
+}
+
+function cyclicEngineDocument(
+  raw: unknown,
+  target: { path: string; method: string },
+  bindingSpec: string,
+  forcedJSONEnvelope: boolean,
+): unknown {
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return raw;
+  const document = raw as OpenAPIDocument;
+  const rawOperation = document.paths?.[target.path]?.[target.method];
+  if (!rawOperation || typeof rawOperation !== "object") return raw;
+  const operation = rawOperation as OpenAPIOperation;
+  if (requestBodyIgnoredForBindingSpec(bindingSpec, target.method)) {
+    delete operation.requestBody;
+    return document;
+  }
+  if (!forcedJSONEnvelope) return document;
+  for (const media of Object.values(operation.requestBody?.content ?? {})) {
+    const schema = media.schema;
+    if (schema === null || typeof schema !== "object" || Array.isArray(schema)) continue;
+    media.schema = bindingSpec === BINDING_SPEC_OPENAPI_30
+      ? { allOf: [schema], additionalProperties: true }
+      : { ...schema, additionalProperties: true };
+  }
+  return document;
+}
+
+function hasObjectCycle(root: unknown): boolean {
+  const visiting = new WeakSet<object>();
+  const visited = new WeakSet<object>();
+  const walk = (value: unknown): boolean => {
+    if (value === null || typeof value !== "object") return false;
+    const object = value as object;
+    if (visiting.has(object)) return true;
+    if (visited.has(object)) return false;
+    visiting.add(object);
+    for (const member of Object.values(value as Record<string, unknown>)) {
+      if (walk(member)) return true;
+    }
+    visiting.delete(object);
+    visited.add(object);
+    return false;
+  };
+  return walk(root);
+}
+
+function forceJSONBodyEnvelopeCarriage(plans: BodyPlan[]): boolean {
+  if (plans.length !== 1) return false;
+  let changed = false;
+  for (const plan of plans) {
+    if (plan.family !== FAMILY_JSON || plan.synthetic || plan.wholeObject || !plan.media) continue;
+    const schema = plan.media.schema;
+    if (!schema || typeof schema !== "object" || Array.isArray(schema)) continue;
+    schema.additionalProperties = true;
+    changed = true;
+  }
+  return changed;
+}
+
+function multipartTypeAbsentParts(operation: OpenAPIOperation): string[] {
+  const content = operation.requestBody?.content;
+  const media = content?.["multipart/form-data"];
+  const schema = media?.schema;
+  if (!schema || typeof schema !== "object" || Array.isArray(schema)) return [];
+  const properties = schema.properties;
+  if (!properties || typeof properties !== "object" || Array.isArray(properties)) return [];
+  return Object.entries(properties as Record<string, unknown>)
+    .filter(([, raw]) => raw !== null && typeof raw === "object" && !Array.isArray(raw)
+      && !("type" in (raw as Record<string, unknown>)))
+    .map(([name]) => name)
+    .sort(codePointCompare);
+}
+
+/** Invocation-local bridge for the 3.1 authority's type-absent octet part row. */
+function adaptOpenAPI31TypeAbsentParts(operation: OpenAPIOperation): void {
+  const content = operation.requestBody?.content;
+  const media = content?.["multipart/form-data"];
+  const schema = media?.schema;
+  if (!schema || typeof schema !== "object" || Array.isArray(schema)) return;
+  const properties = schema.properties;
+  if (!properties || typeof properties !== "object" || Array.isArray(properties)) return;
+  for (const name of multipartTypeAbsentParts(operation)) {
+    const raw = (properties as Record<string, unknown>)[name] as Record<string, unknown>;
+    (properties as Record<string, unknown>)[name] = {
+      ...raw,
+      type: "string",
+      contentEncoding: "base64",
+    };
+  }
+}
+
+function prioritizeNoncollidingRequestMedia(
+  operation: OpenAPIOperation,
+  parameters: OpenAPIParameter[],
+): void {
+  const content = operation.requestBody?.content;
+  if (!content || Object.keys(content).length < 2) return;
+  const parameterNames = new Set(parameters.map((parameter) => parameter.name ?? ""));
+  const scored = Object.entries(content).map(([mediaType, media], index) => {
+    const schema = media.schema;
+    const properties = schema && typeof schema === "object" && !Array.isArray(schema)
+      && schema.properties && typeof schema.properties === "object" && !Array.isArray(schema.properties)
+      ? Object.keys(schema.properties as Record<string, unknown>)
+      : [];
+    return {
+      mediaType,
+      media,
+      index,
+      collisions: properties.filter((name) => parameterNames.has(name)).length,
+    };
+  });
+  scored.sort((a, b) => a.collisions - b.collisions || a.index - b.index);
+  operation.requestBody!.content = Object.fromEntries(
+    scored.map(({ mediaType, media }) => [mediaType, media]),
+  );
+}
+
+/** Repairs the wire-only 3.1 type-absent part cell after the legacy client serializes it. */
+function adaptRuntimeFetch(
+  fetchFn: typeof globalThis.fetch,
+  model: RuntimeOperationModel,
+): typeof globalThis.fetch {
+  return async (input, init) => {
+    if (!init?.body) return fetchFn(input, init);
+    const text = bodyText(init.body);
+    const contentType = new Headers(init.headers).get("Content-Type")?.split(";", 1)[0]?.trim().toLowerCase();
+    if (
+      model.operation.requestBody?.required
+      && contentType !== undefined
+      && isJSONMediaType(contentType)
+      && text?.trim() === "{}"
+    ) {
+      throw new InvocationError("ERR_REFUSED");
+    }
+
+    let next: RequestInit = init;
+    if (text !== undefined) {
+      try {
+        const value = JSON.parse(text) as unknown;
+        if (value && typeof value === "object" && !Array.isArray(value)) {
+          const keys = Object.keys(value as Record<string, unknown>);
+          const selected = model.plans.find((plan) =>
+            plan.family === FAMILY_JSON
+            && !plan.synthetic
+            && keys.every((key) => plan.props?.has(key) === true));
+          if (selected) {
+            const headers = new Headers(next.headers);
+            headers.set("Content-Type", selected.mediaType || selected.mediaKey);
+            next = { ...next, headers };
+          }
+        }
+      } catch { /* not a JSON body */ }
+    }
+
+    const rewritten = rewriteEncodedMultipartParts(next.body!, model.typeAbsentParts);
+    if (rewritten !== next.body) next = { ...next, body: rewritten };
+    return fetchFn(input, next);
+  };
+}
+
+function bodyText(body: BodyInit): string | undefined {
+  if (typeof body === "string") return body;
+  if (body instanceof ArrayBuffer) return new TextDecoder().decode(body);
+  if (ArrayBuffer.isView(body)) {
+    return new TextDecoder().decode(new Uint8Array(body.buffer, body.byteOffset, body.byteLength));
+  }
+  return undefined;
+}
+
+function rewriteEncodedMultipartParts(body: BodyInit, names: string[]): BodyInit {
+  let bytes: Uint8Array;
+  if (typeof body === "string") {
+    bytes = new TextEncoder().encode(body);
+  } else if (body instanceof ArrayBuffer) {
+    bytes = new Uint8Array(body);
+  } else if (ArrayBuffer.isView(body)) {
+    bytes = new Uint8Array(body.buffer, body.byteOffset, body.byteLength);
+  } else {
+    return body;
+  }
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  let changed = false;
+  for (const name of names) {
+    const marker = `name="${name}"`;
+    const markerAt = binary.indexOf(marker);
+    if (markerAt < 0) continue;
+    const headerStart = binary.lastIndexOf("\r\n", markerAt);
+    const bodyStart = binary.indexOf("\r\n\r\n", markerAt);
+    const bodyEnd = bodyStart < 0 ? -1 : binary.indexOf("\r\n--", bodyStart + 4);
+    if (headerStart < 0 || bodyStart < 0 || bodyEnd < 0) continue;
+    const encoded = binary.slice(bodyStart + 4, bodyEnd);
+    let decoded: string;
+    try {
+      decoded = atob(encoded);
+      if (btoa(decoded) !== encoded) continue;
+    } catch {
+      continue;
+    }
+    const headers = binary.slice(headerStart, bodyStart)
+      .replace("\r\nContent-Transfer-Encoding: base64", "");
+    binary = binary.slice(0, headerStart) + headers + "\r\n\r\n" + decoded + binary.slice(bodyEnd);
+    changed = true;
+  }
+  if (!changed) return body;
+  return Uint8Array.from(binary, (character) => character.charCodeAt(0));
+}
+
+function configuredRequestPlans(
+  plans: BodyPlan[],
+  context: Record<string, unknown> | undefined,
+  profile: OpenAPIExecutionProfile,
+  openapiVersion: string | undefined,
+): BodyPlan[] {
+  const configuration = asRecord(context?.configuration);
+  const configured = configuration?.requestMedia;
+  if (configured == null) return plans.filter((plan) => !plan.range && !plan.unsupported);
+  if (typeof configured !== "string") return [];
+  return configureRequestMedia(plans, configured, { profile, openapiVersion });
+}
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : undefined;
 }
 
 async function bridgeExecution<I, O>(
   execution: OpenAPIExecution<I, O>,
   outer: InvocationImpl<I, O>,
+  mapInput: (input: I) => unknown,
 ): Promise<void> {
   const mirrorInnerInputClose = execution.inputFinished.then(() => outer.closeInput());
   const input = (async () => {
     try {
       for await (const value of outer.inputs()) {
-        await execution.send(value);
+        let mapped: unknown;
+        try {
+          mapped = mapInput(value);
+        } catch (error: unknown) {
+          outer.fireError(error instanceof InvocationError
+            ? error
+            : new InvocationError("ERR_REFUSED"));
+          await execution.cancel();
+          return;
+        }
+        try {
+          await execution.send(mapped as I);
+        } catch (error: unknown) {
+          outer.fireError(toSDKError(error));
+          await execution.cancel();
+          return;
+        }
       }
       await execution.finishInput();
     } catch (error: unknown) {
@@ -348,7 +772,7 @@ export class OpenAPISynthesizer implements InterfaceSynthesizer, CoverageSynthes
   /**
    * Synthesizes an OBI and durable interaction coverage from the same OpenAPI
    * load. This surface is per-operation tolerant: an operation whose
-   * revision-1 flattened boundary cannot be represented is omitted from the
+   * registered-family boundary cannot be represented is omitted from the
    * OBI and accounted for as an excluded target in coverage — a sound partial
    * OBI with every omission evidenced, never a whole-document refusal
    * (interface-synthesizer contract; core §10 posture). Strict synthesis
@@ -388,9 +812,9 @@ export class OpenAPISynthesizer implements InterfaceSynthesizer, CoverageSynthes
     if (sources.length > 1) {
       throw new MultipleSourcesError();
     }
-    if (src.bindingSpec !== BINDING_SPEC) {
-      throw new Error(`synthesizer supports exact binding specification ${JSON.stringify(BINDING_SPEC)}, got ${JSON.stringify(src.bindingSpec)}`);
-    }
+    // Refuse absent, unknown, and unwarranted exact tokens before touching
+    // artifact location or content.
+    profileForBindingSpec(src.bindingSpec);
     if (src.outputLocation) validateDocumentAddress(src.outputLocation);
     const location = normalizeAuthoringLocation(src.location);
     const artifactContent = src.content === undefined && src.embed && location
@@ -432,7 +856,7 @@ export class OpenAPISynthesizer implements InterfaceSynthesizer, CoverageSynthes
     options?: { signal?: AbortSignal },
   ): Promise<SourceInspection> {
     // Inspection and synthesis share the same realizability filter. A selector
-    // whose revision-1 flattened boundary cannot be represented is not
+    // whose registered-family boundary cannot be represented is not
     // advertised as a bindable target merely because it appears in paths —
     // it is filtered per operation (tolerant mode), never a reason to refuse
     // inspecting the rest of the document.
@@ -444,7 +868,7 @@ export class OpenAPISynthesizer implements InterfaceSynthesizer, CoverageSynthes
       undefined,
       undefined,
       () => {},
-      source.bindingSpec || BINDING_SPEC,
+      source.bindingSpec,
     );
     const targets: SourceInspection["targets"] = [];
     for (const binding of Object.values(iface.bindings ?? {})) {

@@ -174,7 +174,7 @@ export function assertByteCellsAreNotBoundaryDecoded(cases: FormatByteCarriageCa
 
 describe("`format: byte` carriage case table", () => {
   const cases = loadFormatByteCarriageCases(
-    readFileSync(new URL("./testdata/format-byte-carriage-cases.json", import.meta.url)),
+    readFileSync(new URL("../testdata/format-byte-carriage-cases.json", import.meta.url)),
   );
 
   it("has the 88 shared cells", () => {

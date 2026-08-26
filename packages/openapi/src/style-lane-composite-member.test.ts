@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { OpenAPISynthesizer } from "./invoker.js";
+import { OpenAPISynthesizer } from "./test-helpers.js";
 
 /**
  * The style-lane composite-member case table is SHARED, byte-for-byte, with
@@ -106,7 +106,7 @@ describe("style-lane composite-member case table (shared with three twin engines
   for (const testCase of table.cases) {
     it(testCase.name, async () => {
       const result = await new OpenAPISynthesizer().synthesizeInterfaceWithCoverage({
-        sources: [{ bindingSpec: "openbindings.openapi@1", content: JSON.stringify(document(testCase)) }],
+        sources: [{ bindingSpec: "openbindings.openapi-3.1@1", content: JSON.stringify(document(testCase)) }],
       });
 
       if (testCase.position === "parameter") {
@@ -119,7 +119,7 @@ describe("style-lane composite-member case table (shared with three twin engines
           expect(Object.keys(result.interface.operations)).not.toContain("query");
           expect(entry!.status).toBe("excluded");
           expect(entry!.reasonCode).toBe("openapi.parameter_style_expansion_excluded");
-          expect(entry!.rule).toBe("OAPI-P-02");
+          expect(entry!.rule).toBe(testCase.openapi.startsWith("3.0.") ? "OAPI30-P-02" : "OAPI31-P-02");
         }
         return;
       }

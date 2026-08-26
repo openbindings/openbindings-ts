@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { convertToInterface } from "./synthesize.js";
+import { convertToInterface } from "./test-helpers.js";
 
 // Cut-point naming, twinned in openbindings-go/formats/openapi/cutpoint_names.go
 // and pinned there by cutpoint_names_test.go. Every document here is authored

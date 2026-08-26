@@ -3,7 +3,7 @@
 // (testdata/json-body-trigger-scoping-cases.json). This package owns
 // SYNTHESIS, so the cells are asserted through the shipped synthesizer: a
 // whole cell publishes the one protocol-neutral `payload` operation property
-// and an inputTransform carrying "whole":"payload"; a flattened cell
+// and an inputTransform routing that value to the envelope body; a flattened cell
 // publishes the artifact's own `value` property and no `payload`.
 //
 // Two rules ride the same cells. The trigger keywords are read under the
@@ -15,8 +15,8 @@
 // included.
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { BINDING_SPEC } from "./constants.js";
-import { OpenAPISynthesizer } from "./invoker.js";
+import { BINDING_SPEC_OPENAPI_31 as BINDING_SPEC } from "./constants.js";
+import { OpenAPISynthesizer } from "./test-helpers.js";
 
 interface JSONBodyTriggerCase {
   name: string;
@@ -29,7 +29,7 @@ interface JSONBodyTriggerCase {
 }
 
 const table = JSON.parse(readFileSync(
-  new URL("./testdata/json-body-trigger-scoping-cases.json", import.meta.url),
+  new URL("../testdata/json-body-trigger-scoping-cases.json", import.meta.url),
   "utf8",
 )) as { cases: JSONBodyTriggerCase[] };
 
@@ -68,12 +68,12 @@ describe("language-neutral §9.1 JSON-body trigger scoping (synthesis)", () => {
       if (fixture.expect === "whole") {
         expect(properties.payload).toBeDefined();
         expect(properties.value).toBeUndefined();
-        expect(transform).toContain('"whole":"payload"');
+        expect(transform).toContain('$lookup($,"payload")');
         return;
       }
       expect(properties.value).toBeDefined();
       expect(properties.payload).toBeUndefined();
-      expect(transform).not.toContain('"whole":"payload"');
+      expect(transform).not.toContain('$lookup($,"payload")');
     });
   }
 });

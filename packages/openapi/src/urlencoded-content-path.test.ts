@@ -32,7 +32,7 @@ interface ContentPathCase {
 }
 
 function loadCases(): ContentPathCase[] {
-  const raw = readFileSync(new URL("./testdata/urlencoded-content-path-cases.json", import.meta.url));
+  const raw = readFileSync(new URL("../testdata/urlencoded-content-path-cases.json", import.meta.url));
   const digest = createHash("sha256").update(raw).digest("hex");
   if (digest !== CASES_DIGEST) {
     throw new Error(

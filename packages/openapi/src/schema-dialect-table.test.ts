@@ -7,7 +7,7 @@
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { OpenAPISynthesizer } from "./invoker.js";
+import { OpenAPISynthesizer } from "./test-helpers.js";
 
 // The embedded table's own digest. A change here is a change to the shared
 // answer and must land in every engine simultaneously.
@@ -57,7 +57,7 @@ describe("the shared Schema Object dialect case table, through synthesis", () =>
       const synthesize = () =>
         new OpenAPISynthesizer().synthesizeInterfaceWithCoverage({
           name: "dialect",
-          sources: [{ bindingSpec: "openbindings.openapi@1", name: "dialect", content: document(cell), embed: true }],
+          sources: [{ bindingSpec: "openbindings.openapi-3.1@1", name: "dialect", content: document(cell), embed: true }],
         });
 
       // One cell class never reaches coverage at the current heads, for a

@@ -3,8 +3,8 @@ import { readFileSync, existsSync } from "node:fs";
 import jsonata from "jsonata";
 import { compileOperationSchema } from "@openbindings/core";
 import { OperationInvoker, operationSignature, single } from "@openbindings/invoke";
-import { OpenAPIInvoker, OpenAPISynthesizer } from "./invoker.js";
-import { BINDING_SPEC } from "./constants.js";
+import { OpenAPIInvoker, OpenAPISynthesizer } from "./test-helpers.js";
+import { BINDING_SPEC_OPENAPI_31 as BINDING_SPEC } from "./constants.js";
 
 // A recursive component: Tree.children -> Tree. After full dereference this
 // is a true object cycle; synthesis must emit an equivalent acyclic schema

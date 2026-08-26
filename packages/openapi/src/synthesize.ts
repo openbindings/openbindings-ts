@@ -9,12 +9,13 @@ import type {
   OpenAPIPathItem,
 } from "./types.js";
 import {
-  BINDING_SPEC,
   DEFAULT_SOURCE_NAME,
+  checkAcceptedOpenAPIEdition,
   hasMediaFidelity,
   hasResponseFidelity,
   hasRoutedInputs,
   hasSchemaOmittedOAS30ByteCarriage,
+  openAPIRule,
   profileForBindingSpec,
 } from "./constants.js";
 import {
@@ -29,7 +30,14 @@ import {
   planRequestBodies,
   type BodyPlan,
 } from "./media.js";
-import { effectiveParameters, styleLaneUndefinedExpansionParam, unflattenableParam, validateParameterSerialization } from "./params.js";
+import {
+  duplicateEffectiveParameterIdentity,
+  caseFoldedHeaderCollision,
+  effectiveParameters,
+  requestBodyIgnoredForBindingSpec,
+  styleLaneUndefinedExpansionParam,
+  validateParameterSerialization,
+} from "./params.js";
 import { planAbstractInputRoutes, type AbstractInputRoutes } from "./input-routes-v2.js";
 import { translateSchemaDialect } from "./translate.js";
 import {
@@ -98,9 +106,13 @@ export async function convertToInterface(
   onWarning?: (warning: SynthesizerWarning) => void,
   onDocument?: (document: OpenAPIDocument) => void,
   onUnrealizable?: (target: UnrealizableTarget) => void,
-  bindingSpec: string = BINDING_SPEC,
+  bindingSpec?: string,
   onFloor?: (floor: AcceptanceFloor | undefined) => void,
 ): Promise<OBInterface> {
+  // Exact-token refusal precedes artifact parsing or loading. Missing input is
+  // deliberately not defaulted to any family.
+  const exactBindingSpec = bindingSpec ?? "";
+  const profile = profileForBindingSpec(exactBindingSpec);
   // loadOpenAPIDocument fully dereferences (every $ref, internal and
   // external, matching Go's kin-openapi loader), so extracted schemas are
   // already inlined here.
@@ -111,7 +123,7 @@ export async function convertToInterface(
   // pointer is what names them.
   const resources: LoadedResource[] = [];
   const addressed: AddressedNode[] = [];
-  // The invalid-artifact acceptance floor (openbindings.openapi@1 §3),
+  // The invalid-artifact acceptance floor (registered OpenAPI family §3),
   // computed over the entry document's raw image before normalization and
   // dereference. An internal reference identifying no location is tolerated
   // at load: the floor invalidates each unit whose closure reaches it, so a
@@ -133,6 +145,7 @@ export async function convertToInterface(
     },
     options?.fetch,
   );
+  checkAcceptedOpenAPIEdition(exactBindingSpec, doc.openapi);
   // §3 part 2's single derived whole-source refusal fires here, on every
   // synthesis surface.
   if (floor && floor.refusal) throw new Error(floor.refusal);
@@ -146,7 +159,7 @@ export async function convertToInterface(
   const formatVersion = majorMinor(doc.openapi ?? "3.0");
 
   const sourceEntry: Source = {
-    bindingSpec,
+    bindingSpec: exactBindingSpec,
   };
   if (location) sourceEntry.location = location;
   if (content !== undefined) sourceEntry.content = content;
@@ -184,7 +197,7 @@ export async function convertToInterface(
       if (!op || typeof op !== "object") continue;
       const opObj = op as OpenAPIOperation;
 
-      // The acceptance floor (openbindings.openapi@1 §3): a ladder-invalid
+      // The acceptance floor (registered OpenAPI family §3): a ladder-invalid
       // target is not addressed. Tolerant surfaces skip it (its invalid
       // coverage entry is emitted by the coverage walk); the strict surface
       // throws. Skipped BEFORE key derivation, in every engine identically.
@@ -199,15 +212,15 @@ export async function convertToInterface(
       const selector = buildJsonPointerSelector(pathStr, method);
 
       const params = effectiveParameters(pathItem, opObj);
-      const unflattenable = unflattenableParam(params, profileForBindingSpec(bindingSpec));
-      if (unflattenable) {
-        const reason = `parameter ${JSON.stringify(unflattenable)} has no unique flattened identity`;
+      const duplicate = duplicateEffectiveParameterIdentity(params);
+      if (duplicate) {
+        const reason = `parameter identity ${JSON.stringify(duplicate)} is declared more than once`;
         if (onUnrealizable) {
           onUnrealizable({
             selector,
             operationKey: opKey,
-            reasonCode: "openapi.flattening_collision",
-            rule: "OAPI-P-03",
+            reasonCode: "openapi.duplicate_parameter_identity",
+            rule: openAPIRule(exactBindingSpec, "P-02"),
             message: reason,
           });
           continue;
@@ -215,7 +228,23 @@ export async function convertToInterface(
         throw unrealizableOperation(opKey, reason);
       }
 
-      const unsupportedParameter = unsupportedParameterContent(params, bindingSpec);
+      const headerCollision = caseFoldedHeaderCollision(params);
+      if (headerCollision) {
+        const reason = `parameter ${JSON.stringify(headerCollision)} has no unique HTTP header identity`;
+        if (onUnrealizable) {
+          onUnrealizable({
+            selector,
+            operationKey: opKey,
+            reasonCode: "openapi.flattening_collision",
+            rule: openAPIRule(exactBindingSpec, "P-02"),
+            message: reason,
+          });
+          continue;
+        }
+        throw unrealizableOperation(opKey, reason);
+      }
+
+      const unsupportedParameter = unsupportedParameterContent(params, exactBindingSpec);
       if (unsupportedParameter) {
         const reason = `parameter ${JSON.stringify(unsupportedParameter)} declares content with no faithful candidate carriage`;
         if (onUnrealizable) {
@@ -223,7 +252,7 @@ export async function convertToInterface(
             selector,
             operationKey: opKey,
             reasonCode: "openapi.parameter_content_excluded",
-            rule: "OAPI-P-02",
+            rule: openAPIRule(exactBindingSpec, "P-02"),
             message: reason,
           });
           continue;
@@ -231,7 +260,7 @@ export async function convertToInterface(
         throw unrealizableOperation(opKey, reason);
       }
 
-      if (hasMediaFidelity(bindingSpec)) {
+      if (hasMediaFidelity(exactBindingSpec)) {
         let serializationError: unknown;
         for (const parameter of params) {
           try { validateParameterSerialization(parameter); } catch (error: unknown) {
@@ -246,7 +275,7 @@ export async function convertToInterface(
               selector,
               operationKey: opKey,
               reasonCode: "openapi.parameter_serialization_excluded",
-              rule: "OAPI-P-02",
+              rule: openAPIRule(exactBindingSpec, "P-02"),
               message: reason,
             });
             continue;
@@ -265,7 +294,7 @@ export async function convertToInterface(
       // media.ts for the per-edition authority reading.
       const undefinedExpansionMember = styleLaneUndefinedExpansionParam(
         params,
-        profileForBindingSpec(bindingSpec),
+        profile,
         formatVersion.startsWith("3.0"),
       );
       if (undefinedExpansionMember !== null) {
@@ -275,7 +304,7 @@ export async function convertToInterface(
             selector,
             operationKey: opKey,
             reasonCode: "openapi.parameter_style_expansion_excluded",
-            rule: "OAPI-P-02",
+            rule: openAPIRule(exactBindingSpec, "P-02"),
             message: reason,
           });
           continue;
@@ -283,12 +312,15 @@ export async function convertToInterface(
         throw unrealizableOperation(opKey, reason);
       }
 
+      const inputOperation: OpenAPIOperation = requestBodyIgnoredForBindingSpec(exactBindingSpec, method)
+        ? { ...opObj, requestBody: undefined }
+        : opObj;
       let requestPlans: BodyPlan[] = [];
-      if (opObj.requestBody) {
+      if (inputOperation.requestBody) {
         let planError: unknown;
         let plannedCount = 0;
         try {
-          // The acceptance floor (openbindings.openapi@1 §3): a ladder-invalid
+          // The acceptance floor (registered OpenAPI family §3): a ladder-invalid
           // request media ALTERNATIVE is a unit that is malformed under its
           // upstream authority, so it is not a candidate the operation may
           // carry. It never climbs -- the operation survives on its remaining
@@ -299,17 +331,17 @@ export async function convertToInterface(
           // the ladder invalidated is not misreported as a flattening
           // collision.
           const plans = filterLadderInvalidAlternatives(
-            planRequestBodies(opObj, { profile: profileForBindingSpec(bindingSpec), openapiVersion: doc.openapi }),
+            planRequestBodies(inputOperation, { profile, openapiVersion: doc.openapi }),
             floorVerdict,
             selector,
           );
           plannedCount = plans.length;
-          requestPlans = plans.filter((plan) => hasRoutedInputs(bindingSpec) || !candidateCollides(params, plan));
+          requestPlans = plans.filter((plan) => hasRoutedInputs(exactBindingSpec) || !candidateCollides(params, plan));
         } catch (error: unknown) {
           planError = error;
         }
 
-        if (requestPlans.length === 0 && opObj.requestBody.required) {
+        if (requestPlans.length === 0 && inputOperation.requestBody.required) {
           const reason = planError instanceof Error
             ? planError.message
             : planError === undefined
@@ -329,7 +361,7 @@ export async function convertToInterface(
                 : planError instanceof DegenerateMediaError
                   ? "openapi.media_schema_mismatch"
                   : "openapi.unresolvable_request_body",
-              rule: allCollided ? "OAPI-P-03" : "OAPI-P-04",
+              rule: openAPIRule(exactBindingSpec, allCollided ? "P-02" : "P-03"),
               message: `${reason}; the required request body has no faithful candidate carriage`,
             });
             continue;
@@ -346,7 +378,7 @@ export async function convertToInterface(
         }
       }
 
-      const dialectIssue = operationSchemaDialectIssue(doc, params, requestPlans, opObj, bindingSpec);
+      const dialectIssue = operationSchemaDialectIssue(doc, params, requestPlans, inputOperation, exactBindingSpec);
       if (dialectIssue) {
         const reason = `${dialectIssue.side} schema inherits unsupported dialect ${JSON.stringify(dialectIssue.dialect)} and cannot be projected into OBI's JSON Schema 2020-12 contract`;
         if (onUnrealizable) {
@@ -375,10 +407,10 @@ export async function convertToInterface(
       // schema root, referenced by same-document pointers from the OBI root
       // (OBI-D-16); translation then runs on an acyclic tree.
       const opPointer = `#/operations/${escapePointerSegment(opKey)}`;
-      const routes = planAbstractInputRoutes(params, requestPlans, profileForBindingSpec(bindingSpec));
+      const routes = planAbstractInputRoutes(params, requestPlans);
       const requestProjector = createOpenAPISchemaProjector("request", schemaNames);
       const inputSchema = buildInputSchemaForPlans(
-        opObj,
+        inputOperation,
         params,
         requestPlans,
         routes,
@@ -398,7 +430,7 @@ export async function convertToInterface(
       const outputSchema = buildOutputSchema(
         opObj,
         responseProjector,
-        bindingSpec,
+        exactBindingSpec,
         doc.openapi ?? "3.0",
       );
       if (outputSchema !== undefined) {
@@ -419,7 +451,7 @@ export async function convertToInterface(
         source: DEFAULT_SOURCE_NAME,
         selector,
       };
-      if (hasRoutedInputs(bindingSpec) && routes.needsTransform) {
+      if (hasRoutedInputs(exactBindingSpec) && routes.needsTransform) {
         binding.inputTransform = routes.transformExpression();
       }
       (iface.bindings as Record<string, BindingEntry>)[bindingKey] = binding;
@@ -770,7 +802,7 @@ function buildInputSchema(
       } else {
         // A free-form object body (type object, no named properties): the
         // flattened model passes unmatched input fields through into the
-        // body (openbindings.openapi@1 §9.1), so the flattened surface
+        // body (registered OpenAPI family §9.1), so the flattened surface
         // stays an OPEN object — the synthetic `body` wrap is reserved for
         // NON-object body schemas, and wrapping here would describe a
         // field the conformant invoker refuses as unmatched.

@@ -2,7 +2,7 @@
 // repository's binding-specs/openapi fixtures (OAPI-D-01..03) through this
 // package's own offline lanes — content load, location grammar, and selector
 // grammar/resolution — under the subcorpus README's verdict semantics:
-// valid:false means a conformant openbindings.openapi@1 processor refuses
+// valid:false means a conformant openbindings.openapi-3.1@1 processor refuses
 // the document's family-scoped material at or before bind time, decidable
 // offline with no network and no live source. Positive location-only
 // fixtures are judged by grammar alone (never dereferenced), so the run
@@ -18,7 +18,7 @@ import { existsSync, readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { BINDING_SPEC } from "./constants.js";
+import { BINDING_SPEC_OPENAPI_31 as BINDING_SPEC } from "./constants.js";
 import { loadOpenAPIDocument, parseSelector, validateDocumentAddress, errorMessage } from "./util.js";
 
 const FAMILY = "openapi";
