@@ -10,6 +10,7 @@ import type {
 } from "./types.js";
 import {
   DEFAULT_SOURCE_NAME,
+  BINDING_SPEC_OPENAPI_31,
   checkAcceptedOpenAPIEdition,
   hasMediaFidelity,
   hasResponseFidelity,
@@ -66,6 +67,14 @@ import {
   type AcceptanceFloor,
   type FloorOp,
 } from "@openbindings/openapi-client/analysis";
+import {
+  checkPathTemplateDeclaration,
+  effectiveParameterDeclarationRows,
+  equivalentPathTemplateCollision,
+  formStyleCookieMultiValueParameter,
+  malformedEffectiveParameter,
+  sourceExclusionReason,
+} from "./parameter-semantics.js";
 
 /**
  * A paths operation admitted by the artifact but unrepresentable under
@@ -149,6 +158,8 @@ export async function convertToInterface(
   // §3 part 2's single derived whole-source refusal fires here, on every
   // synthesis surface.
   if (floor && floor.refusal) throw new Error(floor.refusal);
+  const sourceExclusion = sourceExclusionReason(doc, exactBindingSpec);
+  if (sourceExclusion) throw new Error(sourceExclusion);
   onFloor?.(floor);
   // The artifact's own address as the loader used it: a qualified cut-point
   // name is relative to it.
@@ -211,6 +222,23 @@ export async function convertToInterface(
       usedKeys.add(opKey);
       const selector = buildJsonPointerSelector(pathStr, method);
 
+      const declarationRows = effectiveParameterDeclarationRows(pathItem, opObj);
+      const malformedParameter = malformedEffectiveParameter(declarationRows, exactBindingSpec);
+      if (malformedParameter) {
+        const reason = `effective parameter ${JSON.stringify(malformedParameter)} violates the closed Parameter Object declaration list`;
+        if (onUnrealizable) {
+          onUnrealizable({
+            selector,
+            operationKey: opKey,
+            reasonCode: "openapi.parameter_declaration_excluded",
+            rule: openAPIRule(exactBindingSpec, "P-02"),
+            message: reason,
+          });
+          continue;
+        }
+        throw unrealizableOperation(opKey, reason);
+      }
+
       const params = effectiveParameters(pathItem, opObj);
       const duplicate = duplicateEffectiveParameterIdentity(params);
       if (duplicate) {
@@ -226,6 +254,26 @@ export async function convertToInterface(
           continue;
         }
         throw unrealizableOperation(opKey, reason);
+      }
+
+      if (exactBindingSpec === BINDING_SPEC_OPENAPI_31) {
+        const pathIssue = checkPathTemplateDeclaration(pathStr, params, exactBindingSpec);
+        const hierarchyCollision = equivalentPathTemplateCollision(doc.paths, pathStr);
+        if (pathIssue || hierarchyCollision) {
+          const reason = pathIssue
+            ?? `path ${JSON.stringify(pathStr)} has an equivalent templated hierarchy at ${JSON.stringify(hierarchyCollision)}`;
+          if (onUnrealizable) {
+            onUnrealizable({
+              selector,
+              operationKey: opKey,
+              reasonCode: "openapi.path_correspondence_excluded",
+              rule: openAPIRule(exactBindingSpec, "P-02"),
+              message: reason,
+            });
+            continue;
+          }
+          throw unrealizableOperation(opKey, reason);
+        }
       }
 
       const headerCollision = caseFoldedHeaderCollision(params);
@@ -263,7 +311,9 @@ export async function convertToInterface(
       if (hasMediaFidelity(exactBindingSpec)) {
         let serializationError: unknown;
         for (const parameter of params) {
-          try { validateParameterSerialization(parameter); } catch (error: unknown) {
+          try {
+            validateParameterSerialization(parameter, formatVersion.startsWith("3.0"));
+          } catch (error: unknown) {
             serializationError = error;
             break;
           }
@@ -304,6 +354,25 @@ export async function convertToInterface(
             selector,
             operationKey: opKey,
             reasonCode: "openapi.parameter_style_expansion_excluded",
+            rule: openAPIRule(exactBindingSpec, "P-02"),
+            message: reason,
+          });
+          continue;
+        }
+        throw unrealizableOperation(opKey, reason);
+      }
+
+      const multiValueCookie = formStyleCookieMultiValueParameter(
+        params,
+        formatVersion.startsWith("3.0"),
+      );
+      if (multiValueCookie !== undefined) {
+        const reason = `cookie parameter ${JSON.stringify(multiValueCookie)} statically proves multi-pair form expansion`;
+        if (onUnrealizable) {
+          onUnrealizable({
+            selector,
+            operationKey: opKey,
+            reasonCode: "openapi.cookie_multi_value_excluded",
             rule: openAPIRule(exactBindingSpec, "P-02"),
             message: reason,
           });

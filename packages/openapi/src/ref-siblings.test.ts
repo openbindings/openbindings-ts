@@ -743,7 +743,7 @@ describe("OpenAPI edition-specific Schema Object $ref siblings", () => {
     });
   });
 
-  it("gates a custom document dialect per projected operation schema", async () => {
+  it("excludes a custom document dialect before per-operation projection", async () => {
     const source = {
       openapi: "3.1.2",
       jsonSchemaDialect: "https://example.com/custom-schema-dialect",
@@ -779,31 +779,11 @@ describe("OpenAPI edition-specific Schema Object $ref siblings", () => {
       },
     };
     await expect(convertToInterface(undefined, source)).rejects.toThrow(
-      "output schema inherits unsupported dialect",
+      "whole-source exclusion",
     );
-
-    const schemaFreeSource = {
-      ...structuredClone(source),
-      paths: { "/health": structuredClone(source.paths["/health"]) },
-    };
-    const schemaFree = await convertToInterface(undefined, schemaFreeSource);
-    expect(schemaFree.operations.health).toBeDefined();
-
-    const excluded: Array<{ operationKey: string; rule: string }> = [];
-    const iface = await convertToInterface(
-      undefined,
-      source,
-      undefined,
-      undefined,
-      undefined,
-      target => excluded.push({ operationKey: target.operationKey, rule: target.rule }),
-    );
-    expect(iface.operations.health).toBeDefined();
-    expect(iface.operations.customDefault).toBeUndefined();
-    expect(excluded).toEqual([{ operationKey: "customDefault", rule: "OBI-D-06" }]);
   });
 
-  it("allows a supported per-schema resource under a custom document default", async () => {
+  it("does not let a supported per-schema resource reopen a custom root dialect", async () => {
     const source = {
       openapi: "3.1.2",
       jsonSchemaDialect: "https://example.com/custom-schema-dialect",
@@ -831,12 +811,7 @@ describe("OpenAPI edition-specific Schema Object $ref siblings", () => {
       },
     };
 
-    const iface = await convertToInterface(undefined, source);
-    expect(iface.operations.portableOverride?.output).toEqual({
-      $schema: "https://json-schema.org/draft/2020-12/schema",
-      type: "string",
-      maxLength: 8,
-    });
+    await expect(convertToInterface(undefined, source)).rejects.toThrow("whole-source exclusion");
   });
 
   it("refuses a per-resource unsupported $schema before interpreting nested refs", async () => {

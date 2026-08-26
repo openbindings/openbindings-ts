@@ -228,9 +228,9 @@
           }
         }
       },
-      "expect": "refused",
-      "member": "filter.where",
-      "basis": "JSON Schema 2020-12 6.1.1 makes the union spelling the same declaration as the nullable choice; the 3.1 line adopts that dialect."
+      "expect": "admitted",
+      "member": null,
+      "basis": "Section 5.2 retains every member of a 3.1 type array. The resolved set {object,null} does not declare only object or array because null remains a member."
     },
     {
       "name": "deepObject object with a union-typed object member on the 3.0 line",
@@ -272,9 +272,9 @@
           }
         }
       },
-      "expect": "admitted",
-      "member": null,
-      "basis": "Two non-null members declare value-dependent alternatives and do not collapse to one declared kind."
+      "expect": "refused",
+      "member": "filter.where",
+      "basis": "Section 5.2 retains every member of a 3.1 type array. Every member of {object,array} belongs to the unsupported compound set, so the declaration proves a compound member."
     },
     {
       "name": "deepObject object whose offending member is contributed by allOf",
@@ -518,9 +518,9 @@
           }
         }
       },
-      "expect": "admitted",
-      "member": null,
-      "basis": "RESIDUE, NOT A RULING: the ruling covers form, spaceDelimited, pipeDelimited and deepObject. The path and header styles carry the same structural question and are not decided here."
+      "expect": "refused",
+      "member": "filter.where",
+      "basis": "OpenBindings OpenAPI 3.0 §8.2 applies the compound-member proof to every compound-capable Parameter style, including path simple."
     },
     {
       "name": "header simple array of objects",
@@ -533,9 +533,9 @@
           "type": "object"
         }
       },
-      "expect": "admitted",
-      "member": null,
-      "basis": "RESIDUE, NOT A RULING: same as the path row above."
+      "expect": "refused",
+      "member": "filter[]",
+      "basis": "OpenBindings OpenAPI 3.0 §8.2 applies the compound-member proof to every compound-capable Parameter style, including header simple."
     },
     {
       "name": "content-form query parameter with an object member",

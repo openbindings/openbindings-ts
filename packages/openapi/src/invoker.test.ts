@@ -10,9 +10,7 @@ import {
   ERR_SELECTOR_NOT_FOUND,
   ERR_RESPONSE_ERROR,
   ERR_REFUSED,
-  ERR_SOURCE_CONFIG_ERROR,
   ERR_SOURCE_LOAD_FAILED,
-  ERR_VALIDATION_FAILED,
   InvocationError,
   USE_DEFAULT,
   newInvokeHooks,
@@ -151,7 +149,7 @@ describe("OpenAPIInvoker.bindingSpecs", () => {
 });
 
 describe("invokeBinding — request construction", () => {
-  it("invokes a schema-free operation even when the OAS document selects a custom schema dialect", async () => {
+  it("refuses a custom root schema dialect as a whole-source exclusion", async () => {
     const spec = {
       openapi: "3.1.2",
       jsonSchemaDialect: "https://schemas.example/custom-dialect",
@@ -173,9 +171,8 @@ describe("invokeBinding — request construction", () => {
       fetch,
     });
 
-    await call.closed;
-    expect(requests).toHaveLength(1);
-    expect(requests[0]?.method).toBe("GET");
+    await expect(call.closed).rejects.toMatchObject({ code: ERR_REFUSED });
+    expect(requests).toHaveLength(0);
   });
 
   it("dispatches a no-input operation immediately and emits the parsed body", async () => {
@@ -194,7 +191,9 @@ describe("invokeBinding — request construction", () => {
 
   it("classifies input fields into path, query, and header parameters", async () => {
     const { fetch, requests } = mockFetch(() => jsonResponse({ id: "42" }));
-    const call = new OpenAPIInvoker().invokeBinding({ source: SOURCE, selector: REF_GET_USER, fetch });
+    const call = new OpenAPIInvoker({
+      parameterConversion: (value) => String(value),
+    }).invokeBinding({ source: SOURCE, selector: REF_GET_USER, fetch });
 
     await call.write({ id: "42", verbose: true, "X-Trace": "abc" });
     const out = await single(call.outputs);
@@ -1879,7 +1878,7 @@ describe("invokeBinding — context negotiation", () => {
     });
   }
 
-  it("refuses a declared raw Cookie header alongside a structured cookie parameter", async () => {
+  it("allows raw and structured Cookie declarations when neither emits", async () => {
     const spec = authSpec({
       parameters: [
         { name: "Cookie", in: "header", schema: { type: "string" } },
@@ -1893,10 +1892,10 @@ describe("invokeBinding — context negotiation", () => {
       fetch,
     });
 
-    await expect(call.closed).rejects.toMatchObject({
-      code: ERR_REFUSED,
-    });
-    expect(requests).toHaveLength(0);
+    await call.close();
+    await single(call.outputs);
+    expect(requests).toHaveLength(1);
+    expect(requests[0]?.headers.get("Cookie")).toBeNull();
   });
 
   it("refuses a raw Cookie transport hint that would overwrite structured cookies", async () => {
@@ -1963,7 +1962,7 @@ describe("invokeBinding — context negotiation", () => {
     expect(requests).toHaveLength(0);
   });
 
-  it("skips a cookie-colliding security alternative and selects a complete safe alternative", async () => {
+  it("selects a cookie credential when the co-declared raw Cookie parameter is absent", async () => {
     const spec = authSpec({
       securitySchemes: {
         cookieKey: { type: "apiKey", name: "session", in: "cookie" },
@@ -1982,8 +1981,8 @@ describe("invokeBinding — context negotiation", () => {
     await call.close();
 
     await single(call.outputs);
-    expect(requests[0]?.headers.get("Authorization")).toBe("Bearer bearer-secret");
-    expect(requests[0]?.headers.get("Cookie")).toBeNull();
+    expect(requests[0]?.headers.get("Authorization")).toBeNull();
+    expect(requests[0]?.headers.get("Cookie")).toBe("session=cookie-secret");
   });
 });
 

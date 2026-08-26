@@ -839,10 +839,10 @@ describe("openbindings.openapi-3.1@1 request carriage", () => {
     }));
   });
 
-  it("coverage-excludes undefined multipart and urlencoded style-table cells", async () => {
-    for (const [mediaType, encoding] of [
-      ["multipart/form-data", { field: { style: "pipeDelimited", explode: false } }],
-      ["application/x-www-form-urlencoded", { field: { style: "deepObject", explode: false } }],
+  it("admits object-capable delimiter rows and excludes undefined explode cells", async () => {
+    for (const [mediaType, encoding, status] of [
+      ["multipart/form-data", { field: { style: "pipeDelimited", explode: false } }, "represented"],
+      ["application/x-www-form-urlencoded", { field: { style: "deepObject", explode: false } }, "excluded"],
     ] as const) {
       const spec = document("3.1.2", {
         [mediaType]: {
@@ -855,7 +855,7 @@ describe("openbindings.openapi-3.1@1 request carriage", () => {
       });
       expect(result.coverage.entries).toContainEqual(expect.objectContaining({
         scope: "alternative",
-        status: "excluded",
+        status,
       }));
     }
   });

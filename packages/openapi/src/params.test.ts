@@ -127,21 +127,21 @@ describe("serializeMultipartValue", () => {
 });
 
 describe("validateParameterSerialization", () => {
-  it("refuses undefined OAS style-table cells", () => {
+  it("refuses undefined explode cells and admits the object-capable delimiter rows", () => {
     expect(() => validateParameterSerialization({
       name: "filter",
       in: "query",
       style: "deepObject",
       explode: false,
       schema: { type: "object" },
-    })).toThrow(/explode=true/);
+    })).toThrow(/explode=false/);
     expect(() => validateParameterSerialization({
       name: "filter",
       in: "query",
       style: "pipeDelimited",
       explode: false,
       schema: { type: "object" },
-    })).toThrow(/arrays/);
+    })).not.toThrow();
   });
 });
 

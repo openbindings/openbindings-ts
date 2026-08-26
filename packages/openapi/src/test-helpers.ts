@@ -55,7 +55,7 @@ export function convertToInterface(...args: ConvertArgs): ReturnType<typeof conv
   );
 }
 
-function exactTestSource(source: Source): Source {
+function exactTestSource<T extends { content?: unknown; bindingSpec: string }>(source: T): T {
   return source.content === undefined
     ? source
     : { ...source, bindingSpec: bindingSpecForTestDocument(source.content) };
@@ -126,19 +126,19 @@ function legacyTestEnvelope(args: BindingInvocationArgs, input: unknown): unknow
   const operation = asTestRecord(pathItem?.[method]);
   if (!pathItem || !operation) return input;
 
-  const rawParameters = [
-    ...(Array.isArray(pathItem.parameters) ? pathItem.parameters : []),
-    ...(Array.isArray(operation.parameters) ? operation.parameters : []),
+  const rawParameters: unknown[] = [
+    ...asTestArray(pathItem.parameters),
+    ...asTestArray(operation.parameters),
   ];
   const parameters = rawParameters.map((raw) => resolveTestReference(document, raw))
-    .filter((raw): raw is Record<string, unknown> => raw !== undefined)
-    .filter((raw) => typeof raw.name === "string" && typeof raw.in === "string");
+    .filter((raw): raw is TestParameter => raw !== undefined
+      && typeof raw.name === "string" && typeof raw.in === "string");
   const qualified = parameters.some((parameter, index) => parameters.some((other, otherIndex) =>
     otherIndex !== index && other.name === parameter.name && other.in !== parameter.in));
   const callerParameters: Record<string, unknown> = {};
   const consumed = new Set<string>();
   for (const parameter of parameters) {
-    const name = parameter.name as string;
+    const name = parameter.name;
     if (!Object.prototype.hasOwnProperty.call(value, name)) continue;
     const callerKey = qualified
       ? `${parameter.in}/${name.replaceAll("~", "~0").replaceAll("/", "~1")}`
@@ -205,4 +205,10 @@ function asTestRecord(value: unknown): Record<string, unknown> | undefined {
   return value !== null && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown>
     : undefined;
+}
+
+type TestParameter = Record<string, unknown> & { name: string; in: string };
+
+function asTestArray(value: unknown): unknown[] {
+  return Array.isArray(value) ? value.map((member: unknown) => member) : [];
 }

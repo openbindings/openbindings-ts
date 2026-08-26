@@ -832,7 +832,11 @@ describe("inspectSource", () => {
         // operationId collides with the fallback key /users GET would have
         // produced ("users.get") — de-duplication must kick in, and it must
         // pick the SAME key convertToInterface itself would pick.
-        get: { operationId: "users.get", responses: { "200": { description: "ok" } } },
+        get: {
+          operationId: "users.get",
+          parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }],
+          responses: { "200": { description: "ok" } },
+        },
       },
     },
   };
