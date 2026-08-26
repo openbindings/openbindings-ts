@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
-import { OpenAPISynthesizer } from "./invoker.js";
+import { OpenAPISynthesizer } from "./test-helpers.js";
 
 /**
  * The cut-point case table is SHARED with the Go engine:
@@ -59,7 +59,7 @@ describe("cut-point case table (shared with the Go engine)", () => {
     it(testCase.name, async () => {
       const source = () => ({
         sources: [{
-          bindingSpec: "openbindings.openapi@1",
+          bindingSpec: "openbindings.openapi-3.1@1",
           content: JSON.stringify(testCase.document),
         }],
       });

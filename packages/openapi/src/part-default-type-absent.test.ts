@@ -162,7 +162,7 @@ export async function assertTypeAbsentPartRefusesOnEveryAcceptedEdition(
 
 describe("type-absent part default case table", () => {
   const cases = loadPartDefaultTypeAbsentCases(
-    readFileSync(new URL("./testdata/part-default-type-absent-cases.json", import.meta.url)),
+    readFileSync(new URL("../testdata/part-default-type-absent-cases.json", import.meta.url)),
   );
 
   it("has the 128 shared cells", () => {

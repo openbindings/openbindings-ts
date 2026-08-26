@@ -10,10 +10,10 @@ import {
   ERR_SOURCE_CONFIG_ERROR,
   ERR_VALIDATION_FAILED,
 } from "@openbindings/invoke";
-import { OpenAPIInvoker } from "./invoker.js";
+import { OpenAPIInvoker } from "./test-helpers.js";
 import { loadOpenAPIDocument } from "./util.js";
 
-// Integration tests keyed to openbindings.openapi@1 rules, driving the
+// Integration tests keyed to openbindings.openapi-3.1@1 rules, driving the
 // invoker against a captured fetch. Mirrors the Go SDK's
 // invoke_conformance_test.go.
 
@@ -100,7 +100,7 @@ function src(spec: unknown) {
     for (const member of Object.values(object)) visit(member);
   };
   visit(content);
-  return { bindingSpec: "openbindings.openapi@1", content };
+  return { bindingSpec: "openbindings.openapi-3.1@1", content };
 }
 
 const BASE = "https://api.example.test";
@@ -479,7 +479,7 @@ describe("OAPI-P-03 — flattened-model refusals", () => {
     await call.write({ name: "x", extra: "y" });
     await single(call.outputs);
     expect(requests[0]?.headers.get("Content-Type")).toBe("application/json");
-    expect(requests[0]?.body).toBe('{"extra":"y","name":"x"}');
+    expect(JSON.parse(requests[0]?.body as string)).toEqual({ extra: "y", name: "x" });
   });
 
   // Unlike JSON, multipart needs declaration-defined part carriage. Unknown
@@ -783,7 +783,7 @@ describe("OAPI-P-04 — request media on the wire", () => {
     };
     const { fetch, requests } = mockFetch(() => jsonResponse({}));
     const call = new OpenAPIInvoker().invokeBinding({
-      source: { ...src(spec), bindingSpec: "openbindings.openapi@1" },
+      source: { ...src(spec), bindingSpec: "openbindings.openapi-3.1@1" },
       selector: "#/paths/~1blob/post",
       fetch,
     });

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { OpenAPISynthesizer } from "./invoker.js";
-import { BINDING_SPEC } from "./constants.js";
+import { OpenAPISynthesizer } from "./test-helpers.js";
+import { BINDING_SPEC_OPENAPI_31 as BINDING_SPEC } from "./constants.js";
 
 // A document with one clean operation and two operations that are genuinely
 // unrepresentable by the complete first candidate: a required multipart
@@ -73,13 +73,13 @@ describe("per-operation tolerant coverage synthesis", () => {
     const conditional = byRef.get("#/paths/~1conditional/post");
     expect(conditional?.status).toBe("excluded");
     expect(conditional?.reasonCode).toMatch(/^openapi\.(unresolvable_request_body|media_schema_mismatch)$/);
-    expect(conditional?.rule).toBe("OAPI-P-04");
+    expect(conditional?.rule).toBe("OAPI30-P-03");
     expect(conditional?.message).toBeTruthy();
 
     const collide = byRef.get("#/paths/~1collide/get");
     expect(collide?.status).toBe("excluded");
     expect(collide?.reasonCode).toBe("openapi.flattening_collision");
-    expect(collide?.rule).toBe("OAPI-P-03");
+    expect(collide?.rule).toBe("OAPI30-P-02");
 
     expect(targets.some((e) => e.status === "implementation-unsupported")).toBe(false);
 

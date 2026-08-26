@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import jsonata from "jsonata";
 import { OperationInvoker, operationSignature } from "@openbindings/invoke";
-import { BINDING_SPEC } from "./constants.js";
-import { OpenAPIInvoker, OpenAPISynthesizer } from "./invoker.js";
+import { BINDING_SPEC_OPENAPI_31 as BINDING_SPEC } from "./constants.js";
+import { OpenAPIInvoker, OpenAPISynthesizer } from "./test-helpers.js";
 
 function byteDocument(media = "application/octet-stream"): Record<string, unknown> {
   return {
@@ -23,7 +23,7 @@ function byteDocument(media = "application/octet-stream"): Record<string, unknow
   };
 }
 
-describe("openbindings.openapi@1 OAS 3.0 schema-omitted byte carriage", () => {
+describe("openbindings.openapi-3.1@1 OAS 3.0 schema-omitted byte carriage", () => {
   it("synthesizes one Base64 application value and preserves request and response octets", async () => {
     const source = byteDocument();
     const iface = await new OpenAPISynthesizer().synthesizeInterface({

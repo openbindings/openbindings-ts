@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import jsonata from "jsonata";
 import { OperationInvoker, operationSignature } from "@openbindings/invoke";
-import { BINDING_SPEC } from "./constants.js";
-import { OpenAPIInvoker, OpenAPISynthesizer } from "./invoker.js";
+import { BINDING_SPEC_OPENAPI_31 as BINDING_SPEC } from "./constants.js";
+import { OpenAPIInvoker, OpenAPISynthesizer } from "./test-helpers.js";
 
 function dynamicBodyDocument(
   openapi: string,
@@ -60,7 +60,7 @@ async function joinedInvocation(
   return iface;
 }
 
-describe("openbindings.openapi@1 dynamic object carriage", () => {
+describe("openbindings.openapi-3.1@1 dynamic object carriage", () => {
   it("keeps an additionalProperties form object independent from a same-named query parameter", async () => {
     const source = dynamicBodyDocument("3.0.4", "application/x-www-form-urlencoded", {
       type: "object",

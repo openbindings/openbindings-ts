@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import jsonata from "jsonata";
 import { OperationInvoker, operationSignature } from "@openbindings/invoke";
-import { BINDING_SPEC } from "./constants.js";
-import { OpenAPIInvoker, OpenAPISynthesizer } from "./invoker.js";
+import { BINDING_SPEC_OPENAPI_31 as BINDING_SPEC } from "./constants.js";
+import { OpenAPIInvoker, OpenAPISynthesizer } from "./test-helpers.js";
 
 function unionDocument(
   mediaType = "application/json",
@@ -50,7 +50,7 @@ function unionDocument(
   };
 }
 
-describe("openbindings.openapi@1 whole JSON carriage", () => {
+describe("openbindings.openapi-3.1@1 whole JSON carriage", () => {
   it("keeps a combinatorial JSON schema as one application value and sends it unchanged", async () => {
     const source = unionDocument();
     const iface = await new OpenAPISynthesizer().synthesizeInterface({
@@ -65,7 +65,7 @@ describe("openbindings.openapi@1 whole JSON carriage", () => {
       additionalProperties: false,
       required: ["kind", "payload"],
     });
-    expect(iface.bindings?.["createItem.openapi"]?.inputTransform).toContain('"whole":"payload"');
+    expect(iface.bindings?.["createItem.openapi"]?.inputTransform).toContain('$lookup($,"payload")');
 
     const invoker = new OperationInvoker([new OpenAPIInvoker()], {
       fetch: async (request, init) => {
@@ -110,7 +110,7 @@ describe("openbindings.openapi@1 whole JSON carriage", () => {
       });
       const properties = (iface.operations.createItem?.input as any).properties;
       expect(properties.payload, name).toEqual(schema);
-      expect(iface.bindings?.["createItem.openapi"]?.inputTransform, name).toContain('"whole":"payload"');
+      expect(iface.bindings?.["createItem.openapi"]?.inputTransform, name).toContain('$lookup($,"payload")');
     }
   });
 

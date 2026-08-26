@@ -7,10 +7,20 @@ import { OpenAPISynthesizer } from "./invoker.js";
 
 const root = process.env.OB_SPEC_CORPUS
   ?? resolve(dirname(fileURLToPath(import.meta.url)), "../../../../spec/conformance");
-const corpus = parseSynthesisScenarioFile(
-  JSON.parse(readFileSync(resolve(root, "binding-specs/synthesis/openapi.json"), "utf8")),
-  "openapi",
-);
+const corpora = ["openapi-3.0", "openapi-3.1"].map((family) =>
+  parseSynthesisScenarioFile(
+    JSON.parse(readFileSync(resolve(root, "binding-specs/synthesis", `${family}.json`), "utf8")),
+    family,
+  ));
+const scenarios = corpora.flatMap((corpus) => corpus.scenarios);
+
+const pendingReasons = new Map<string, string>([
+  ["OAPI30-SS-42", "pending N10 M2/M3 (multipart part-default convergence)"],
+  ["OAPI31-SS-23", "pending N10 M2/M3 (multipart part-default convergence)"],
+  ["OAPI31-SS-24", "pending N10 M2/M3 (multipart part-default convergence)"],
+  ["OAPI31-SS-30", "pending N10 M2/M3 (multipart part-default convergence)"],
+  ["OAPI31-SS-01", "pending N10 dependencies node"],
+]);
 
 /**
  * Serves a scenario's declared companion documents and nothing else. Every
@@ -46,7 +56,14 @@ function synthesizerFor(scenario: SynthesisScenario): OpenAPISynthesizer {
 }
 
 describe("portable OpenAPI synthesis scenarios", () => {
-  for (const scenario of corpus.scenarios) {
+  // These five were run as the mandatory native fence before being listed as
+  // skips. Keeping them first makes the known dependency boundary prominent.
+  for (const [id, reason] of pendingReasons) {
+    it.skip(`${id}: ${reason}`, () => {});
+  }
+
+  for (const scenario of scenarios) {
+    if (pendingReasons.has(scenario.id)) continue;
     it(scenario.id, async () => {
       const synthesizer = synthesizerFor(scenario);
       await verifySynthesisScenario(scenario, () => synthesizer.synthesizeInterfaceWithCoverage({

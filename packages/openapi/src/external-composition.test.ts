@@ -1,8 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
-import { OpenAPISynthesizer } from "./invoker.js";
-import { BINDING_SPEC } from "./constants.js";
+import { bindingSpecForTestDocument, OpenAPISynthesizer } from "./test-helpers.js";
 
 /**
  * The external-composition case table is SHARED, byte for byte, with both Go
@@ -14,7 +13,7 @@ import { BINDING_SPEC } from "./constants.js";
  * way this obligation can be checked by execution rather than by reading three
  * implementations.
  *
- * The rule under test is `openbindings.openapi@1` §6 ("Reference scope"): a
+ * The rule under test is `openbindings.openapi-3.1@1` §6 ("Reference scope"): a
  * reference that leaves the current document composes the value at the
  * referenced JSON Pointer together with that value's transitive closure of
  * references, and nothing else.
@@ -43,7 +42,7 @@ interface CompositionCase {
 }
 
 const raw = readFileSync(
-  new URL("./testdata/external-composition-cases.json", import.meta.url),
+  new URL("../testdata/external-composition-cases.json", import.meta.url),
   "utf8",
 );
 const table = JSON.parse(raw) as { cases: readonly CompositionCase[] };
@@ -83,7 +82,12 @@ describe("external reference composition is pointer-scoped", () => {
 
       const synthesize = () =>
         new OpenAPISynthesizer({ fetch: fetchFn }).synthesizeInterface({
-          sources: [{ bindingSpec: BINDING_SPEC, location: testCase.entry }],
+          sources: [{
+            bindingSpec: bindingSpecForTestDocument(
+              testCase.documents[testCase.entry]?.json ?? testCase.documents[testCase.entry]?.text,
+            ),
+            location: testCase.entry,
+          }],
         });
 
       if (testCase.expect.outcome === "refused") {

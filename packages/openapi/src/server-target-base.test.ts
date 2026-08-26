@@ -3,8 +3,8 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
-import { OpenAPISynthesizer } from "./invoker.js";
-import { BINDING_SPEC } from "./constants.js";
+import { OpenAPISynthesizer } from "./test-helpers.js";
+import { BINDING_SPEC_OPENAPI_31 as BINDING_SPEC } from "./constants.js";
 
 // The `requirements` half of the shared server target-base case table. The
 // resolution and predicate halves are executed by the engine that owns
@@ -29,7 +29,7 @@ interface ResolutionCase {
 }
 
 function loadTable(): { resolutionCases: ResolutionCase[] } {
-  const path = fileURLToPath(new URL("./testdata/server-target-base-cases.json", import.meta.url));
+  const path = fileURLToPath(new URL("../testdata/server-target-base-cases.json", import.meta.url));
   const raw = readFileSync(path);
   const digest = createHash("sha256").update(raw).digest("hex");
   if (digest !== serverTargetBaseCasesDigest) {

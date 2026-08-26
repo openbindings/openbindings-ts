@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 import jsonata from "jsonata";
 import { type ProcessorScenario, type ProcessorScenarioFile } from "@openbindings/core";
 import { CONTEXT_REQUIRED, OperationInvoker, operationSignature, type InvocationError } from "@openbindings/invoke";
-import { OpenAPIInvoker, OpenAPISynthesizer } from "./invoker.js";
+import { OpenAPIInvoker, OpenAPISynthesizer } from "./test-helpers.js";
 
 const corpusRoot = process.env.OB_SPEC_CORPUS ?? resolve(
   dirname(fileURLToPath(import.meta.url)),
@@ -174,7 +174,7 @@ describe("OpenAPI native-client differential", () => {
         },
       };
       const iface = await new OpenAPISynthesizer().synthesizeInterface({
-        sources: [{ bindingSpec: "openbindings.openapi@1", content }],
+        sources: [{ bindingSpec: "openbindings.openapi-3.1@1", content }],
       });
       expect(iface.bindings?.["createItem.openapi"]?.inputTransform).toBeTypeOf("string");
       expect(Object.keys(
@@ -242,7 +242,7 @@ describe("OpenAPI native-client differential", () => {
       },
     };
     const iface = await new OpenAPISynthesizer().synthesizeInterface({
-      sources: [{ bindingSpec: "openbindings.openapi@1", content }],
+      sources: [{ bindingSpec: "openbindings.openapi-3.1@1", content }],
     });
     const input = iface.operations.uploadAllOf?.input as {
       properties?: Record<string, unknown>;
@@ -260,7 +260,12 @@ describe("OpenAPI native-client differential", () => {
       form.forEach((value, name) => { observed[name] = value; });
       return new Response(null, { status: 204 });
     };
-    const call = new OperationInvoker([new OpenAPIInvoker()], { fetch }).invoke(
+    const call = new OperationInvoker([new OpenAPIInvoker()], {
+      fetch,
+      transformEvaluator: {
+        evaluate: (expression, data) => jsonata(expression).evaluate(data),
+      },
+    }).invoke(
       iface,
       operationSignature("uploadAllOf"),
     );

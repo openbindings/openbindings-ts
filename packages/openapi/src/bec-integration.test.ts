@@ -1,5 +1,6 @@
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from "node:http";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import jsonata from "jsonata";
 import { type OBInterface } from "@openbindings/core";
 import {
   OperationInvoker,
@@ -14,7 +15,7 @@ import {
   type InvocationError,
 } from "@openbindings/invoke";
 import { fetchInterface } from "@openbindings/synthesize";
-import { OpenAPIInvoker, OpenAPISynthesizer } from "./invoker.js";
+import { OpenAPIInvoker, OpenAPISynthesizer } from "./test-helpers.js";
 
 const SECRET = "test-token-123";
 
@@ -216,6 +217,7 @@ describe("BEC Integration (real HTTP)", () => {
 
     const opInvoker = new OperationInvoker([new OpenAPIInvoker()], {
       contextResolver: storeContextResolver(store),
+      transformEvaluator: { evaluate: (expression, data) => jsonata(expression).evaluate(data) },
     });
     const iface = await fetchIface();
 
@@ -290,7 +292,7 @@ describe("BEC Integration (real HTTP)", () => {
     const iface = await fetchIface();
 
     const args = {
-      source: { bindingSpec: "openbindings.openapi@1", location: specURL },
+      source: { bindingSpec: "openbindings.openapi-3.1@1", location: specURL },
       selector: "#/paths/~1items/get",
     };
 

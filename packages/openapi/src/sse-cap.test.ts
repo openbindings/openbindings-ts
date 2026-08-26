@@ -1,7 +1,7 @@
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from "node:http";
 import { describe, it, expect, afterAll } from "vitest";
-import { OpenAPIInvoker } from "./invoker.js";
-import { BINDING_SPEC } from "./constants.js";
+import { OpenAPIInvoker } from "./test-helpers.js";
+import { BINDING_SPEC_OPENAPI_31 as BINDING_SPEC } from "./constants.js";
 
 // The SSE size cap is PER EVENT — each event is one delivery unit, so the
 // consumer-configurable delivery-unit bound applies per emission, never

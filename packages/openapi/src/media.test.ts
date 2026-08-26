@@ -16,7 +16,7 @@ import {
   successMediaTypes,
   type BodyPlan,
 } from "./media.js";
-import { BINDING_SPEC, profileForBindingSpec } from "./constants.js";
+import { BINDING_SPEC_OPENAPI_31 as BINDING_SPEC, profileForBindingSpec } from "./constants.js";
 import type { OpenAPIDocument, OpenAPIMediaType, OpenAPIOperation } from "./types.js";
 import type { RoutedInput } from "./params.js";
 

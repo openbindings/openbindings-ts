@@ -8,13 +8,12 @@ import {
   serializeMultipartValue,
   serializePathValue,
   serializeQueryValue,
-  unflattenableParam,
   validateParameterSerialization,
   type RoutedInput,
 } from "./params.js";
 import type { BodyPlan } from "./media.js";
 import { FAMILY_JSON } from "./media.js";
-import { BINDING_SPEC, profileForBindingSpec } from "./constants.js";
+import { BINDING_SPEC_OPENAPI_31 as BINDING_SPEC, profileForBindingSpec } from "./constants.js";
 
 // The OAS style-examples table (OAPI-P-02: serialization incorporated
 // wholesale), exercised cell by cell with the OAS's own example values:
@@ -225,28 +224,6 @@ describe("routeParameter — content-form parameters", () => {
       in: "query",
       content: { "text/plain; charset=utf-16": {} },
     }, "hello", profileForBindingSpec(BINDING_SPEC))).toThrow(/unsupported charset/);
-  });
-});
-
-// Two declared parameters sharing one name across DIFFERENT locations make
-// the operation unflattenable (OAPI-P-03).
-describe("unflattenableParam", () => {
-  it("reports a name declared in two different locations", () => {
-    expect(
-      unflattenableParam([
-        { name: "id", in: "path", required: true },
-        { name: "id", in: "query" },
-      ]),
-    ).toBe("id");
-  });
-
-  it("stays flattenable for distinct names and same name+location", () => {
-    expect(
-      unflattenableParam([
-        { name: "id", in: "path", required: true },
-        { name: "verbose", in: "query" },
-      ]),
-    ).toBe("");
   });
 });
 

@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { CONTEXT_REQUIRED, ERR_REFUSED, type InvocationError } from "@openbindings/invoke";
-import { BINDING_SPEC } from "./constants.js";
-import { OpenAPIInvoker, OpenAPISynthesizer } from "./invoker.js";
-import { convertToInterface } from "./synthesize.js";
+import { BINDING_SPEC_OPENAPI_31 as BINDING_SPEC } from "./constants.js";
+import { OpenAPIInvoker, OpenAPISynthesizer } from "./test-helpers.js";
+import { convertToInterface } from "./test-helpers.js";
 
 function document(
   openapi: string,
@@ -82,7 +82,7 @@ async function invokeResponse(
   return { outputs, error };
 }
 
-describe("openbindings.openapi@1 request carriage", () => {
+describe("openbindings.openapi-3.1@1 request carriage", () => {
   it("projects and invokes a generic OAS 3.0 binary image as exact raw octets", async () => {
     const spec = document("3.0.4", {
       "image/png": { schema: { type: "string", format: "binary", title: "Image bytes" } },

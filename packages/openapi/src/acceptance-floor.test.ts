@@ -5,8 +5,8 @@
 // per-reaching-unit invalidation of unresolvable internal references.
 
 import { describe, expect, it } from "vitest";
-import { OpenAPISynthesizer } from "./invoker.js";
-import { BINDING_SPEC } from "./constants.js";
+import { OpenAPISynthesizer } from "./test-helpers.js";
+import { BINDING_SPEC_OPENAPI_31 as BINDING_SPEC } from "./constants.js";
 
 const synthesizer = new OpenAPISynthesizer();
 

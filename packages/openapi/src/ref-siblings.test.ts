@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { validateInterface } from "@openbindings/core";
-import { convertToInterface } from "./synthesize.js";
+import { convertToInterface } from "./test-helpers.js";
 import { loadOpenAPIDocument } from "./util.js";
 
 function refSiblingSpec(openapi: "3.0.3" | "3.1.2"): Record<string, unknown> {
