@@ -7,8 +7,6 @@ import {
   ERR_PROTOCOL,
   ERR_RESPONSE_ERROR,
   ERR_REFUSED,
-  ERR_SOURCE_CONFIG_ERROR,
-  ERR_VALIDATION_FAILED,
 } from "@openbindings/invoke";
 import { OpenAPIInvoker } from "./test-helpers.js";
 import { loadOpenAPIDocument } from "./util.js";

@@ -1,5 +1,6 @@
 export { OpenAPIInvoker, OpenAPISynthesizer } from "./invoker.js";
 export type { OpenAPIInvokerOptions } from "./invoker.js";
+export type { ParameterConversion } from "./parameter-semantics.js";
 export {
   BINDING_SPEC_OPENAPI_20,
   BINDING_SPEC_OPENAPI_30,

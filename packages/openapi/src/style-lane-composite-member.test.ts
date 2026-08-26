@@ -22,7 +22,7 @@ import { OpenAPISynthesizer } from "./test-helpers.js";
  * reads the style table per edition. Package:
  * `design/openapi-style-lane-composite-member-ruling.md`, RULED 2026-08-18.
  */
-const CASES_DIGEST = "1ea1045c75039b00c1035a2e2c3d09e440644e32a5fa1c3689be6add1eac7673";
+const CASES_DIGEST = "d23c8fe527971c620627307ba16e220aaab2e25a731488fe62a184a465fb2cb5";
 
 interface StyleLaneCase {
   readonly name: string;

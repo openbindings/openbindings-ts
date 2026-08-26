@@ -38,7 +38,6 @@ import type {
   OpenAPIDocument,
   OpenAPIOperation,
   OpenAPIParameter,
-  OpenAPIPathItem,
 } from "./types.js";
 import {
   DEFAULT_SOURCE_NAME,
@@ -68,6 +67,8 @@ import {
   duplicateEffectiveParameterIdentity,
   effectiveParameters,
   requestBodyIgnoredForBindingSpec,
+  styleLaneUndefinedExpansionParam,
+  validateParameterSerialization,
 } from "./params.js";
 import {
   engineInputForCallerEnvelope,
@@ -78,6 +79,18 @@ import {
   normalizeAuthoringLocation,
   readAuthoringArtifact,
 } from "./platform.js";
+import {
+  checkPathTemplateDeclaration,
+  effectiveParameterDeclarationRows,
+  equivalentPathTemplateCollision,
+  formStyleCookieMultiValueParameter,
+  malformedEffectiveParameter,
+  prepareEngineEncodingView,
+  prepareEngineParameterView,
+  sourceExclusionReason,
+  validateCompletedURL,
+  type ParameterConversion,
+} from "./parameter-semantics.js";
 
 // ---------------------------------------------------------------------------
 // Invoker
@@ -98,6 +111,12 @@ function checkOpenAPIBindingSpecs(bindingSpecs: readonly string[]): BindingSpecV
 export interface OpenAPIInvokerOptions {
   engine?: OpenAPIEngine;
   /**
+   * §8.1's deterministic conversion from a supplied JSON boolean or number
+   * to its parameter/style-lane string spelling. No conversion is configured
+   * when omitted.
+   */
+  parameterConversion?: ParameterConversion;
+  /**
    * Artifact-scheme handlers for mechanisms the built-in OpenAPI credential
    * adapter cannot apply, keyed by the authored security-scheme name.
    */
@@ -107,12 +126,14 @@ export interface OpenAPIInvokerOptions {
 export class OpenAPIInvoker implements BindingInvoker {
   private readonly engine: OpenAPIEngine;
   private readonly securityHandlers?: Record<string, OpenAPIEngineSecurityHandler>;
+  private readonly parameterConversion?: ParameterConversion;
 
   constructor(options: OpenAPIInvokerOptions = {}) {
     this.engine = options?.engine ?? new OpenAPIEngine();
     this.securityHandlers = options.securityHandlers
       ? { ...options.securityHandlers }
       : undefined;
+    this.parameterConversion = options.parameterConversion;
   }
 
   checkBindingSpecs(bindingSpecs: readonly string[]): BindingSpecVerdict[] {
@@ -213,11 +234,14 @@ export class OpenAPIInvoker implements BindingInvoker {
       selectedPlans,
       model.routes,
       profile,
+      bindingSpec,
+      this.parameterConversion,
     ));
   }
 }
 
 interface RuntimeOperationModel {
+  bindingSpec: string;
   document: OpenAPIDocument;
   engineContent: unknown;
   operation: OpenAPIOperation;
@@ -225,6 +249,7 @@ interface RuntimeOperationModel {
   plans: BodyPlan[];
   routes: AbstractInputRoutes;
   typeAbsentParts: string[];
+  rawCookieHeader?: string;
 }
 
 function unsupportedBindingSpecError(bindingSpec: string): InvocationError {
@@ -267,6 +292,9 @@ async function loadRuntimeOperationModel(
   } catch {
     throw new InvocationError("ERR_SOURCE_LOAD_FAILED");
   }
+  if (sourceExclusionReason(document, bindingSpec)) {
+    throw new InvocationError("ERR_REFUSED");
+  }
 
   let target: { path: string; method: string };
   try {
@@ -278,14 +306,47 @@ async function loadRuntimeOperationModel(
   if (!rawPathItem || typeof rawPathItem !== "object") {
     throw new InvocationError("ERR_SELECTOR_NOT_FOUND");
   }
-  const pathItem = rawPathItem as OpenAPIPathItem;
+  const pathItem = rawPathItem;
   const rawOperation = pathItem[target.method];
   if (!rawOperation || typeof rawOperation !== "object") {
     throw new InvocationError("ERR_SELECTOR_NOT_FOUND");
   }
   const operation = rawOperation as OpenAPIOperation;
+  const declarationRows = effectiveParameterDeclarationRows(pathItem, operation);
+  if (malformedEffectiveParameter(declarationRows, bindingSpec)) {
+    throw new InvocationError("ERR_REFUSED");
+  }
   const parameters = effectiveParameters(pathItem, operation);
   if (duplicateEffectiveParameterIdentity(parameters)) {
+    throw new InvocationError("ERR_REFUSED");
+  }
+  if (checkPathTemplateDeclaration(target.path, parameters, bindingSpec)) {
+    throw new InvocationError("ERR_REFUSED");
+  }
+  if (
+    bindingSpec === BINDING_SPEC_OPENAPI_31
+    && equivalentPathTemplateCollision(document.paths, target.path)
+  ) {
+    throw new InvocationError("ERR_REFUSED");
+  }
+  for (const parameter of parameters) {
+    try {
+      validateParameterSerialization(parameter, bindingSpec === BINDING_SPEC_OPENAPI_30);
+    } catch {
+      throw new InvocationError("ERR_REFUSED");
+    }
+  }
+  if (styleLaneUndefinedExpansionParam(
+    parameters,
+    profileForInvocation(bindingSpec),
+    bindingSpec === BINDING_SPEC_OPENAPI_30,
+  )) {
+    throw new InvocationError("ERR_REFUSED");
+  }
+  if (formStyleCookieMultiValueParameter(
+    parameters,
+    bindingSpec === BINDING_SPEC_OPENAPI_30,
+  )) {
     throw new InvocationError("ERR_REFUSED");
   }
 
@@ -333,7 +394,10 @@ async function loadRuntimeOperationModel(
       throw new InvocationError("ERR_SOURCE_CONFIG_ERROR");
     }
   }
-  const routes = planAbstractInputRoutes(parameters, plans);
+  const callerParameters = parameters.map((parameter) => ({ ...parameter }));
+  const routes = planAbstractInputRoutes(callerParameters, plans);
+  const rawCookieHeader = prepareEngineParameterView(parameters, routes, bindingSpec);
+  prepareEngineEncodingView(plans);
   // A fully dereferenced recursive schema is cyclic. Passing that adapter
   // view through the standalone engine's loader a second time cannot preserve
   // its graph, so let the engine load the original authored artifact in that
@@ -341,7 +405,17 @@ async function loadRuntimeOperationModel(
   const engineContent = hasObjectCycle(document)
     ? cyclicEngineDocument(rawDocument, target, bindingSpec, forcedJSONEnvelope)
     : document;
-  return { document, engineContent, operation, parameters, plans, routes, typeAbsentParts };
+  return {
+    bindingSpec,
+    document,
+    engineContent,
+    operation,
+    parameters: callerParameters,
+    plans,
+    routes,
+    typeAbsentParts,
+    rawCookieHeader,
+  };
 }
 
 function cyclicEngineDocument(
@@ -375,7 +449,7 @@ function hasObjectCycle(root: unknown): boolean {
   const visited = new WeakSet<object>();
   const walk = (value: unknown): boolean => {
     if (value === null || typeof value !== "object") return false;
-    const object = value as object;
+    const object = value;
     if (visiting.has(object)) return true;
     if (visited.has(object)) return false;
     visiting.add(object);
@@ -445,7 +519,7 @@ function prioritizeNoncollidingRequestMedia(
     const schema = media.schema;
     const properties = schema && typeof schema === "object" && !Array.isArray(schema)
       && schema.properties && typeof schema.properties === "object" && !Array.isArray(schema.properties)
-      ? Object.keys(schema.properties as Record<string, unknown>)
+      ? Object.keys(schema.properties)
       : [];
     return {
       mediaType,
@@ -466,9 +540,36 @@ function adaptRuntimeFetch(
   model: RuntimeOperationModel,
 ): typeof globalThis.fetch {
   return async (input, init) => {
-    if (!init?.body) return fetchFn(input, init);
-    const text = bodyText(init.body);
-    const contentType = new Headers(init.headers).get("Content-Type")?.split(";", 1)[0]?.trim().toLowerCase();
+    const completedURL = input instanceof Request ? input.url : String(input);
+    if (model.bindingSpec === BINDING_SPEC_OPENAPI_31) {
+      try {
+        validateCompletedURL(completedURL);
+      } catch {
+        throw new InvocationError("ERR_REFUSED");
+      }
+    }
+
+    let nextInput: RequestInfo | URL = input;
+    let nextInit = init;
+    if (model.rawCookieHeader) {
+      const sourceHeaders = init?.headers ?? (input instanceof Request ? input.headers : undefined);
+      const headers = new Headers(sourceHeaders);
+      const rawCookie = headers.get(model.rawCookieHeader);
+      if (rawCookie !== null) {
+        if (headers.has("Cookie")) throw new InvocationError("ERR_REFUSED");
+        headers.delete(model.rawCookieHeader);
+        headers.set("Cookie", rawCookie);
+        if (input instanceof Request && init?.headers === undefined) {
+          nextInput = new Request(input, { headers });
+        } else {
+          nextInit = { ...init, headers };
+        }
+      }
+    }
+
+    if (!nextInit?.body) return fetchFn(nextInput, nextInit);
+    const text = bodyText(nextInit.body);
+    const contentType = new Headers(nextInit.headers).get("Content-Type")?.split(";", 1)[0]?.trim().toLowerCase();
     if (
       model.operation.requestBody?.required
       && contentType !== undefined
@@ -478,12 +579,12 @@ function adaptRuntimeFetch(
       throw new InvocationError("ERR_REFUSED");
     }
 
-    let next: RequestInit = init;
+    let next: RequestInit = nextInit;
     if (text !== undefined) {
       try {
         const value = JSON.parse(text) as unknown;
         if (value && typeof value === "object" && !Array.isArray(value)) {
-          const keys = Object.keys(value as Record<string, unknown>);
+          const keys = Object.keys(value);
           const selected = model.plans.find((plan) =>
             plan.family === FAMILY_JSON
             && !plan.synthetic
@@ -499,7 +600,7 @@ function adaptRuntimeFetch(
 
     const rewritten = rewriteEncodedMultipartParts(next.body!, model.typeAbsentParts);
     if (rewritten !== next.body) next = { ...next, body: rewritten };
-    return fetchFn(input, next);
+    return fetchFn(nextInput, next);
   };
 }
 

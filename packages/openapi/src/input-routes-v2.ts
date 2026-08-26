@@ -2,10 +2,17 @@ import type { OpenAPIExecutionProfile } from "@openbindings/openapi-client/engin
 import type { OpenAPIParameter } from "./types.js";
 import { FAMILY_JSON, type BodyPlan } from "./media.js";
 import { codePointCompare, escapePointerSegment } from "./util.js";
+import {
+  prepareEncodingStylePropertyValue,
+  prepareSchemaParameterValue,
+  type ParameterConversion,
+} from "./parameter-semantics.js";
 
 export interface AbstractParameterRoute {
   in: string;
   name: string;
+  /** Adapter-private name used only by the standalone carrier. */
+  engineName?: string;
   field: string;
 }
 
@@ -235,6 +242,8 @@ export function engineInputForCallerEnvelope(
   plans: BodyPlan[],
   routes: AbstractInputRoutes,
   profile: OpenAPIExecutionProfile,
+  bindingSpec?: string,
+  parameterConversion?: ParameterConversion,
 ): unknown {
   const envelope = parseCallerEnvelope(input);
   const qualified = qualifiedParameterMode(params);
@@ -247,7 +256,21 @@ export function engineInputForCallerEnvelope(
   for (const [key, member] of Object.entries(envelope.parameters)) {
     const route = byCallerKey.get(key);
     if (!route) throw new Error(`caller envelope contains unknown parameter key ${JSON.stringify(key)}`);
-    value[route.field] = member;
+    if (bindingSpec === undefined) {
+      value[route.field] = member;
+      continue;
+    }
+    const parameter = params.find((candidate) => candidate.in === route.in && candidate.name === route.name);
+    try {
+      value[route.field] = prepareSchemaParameterValue(
+        parameter,
+        member,
+        bindingSpec,
+        parameterConversion,
+      ).value;
+    } catch (error: unknown) {
+      throw new Error(`parameter ${JSON.stringify(key)}: ${errorMessage(error)}`, { cause: error });
+    }
   }
 
   const bodyDescriptor: Record<string, unknown> = {};
@@ -271,7 +294,17 @@ export function engineInputForCallerEnvelope(
         throw new Error("required request body received no routed value");
       }
       if (Object.keys(body).length > 0) bodyDescriptor.present = true;
-      for (const [name, member] of Object.entries(body)) value[routes.bodyField(name)] = member;
+      for (const [name, member] of Object.entries(body)) {
+        value[routes.bodyField(name)] = bindingSpec === undefined
+          ? member
+          : prepareEncodingStylePropertyValue(
+            plan,
+            name,
+            member,
+            bindingSpec,
+            parameterConversion,
+          );
+      }
     }
   }
 
@@ -280,11 +313,15 @@ export function engineInputForCallerEnvelope(
     value,
     parameters: routes.parameters.map((route) => ({
       in: route.in,
-      name: route.name,
+      name: route.engineName ?? route.name,
       field: route.field,
     })),
     body: bodyDescriptor,
   }];
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {

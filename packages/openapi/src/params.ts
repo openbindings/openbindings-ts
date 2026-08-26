@@ -15,14 +15,29 @@ export {
   asArray,
   asObject,
   encodePathValue,
-  styleLaneUndefinedExpansionParam,
-  parameterStyleLaneUndefinedExpansionMember,
-  validateParameterSerialization,
   type RoutedInput,
 } from "@openbindings/openapi-client/analysis";
 
 import type { OpenAPIParameter } from "./types.js";
 import { BINDING_SPEC_OPENAPI_30, BINDING_SPEC_OPENAPI_31 } from "./constants.js";
+import {
+  parameterStyleLaneUndefinedExpansionMember,
+  styleLaneUndefinedExpansionParam,
+  validateParameterSerializationForBinding,
+} from "./parameter-semantics.js";
+
+export {
+  parameterStyleLaneUndefinedExpansionMember,
+  styleLaneUndefinedExpansionParam,
+};
+
+/** Defaults to the 3.1 declaration dialect for direct helper callers. */
+export function validateParameterSerialization(
+  parameter: OpenAPIParameter,
+  oas30 = false,
+): void {
+  validateParameterSerializationForBinding(parameter, oas30);
+}
 
 /** Returns the first exact (in,name) identity declared more than once. */
 export function duplicateEffectiveParameterIdentity(params: OpenAPIParameter[]): string | undefined {
