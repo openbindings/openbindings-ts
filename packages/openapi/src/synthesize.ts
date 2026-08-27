@@ -75,6 +75,12 @@ import {
   malformedEffectiveParameter,
   sourceExclusionReason,
 } from "./parameter-semantics.js";
+import { effectiveServers, eligibleServers } from "./servers.js";
+import {
+  effectiveSecurityRequirements,
+  securityAlternativeUsable,
+} from "./security.js";
+import { markBindingOrigins } from "./binding-origins.js";
 
 /**
  * A paths operation admitted by the artifact but unrepresentable under
@@ -143,7 +149,10 @@ export async function convertToInterface(
     content,
     {
       ...options,
-      onResource: (root, baseURI) => { resources.push({ root, baseURI }); },
+      onResource: (root, baseURI) => {
+        markBindingOrigins(root, baseURI);
+        resources.push({ root, baseURI });
+      },
       onRefTarget: (node, declaringRoot, pointer) => {
         addressed.push({ node, declaringRoot, pointer });
       },
@@ -240,6 +249,38 @@ export async function convertToInterface(
       }
 
       const params = effectiveParameters(pathItem, opObj);
+      try {
+        eligibleServers(effectiveServers(doc, pathItem, opObj), doc.openapi ?? "", location);
+      } catch (error: unknown) {
+        const reason = safeErrorMessage(error);
+        if (onUnrealizable) {
+          onUnrealizable({
+            selector,
+            operationKey: opKey,
+            reasonCode: "openapi.server_url_excluded",
+            rule: openAPIRule(exactBindingSpec, "P-04"),
+            message: reason,
+          });
+          continue;
+        }
+        throw unrealizableOperation(opKey, reason);
+      }
+      const securityRequirements = effectiveSecurityRequirements(doc, opObj);
+      if (securityRequirements && securityRequirements.length > 0
+        && !securityRequirements.some((_, index) => securityAlternativeUsable(doc, opObj, params, index))) {
+        const reason = "the effective security declaration has no usable complete alternative";
+        if (onUnrealizable) {
+          onUnrealizable({
+            selector,
+            operationKey: opKey,
+            reasonCode: "openapi.security_alternative_unusable",
+            rule: openAPIRule(exactBindingSpec, "P-04"),
+            message: reason,
+          });
+          continue;
+        }
+        throw unrealizableOperation(opKey, reason);
+      }
       const duplicate = duplicateEffectiveParameterIdentity(params);
       if (duplicate) {
         const reason = `parameter identity ${JSON.stringify(duplicate)} is declared more than once`;

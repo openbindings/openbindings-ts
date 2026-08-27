@@ -20,7 +20,17 @@ import {
   buildJsonPointerSelector,
   codePointCompare,
 } from "./util.js";
-import { resolveServer } from "./servers.js";
+import {
+  ConfigRequired,
+  eligibleServers,
+  resolveServer,
+  type ServerEntry,
+} from "./servers.js";
+import {
+  effectiveSecurityRequirements,
+  securityAlternativeUsable,
+  securityCoverageRequirements,
+} from "./security.js";
 import {
   INVALID_UNIT_REASON_CODE,
   floorDefectDetails,
@@ -148,9 +158,27 @@ export function openAPISynthesisCoverage(
         bindingSelector: identity.selector,
         requirements: [
           ...serverRequirements(doc, pathItem!, operation, sourceLocation),
+          ...securityCoverageRequirements(doc, operation, effectiveParameters(pathItem!, operation)),
           ...requestMediaTargetRequirements(operation, pathItem!, bindingSpec, doc.openapi),
         ],
       });
+      entries.push(...serverAlternativeCoverage(
+        doc,
+        pathItem!,
+        operation,
+        selector,
+        identity.operationKey,
+        bindingSpec,
+        sourceLocation,
+      ));
+      entries.push(...securityAlternativeCoverage(
+        doc,
+        operation,
+        effectiveParameters(pathItem!, operation),
+        selector,
+        identity.operationKey,
+        bindingSpec,
+      ));
       entries.push(...requestMediaCoverage(operation, pathItem!, identity, bindingSpec, doc.openapi, verdict));
       entries.push(...floorProjectionEntries(verdict));
       entries.push(...callbackCoverage(operation, selector));
@@ -237,9 +265,93 @@ function serverRequirements(
   try {
     resolveServer(doc, pathItem, operation, undefined, sourceLocation);
     return [];
-  } catch {
-    return ["configuration.server"];
+  } catch (error: unknown) {
+    return error instanceof ConfigRequired ? ["configuration.server"] : [];
   }
+}
+
+function serverAlternativeCoverage(
+  document: OpenAPIDocument,
+  pathItem: OpenAPIPathItem,
+  operation: OpenAPIOperation,
+  selector: string,
+  operationKey: string,
+  bindingSpec: string,
+  sourceLocation: string,
+): SynthesisCoverageEntry[] {
+  const declaration = effectiveServerDeclaration(document, pathItem, operation, selector);
+  if (!declaration) return [];
+  const entries: SynthesisCoverageEntry[] = [];
+  for (const [index, server] of declaration.servers.entries()) {
+    try {
+      eligibleServers([server], document.openapi ?? "", sourceLocation);
+    } catch (error: unknown) {
+      entries.push({
+        sourceIndex: 0,
+        sourceRef: `${declaration.prefix}/${index}`,
+        scope: "alternative",
+        status: "excluded",
+        reasonCode: "openapi.server_url_excluded",
+        rule: openAPIRule(bindingSpec, "P-04"),
+        message: error instanceof Error ? error.message : String(error),
+        operationKey,
+        bindingSelector: selector,
+      });
+    }
+  }
+  return entries;
+}
+
+function effectiveServerDeclaration(
+  document: OpenAPIDocument,
+  pathItem: OpenAPIPathItem,
+  operation: OpenAPIOperation,
+  selector: string,
+): { servers: ServerEntry[]; prefix: string } | null {
+  const operationServers = declaredServers(operation.servers);
+  if (operationServers.length > 0) return { servers: operationServers, prefix: `${selector}/servers` };
+  const pathServers = declaredServers(pathItem.servers);
+  if (pathServers.length > 0) {
+    return { servers: pathServers, prefix: `${selector.slice(0, selector.lastIndexOf("/"))}/servers` };
+  }
+  const rootServers = declaredServers(document.servers);
+  return rootServers.length > 0 ? { servers: rootServers, prefix: "#/servers" } : null;
+}
+
+function declaredServers(raw: unknown): ServerEntry[] {
+  return Array.isArray(raw)
+    ? raw.filter((value): value is ServerEntry => value !== null && typeof value === "object"
+      && !Array.isArray(value) && typeof (value as Record<string, unknown>).url === "string")
+    : [];
+}
+
+function securityAlternativeCoverage(
+  document: OpenAPIDocument,
+  operation: OpenAPIOperation,
+  parameters: ReturnType<typeof effectiveParameters>,
+  selector: string,
+  operationKey: string,
+  bindingSpec: string,
+): SynthesisCoverageEntry[] {
+  const requirements = effectiveSecurityRequirements(document, operation);
+  if (!requirements || requirements.length === 0) return [];
+  const prefix = Array.isArray(operation.security) ? `${selector}/security` : "#/security";
+  const entries: SynthesisCoverageEntry[] = [];
+  for (const [index] of requirements.entries()) {
+    if (securityAlternativeUsable(document, operation, parameters, index)) continue;
+    entries.push({
+      sourceIndex: 0,
+      sourceRef: `${prefix}/${index}`,
+      scope: "alternative",
+      status: "excluded",
+      reasonCode: "openapi.security_alternative_unusable",
+      rule: openAPIRule(bindingSpec, "P-04"),
+      message: "security alternative is malformed, unresolved, or collides with an owned request destination",
+      operationKey,
+      bindingSelector: selector,
+    });
+  }
+  return entries;
 }
 
 function requestMediaCoverage(

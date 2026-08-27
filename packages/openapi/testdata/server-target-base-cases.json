@@ -226,10 +226,10 @@
       "operationServers": null,
       "expect": {
         "resolvable": true,
-        "targetBase": "https://api.example.test/v1"
+        "targetBase": "https://api.example.test/v1/"
       },
       "requirements": [],
-      "basis": "The resolved base carries no trailing slash so that joining it with the operation's path template is concatenation. Unchanged behaviour, pinned here so the predicate change cannot disturb it."
+      "basis": "OpenAPI 3.0/3.1 Section 10 appends operation path bytes verbatim to the resolved Server URL with no slash normalization or path repair, so the authored trailing slash remains part of the target base."
     },
     {
       "name": "sole-server-declared-variable-with-default",
@@ -290,10 +290,8 @@
         "resolvable": false,
         "targetBase": null
       },
-      "requirements": [
-        "configuration.server"
-      ],
-      "basis": "The nhost/nhost shape at commit b711a092180f931f876350cc0068b753318889dc. The sole entry selects itself, but the OAS defines substitution only for variables the Server Object declares, so the braces survive and the string is not a URI under RFC 3986. The target address is undetermined until the consumer supplies one at the `server` point."
+      "requirements": [],
+      "basis": "OpenAPI 3.0/3.1 Section 10 requires every template variable to resolve before dispatch. An undeclared expression is a declaration defect, so the server alternative is excluded rather than turned into consumer configuration."
     },
     {
       "name": "sole-server-partially-declared-template-variables",
@@ -313,10 +311,8 @@
         "resolvable": false,
         "targetBase": null
       },
-      "requirements": [
-        "configuration.server"
-      ],
-      "basis": "Declaring SOME of the URL's variables does not make the rest resolvable. `{subdomain}` survives substitution and the residue is still not a URI."
+      "requirements": [],
+      "basis": "Declaring some URL variables does not make an undeclared expression configurable. OpenAPI 3.0/3.1 Section 10 excludes the alternative because `{subdomain}` remains unresolved."
     },
     {
       "name": "sole-server-empty-http-host",
@@ -415,10 +411,8 @@
         "resolvable": false,
         "targetBase": null
       },
-      "requirements": [
-        "configuration.server"
-      ],
-      "basis": "The converse: a usable document-level entry does not rescue a defective operation-level one, because the operation's list REPLACES the document's rather than extending it."
+      "requirements": [],
+      "basis": "A usable document-level entry does not rescue a defective operation-level one because the operation list replaces the root list; the unresolved operation alternative is excluded under Section 10."
     },
     {
       "name": "sole-server-declared-variable-without-default",
@@ -441,10 +435,8 @@
         "resolvable": false,
         "targetBase": null
       },
-      "requirements": [
-        "configuration.server"
-      ],
-      "basis": "`default` is REQUIRED on a Server Variable Object in every accepted edition (verified in all eight); an artifact omitting it has declared a variable with no value, so the consumer must supply one. Unchanged behaviour, pinned so the predicate change cannot absorb it."
+      "requirements": [],
+      "basis": "OpenAPI 3.0.4 requires Server Variable default. Section 10 pins omission as a declaration refusal, not a recoverable consumer configuration requirement."
     },
     {
       "name": "no-servers-declared-no-base-uri",
