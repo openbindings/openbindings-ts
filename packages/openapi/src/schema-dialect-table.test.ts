@@ -28,7 +28,7 @@ interface SchemaDialectCell {
 const SUBJECT_REF = "#/paths/~1a/get";
 const CLEAN_REF = "#/paths/~1b/get";
 
-const raw = readFileSync(new URL("./testdata/schema-object-dialect-cases.json", import.meta.url), "utf8");
+const raw = readFileSync(new URL("../testdata/schema-object-dialect-cases.json", import.meta.url), "utf8");
 const digest = createHash("sha256").update(raw).digest("hex");
 if (digest !== SCHEMA_OBJECT_DIALECT_TABLE_SHA256) {
   throw new Error(

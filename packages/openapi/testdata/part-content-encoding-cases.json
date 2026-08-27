@@ -1,5 +1,5 @@
 {
-  "$comment": "The shared part-content-encoding case table. One rule across eight accepted OAS\neditions, both form media types, six declared part kinds, four Content-vocabulary\nspellings and two Encoding Object contentType settings: contentEncoding and\ncontentMediaType have force only where the resolved part schema declares\n`type: string`. On a declared non-string type they are inert and the part keeps\nits own per-type default row; a part declaring no `type` is the separate\ntype-absent cell and is unchanged by either keyword.\n\nEVERY harness that executes this file renders the case as a WHOLE OpenAPI\ndocument and loads it through its own engine's shipped loader — the two Go\nengines, openapi-client/typescript, and openbindings-ts/packages/openapi against\nthe BUILT client dist. No harness hands the engine a hand-built typed model.\n\nThe rendered decision deliberately carries no part headers other than\nContent-Type. A multipart part's Content-Transfer-Encoding is emitted by the Go\nengines and cannot be emitted by the TypeScript one, which writes parts through\nFormData; that difference predates this table and is pinned in each Go engine's\nown tests rather than smuggled across the twin boundary here. A bare FormData\nstring field carries no Content-Type header at all, which [RFC7578] Section 4.4\nmakes the same wire fact as an explicit text/plain, so both spellings render as\n`text/plain:<body>`.\nUPDATED 2026-08-17: the 80 urlencoded cells on 3.0.0, 3.0.1, 3.0.2 and 3.0.3\nmoved, and none of the `bases` did. Until then a legacyOpenAPIFormEncoding\npredicate in all three engines put those four editions' control-free urlencoded\nparts on the RFC6570-style path, where the Encoding Object was never consulted\nat all: an object rode as its own exploded members, an array as repeated\nparameters, and a declared `encoding.contentType: text/plain` on either was\nsilently DISCARDED. On the content path the declaration is honoured, so an\nobject or array under an explicit text/plain now refuses before dispatch —\nopenbindings.openapi@1 §9.2's \"a member for which the resolved schema leaves no\nfaithful form carriage refuses before dispatch\". The predicate was deleted\nbecause each of those editions' own §4.1 tells tooling to make no distinction\nbetween the patch versions of the 3.0 line, and 3.0.4 — a 3.0.* version —\nstates that with all three RFC6570-style fields absent \"Encoding is to be based\non contentType alone\" (ruling:\ndesign/openapi-30-urlencoded-default-lane-ruling.md; specification:\nopenbindings.openapi@1 §2 and §9.2). The `bases` are keyed by edition LINE and\ndescribe the part-default row rather than the path, which is why they are\nunchanged: this table's own rule never depended on the patch component.",
+  "$comment": "Shared engine-neutral case table for the openapi family specifications §§9.2–9.3. Each whole-document cell crosses edition, form media, resolved property kind, Schema content keyword, and Encoding contentType. Corrected 2026-08-26: typeless multipart cells no longer carry the superseded refusal. On 3.1 they use the raw-octet lane and canonical Base64 boundary, defaulting to application/octet-stream when Encoding contentType is absent. On 3.0 they remain represented but require configuration.propertyMedia at invocation; this harness supplies none, so they decide missing-required-choice. Typeless urlencoded cells remain refused because the family defines no urlencoded raw-octet boundary. contentEncoding is inert off string, and 3.1 emits no Content-Transfer-Encoding.",
   "bases": {
     "3.0|array-of-string|contentEncoding|encCT=absent": "3.0 line: neither Content-vocabulary keyword is in the Wright-Draft-00 Schema Object, so it is inert and the array-of-string part decides exactly as its |plain twin.",
     "3.0|array-of-string|contentEncoding|encCT=declared": "3.0 line: neither Content-vocabulary keyword is in the Wright-Draft-00 Schema Object, so it is inert and the array-of-string part decides exactly as its |plain twin. The Encoding Object declares contentType text/plain, which displaces the default row; the cell proves a declared contentType is reached at all, which it was not while a Content-vocabulary keyword on a non-string declaration refused ahead of it.",
@@ -31,12 +31,12 @@
     "3.0|string|contentMediaType|encCT=declared": "3.0 line: neither Content-vocabulary keyword is in the Wright-Draft-00 Schema Object, so it is inert and the string part decides exactly as its |plain twin. The Encoding Object declares contentType text/plain, which displaces the default row; the cell proves a declared contentType is reached at all, which it was not while a Content-vocabulary keyword on a non-string declaration refused ahead of it.",
     "3.0|string|plain|encCT=absent": "3.0 line: the multipart default list keys application/octet-stream on \"a `type: string` with `format: binary` or `format: base64`\"; primitives text/plain, complex application/json.",
     "3.0|string|plain|encCT=declared": "3.0 line: the multipart default list keys application/octet-stream on \"a `type: string` with `format: binary` or `format: base64`\"; primitives text/plain, complex application/json. The Encoding Object declares contentType text/plain, which displaces the default row; the cell proves a declared contentType is reached at all, which it was not while a Content-vocabulary keyword on a non-string declaration refused ahead of it.",
-    "3.0|typeless|contentEncoding|encCT=absent": "3.0 line: neither Content-vocabulary keyword is in the Wright-Draft-00 Schema Object, so it is inert and the typeless part decides exactly as its |plain twin. FLIPPED 2026-08-20 (stage-3 block 5, escalation M2): this cell read `admitted;emit=…` under the 3.0-line value-keyed convention, which is deleted. A resolved part schema declaring no `type` now refuses before dispatch on EVERY accepted edition — on this line because no stated default row reaches such a declaration and this specification authors none, on the 3.1 line because the edition states application/octet-stream and this revision defines no JSON-to-octet part boundary to cross. The `encCT=declared` twins are unaffected: an Encoding Object that declares a part contentType displaces the default row, so those cells are not the type-absent cell at all.",
-    "3.0|typeless|contentEncoding|encCT=declared": "3.0 line: neither Content-vocabulary keyword is in the Wright-Draft-00 Schema Object, so it is inert and the typeless part decides exactly as its |plain twin. The Encoding Object declares contentType text/plain, which displaces the default row; the cell proves a declared contentType is reached at all, which it was not while a Content-vocabulary keyword on a non-string declaration refused ahead of it.",
-    "3.0|typeless|contentMediaType|encCT=absent": "3.0 line: neither Content-vocabulary keyword is in the Wright-Draft-00 Schema Object, so it is inert and the typeless part decides exactly as its |plain twin. FLIPPED 2026-08-20 (stage-3 block 5, escalation M2): this cell read `admitted;emit=…` under the 3.0-line value-keyed convention, which is deleted. A resolved part schema declaring no `type` now refuses before dispatch on EVERY accepted edition — on this line because no stated default row reaches such a declaration and this specification authors none, on the 3.1 line because the edition states application/octet-stream and this revision defines no JSON-to-octet part boundary to cross. The `encCT=declared` twins are unaffected: an Encoding Object that declares a part contentType displaces the default row, so those cells are not the type-absent cell at all.",
-    "3.0|typeless|contentMediaType|encCT=declared": "3.0 line: neither Content-vocabulary keyword is in the Wright-Draft-00 Schema Object, so it is inert and the typeless part decides exactly as its |plain twin. The Encoding Object declares contentType text/plain, which displaces the default row; the cell proves a declared contentType is reached at all, which it was not while a Content-vocabulary keyword on a non-string declaration refused ahead of it.",
-    "3.0|typeless|plain|encCT=absent": "3.0 line: the multipart default list keys application/octet-stream on \"a `type: string` with `format: binary` or `format: base64`\"; primitives text/plain, complex application/json. FLIPPED 2026-08-20 (stage-3 block 5, escalation M2): this cell read `admitted;emit=…` under the 3.0-line value-keyed convention, which is deleted. A resolved part schema declaring no `type` now refuses before dispatch on EVERY accepted edition — on this line because no stated default row reaches such a declaration and this specification authors none, on the 3.1 line because the edition states application/octet-stream and this revision defines no JSON-to-octet part boundary to cross. The `encCT=declared` twins are unaffected: an Encoding Object that declares a part contentType displaces the default row, so those cells are not the type-absent cell at all.",
-    "3.0|typeless|plain|encCT=declared": "3.0 line: the multipart default list keys application/octet-stream on \"a `type: string` with `format: binary` or `format: base64`\"; primitives text/plain, complex application/json. The Encoding Object declares contentType text/plain, which displaces the default row; the cell proves a declared contentType is reached at all, which it was not while a Content-vocabulary keyword on a non-string declaration refused ahead of it.",
+    "3.0|typeless|contentEncoding|encCT=absent": "3.0 line: a typeless resolved multipart part has no default concrete type and configuration.propertyMedia is required for the property. This harness supplies no configuration, so the represented alternative reaches missing-required-choice before inspecting the value.",
+    "3.0|typeless|contentEncoding|encCT=declared": "3.0 line: a typeless resolved multipart part has no default concrete type and configuration.propertyMedia is required for the property. This harness supplies no configuration, so the represented alternative reaches missing-required-choice before inspecting the value. The explicit Encoding contentType is the declared member the configured concrete choice must satisfy; it does not remove the family configuration point.",
+    "3.0|typeless|contentMediaType|encCT=absent": "3.0 line: a typeless resolved multipart part has no default concrete type and configuration.propertyMedia is required for the property. This harness supplies no configuration, so the represented alternative reaches missing-required-choice before inspecting the value.",
+    "3.0|typeless|contentMediaType|encCT=declared": "3.0 line: a typeless resolved multipart part has no default concrete type and configuration.propertyMedia is required for the property. This harness supplies no configuration, so the represented alternative reaches missing-required-choice before inspecting the value. The explicit Encoding contentType is the declared member the configured concrete choice must satisfy; it does not remove the family configuration point.",
+    "3.0|typeless|plain|encCT=absent": "3.0 line: a typeless resolved multipart part has no default concrete type and configuration.propertyMedia is required for the property. This harness supplies no configuration, so the represented alternative reaches missing-required-choice before inspecting the value.",
+    "3.0|typeless|plain|encCT=declared": "3.0 line: a typeless resolved multipart part has no default concrete type and configuration.propertyMedia is required for the property. This harness supplies no configuration, so the represented alternative reaches missing-required-choice before inspecting the value. The explicit Encoding contentType is the declared member the configured concrete choice must satisfy; it does not remove the family configuration point.",
     "3.1|array-of-string|contentEncoding|encCT=absent": "3.1 line: [JSON Schema 2020-12] Section 8.1 makes the Content vocabulary annotations that \"do not function as validation assertions\" and Sections 8.3/8.4 condition each keyword on a string instance, so on a declared array-of-string both are inert; 3.1.1/3.1.2 say the same by holding `n/a` in the contentEncoding column of that row (\"the presence or value of contentEncoding is irrelevant\"). Decides exactly as its |plain twin.",
     "3.1|array-of-string|contentEncoding|encCT=declared": "3.1 line: [JSON Schema 2020-12] Section 8.1 makes the Content vocabulary annotations that \"do not function as validation assertions\" and Sections 8.3/8.4 condition each keyword on a string instance, so on a declared array-of-string both are inert; 3.1.1/3.1.2 say the same by holding `n/a` in the contentEncoding column of that row (\"the presence or value of contentEncoding is irrelevant\"). Decides exactly as its |plain twin. The Encoding Object declares contentType text/plain, which displaces the default row; the cell proves a declared contentType is reached at all, which it was not while a Content-vocabulary keyword on a non-string declaration refused ahead of it.",
     "3.1|array-of-string|contentMediaType|encCT=absent": "3.1 line: [JSON Schema 2020-12] Section 8.1 makes the Content vocabulary annotations that \"do not function as validation assertions\" and Sections 8.3/8.4 condition each keyword on a string instance, so on a declared array-of-string both are inert; 3.1.1/3.1.2 say the same by holding `n/a` in the contentEncoding column of that row (\"the presence or value of contentEncoding is irrelevant\"). Decides exactly as its |plain twin.",
@@ -67,12 +67,12 @@
     "3.1|string|contentMediaType|encCT=declared": "3.1 line: the `string` x contentEncoding-absent row -> text/plain. 3.1.1/3.1.2 add that \"the Encoding Object's contentType defaulting rules do not take the Schema Object's contentMediaType into account\", so contentMediaType alone does not displace it. The Encoding Object declares contentType text/plain, which displaces the default row; the cell proves a declared contentType is reached at all, which it was not while a Content-vocabulary keyword on a non-string declaration refused ahead of it.",
     "3.1|string|plain|encCT=absent": "3.1 line: the `string` x contentEncoding-absent row -> text/plain. 3.1.1/3.1.2 add that \"the Encoding Object's contentType defaulting rules do not take the Schema Object's contentMediaType into account\", so contentMediaType alone does not displace it.",
     "3.1|string|plain|encCT=declared": "3.1 line: the `string` x contentEncoding-absent row -> text/plain. 3.1.1/3.1.2 add that \"the Encoding Object's contentType defaulting rules do not take the Schema Object's contentMediaType into account\", so contentMediaType alone does not displace it. The Encoding Object declares contentType text/plain, which displaces the default row; the cell proves a declared contentType is reached at all, which it was not while a Content-vocabulary keyword on a non-string declaration refused ahead of it.",
-    "3.1|typeless|contentEncoding|encCT=absent": "3.1 line: the `type`-absent row, application/octet-stream in all three editions, for which this revision defines no JSON-to-octet part boundary (F-O1-10 item 2). A Content-vocabulary keyword annotates nothing here and does not change it.",
-    "3.1|typeless|contentEncoding|encCT=declared": "3.1 line: the `type`-absent row, application/octet-stream in all three editions, for which this revision defines no JSON-to-octet part boundary (F-O1-10 item 2). A Content-vocabulary keyword annotates nothing here and does not change it. The Encoding Object declares contentType text/plain, which displaces the default row; the cell proves a declared contentType is reached at all, which it was not while a Content-vocabulary keyword on a non-string declaration refused ahead of it.",
-    "3.1|typeless|contentMediaType|encCT=absent": "3.1 line: the `type`-absent row, application/octet-stream in all three editions, for which this revision defines no JSON-to-octet part boundary (F-O1-10 item 2). A Content-vocabulary keyword annotates nothing here and does not change it.",
-    "3.1|typeless|contentMediaType|encCT=declared": "3.1 line: the `type`-absent row, application/octet-stream in all three editions, for which this revision defines no JSON-to-octet part boundary (F-O1-10 item 2). A Content-vocabulary keyword annotates nothing here and does not change it. The Encoding Object declares contentType text/plain, which displaces the default row; the cell proves a declared contentType is reached at all, which it was not while a Content-vocabulary keyword on a non-string declaration refused ahead of it.",
-    "3.1|typeless|plain|encCT=absent": "3.1 line: the `type`-absent row, application/octet-stream in all three editions, for which this revision defines no JSON-to-octet part boundary (F-O1-10 item 2). A Content-vocabulary keyword annotates nothing here and does not change it.",
-    "3.1|typeless|plain|encCT=declared": "3.1 line: the `type`-absent row, application/octet-stream in all three editions, for which this revision defines no JSON-to-octet part boundary (F-O1-10 item 2). A Content-vocabulary keyword annotates nothing here and does not change it. The Encoding Object declares contentType text/plain, which displaces the default row; the cell proves a declared contentType is reached at all, which it was not while a Content-vocabulary keyword on a non-string declaration refused ahead of it."
+    "3.1|typeless|contentEncoding|encCT=absent": "3.1 line: a typeless resolved multipart part uses the raw-octet lane and canonical Base64 boundary, with the application/octet-stream default supplying the part field.",
+    "3.1|typeless|contentEncoding|encCT=declared": "3.1 line: a typeless resolved multipart part uses the raw-octet lane and canonical Base64 boundary; the explicit Encoding contentType supplies the part field while the decoded octets remain the body.",
+    "3.1|typeless|contentMediaType|encCT=absent": "3.1 line: a typeless resolved multipart part uses the raw-octet lane and canonical Base64 boundary, with the application/octet-stream default supplying the part field.",
+    "3.1|typeless|contentMediaType|encCT=declared": "3.1 line: a typeless resolved multipart part uses the raw-octet lane and canonical Base64 boundary; the explicit Encoding contentType supplies the part field while the decoded octets remain the body.",
+    "3.1|typeless|plain|encCT=absent": "3.1 line: a typeless resolved multipart part uses the raw-octet lane and canonical Base64 boundary, with the application/octet-stream default supplying the part field.",
+    "3.1|typeless|plain|encCT=declared": "3.1 line: a typeless resolved multipart part uses the raw-octet lane and canonical Base64 boundary; the explicit Encoding contentType supplies the part field while the decoded octets remain the body."
   },
   "cases": [
     {
@@ -861,9 +861,10 @@
       "declaresString": false,
       "encodingContentType": "",
       "propertyName": "p",
-      "propertySchema": {},
+      "propertySchema": {
+      },
       "value": "abc",
-      "expect": "refused",
+      "expect": "missing-required-choice",
       "basisKey": "3.0|typeless|plain|encCT=absent"
     },
     {
@@ -876,9 +877,10 @@
       "declaresString": false,
       "encodingContentType": "text/plain",
       "propertyName": "p",
-      "propertySchema": {},
+      "propertySchema": {
+      },
       "value": "abc",
-      "expect": "refused",
+      "expect": "missing-required-choice",
       "basisKey": "3.0|typeless|plain|encCT=declared"
     },
     {
@@ -895,7 +897,7 @@
         "contentEncoding": "base64"
       },
       "value": "abc",
-      "expect": "refused",
+      "expect": "missing-required-choice",
       "basisKey": "3.0|typeless|contentEncoding|encCT=absent"
     },
     {
@@ -912,7 +914,7 @@
         "contentEncoding": "base64"
       },
       "value": "abc",
-      "expect": "refused",
+      "expect": "missing-required-choice",
       "basisKey": "3.0|typeless|contentEncoding|encCT=declared"
     },
     {
@@ -929,7 +931,7 @@
         "contentMediaType": "application/json"
       },
       "value": "abc",
-      "expect": "refused",
+      "expect": "missing-required-choice",
       "basisKey": "3.0|typeless|contentMediaType|encCT=absent"
     },
     {
@@ -946,7 +948,7 @@
         "contentMediaType": "application/json"
       },
       "value": "abc",
-      "expect": "refused",
+      "expect": "missing-required-choice",
       "basisKey": "3.0|typeless|contentMediaType|encCT=declared"
     },
     {
@@ -964,7 +966,7 @@
         "contentMediaType": "application/json"
       },
       "value": "abc",
-      "expect": "refused",
+      "expect": "missing-required-choice",
       "basisKey": "3.0|typeless|contentEncoding|encCT=absent"
     },
     {
@@ -982,7 +984,7 @@
         "contentMediaType": "application/json"
       },
       "value": "abc",
-      "expect": "refused",
+      "expect": "missing-required-choice",
       "basisKey": "3.0|typeless|contentEncoding|encCT=declared"
     },
     {
@@ -1771,7 +1773,8 @@
       "declaresString": false,
       "encodingContentType": "",
       "propertyName": "p",
-      "propertySchema": {},
+      "propertySchema": {
+      },
       "value": "abc",
       "expect": "refused",
       "basisKey": "3.0|typeless|plain|encCT=absent"
@@ -1786,7 +1789,8 @@
       "declaresString": false,
       "encodingContentType": "text/plain",
       "propertyName": "p",
-      "propertySchema": {},
+      "propertySchema": {
+      },
       "value": "abc",
       "expect": "refused",
       "basisKey": "3.0|typeless|plain|encCT=declared"
@@ -2681,9 +2685,10 @@
       "declaresString": false,
       "encodingContentType": "",
       "propertyName": "p",
-      "propertySchema": {},
+      "propertySchema": {
+      },
       "value": "abc",
-      "expect": "refused",
+      "expect": "missing-required-choice",
       "basisKey": "3.0|typeless|plain|encCT=absent"
     },
     {
@@ -2696,9 +2701,10 @@
       "declaresString": false,
       "encodingContentType": "text/plain",
       "propertyName": "p",
-      "propertySchema": {},
+      "propertySchema": {
+      },
       "value": "abc",
-      "expect": "refused",
+      "expect": "missing-required-choice",
       "basisKey": "3.0|typeless|plain|encCT=declared"
     },
     {
@@ -2715,7 +2721,7 @@
         "contentEncoding": "base64"
       },
       "value": "abc",
-      "expect": "refused",
+      "expect": "missing-required-choice",
       "basisKey": "3.0|typeless|contentEncoding|encCT=absent"
     },
     {
@@ -2732,7 +2738,7 @@
         "contentEncoding": "base64"
       },
       "value": "abc",
-      "expect": "refused",
+      "expect": "missing-required-choice",
       "basisKey": "3.0|typeless|contentEncoding|encCT=declared"
     },
     {
@@ -2749,7 +2755,7 @@
         "contentMediaType": "application/json"
       },
       "value": "abc",
-      "expect": "refused",
+      "expect": "missing-required-choice",
       "basisKey": "3.0|typeless|contentMediaType|encCT=absent"
     },
     {
@@ -2766,7 +2772,7 @@
         "contentMediaType": "application/json"
       },
       "value": "abc",
-      "expect": "refused",
+      "expect": "missing-required-choice",
       "basisKey": "3.0|typeless|contentMediaType|encCT=declared"
     },
     {
@@ -2784,7 +2790,7 @@
         "contentMediaType": "application/json"
       },
       "value": "abc",
-      "expect": "refused",
+      "expect": "missing-required-choice",
       "basisKey": "3.0|typeless|contentEncoding|encCT=absent"
     },
     {
@@ -2802,7 +2808,7 @@
         "contentMediaType": "application/json"
       },
       "value": "abc",
-      "expect": "refused",
+      "expect": "missing-required-choice",
       "basisKey": "3.0|typeless|contentEncoding|encCT=declared"
     },
     {
@@ -3591,7 +3597,8 @@
       "declaresString": false,
       "encodingContentType": "",
       "propertyName": "p",
-      "propertySchema": {},
+      "propertySchema": {
+      },
       "value": "abc",
       "expect": "refused",
       "basisKey": "3.0|typeless|plain|encCT=absent"
@@ -3606,7 +3613,8 @@
       "declaresString": false,
       "encodingContentType": "text/plain",
       "propertyName": "p",
-      "propertySchema": {},
+      "propertySchema": {
+      },
       "value": "abc",
       "expect": "refused",
       "basisKey": "3.0|typeless|plain|encCT=declared"
@@ -4501,9 +4509,10 @@
       "declaresString": false,
       "encodingContentType": "",
       "propertyName": "p",
-      "propertySchema": {},
+      "propertySchema": {
+      },
       "value": "abc",
-      "expect": "refused",
+      "expect": "missing-required-choice",
       "basisKey": "3.0|typeless|plain|encCT=absent"
     },
     {
@@ -4516,9 +4525,10 @@
       "declaresString": false,
       "encodingContentType": "text/plain",
       "propertyName": "p",
-      "propertySchema": {},
+      "propertySchema": {
+      },
       "value": "abc",
-      "expect": "refused",
+      "expect": "missing-required-choice",
       "basisKey": "3.0|typeless|plain|encCT=declared"
     },
     {
@@ -4535,7 +4545,7 @@
         "contentEncoding": "base64"
       },
       "value": "abc",
-      "expect": "refused",
+      "expect": "missing-required-choice",
       "basisKey": "3.0|typeless|contentEncoding|encCT=absent"
     },
     {
@@ -4552,7 +4562,7 @@
         "contentEncoding": "base64"
       },
       "value": "abc",
-      "expect": "refused",
+      "expect": "missing-required-choice",
       "basisKey": "3.0|typeless|contentEncoding|encCT=declared"
     },
     {
@@ -4569,7 +4579,7 @@
         "contentMediaType": "application/json"
       },
       "value": "abc",
-      "expect": "refused",
+      "expect": "missing-required-choice",
       "basisKey": "3.0|typeless|contentMediaType|encCT=absent"
     },
     {
@@ -4586,7 +4596,7 @@
         "contentMediaType": "application/json"
       },
       "value": "abc",
-      "expect": "refused",
+      "expect": "missing-required-choice",
       "basisKey": "3.0|typeless|contentMediaType|encCT=declared"
     },
     {
@@ -4604,7 +4614,7 @@
         "contentMediaType": "application/json"
       },
       "value": "abc",
-      "expect": "refused",
+      "expect": "missing-required-choice",
       "basisKey": "3.0|typeless|contentEncoding|encCT=absent"
     },
     {
@@ -4622,7 +4632,7 @@
         "contentMediaType": "application/json"
       },
       "value": "abc",
-      "expect": "refused",
+      "expect": "missing-required-choice",
       "basisKey": "3.0|typeless|contentEncoding|encCT=declared"
     },
     {
@@ -5411,7 +5421,8 @@
       "declaresString": false,
       "encodingContentType": "",
       "propertyName": "p",
-      "propertySchema": {},
+      "propertySchema": {
+      },
       "value": "abc",
       "expect": "refused",
       "basisKey": "3.0|typeless|plain|encCT=absent"
@@ -5426,7 +5437,8 @@
       "declaresString": false,
       "encodingContentType": "text/plain",
       "propertyName": "p",
-      "propertySchema": {},
+      "propertySchema": {
+      },
       "value": "abc",
       "expect": "refused",
       "basisKey": "3.0|typeless|plain|encCT=declared"
@@ -6321,9 +6333,10 @@
       "declaresString": false,
       "encodingContentType": "",
       "propertyName": "p",
-      "propertySchema": {},
+      "propertySchema": {
+      },
       "value": "abc",
-      "expect": "refused",
+      "expect": "missing-required-choice",
       "basisKey": "3.0|typeless|plain|encCT=absent"
     },
     {
@@ -6336,9 +6349,10 @@
       "declaresString": false,
       "encodingContentType": "text/plain",
       "propertyName": "p",
-      "propertySchema": {},
+      "propertySchema": {
+      },
       "value": "abc",
-      "expect": "refused",
+      "expect": "missing-required-choice",
       "basisKey": "3.0|typeless|plain|encCT=declared"
     },
     {
@@ -6355,7 +6369,7 @@
         "contentEncoding": "base64"
       },
       "value": "abc",
-      "expect": "refused",
+      "expect": "missing-required-choice",
       "basisKey": "3.0|typeless|contentEncoding|encCT=absent"
     },
     {
@@ -6372,7 +6386,7 @@
         "contentEncoding": "base64"
       },
       "value": "abc",
-      "expect": "refused",
+      "expect": "missing-required-choice",
       "basisKey": "3.0|typeless|contentEncoding|encCT=declared"
     },
     {
@@ -6389,7 +6403,7 @@
         "contentMediaType": "application/json"
       },
       "value": "abc",
-      "expect": "refused",
+      "expect": "missing-required-choice",
       "basisKey": "3.0|typeless|contentMediaType|encCT=absent"
     },
     {
@@ -6406,7 +6420,7 @@
         "contentMediaType": "application/json"
       },
       "value": "abc",
-      "expect": "refused",
+      "expect": "missing-required-choice",
       "basisKey": "3.0|typeless|contentMediaType|encCT=declared"
     },
     {
@@ -6424,7 +6438,7 @@
         "contentMediaType": "application/json"
       },
       "value": "abc",
-      "expect": "refused",
+      "expect": "missing-required-choice",
       "basisKey": "3.0|typeless|contentEncoding|encCT=absent"
     },
     {
@@ -6442,7 +6456,7 @@
         "contentMediaType": "application/json"
       },
       "value": "abc",
-      "expect": "refused",
+      "expect": "missing-required-choice",
       "basisKey": "3.0|typeless|contentEncoding|encCT=declared"
     },
     {
@@ -7231,7 +7245,8 @@
       "declaresString": false,
       "encodingContentType": "",
       "propertyName": "p",
-      "propertySchema": {},
+      "propertySchema": {
+      },
       "value": "abc",
       "expect": "refused",
       "basisKey": "3.0|typeless|plain|encCT=absent"
@@ -7246,7 +7261,8 @@
       "declaresString": false,
       "encodingContentType": "text/plain",
       "propertyName": "p",
-      "propertySchema": {},
+      "propertySchema": {
+      },
       "value": "abc",
       "expect": "refused",
       "basisKey": "3.0|typeless|plain|encCT=declared"
@@ -8141,9 +8157,10 @@
       "declaresString": false,
       "encodingContentType": "",
       "propertyName": "p",
-      "propertySchema": {},
+      "propertySchema": {
+      },
       "value": "abc",
-      "expect": "refused",
+      "expect": "missing-required-choice",
       "basisKey": "3.0|typeless|plain|encCT=absent"
     },
     {
@@ -8156,9 +8173,10 @@
       "declaresString": false,
       "encodingContentType": "text/plain",
       "propertyName": "p",
-      "propertySchema": {},
+      "propertySchema": {
+      },
       "value": "abc",
-      "expect": "refused",
+      "expect": "missing-required-choice",
       "basisKey": "3.0|typeless|plain|encCT=declared"
     },
     {
@@ -8175,7 +8193,7 @@
         "contentEncoding": "base64"
       },
       "value": "abc",
-      "expect": "refused",
+      "expect": "missing-required-choice",
       "basisKey": "3.0|typeless|contentEncoding|encCT=absent"
     },
     {
@@ -8192,7 +8210,7 @@
         "contentEncoding": "base64"
       },
       "value": "abc",
-      "expect": "refused",
+      "expect": "missing-required-choice",
       "basisKey": "3.0|typeless|contentEncoding|encCT=declared"
     },
     {
@@ -8209,7 +8227,7 @@
         "contentMediaType": "application/json"
       },
       "value": "abc",
-      "expect": "refused",
+      "expect": "missing-required-choice",
       "basisKey": "3.0|typeless|contentMediaType|encCT=absent"
     },
     {
@@ -8226,7 +8244,7 @@
         "contentMediaType": "application/json"
       },
       "value": "abc",
-      "expect": "refused",
+      "expect": "missing-required-choice",
       "basisKey": "3.0|typeless|contentMediaType|encCT=declared"
     },
     {
@@ -8244,7 +8262,7 @@
         "contentMediaType": "application/json"
       },
       "value": "abc",
-      "expect": "refused",
+      "expect": "missing-required-choice",
       "basisKey": "3.0|typeless|contentEncoding|encCT=absent"
     },
     {
@@ -8262,7 +8280,7 @@
         "contentMediaType": "application/json"
       },
       "value": "abc",
-      "expect": "refused",
+      "expect": "missing-required-choice",
       "basisKey": "3.0|typeless|contentEncoding|encCT=declared"
     },
     {
@@ -9051,7 +9069,8 @@
       "declaresString": false,
       "encodingContentType": "",
       "propertyName": "p",
-      "propertySchema": {},
+      "propertySchema": {
+      },
       "value": "abc",
       "expect": "refused",
       "basisKey": "3.0|typeless|plain|encCT=absent"
@@ -9066,7 +9085,8 @@
       "declaresString": false,
       "encodingContentType": "text/plain",
       "propertyName": "p",
-      "propertySchema": {},
+      "propertySchema": {
+      },
       "value": "abc",
       "expect": "refused",
       "basisKey": "3.0|typeless|plain|encCT=declared"
@@ -9961,9 +9981,10 @@
       "declaresString": false,
       "encodingContentType": "",
       "propertyName": "p",
-      "propertySchema": {},
-      "value": "abc",
-      "expect": "refused",
+      "propertySchema": {
+      },
+      "value": "YWJj",
+      "expect": "admitted;emit=application/octet-stream:abc",
       "basisKey": "3.1|typeless|plain|encCT=absent"
     },
     {
@@ -9976,9 +9997,10 @@
       "declaresString": false,
       "encodingContentType": "text/plain",
       "propertyName": "p",
-      "propertySchema": {},
-      "value": "abc",
-      "expect": "refused",
+      "propertySchema": {
+      },
+      "value": "YWJj",
+      "expect": "admitted;emit=text/plain:abc",
       "basisKey": "3.1|typeless|plain|encCT=declared"
     },
     {
@@ -9994,8 +10016,8 @@
       "propertySchema": {
         "contentEncoding": "base64"
       },
-      "value": "abc",
-      "expect": "refused",
+      "value": "YWJj",
+      "expect": "admitted;emit=application/octet-stream:abc",
       "basisKey": "3.1|typeless|contentEncoding|encCT=absent"
     },
     {
@@ -10011,8 +10033,8 @@
       "propertySchema": {
         "contentEncoding": "base64"
       },
-      "value": "abc",
-      "expect": "refused",
+      "value": "YWJj",
+      "expect": "admitted;emit=text/plain:abc",
       "basisKey": "3.1|typeless|contentEncoding|encCT=declared"
     },
     {
@@ -10028,8 +10050,8 @@
       "propertySchema": {
         "contentMediaType": "application/json"
       },
-      "value": "abc",
-      "expect": "refused",
+      "value": "YWJj",
+      "expect": "admitted;emit=application/octet-stream:abc",
       "basisKey": "3.1|typeless|contentMediaType|encCT=absent"
     },
     {
@@ -10045,8 +10067,8 @@
       "propertySchema": {
         "contentMediaType": "application/json"
       },
-      "value": "abc",
-      "expect": "refused",
+      "value": "YWJj",
+      "expect": "admitted;emit=text/plain:abc",
       "basisKey": "3.1|typeless|contentMediaType|encCT=declared"
     },
     {
@@ -10063,8 +10085,8 @@
         "contentEncoding": "base64",
         "contentMediaType": "application/json"
       },
-      "value": "abc",
-      "expect": "refused",
+      "value": "YWJj",
+      "expect": "admitted;emit=application/octet-stream:abc",
       "basisKey": "3.1|typeless|contentEncoding|encCT=absent"
     },
     {
@@ -10081,8 +10103,8 @@
         "contentEncoding": "base64",
         "contentMediaType": "application/json"
       },
-      "value": "abc",
-      "expect": "refused",
+      "value": "YWJj",
+      "expect": "admitted;emit=text/plain:abc",
       "basisKey": "3.1|typeless|contentEncoding|encCT=declared"
     },
     {
@@ -10871,7 +10893,8 @@
       "declaresString": false,
       "encodingContentType": "",
       "propertyName": "p",
-      "propertySchema": {},
+      "propertySchema": {
+      },
       "value": "abc",
       "expect": "refused",
       "basisKey": "3.1|typeless|plain|encCT=absent"
@@ -10886,7 +10909,8 @@
       "declaresString": false,
       "encodingContentType": "text/plain",
       "propertyName": "p",
-      "propertySchema": {},
+      "propertySchema": {
+      },
       "value": "abc",
       "expect": "refused",
       "basisKey": "3.1|typeless|plain|encCT=declared"
@@ -11781,9 +11805,10 @@
       "declaresString": false,
       "encodingContentType": "",
       "propertyName": "p",
-      "propertySchema": {},
-      "value": "abc",
-      "expect": "refused",
+      "propertySchema": {
+      },
+      "value": "YWJj",
+      "expect": "admitted;emit=application/octet-stream:abc",
       "basisKey": "3.1|typeless|plain|encCT=absent"
     },
     {
@@ -11796,9 +11821,10 @@
       "declaresString": false,
       "encodingContentType": "text/plain",
       "propertyName": "p",
-      "propertySchema": {},
-      "value": "abc",
-      "expect": "refused",
+      "propertySchema": {
+      },
+      "value": "YWJj",
+      "expect": "admitted;emit=text/plain:abc",
       "basisKey": "3.1|typeless|plain|encCT=declared"
     },
     {
@@ -11814,8 +11840,8 @@
       "propertySchema": {
         "contentEncoding": "base64"
       },
-      "value": "abc",
-      "expect": "refused",
+      "value": "YWJj",
+      "expect": "admitted;emit=application/octet-stream:abc",
       "basisKey": "3.1|typeless|contentEncoding|encCT=absent"
     },
     {
@@ -11831,8 +11857,8 @@
       "propertySchema": {
         "contentEncoding": "base64"
       },
-      "value": "abc",
-      "expect": "refused",
+      "value": "YWJj",
+      "expect": "admitted;emit=text/plain:abc",
       "basisKey": "3.1|typeless|contentEncoding|encCT=declared"
     },
     {
@@ -11848,8 +11874,8 @@
       "propertySchema": {
         "contentMediaType": "application/json"
       },
-      "value": "abc",
-      "expect": "refused",
+      "value": "YWJj",
+      "expect": "admitted;emit=application/octet-stream:abc",
       "basisKey": "3.1|typeless|contentMediaType|encCT=absent"
     },
     {
@@ -11865,8 +11891,8 @@
       "propertySchema": {
         "contentMediaType": "application/json"
       },
-      "value": "abc",
-      "expect": "refused",
+      "value": "YWJj",
+      "expect": "admitted;emit=text/plain:abc",
       "basisKey": "3.1|typeless|contentMediaType|encCT=declared"
     },
     {
@@ -11883,8 +11909,8 @@
         "contentEncoding": "base64",
         "contentMediaType": "application/json"
       },
-      "value": "abc",
-      "expect": "refused",
+      "value": "YWJj",
+      "expect": "admitted;emit=application/octet-stream:abc",
       "basisKey": "3.1|typeless|contentEncoding|encCT=absent"
     },
     {
@@ -11901,8 +11927,8 @@
         "contentEncoding": "base64",
         "contentMediaType": "application/json"
       },
-      "value": "abc",
-      "expect": "refused",
+      "value": "YWJj",
+      "expect": "admitted;emit=text/plain:abc",
       "basisKey": "3.1|typeless|contentEncoding|encCT=declared"
     },
     {
@@ -12691,7 +12717,8 @@
       "declaresString": false,
       "encodingContentType": "",
       "propertyName": "p",
-      "propertySchema": {},
+      "propertySchema": {
+      },
       "value": "abc",
       "expect": "refused",
       "basisKey": "3.1|typeless|plain|encCT=absent"
@@ -12706,7 +12733,8 @@
       "declaresString": false,
       "encodingContentType": "text/plain",
       "propertyName": "p",
-      "propertySchema": {},
+      "propertySchema": {
+      },
       "value": "abc",
       "expect": "refused",
       "basisKey": "3.1|typeless|plain|encCT=declared"
@@ -13601,9 +13629,10 @@
       "declaresString": false,
       "encodingContentType": "",
       "propertyName": "p",
-      "propertySchema": {},
-      "value": "abc",
-      "expect": "refused",
+      "propertySchema": {
+      },
+      "value": "YWJj",
+      "expect": "admitted;emit=application/octet-stream:abc",
       "basisKey": "3.1|typeless|plain|encCT=absent"
     },
     {
@@ -13616,9 +13645,10 @@
       "declaresString": false,
       "encodingContentType": "text/plain",
       "propertyName": "p",
-      "propertySchema": {},
-      "value": "abc",
-      "expect": "refused",
+      "propertySchema": {
+      },
+      "value": "YWJj",
+      "expect": "admitted;emit=text/plain:abc",
       "basisKey": "3.1|typeless|plain|encCT=declared"
     },
     {
@@ -13634,8 +13664,8 @@
       "propertySchema": {
         "contentEncoding": "base64"
       },
-      "value": "abc",
-      "expect": "refused",
+      "value": "YWJj",
+      "expect": "admitted;emit=application/octet-stream:abc",
       "basisKey": "3.1|typeless|contentEncoding|encCT=absent"
     },
     {
@@ -13651,8 +13681,8 @@
       "propertySchema": {
         "contentEncoding": "base64"
       },
-      "value": "abc",
-      "expect": "refused",
+      "value": "YWJj",
+      "expect": "admitted;emit=text/plain:abc",
       "basisKey": "3.1|typeless|contentEncoding|encCT=declared"
     },
     {
@@ -13668,8 +13698,8 @@
       "propertySchema": {
         "contentMediaType": "application/json"
       },
-      "value": "abc",
-      "expect": "refused",
+      "value": "YWJj",
+      "expect": "admitted;emit=application/octet-stream:abc",
       "basisKey": "3.1|typeless|contentMediaType|encCT=absent"
     },
     {
@@ -13685,8 +13715,8 @@
       "propertySchema": {
         "contentMediaType": "application/json"
       },
-      "value": "abc",
-      "expect": "refused",
+      "value": "YWJj",
+      "expect": "admitted;emit=text/plain:abc",
       "basisKey": "3.1|typeless|contentMediaType|encCT=declared"
     },
     {
@@ -13703,8 +13733,8 @@
         "contentEncoding": "base64",
         "contentMediaType": "application/json"
       },
-      "value": "abc",
-      "expect": "refused",
+      "value": "YWJj",
+      "expect": "admitted;emit=application/octet-stream:abc",
       "basisKey": "3.1|typeless|contentEncoding|encCT=absent"
     },
     {
@@ -13721,8 +13751,8 @@
         "contentEncoding": "base64",
         "contentMediaType": "application/json"
       },
-      "value": "abc",
-      "expect": "refused",
+      "value": "YWJj",
+      "expect": "admitted;emit=text/plain:abc",
       "basisKey": "3.1|typeless|contentEncoding|encCT=declared"
     },
     {
@@ -14511,7 +14541,8 @@
       "declaresString": false,
       "encodingContentType": "",
       "propertyName": "p",
-      "propertySchema": {},
+      "propertySchema": {
+      },
       "value": "abc",
       "expect": "refused",
       "basisKey": "3.1|typeless|plain|encCT=absent"
@@ -14526,7 +14557,8 @@
       "declaresString": false,
       "encodingContentType": "text/plain",
       "propertyName": "p",
-      "propertySchema": {},
+      "propertySchema": {
+      },
       "value": "abc",
       "expect": "refused",
       "basisKey": "3.1|typeless|plain|encCT=declared"

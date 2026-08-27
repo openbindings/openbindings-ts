@@ -432,10 +432,15 @@ export function withEngineEncodingAdmissionView<T>(
   const restores: Array<() => void> = [];
   const oas30 = openapiVersion?.startsWith("3.0") ?? true;
   try {
-    for (const media of Object.values(operation.requestBody?.content ?? {})) {
+    for (const [mediaKey, media] of Object.entries(operation.requestBody?.content ?? {})) {
       const root = media.schema as SchemaDeclaration;
       const encoding = asRecord(media.encoding);
       if (!encoding || !asRecord(root)) continue;
+      // OAS 3.0 Encoding style controls apply only to urlencoded bodies. For
+      // multipart they are ignored and the ordinary content path governs.
+      if (oas30 && mediaKey.split(";", 1)[0]!.trim().toLowerCase() === "multipart/form-data") {
+        continue;
+      }
       for (const [name, rawEncoding] of Object.entries(encoding)) {
         const entry = asRecord(rawEncoding);
         if (!encodingUsesSerialization(entry)) continue;

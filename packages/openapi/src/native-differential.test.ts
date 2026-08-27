@@ -93,7 +93,7 @@ describe("OpenAPI native-client differential", () => {
 
         expect(terminal).toBeDefined();
         expect(outputs).toEqual([]);
-        expect(terminal?.code).toBe("ERR_EXECUTION_FAILED");
+        expect(terminal?.code).toBe(scenario.id === "OAPI-FI-03" ? "ERR_PROTOCOL" : "ERR_EXECUTION_FAILED");
         expect(Object.hasOwn(terminal as object, "diagnostics")).toBe(false);
       } finally {
         await close(server);

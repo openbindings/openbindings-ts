@@ -1,8 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
   single,
-  newInvokeHooks,
-  USE_DEFAULT,
   ERR_INVALID_SELECTOR,
   ERR_PROTOCOL,
   ERR_RESPONSE_ERROR,
@@ -720,43 +718,6 @@ describe("OAPI-P-03 — flattened-model refusals", () => {
 // ---------------------------------------------------------------------------
 
 describe("OAPI-P-04 — request media on the wire", () => {
-  // The lexicographically least +json type is selected when exact
-  // application/json is absent, and rides as the request Content-Type.
-  it("selects the lexicographically least +json type", async () => {
-    const spec = {
-      openapi: "3.0.3",
-      info: { title: "t", version: "1" },
-      servers: [{ url: BASE }],
-      paths: {
-        "/things": {
-          post: {
-            operationId: "makeThing",
-            requestBody: {
-              required: true,
-              content: {
-                "application/vnd.b+json": { schema: { type: "object" } },
-                "application/vnd.a+json": { schema: { type: "object" } },
-              },
-            },
-            responses: { "201": { description: "ok" } },
-          },
-        },
-      },
-    };
-    const { fetch, requests } = mockFetch(() => jsonResponse({}, 201));
-    const call = new OpenAPIInvoker().invokeBinding({
-      source: src(spec),
-      selector: "#/paths/~1things/post",
-      fetch,
-    });
-    await call.write({ k: "v" });
-    await single(call.outputs);
-    expect(requests[0]?.headers.get("Content-Type")).toBe(
-      "application/vnd.a+json",
-    );
-    expect(requests[0]?.body).toBe('{"k":"v"}');
-  });
-
   it("carries an OAS 3.0 binary request as exact Base64-decoded octets", async () => {
     const spec = {
       openapi: "3.0.3",
@@ -853,12 +814,11 @@ describe("OAPI-P-04 — request media on the wire", () => {
     });
   }
 
-  // The degenerate-combination refusal reaches only artifacts declaring NO
-  // JSON-family request media: a co-declared JSON media type is selected
-  // first (JSON carries any shape), so the same scalar schema dispatches
-  // over JSON with no refusal. Mirrors the Go SDK's
+  // The degenerate-combination refusal reaches only a caller-selected
+  // degenerate alternative: a caller-selected co-declared JSON media type
+  // carries the same scalar schema with no refusal. Mirrors the Go SDK's
   // TestInvoke_DegenerateCombinationUnreachableWithJSONCoDeclared.
-  it("selects co-declared JSON over a degenerate multipart combination (no refusal)", async () => {
+  it("honors caller-selected JSON over a degenerate multipart combination", async () => {
     const spec = {
       openapi: "3.1.0",
       info: { title: "t", version: "1" },
@@ -884,6 +844,7 @@ describe("OAPI-P-04 — request media on the wire", () => {
       source: src(spec),
       selector: "#/paths/~1op/post",
       fetch,
+      context: { configuration: { requestMedia: "application/json" } },
     });
     await call.write({ body: "x" });
     await single(call.outputs);
@@ -1029,9 +990,7 @@ describe("OAPI-P-04 — request media on the wire", () => {
     expect(requests).toHaveLength(1);
   });
 
-  // The Accept header carries the declared success media; membership is
-  // normative (§9.2).
-  it("advertises declared success media in Accept, never failure media", async () => {
+  it("does not generate an Accept header from response declarations", async () => {
     const spec = {
       openapi: "3.0.3",
       info: { title: "t", version: "1" },
@@ -1061,10 +1020,7 @@ describe("OAPI-P-04 — request media on the wire", () => {
       fetch,
     });
     await single(call.outputs);
-    const accept = requests[0]?.headers.get("Accept") ?? "";
-    expect(accept).toContain("application/json");
-    expect(accept).toContain("text/csv");
-    expect(accept).not.toContain("problem+json");
+    expect(requests[0]?.headers.get("Accept")).toBeNull();
   });
 });
 
@@ -1085,7 +1041,7 @@ const DUAL_SPEC = {
             description: "ok",
             content: {
               "application/json": { schema: { type: "object" } },
-              "text/event-stream": {},
+              "text/event-stream": { schema: { type: "string" } },
             },
           },
         },
@@ -1109,12 +1065,9 @@ describe("OAPI-P-06 / §8 — interaction shape", () => {
     await expect(call.closed).rejects.toMatchObject({ code: ERR_PROTOCOL });
   });
 
-  // An operation declaring BOTH a JSON success and text/event-stream is
-  // streaming-capable; the response's Content-Type framing selects the shape.
-  it("selects the shape by response framing among declared shapes", async () => {
+  it("delivers an SSE representation as one unary value while JSON remains unary", async () => {
     const inv = new OpenAPIInvoker();
 
-    // SSE framing → server-streaming.
     const { fetch: sseFetch } = mockFetch(() =>
       sseResponse(["data: one\n\ndata: two\n\n"]),
     );
@@ -1126,7 +1079,7 @@ describe("OAPI-P-06 / §8 — interaction shape", () => {
     const events: unknown[] = [];
     for await (const e of streamCall.outputs) events.push(e);
     await streamCall.closed;
-    expect(events).toEqual(["one", "two"]);
+    expect(events).toEqual(["data: one\n\ndata: two\n\n"]);
 
     // JSON framing → unary.
     const { fetch: jsonFetch } = mockFetch(() =>
@@ -1140,94 +1093,6 @@ describe("OAPI-P-06 / §8 — interaction shape", () => {
     await expect(single(unaryCall.outputs)).resolves.toEqual({ mode: "unary" });
   });
 
-  // WHATWG extraction: a lone empty `data:` line DISPATCHES an event whose
-  // data is the empty string (the data-buffer emptiness check precedes the
-  // trailing-LF strip; openapi@1 §8), at its position in the stream. Blocks
-  // with no data line — comment-only or event/id-only — dispatch nothing,
-  // and an incomplete final event is discarded. Shared empty-data case:
-  // byte-identical stream across the openapi and asyncapi engines.
-  it("dispatches the empty string for a lone empty data line at its position", async () => {
-    const { fetch } = mockFetch(() =>
-      sseResponse([
-        ": comment only\n\n", // comment-only: nothing
-        "event: tick\nid: 7\n\n", // fields-only: nothing
-        "data: first\n\n", // emits "first"
-        "data:\n\n", // lone empty data line: emits ""
-        "data: third\n\n", // emits "third"
-        "data: incomplete-final-event", // no blank line: discarded
-      ]),
-    );
-    const call = new OpenAPIInvoker().invokeBinding({
-      source: src(DUAL_SPEC),
-      selector: REF_DUAL,
-      fetch,
-    });
-    const events: unknown[] = [];
-    for await (const e of call.outputs) events.push(e);
-    await call.closed;
-    expect(events).toEqual(["first", "", "third"]);
-  });
-
-  // CRLF and lone-CR line endings are valid event-stream line terminators.
-  it("accepts CRLF and lone-CR line endings", async () => {
-    const { fetch } = mockFetch(() =>
-      sseResponse(["data: crlf\r\n\r\n", "data: cr\r\r"]),
-    );
-    const call = new OpenAPIInvoker().invokeBinding({
-      source: src(DUAL_SPEC),
-      selector: REF_DUAL,
-      fetch,
-    });
-    const events: unknown[] = [];
-    for await (const e of call.outputs) events.push(e);
-    expect(events).toEqual(["crlf", "cr"]);
-  });
-
-  // One leading U+FEFF BOM is ignored per the WHATWG stream grammar.
-  it("ignores one leading BOM", async () => {
-    const { fetch } = mockFetch(() => sseResponse(["﻿data: x\n\n"]));
-    const call = new OpenAPIInvoker().invokeBinding({
-      source: src(DUAL_SPEC),
-      selector: REF_DUAL,
-      fetch,
-    });
-    await expect(single(call.outputs)).resolves.toBe("x");
-  });
-
-  // WHATWG lastEventId semantics: the last event ID persists across events
-  // until changed; retry is digits-only.
-  it("persists lastEventId across events and honors digits-only retry", async () => {
-    const metas: Array<Record<string, string[] | undefined>> = [];
-    const hooks = newInvokeHooks(
-      {
-        decode: (_site, raw) => {
-          metas.push({
-            id: raw.meta["x-sse-id"],
-            retry: raw.meta["x-sse-retry"],
-          });
-          return USE_DEFAULT;
-        },
-      },
-      {},
-    );
-    const { fetch } = mockFetch(() =>
-      sseResponse([
-        "id: 7\nretry: 250\ndata: a\n\n",
-        "retry: 9x9\ndata: b\n\n", // non-digits retry ignored; id persists
-      ]),
-    );
-    const call = new OpenAPIInvoker().invokeBinding({
-      source: src(DUAL_SPEC),
-      selector: REF_DUAL,
-      fetch,
-      hooks,
-    });
-    const events: unknown[] = [];
-    for await (const e of call.outputs) events.push(e);
-    expect(events).toEqual(["a", "b"]);
-    expect(metas[0]).toEqual({ id: ["7"], retry: ["250"] });
-    expect(metas[1]).toEqual({ id: ["7"], retry: undefined });
-  });
 });
 
 // ---------------------------------------------------------------------------

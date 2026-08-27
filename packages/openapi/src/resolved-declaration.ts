@@ -16,6 +16,11 @@ export interface ResolvedDeclaration {
   readonly types: ReadonlySet<string> | null;
   declaresOnly(...allowed: string[]): boolean;
   admitsStringAsSoleNonNullType(): boolean;
+  typeless(): boolean;
+  admitsNull(): boolean;
+  format(): { value: string; conflict: boolean };
+  keywordString(key: "contentEncoding" | "contentMediaType"): { value: string; conflict: boolean };
+  admitsStringEnumValue(value: string): boolean;
   propertyNames(): string[];
   property(name: string): ResolvedDeclaration;
   items(): ResolvedDeclaration;
@@ -34,6 +39,7 @@ class Declaration implements ResolvedDeclaration {
     readonly ambiguous: boolean,
     private readonly oas30: boolean,
     private readonly resolveReference?: SchemaReferenceResolver,
+    private readonly unsatisfiable = false,
   ) {}
 
   declaresOnly(...allowed: string[]): boolean {
@@ -51,6 +57,35 @@ class Declaration implements ResolvedDeclaration {
     return true;
   }
 
+  typeless(): boolean {
+    if (this.ambiguous || this.unsatisfiable || this.types !== null) return false;
+    return this.conjuncts.every((conjunct) => !Object.hasOwn(conjunct, "type"));
+  }
+
+  admitsNull(): boolean {
+    return !this.ambiguous && this.types?.has("null") === true;
+  }
+
+  format(): { value: string; conflict: boolean } {
+    return this.resolvedStringKeyword("format");
+  }
+
+  keywordString(
+    key: "contentEncoding" | "contentMediaType",
+  ): { value: string; conflict: boolean } {
+    if (this.oas30) return { value: "", conflict: false };
+    return this.resolvedStringKeyword(key);
+  }
+
+  admitsStringEnumValue(value: string): boolean {
+    if (this.ambiguous || this.unsatisfiable) return false;
+    for (const conjunct of this.conjuncts) {
+      if (!Array.isArray(conjunct.enum) || conjunct.enum.length === 0) continue;
+      if (!conjunct.enum.some((candidate) => candidate === value)) return false;
+    }
+    return true;
+  }
+
   propertyNames(): string[] {
     if (this.ambiguous) return [];
     const names = new Set<string>();
@@ -64,7 +99,31 @@ class Declaration implements ResolvedDeclaration {
 
   property(name: string): ResolvedDeclaration {
     if (this.ambiguous) return ambiguousDeclaration(this.oas30, this.resolveReference);
-    const matches = this.propertySlots(name).map((slot) => slot.value);
+    const matches: SchemaDeclaration[] = [];
+    for (const conjunct of this.conjuncts) {
+      let matched = false;
+      const properties = asRecord(conjunct.properties);
+      if (properties && Object.hasOwn(properties, name)) {
+        matches.push(properties[name] as SchemaDeclaration);
+        matched = true;
+      }
+      if (!this.oas30) {
+        const patterns = asRecord(conjunct.patternProperties);
+        for (const pattern of Object.keys(patterns ?? {}).sort(codePointCompare)) {
+          let applies = false;
+          try { applies = new RegExp(pattern, "u").test(name); } catch { /* validation owns invalid patterns */ }
+          if (!applies) continue;
+          matched = true;
+          matches.push(patterns![pattern] as SchemaDeclaration);
+        }
+      }
+      if (matched) continue;
+      const additional = conjunct.additionalProperties;
+      if (additional === false) continue;
+      matches.push(additional === undefined || additional === true
+        ? {}
+        : additional as SchemaDeclaration);
+    }
     return resolveDeclaration(conjoin(matches), this.oas30, this.resolveReference);
   }
 
@@ -88,6 +147,18 @@ class Declaration implements ResolvedDeclaration {
     }
     return slots;
   }
+
+  private resolvedStringKeyword(
+    key: "format" | "contentEncoding" | "contentMediaType",
+  ): { value: string; conflict: boolean } {
+    const values = new Set<string>();
+    for (const conjunct of this.conjuncts) {
+      const value = conjunct[key];
+      if (typeof value === "string" && value !== "") values.add(value);
+    }
+    if (values.size > 1) return { value: "", conflict: true };
+    return { value: values.values().next().value ?? "", conflict: false };
+  }
 }
 
 export function resolveDeclaration(
@@ -108,7 +179,14 @@ export function resolveDeclaration(
     }
     for (const member of types) if (!candidate.has(member)) types.delete(member);
   }
-  return new Declaration(result.conjuncts, types, false, oas30, resolveReference);
+  return new Declaration(
+    result.conjuncts,
+    types,
+    false,
+    oas30,
+    resolveReference,
+    result.unsatisfiable,
+  );
 }
 
 /** Returns the actual property-map slots contributing to a resolved member. */
@@ -127,14 +205,16 @@ function declarationConjuncts(
   oas30: boolean,
   resolveReference: SchemaReferenceResolver | undefined,
   seen: Set<object>,
-): { conjuncts: Record<string, unknown>[]; ambiguous: boolean } {
-  if (schema === true) return { conjuncts: [{}], ambiguous: false };
+): { conjuncts: Record<string, unknown>[]; ambiguous: boolean; unsatisfiable: boolean } {
+  if (schema === true) return { conjuncts: [{}], ambiguous: false, unsatisfiable: false };
   const object = asRecord(schema);
-  if (schema === false || !object) return { conjuncts: [], ambiguous: false };
-  if (seen.has(object)) return { conjuncts: [], ambiguous: false };
+  if (schema === false) return { conjuncts: [], ambiguous: false, unsatisfiable: true };
+  if (!object) return { conjuncts: [], ambiguous: false, unsatisfiable: false };
+  if (seen.has(object)) return { conjuncts: [], ambiguous: false, unsatisfiable: false };
   seen.add(object);
   try {
     const conjuncts: Record<string, unknown>[] = [];
+    let unsatisfiable = false;
     const reference = typeof object.$ref === "string" && resolveReference
       ? resolveReference(object.$ref, object)
       : undefined;
@@ -142,7 +222,8 @@ function declarationConjuncts(
       const target = declarationConjuncts(reference, oas30, resolveReference, seen);
       if (target.ambiguous) return target;
       conjuncts.push(...target.conjuncts);
-      if (oas30) return { conjuncts, ambiguous: false };
+      unsatisfiable ||= target.unsatisfiable;
+      if (oas30) return { conjuncts, ambiguous: false, unsatisfiable };
     }
     conjuncts.push(object);
 
@@ -155,10 +236,13 @@ function declarationConjuncts(
         if (resolveDeclaration(candidate, oas30, resolveReference).declaresOnly("null")) continue;
         selected.push(candidate);
       }
-      if (selected.length !== 1) return { conjuncts: [], ambiguous: true };
+      if (selected.length !== 1) {
+        return { conjuncts: [], ambiguous: true, unsatisfiable: false };
+      }
       const member = declarationConjuncts(selected[0], oas30, resolveReference, seen);
       if (member.ambiguous) return member;
       conjuncts.push(...member.conjuncts);
+      unsatisfiable ||= member.unsatisfiable;
     }
 
     if (Array.isArray(object.allOf)) {
@@ -171,9 +255,10 @@ function declarationConjuncts(
         );
         if (member.ambiguous) return member;
         conjuncts.push(...member.conjuncts);
+        unsatisfiable ||= member.unsatisfiable;
       }
     }
-    return { conjuncts, ambiguous: false };
+    return { conjuncts, ambiguous: false, unsatisfiable };
   } finally {
     seen.delete(object);
   }

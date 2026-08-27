@@ -36,7 +36,7 @@ interface CutPointCase {
 }
 
 const table = JSON.parse(
-  readFileSync(new URL("./testdata/cut-point-cases.json", import.meta.url), "utf8"),
+  readFileSync(new URL("../testdata/cut-point-cases.json", import.meta.url), "utf8"),
 ) as { cases: readonly CutPointCase[] };
 
 /** Key order is not emission: compare the values, not the object literal. */

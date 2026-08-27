@@ -18,7 +18,7 @@ import { bindingSpecForTestDocument, OpenAPISynthesizer } from "./test-helpers.j
  * referenced JSON Pointer together with that value's transitive closure of
  * references, and nothing else.
  */
-const CASES_DIGEST = "94e8e61fd8851594de2c7b39f7f25bce8d7f2f5e95f1e1d17354f61f7d3da16f";
+const CASES_DIGEST = "c306c02568f23e5ce199edf4101337bdf2c3c040fecdcc5624a1c9cf2ea7fe95";
 
 interface CompositionDocument {
   readonly text?: string;

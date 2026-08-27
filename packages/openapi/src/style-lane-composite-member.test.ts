@@ -22,7 +22,7 @@ import { OpenAPISynthesizer } from "./test-helpers.js";
  * reads the style table per edition. Package:
  * `design/openapi-style-lane-composite-member-ruling.md`, RULED 2026-08-18.
  */
-const CASES_DIGEST = "d23c8fe527971c620627307ba16e220aaab2e25a731488fe62a184a465fb2cb5";
+const CASES_DIGEST = "ae6179681e8ba7c9700f05e250eec3fe05b3f5b27c6ec7658593a23495e3ab00";
 
 interface StyleLaneCase {
   readonly name: string;
@@ -39,7 +39,7 @@ interface StyleLaneCase {
   readonly basis: string;
 }
 
-const raw = readFileSync(new URL("./testdata/style-lane-composite-member-cases.json", import.meta.url));
+const raw = readFileSync(new URL("../testdata/style-lane-composite-member-cases.json", import.meta.url));
 const digest = createHash("sha256").update(raw).digest("hex");
 const table = JSON.parse(raw.toString("utf8")) as { cases: readonly StyleLaneCase[] };
 

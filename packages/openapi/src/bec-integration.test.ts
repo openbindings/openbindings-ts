@@ -9,7 +9,7 @@ import {
   operationSignature,
   storeContextResolver,
   CONTEXT_REQUIRED,
-  ERR_EXECUTION_FAILED,
+  ERR_PROTOCOL,
   type ContextStore,
   type ContextRequiredDetails,
   type InvocationError,
@@ -261,7 +261,7 @@ describe("BEC Integration (real HTTP)", () => {
 
     const call = opInvoker.invoke(iface, operationSignature("listItems"));
     const error = await call.closed.catch((caught: unknown) => caught) as InvocationError;
-    expect(error.code).toBe(ERR_EXECUTION_FAILED);
+    expect(error.code).toBe(ERR_PROTOCOL);
     expect(Object.hasOwn(error, "data")).toBe(false);
     expect(Object.hasOwn(error, "diagnostics")).toBe(false);
   });

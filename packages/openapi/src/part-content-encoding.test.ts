@@ -8,6 +8,7 @@ import {
   loadOpenAPIDocument,
   OPENAPI_PROFILE_FULL,
   planRequestBodies,
+  plansRequirePropertyMedia,
 } from "./media.js";
 import type { OpenAPIDocument, OpenAPIMediaType, OpenAPIOperation } from "./types.js";
 
@@ -20,7 +21,7 @@ import type { OpenAPIDocument, OpenAPIMediaType, OpenAPIOperation } from "./type
 // openbindings-go/formats/openapi/testdata, openapi-client/go/testdata and
 // openapi-client/typescript/src/testdata.
 export const PART_CONTENT_ENCODING_CASES_DIGEST =
-  "350a4d87e531218a0f189b754a91c6573eaf98d850c69546a044debdd36fa8b5";
+  "7715dd10e63e4fa2865c354325e3d15af7800fb6768fc4d4e9b5d060b46dd030";
 
 export interface PartContentEncodingCase {
   name: string;
@@ -127,7 +128,8 @@ export async function partContentEncodingDecision(c: PartContentEncodingCase): P
   const op = (doc as unknown as Record<string, any>).paths?.["/form"]?.post as OpenAPIOperation | undefined;
   if (!op) throw new Error(`${c.name}: loaded document has no form operation`);
   try {
-    planRequestBodies(op, { profile: OPENAPI_PROFILE_FULL, openapiVersion: c.openapi });
+    const plans = planRequestBodies(op, { profile: OPENAPI_PROFILE_FULL, openapiVersion: c.openapi });
+    if (plansRequirePropertyMedia(plans)) return "missing-required-choice";
   } catch {
     return "refused";
   }
@@ -207,15 +209,10 @@ describe("part content-encoding case table", () => {
     });
   }
 
-  // The one part header the shared table deliberately excludes, because it is
-  // not reachable through FormData: the wire body's own
-  // `multipartTransferEncodings` map, which the dispatch layer writes out as
-  // Content-Transfer-Encoding. [JSON Schema 2020-12] Section 8.3 derives the
-  // keyword from that header and conditions it on the instance being a string,
-  // so a declared non-string part carrying `contentEncoding` emits no such
-  // header even though it is now admitted. The Go twins pin the same rule in
-  // TestRevision3PartContentTransferEncoding.
-  it("emits Content-Transfer-Encoding only for a declared string part", async () => {
+  // The predecessor carrier exposes this private map. The adapter deliberately
+  // removes the resulting header because OAS 3.1 contentEncoding annotates the
+  // artifact string; revision3.test.ts pins the production wire boundary.
+  it("identifies the predecessor's static transfer-header candidates", async () => {
     const doc = await loadOpenAPIDocument(undefined, {
       openapi: "3.1.1",
       info: { title: "content transfer encoding", version: "1.0.0" },

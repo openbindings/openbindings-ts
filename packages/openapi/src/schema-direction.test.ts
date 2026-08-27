@@ -21,13 +21,13 @@ describe("createOpenAPISchemaProjector", () => {
     const requestContent = request.contentSchema as Record<string, unknown>;
     const responseContent = response.contentSchema as Record<string, unknown>;
 
-    expect(requestContent.properties).toEqual({
-      client: { type: "string", writeOnly: true },
-    });
-    expect(requestContent.required).toEqual(["client"]);
-    expect(responseContent.properties).toEqual({
+    const preserved = {
       server: { type: "string", readOnly: true },
-    });
-    expect(responseContent.required).toEqual(["server"]);
+      client: { type: "string", writeOnly: true },
+    };
+    expect(requestContent.properties).toEqual(preserved);
+    expect(requestContent.required).toEqual(["server", "client"]);
+    expect(responseContent.properties).toEqual(preserved);
+    expect(responseContent.required).toEqual(["server", "client"]);
   });
 });

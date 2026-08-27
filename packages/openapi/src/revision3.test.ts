@@ -465,7 +465,7 @@ describe("openbindings.openapi-3.1@1 request carriage", () => {
     expect(invoked.requests[0]?.body).toBe('{"name":"Ada"}');
   });
 
-  it("safely refuses a mixed exact/range invocation when no preselected concrete lane works", async () => {
+  it("requires requestMedia for a mixed exact/range inventory before input", async () => {
     const spec = document("3.1.2", {
       "text/plain": { schema: { type: "string" } },
       "application/*": {
@@ -474,7 +474,7 @@ describe("openbindings.openapi-3.1@1 request carriage", () => {
     });
     const result = await invoke(spec, { name: "Ada" });
     expect(result.requests).toHaveLength(0);
-    expect(result.error?.code).toBe(ERR_REFUSED);
+    expect(result.error?.code).toBe(CONTEXT_REQUIRED);
   });
 
   it.each([
@@ -638,7 +638,7 @@ describe("openbindings.openapi-3.1@1 request carriage", () => {
       .toContain("Content-Type: text/plain; charset=iso-8859-1");
   });
 
-  it("preserves an encoded OAS 3.1 string and emits its static transfer encoding", async () => {
+  it("preserves an encoded OAS 3.1 string without inventing a transfer header", async () => {
     const spec = document("3.1.2", {
       "multipart/form-data": {
         schema: {
@@ -657,7 +657,7 @@ describe("openbindings.openapi-3.1@1 request carriage", () => {
     expect(result.error).toBeUndefined();
     const body = new TextDecoder().decode(result.requests[0]?.body as Uint8Array);
     expect(body).toContain("Content-Type: application/octet-stream");
-    expect(body).toContain("Content-Transfer-Encoding: base64");
+    expect(body).not.toContain("Content-Transfer-Encoding");
     expect(body).toContain("\r\n\r\nAAH+/w==\r\n");
     expect(body).not.toContain("Content-Type: image/png");
   });
@@ -676,9 +676,57 @@ describe("openbindings.openapi-3.1@1 request carriage", () => {
     expect(result.error).toBeUndefined();
     const body = new TextDecoder().decode(result.requests[0]?.body as Uint8Array);
     expect(body).toContain("Content-Type: application/json");
-    expect(body).toContain("Content-Transfer-Encoding: base64");
+    expect(body).not.toContain("Content-Transfer-Encoding");
     expect(body).toContain("\r\n\r\nAAH+/w==\r\n");
     expect(body).not.toContain('"AAH+/w=="');
+  });
+
+  it("emits the explicitly declared OAS 3.0 base64 transfer header for format byte", async () => {
+    const spec = document("3.0.4", {
+      "multipart/form-data": {
+        schema: {
+          type: "object",
+          properties: { payload: { type: "string", format: "byte" } },
+        },
+        encoding: {
+          payload: {
+            headers: {
+              "Content-Transfer-Encoding": {
+                schema: { type: "string", enum: ["base64"] },
+              },
+            },
+          },
+        },
+      },
+    });
+    const result = await invoke(spec, { payload: "YWJj" });
+    expect(result.error).toBeUndefined();
+    const body = new TextDecoder().decode(result.requests[0]?.body as Uint8Array);
+    expect(body).toContain("Content-Transfer-Encoding: base64");
+    expect(body).toContain("\r\n\r\nYWJj\r\n");
+  });
+
+  it("confines an OAS 3.0 format-byte part whose explicit transfer header disallows base64", async () => {
+    const spec = document("3.0.4", {
+      "multipart/form-data": {
+        schema: {
+          type: "object",
+          properties: { payload: { type: "string", format: "byte" } },
+        },
+        encoding: {
+          payload: {
+            headers: {
+              "Content-Transfer-Encoding": {
+                schema: { type: "string", enum: ["quoted-printable"] },
+              },
+            },
+          },
+        },
+      },
+    });
+    const result = await invoke(spec, { payload: "YWJj" });
+    expect(result.error?.code).toBe(ERR_REFUSED);
+    expect(result.requests).toHaveLength(0);
   });
 
   it("JSON-stringifies a plain string when Encoding.contentType selects JSON", async () => {
@@ -717,27 +765,6 @@ describe("openbindings.openapi-3.1@1 request carriage", () => {
   it.each([
     ["schema omission", {}],
     [
-      "encoding headers",
-      {
-        schema: { type: "object", properties: { note: { type: "string" } } },
-        encoding: { note: { headers: { "X-Part": { schema: { type: "string" } } } } },
-      },
-    ],
-    [
-      "ambiguous encoding content type",
-      {
-        schema: { type: "object", properties: { note: { type: "string" } } },
-        encoding: { note: { contentType: "text/plain, application/json" } },
-      },
-    ],
-    [
-      "wildcard encoding content type",
-      {
-        schema: { type: "object", properties: { note: { type: "string" } } },
-        encoding: { note: { contentType: "text/*" } },
-      },
-    ],
-    [
       "multi-non-null choice part",
       { schema: { type: "object", properties: { note: { anyOf: [{ type: "string" }, { type: "integer" }] } } } },
     ],
@@ -762,6 +789,43 @@ describe("openbindings.openapi-3.1@1 request carriage", () => {
     }));
   });
 
+  it.each([
+    [
+      "descriptive Encoding headers",
+      {
+        schema: { type: "object", properties: { note: { type: "string" } } },
+        encoding: { note: { headers: { "X-Part": { schema: { type: "string" } } } } },
+      },
+      false,
+    ],
+    [
+      "Encoding contentType list",
+      {
+        schema: { type: "object", properties: { note: { type: "string" } } },
+        encoding: { note: { contentType: "text/plain, application/json" } },
+      },
+      true,
+    ],
+    [
+      "Encoding contentType wildcard",
+      {
+        schema: { type: "object", properties: { note: { type: "string" } } },
+        encoding: { note: { contentType: "text/*" } },
+      },
+      true,
+    ],
+  ])("coverage represents multipart %s", async (_case, media, propertyMedia) => {
+    const spec = document("3.1.2", { "multipart/form-data": media }, false);
+    const result = await new OpenAPISynthesizer().synthesizeInterfaceWithCoverage({
+      sources: [{ bindingSpec: BINDING_SPEC, content: spec }],
+    });
+    const alternative = result.coverage.entries.find((entry) => entry.scope === "alternative");
+    expect(alternative).toMatchObject({ status: "represented" });
+    expect(alternative?.requirements ?? []).toEqual(
+      propertyMedia ? ["configuration.propertyMedia"] : [],
+    );
+  });
+
   // §9.2: a single-non-null-branch choice collapses to that branch. The
   // typeless and boolean-true parts moved out of this case list on
   // 2026-08-17 — see the two cases below — because every accepted 3.1 edition
@@ -782,45 +846,29 @@ describe("openbindings.openapi-3.1@1 request carriage", () => {
     }));
   });
 
-  // §9.2, both lines: a multipart alternative whose part declares no `type`
-  // is an ACCOUNTED EXCLUSION on every accepted edition. This case split by
-  // edition until 2026-08-20 — the 3.0 line represented the alternative under
-  // the specification's own value-keyed convention — and escalation M2
-  // deleted that convention, so the accounting converges. The grounds still
-  // differ per line: the 3.1 editions STATE application/octet-stream for the
-  // part and this revision defines no JSON-to-octet part boundary to cross,
-  // while the 3.0 editions state no row at all and this revision authors none.
-  // The boolean-literal `true` part left this case list with F-O1-13: on the
-  // 3.0 line it is not a Schema Object, so the acceptance floor accounts it
-  // `invalid` rather than excluded — see the F-O1-13 test below.
-  it.each([
-    ["typeless part", { schema: { type: "object", properties: { note: {} } } }],
-  ])("coverage-excludes multipart %s on every edition (§9.2 part interpretation)", async (_case, media) => {
+  it("represents typeless multipart parts with the edition-specific choice", async () => {
+    const media = { schema: { type: "object", properties: { note: {} } } };
     for (const edition of ["3.0.0", "3.0.4", "3.1.0", "3.1.1", "3.1.2"]) {
-      const excluded = await new OpenAPISynthesizer().synthesizeInterfaceWithCoverage({
+      const result = await new OpenAPISynthesizer().synthesizeInterfaceWithCoverage({
         sources: [{ bindingSpec: BINDING_SPEC, content: document(edition, { "multipart/form-data": media }, false) }],
       });
-      expect(excluded.coverage.entries).toContainEqual(expect.objectContaining({
-        scope: "alternative",
-        status: "excluded",
-        reasonCode: "openapi.request_media_excluded",
-      }));
+      const alternative = result.coverage.entries.find((entry) => entry.scope === "alternative");
+      expect(alternative).toMatchObject({ status: "represented" });
+      expect(alternative?.requirements ?? []).toEqual(
+        edition.startsWith("3.0") ? ["configuration.propertyMedia"] : [],
+      );
     }
   });
 
-  // The 3.1 half of the boolean-literal part: `true` is a legal 2020-12
-  // schema that asserts nothing, so it is the type-absent cell there and its
-  // alternative is an accounted exclusion. The 3.0 half is F-O1-13's.
-  it("coverage-excludes a multipart boolean-true part on the 3.1 line", async () => {
+  it("represents a multipart boolean-true part as the 3.1 typeless octet lane", async () => {
     const media = { schema: { type: "object", properties: { note: true } } };
     for (const edition of ["3.1.0", "3.1.1", "3.1.2"]) {
-      const excluded = await new OpenAPISynthesizer().synthesizeInterfaceWithCoverage({
+      const result = await new OpenAPISynthesizer().synthesizeInterfaceWithCoverage({
         sources: [{ bindingSpec: BINDING_SPEC, content: document(edition, { "multipart/form-data": media }, false) }],
       });
-      expect(excluded.coverage.entries).toContainEqual(expect.objectContaining({
+      expect(result.coverage.entries).toContainEqual(expect.objectContaining({
         scope: "alternative",
-        status: "excluded",
-        reasonCode: "openapi.request_media_excluded",
+        status: "represented",
       }));
     }
   });
@@ -1034,7 +1082,7 @@ describe("openbindings.openapi-3.1@1 request carriage", () => {
       headers: { "content-type": 'text/plain; charset=""' },
     }));
     expect(result.outputs).toHaveLength(0);
-    expect(result.error?.code).toBe("ERR_RESPONSE_ERROR");
+    expect(result.error?.code).toBe("ERR_PROTOCOL");
   });
 
   it("refuses a folded multiple Content-Type success header", async () => {
@@ -1078,14 +1126,7 @@ describe("openbindings.openapi-3.1@1 request carriage", () => {
     expect(result.outputs).toEqual([]);
   });
 
-  it.each([
-    ["valid UTF-8", new TextEncoder().encode("data: café\n\n"), "café"],
-    ["malformed UTF-8", new Uint8Array([100, 97, 116, 97, 58, 32, 233, 10, 10]), "�"],
-  ])("decodes SSE as WHATWG UTF-8 replacement mode despite a charset parameter: %s", async (
-    _case,
-    body,
-    expected,
-  ) => {
+  it("delivers SSE as one full representation without event parsing", async () => {
     // The request side is incidental here: input {} routes nothing to the
     // body, and a REQUIRED body with no value to carry now refuses before
     // dispatch (§9.1 applied uniformly to absent and supplied input). An
@@ -1100,12 +1141,12 @@ describe("openbindings.openapi-3.1@1 request carriage", () => {
         content: { "text/event-stream": { schema: { type: "string" } } },
       },
     };
-    const result = await invokeResponse(spec, {}, new Response(body, {
+    const result = await invokeResponse(spec, {}, new Response("data: café\n\n", {
       status: 200,
-      headers: { "content-type": "text/event-stream; charset=iso-8859-1" },
+      headers: { "content-type": "text/event-stream; charset=utf-8" },
     }));
     expect(result.error).toBeUndefined();
-    expect(result.outputs).toEqual([expected]);
+    expect(result.outputs).toEqual(["data: café\n\n"]);
   });
 
   // §9.2's string-carriage lane is declaration-scoped (ruled 2026-08-15) and
