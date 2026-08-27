@@ -80,7 +80,7 @@ import {
   effectiveSecurityRequirements,
   securityAlternativeUsable,
 } from "./security.js";
-import { markBindingOrigins } from "./binding-origins.js";
+import { markBindingOrigins, markReferencedPathItemOrigins } from "./binding-origins.js";
 
 /**
  * A paths operation admitted by the artifact but unrepresentable under
@@ -138,6 +138,7 @@ export async function convertToInterface(
   // pointer is what names them.
   const resources: LoadedResource[] = [];
   const addressed: AddressedNode[] = [];
+  const resourceBases = new WeakMap<object, string | undefined>();
   // The invalid-artifact acceptance floor (registered OpenAPI family §3),
   // computed over the entry document's raw image before normalization and
   // dereference. An internal reference identifying no location is tolerated
@@ -150,10 +151,12 @@ export async function convertToInterface(
     {
       ...options,
       onResource: (root, baseURI) => {
+        resourceBases.set(root, baseURI);
         markBindingOrigins(root, baseURI);
         resources.push({ root, baseURI });
       },
       onRefTarget: (node, declaringRoot, pointer) => {
+        markReferencedPathItemOrigins(node, declaringRoot, resourceBases.get(declaringRoot));
         addressed.push({ node, declaringRoot, pointer });
       },
       onRawDocument: (raw) => {
@@ -297,9 +300,11 @@ export async function convertToInterface(
         throw unrealizableOperation(opKey, reason);
       }
 
-      if (exactBindingSpec === BINDING_SPEC_OPENAPI_31) {
+      {
         const pathIssue = checkPathTemplateDeclaration(pathStr, params, exactBindingSpec);
-        const hierarchyCollision = equivalentPathTemplateCollision(doc.paths, pathStr);
+        const hierarchyCollision = exactBindingSpec === BINDING_SPEC_OPENAPI_31
+          ? equivalentPathTemplateCollision(doc.paths, pathStr)
+          : undefined;
         if (pathIssue || hierarchyCollision) {
           const reason = pathIssue
             ?? `path ${JSON.stringify(pathStr)} has an equivalent templated hierarchy at ${JSON.stringify(hierarchyCollision)}`;

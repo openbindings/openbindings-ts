@@ -22,6 +22,7 @@ export interface ResolvedDeclaration {
   keywordString(key: "contentEncoding" | "contentMediaType"): { value: string; conflict: boolean };
   admitsStringEnumValue(value: string): boolean;
   propertyNames(): string[];
+  requiresProperty(name: string): boolean;
   property(name: string): ResolvedDeclaration;
   items(): ResolvedDeclaration;
 }
@@ -95,6 +96,12 @@ class Declaration implements ResolvedDeclaration {
       for (const name of Object.keys(properties)) names.add(name);
     }
     return [...names].sort(codePointCompare);
+  }
+
+  requiresProperty(name: string): boolean {
+    if (this.ambiguous) return false;
+    return this.conjuncts.some((conjunct) =>
+      Array.isArray(conjunct.required) && conjunct.required.includes(name));
   }
 
   property(name: string): ResolvedDeclaration {

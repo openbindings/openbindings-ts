@@ -182,6 +182,7 @@ describe("convertToInterface", () => {
       paths: {
         "/items/{itemId}/reviews": {
           get: {
+            parameters: [{ name: "itemId", in: "path", required: true, schema: { type: "string" } }],
             responses: { "200": { description: "OK" } },
           },
         },
@@ -463,6 +464,28 @@ describe("synthesis coverage", () => {
     expect(statusByRef.get("#/paths/~1jobs/post/requestBody/content/application~1json")).toBe("represented");
     expect(statusByRef.get("#/paths/~1jobs/post/requestBody/content/application~1x-custom")).toBe("excluded");
     expect(statusByRef.get("#/webhooks/jobChanged/post")).toBe("excluded");
+  });
+
+  it("keeps a 3.0 root webhooks spelling dependency- and coverage-silent", async () => {
+    const result = await new OpenAPISynthesizer().synthesizeInterfaceWithCoverage({
+      sources: [{
+        bindingSpec: "openbindings.openapi-3.0@1",
+        content: {
+          openapi: "3.0.4",
+          info: { title: "3.0 webhooks are inert", version: "1" },
+          paths: {
+            "/jobs": { get: { responses: { "204": { description: "ok" } } } },
+          },
+          webhooks: {
+            ignored: { post: { responses: { "204": { description: "ignored" } } } },
+          },
+        },
+      }],
+    });
+    expect(result.interface.dependencies).toBeUndefined();
+    expect(result.coverage.entries.some((entry) => entry.sourceRef.startsWith("#/webhooks")))
+      .toBe(false);
+    expect(result.coverage.fullyRepresented).toBe(true);
   });
 
   it("can prove full representation for an ordinary paths-only document", async () => {

@@ -165,30 +165,33 @@ describe("server convergence", () => {
     },
   );
 
-  it("resolves an external operation server against its declaring document", async () => {
-    const external = document({ servers: [] });
-    const externalPath = external.paths?.["/items/{id}"];
-    const operation = externalPath?.get as OpenAPIOperation;
-    operation.servers = [{ url: "../api/" }];
-    const entry = {
-      openapi: "3.1.2",
-      info: { title: "entry", version: "1" },
-      paths: {
-        "/items/{id}": {
-          $ref: "https://docs.example/specs/parts.json#/paths/~1items~1{id}",
+  it.each(["3.0.4", "3.1.2"])(
+    "resolves an external %s operation server against its declaring document",
+    async (openapi) => {
+      const external = document({ openapi, servers: [] });
+      const externalPath = external.paths?.["/items/{id}"];
+      const operation = externalPath?.get as OpenAPIOperation;
+      operation.servers = [{ url: "../api/" }];
+      const entry = {
+        openapi,
+        info: { title: "entry", version: "1" },
+        paths: {
+          "/items/{id}": {
+            $ref: "https://docs.example/specs/parts.json#/paths/~1items~1{id}",
+          },
         },
-      },
-    };
-    const result = await invoke(
-      entry,
-      { parameters: { id: "42" } },
-      undefined,
-      { "https://docs.example/specs/parts.json": external },
-      "https://entry.example/root/openapi.json",
-    );
-    expect(result.error).toBeUndefined();
-    expect(result.requests[0]?.url).toBe("https://docs.example/api//items/42");
-  });
+      };
+      const result = await invoke(
+        entry,
+        { parameters: { id: "42" } },
+        undefined,
+        { "https://docs.example/specs/parts.json": external },
+        "https://entry.example/root/openapi.json",
+      );
+      expect(result.error).toBeUndefined();
+      expect(result.requests[0]?.url).toBe("https://docs.example/api//items/42");
+    },
+  );
 });
 
 describe("security convergence", () => {

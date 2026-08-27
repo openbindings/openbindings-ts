@@ -384,7 +384,7 @@ describe("invokeBinding — request construction", () => {
       },
     };
     const { fetch, requests } = mockFetch(() => jsonResponse({ ok: true }));
-    const call = new OpenAPIInvoker().invokeBinding({
+    const call = new OpenAPIInvoker({ parameterConversion: String }).invokeBinding({
       source: { bindingSpec: "openbindings.openapi-3.1@1", content: spec },
       selector: "#/paths/~1users~1{id}/get",
       fetch,

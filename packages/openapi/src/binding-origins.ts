@@ -12,20 +12,38 @@ export function markBindingOrigins(root: unknown, baseURI: string | undefined): 
   const schemes = asRecord(asRecord(document.components)?.securitySchemes);
   for (const collectionName of ["paths", "webhooks"]) {
     for (const pathItem of Object.values(asRecord(document[collectionName]) ?? {})) {
-      const item = asRecord(pathItem);
-      if (!item) continue;
-      markServers(item.servers, baseURI);
-      for (const method of METHODS) {
-        const operation = asRecord(item[method]);
-        if (!operation) continue;
-        markServers(operation.servers, baseURI);
-        if (Object.hasOwn(operation, "security")) {
-          if (baseURI) operation[OPERATION_DOCUMENT_MARKER] = baseURI;
-          if (schemes && Object.keys(schemes).length > 0) {
-            operation[REFERRING_SECURITY_SCHEMES_MARKER] = schemes;
-          }
-        }
-      }
+      markPathItemOrigins(pathItem, baseURI, schemes);
+    }
+  }
+}
+
+/** Marks a Path Item reached through `$ref` with facts from its containing document. */
+export function markReferencedPathItemOrigins(
+  target: unknown,
+  declaringRoot: unknown,
+  baseURI: string | undefined,
+): void {
+  const root = asRecord(declaringRoot);
+  const schemes = asRecord(asRecord(root?.components)?.securitySchemes);
+  markPathItemOrigins(target, baseURI, schemes);
+}
+
+function markPathItemOrigins(
+  raw: unknown,
+  baseURI: string | undefined,
+  schemes: Record<string, unknown> | undefined,
+): void {
+  const item = asRecord(raw);
+  if (!item) return;
+  markServers(item.servers, baseURI);
+  for (const method of METHODS) {
+    const operation = asRecord(item[method]);
+    if (!operation) continue;
+    markServers(operation.servers, baseURI);
+    if (!Object.hasOwn(operation, "security")) continue;
+    if (baseURI) operation[OPERATION_DOCUMENT_MARKER] = baseURI;
+    if (schemes && Object.keys(schemes).length > 0) {
+      operation[REFERRING_SECURITY_SCHEMES_MARKER] = schemes;
     }
   }
 }

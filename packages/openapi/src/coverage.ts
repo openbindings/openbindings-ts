@@ -42,6 +42,7 @@ import {
   type FloorOp,
 } from "@openbindings/openapi-client/analysis";
 import {
+  BINDING_SPEC_OPENAPI_31,
   hasMediaFidelity,
   hasRoutedInputs,
   isImplementedOpenAPIBindingSpec,
@@ -184,7 +185,7 @@ export function openAPISynthesisCoverage(
       entries.push(...callbackCoverage(operation, selector));
     }
   }
-  entries.push(...webhookCoverage(doc));
+  if (bindingSpec === BINDING_SPEC_OPENAPI_31) entries.push(...webhookCoverage(doc));
   return entries;
 }
 

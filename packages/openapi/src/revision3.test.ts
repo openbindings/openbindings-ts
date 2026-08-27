@@ -43,9 +43,10 @@ async function invoke(
   spec: unknown,
   input: unknown,
   context?: Record<string, unknown>,
+  parameterConversion?: (value: boolean | number) => string,
 ): Promise<{ requests: RequestInit[]; error?: InvocationError }> {
   const captured = captureFetch();
-  const call = new OpenAPIInvoker().invokeBinding({
+  const call = new OpenAPIInvoker({ parameterConversion }).invokeBinding({
     source: { bindingSpec: BINDING_SPEC, content: spec },
     selector: "#/paths/~1payload/put",
     context,
@@ -1000,9 +1001,9 @@ describe("openbindings.openapi-3.1@1 request carriage", () => {
         },
       },
     });
-    const result = await invoke(spec, { ids: [1, 2], name: "a b" });
+    const result = await invoke(spec, { ids: [1, 2], name: "a b" }, undefined, String);
     expect(result.error).toBeUndefined();
-    expect(result.requests[0]?.body).toBe("ids=%5B1%2C2%5D&name=a+b");
+    expect(result.requests[0]?.body).toBe("ids=%5B%221%22%2C%222%22%5D&name=a+b");
   });
 
   it("uses RFC6570 percent encoding for explicit urlencoded style fields", async () => {

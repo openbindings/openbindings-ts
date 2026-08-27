@@ -22,19 +22,30 @@ describe("OpenAPI parameter semantics", () => {
     });
   });
 
-  it("keeps 3.0 scalar conversion at its later-node behavior", () => {
+  it("converges 3.0 scalar conversion and member-null refusal", () => {
     const parameter = {
       name: "q",
       in: "query",
       schema: { type: "array", items: { type: "integer" } },
     };
-    const value = [7, null];
-    expect(prepareSchemaParameterValue(
+    expect(() => prepareSchemaParameterValue(
       parameter,
-      value,
+      [7],
       BINDING_SPEC_OPENAPI_30,
       undefined,
-    ).value).toEqual(value);
+    )).toThrow(/parameterConversion/);
+    expect(prepareSchemaParameterValue(
+      parameter,
+      [7],
+      BINDING_SPEC_OPENAPI_30,
+      (value) => `configured<${value}>`,
+    ).value).toEqual(["configured<7>"]);
+    expect(() => prepareSchemaParameterValue(
+      parameter,
+      [7, null],
+      BINDING_SPEC_OPENAPI_30,
+      String,
+    )).toThrow(/null array\/object member/);
   });
 
   it("refuses member nulls, non-RFC delimiters, and invalid header bytes", () => {
@@ -53,6 +64,24 @@ describe("OpenAPI parameter semantics", () => {
     }, "safe\r\nInjected: yes", BINDING_SPEC_OPENAPI_31, undefined)).toThrow(/invalid HTTP field byte/);
   });
 
+  it("uses the corrected whole-null cells and refuses n/a cells on both siblings", () => {
+    for (const bindingSpec of [BINDING_SPEC_OPENAPI_30, BINDING_SPEC_OPENAPI_31]) {
+      expect(prepareSchemaParameterValue({
+        name: "q",
+        in: "query",
+        style: "form",
+        schema: {},
+      }, null, bindingSpec, undefined).value).toBeNull();
+      expect(() => prepareSchemaParameterValue({
+        name: "q",
+        in: "query",
+        style: "spaceDelimited",
+        explode: false,
+        schema: {},
+      }, null, bindingSpec, undefined)).toThrow(/undefined cell/);
+    }
+  });
+
   it("distinguishes cookie static proof from runtime multi-pair proof", () => {
     const array = {
       name: "parts",
@@ -66,28 +95,34 @@ describe("OpenAPI parameter semantics", () => {
     expect(formStyleCookieMultiValueProof(array, false)).toBe(true);
     expect(formStyleCookieMultiValueProof(typeless, false)).toBe(false);
     expect(formStyleCookieMultiValueProof(arrayOrNull, false)).toBe(false);
-    expect(formStyleCookieMultiValueProof(array, true)).toBe(false);
-    expect(() => prepareSchemaParameterValue(
-      typeless,
-      ["a", "b"],
-      BINDING_SPEC_OPENAPI_31,
-      undefined,
-    )).toThrow(/multiple cookie pairs/);
+    expect(formStyleCookieMultiValueProof(array, true)).toBe(true);
+    for (const bindingSpec of [BINDING_SPEC_OPENAPI_30, BINDING_SPEC_OPENAPI_31]) {
+      expect(() => prepareSchemaParameterValue(
+        typeless,
+        ["a", "b"],
+        bindingSpec,
+        undefined,
+      )).toThrow(/multiple cookie pairs/);
+    }
   });
 
-  it("enforces 3.1 path correspondence and equivalent hierarchies", () => {
+  it("enforces sibling path correspondence without importing 3.1 ambiguity rules into 3.0", () => {
     const pathParameter = (name: string) => ({ name, in: "path", required: true, schema: {} });
     expect(checkPathTemplateDeclaration("/items", [pathParameter("id")], BINDING_SPEC_OPENAPI_31))
       .toMatch(/no path template expression/);
     expect(checkPathTemplateDeclaration("/{id}/{id}", [pathParameter("id")], BINDING_SPEC_OPENAPI_31))
       .toMatch(/more than once/);
+    expect(checkPathTemplateDeclaration("/items", [pathParameter("id")], BINDING_SPEC_OPENAPI_30))
+      .toMatch(/no path template expression/);
+    expect(checkPathTemplateDeclaration("/{id}/{id}", [pathParameter("id")], BINDING_SPEC_OPENAPI_30))
+      .toBeUndefined();
     expect(equivalentPathTemplateCollision({
       "/items/{id}": {},
       "/items/{name}": {},
     }, "/items/{id}")).toBe("/items/{name}");
   });
 
-  it("keeps the 3.1 declaration gate closed without guessing unknown fields", () => {
+  it("keeps both declaration gates closed without guessing unknown fields", () => {
     const malformed = [{
       name: "q",
       in: "query",
@@ -98,7 +133,7 @@ describe("OpenAPI parameter semantics", () => {
     expect(malformedEffectiveParameter([
       { name: "q", in: "query", schema: {}, futureKeyword: true },
     ], BINDING_SPEC_OPENAPI_31)).toBeUndefined();
-    expect(malformedEffectiveParameter(malformed, BINDING_SPEC_OPENAPI_30)).toBeUndefined();
+    expect(malformedEffectiveParameter(malformed, BINDING_SPEC_OPENAPI_30)).toBe("q");
 
     const rows = effectiveParameterDeclarationRows(
       { parameters: [{ name: "q", in: "query", schema: {} }] },
@@ -173,6 +208,46 @@ describe("OpenAPI parameter semantics", () => {
     await call.write({ body: { filter: { a: 7, b: "two" } } });
     await call.closed;
     expect(body).toBe("filter=a|configured-seven|b|two");
+  });
+
+  it("applies configured 3.0 conversion on the content-based form path", async () => {
+    let body: BodyInit | null | undefined;
+    const spec = {
+      openapi: "3.0.4",
+      info: { title: "content-form conversion", version: "1" },
+      servers: [{ url: "https://api.example.test" }],
+      paths: {
+        "/x": {
+          post: {
+            requestBody: {
+              required: true,
+              content: {
+                "application/x-www-form-urlencoded": {
+                  schema: {
+                    type: "object",
+                    properties: { count: { type: "integer" } },
+                  },
+                },
+              },
+            },
+            responses: { "204": { description: "ok" } },
+          },
+        },
+      },
+    };
+    const call = new OpenAPIInvoker({
+      parameterConversion: () => "seven",
+    }).invokeBinding({
+      source: { bindingSpec: BINDING_SPEC_OPENAPI_30, content: spec },
+      selector: "#/paths/~1x/post",
+      fetch: async (_input, init) => {
+        body = init?.body;
+        return new Response(null, { status: 204 });
+      },
+    });
+    await call.write({ body: { count: 7 } });
+    await call.closed;
+    expect(body).toBe("count=seven");
   });
 });
 
