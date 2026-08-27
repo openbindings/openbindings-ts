@@ -16,7 +16,7 @@ import { BINDING_SPEC_OPENAPI_31 as BINDING_SPEC } from "./constants.js";
 // The file is byte-identical to the copies in
 // openbindings-go/formats/openapi/testdata, openapi-client/go/testdata and
 // openapi-client/typescript/src/testdata.
-const serverTargetBaseCasesDigest = "4dc1e910ccba0fea37a8bce4a12465d3275b57cc5d275b9f8ddfdc46c44428ae";
+const serverTargetBaseCasesDigest = "5c87131c4db1b3e90381ae29d51948fdebb772a928648c4217fcfcb32386c68f";
 
 interface ResolutionCase {
   name: string;

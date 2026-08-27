@@ -4,6 +4,7 @@ import {
   CONTEXT_REQUIRED,
   InvocationError,
   InvocationImpl,
+  contextConfiguration,
   isContextRequiredDetails,
   type BindingInvoker,
   type BindingInvocationArgs,
@@ -38,6 +39,7 @@ import type {
   OpenAPIDocument,
   OpenAPIOperation,
   OpenAPIParameter,
+  OpenAPIPathItem,
 } from "./types.js";
 import {
   DEFAULT_SOURCE_NAME,
@@ -106,6 +108,17 @@ import {
   validateCompletedURL,
   type ParameterConversion,
 } from "./parameter-semantics.js";
+import { ConfigRequired, resolveServer } from "./servers.js";
+import { markBindingOrigins } from "./binding-origins.js";
+import {
+  electSecurityAlternative,
+  installSelectedSecurityAlternative,
+  requiredImplicitConnectionScopeContext,
+  requiredSelectedSecurityContext,
+  requiredSecuritySelectionContext,
+  validateSelectedCredentials,
+  type SecuritySelection,
+} from "./security.js";
 
 // ---------------------------------------------------------------------------
 // Invoker
@@ -149,6 +162,7 @@ export class OpenAPIInvoker implements BindingInvoker {
   private readonly requestContentCodings: ReadonlyMap<string, ContentEncoder>;
   private readonly responseContentCodings: ReadonlyMap<string, ContentDecoder>;
   private readonly contentCodingDefect?: Error;
+  private readonly runtimeModels = new Map<string, RuntimeOperationModel>();
 
   constructor(options: OpenAPIInvokerOptions = {}) {
     this.engine = options?.engine ?? new OpenAPIEngine();
@@ -201,25 +215,119 @@ export class OpenAPIInvoker implements BindingInvoker {
    * raise the challenge instead.
    */
   async prepareBinding(args: BindingInvocationArgs): Promise<ContextRequiredDetails | null> {
-    const profile = profileForInvocation(args.source.bindingSpec);
+    let profile: OpenAPIExecutionProfile;
     try {
-      const prepared = await this.engine.prepareCached({
-        source: { location: args.source.location, content: args.source.content },
-        // The standalone client engine's own API names the selector `ref`.
-        ref: args.selector,
-        profile,
-        context: args.context,
-        signal: args.signal,
-        fetch: args.fetch,
-        hooks: adaptHooks(args),
-        maxDeliveryUnitBytes: args.maxDeliveryUnitBytes,
-        securityHandlers: this.securityHandlers,
-      });
-      return prepared?.prerequisites ?? null;
+      profile = profileForInvocation(args.source.bindingSpec);
     } catch {
-      // The optional prepareBinding surface reports context only. Source and
-      // operation failures remain authoritative on the invocation terminal.
       return null;
+    }
+    let model: RuntimeOperationModel;
+    if (args.source.content === undefined) {
+      const cached = this.runtimeModels.get(runtimeModelCacheKey(args));
+      if (cached) {
+        model = cloneRuntimeModel(cached);
+      } else {
+        try {
+          const prepared = await this.engine.prepareCached({
+            source: { location: args.source.location },
+            ref: args.selector,
+            profile,
+            context: contextWithoutConfigurationPoints(
+              args.context,
+              "server",
+              "security",
+              "implicitConnectionScope",
+            ),
+            signal: args.signal,
+            hooks: adaptHooks(args),
+            maxDeliveryUnitBytes: args.maxDeliveryUnitBytes,
+            securityHandlers: this.securityHandlers,
+          });
+          return prepared?.prerequisites ?? null;
+        } catch {
+          return null;
+        }
+      }
+    } else {
+      try {
+        model = await loadRuntimeOperationModel({
+          ...args,
+          fetch: () => Promise.reject(new Error("prepareBinding performs no external retrieval")),
+        }, args.source.bindingSpec);
+      } catch {
+        // The optional prepareBinding surface reports context only. Source and
+        // operation failures remain authoritative on the invocation terminal.
+        return null;
+      }
+    }
+    let combined: ContextRequiredDetails | null = null;
+    let serverBase = "";
+    try {
+      serverBase = resolveServer(
+        model.document,
+        model.pathItem,
+        model.operation,
+        args.context,
+        args.source.location,
+      );
+    } catch (error: unknown) {
+      if (error instanceof ConfigRequired) {
+        combined = mergeContextRequirements(combined, configRequiredDetails(error, args.source.location ?? ""));
+      } else {
+        throw new InvocationError("ERR_REFUSED");
+      }
+    }
+
+    try {
+      combined = mergeContextRequirements(combined, requiredSecuritySelectionContext(
+        model.document,
+        model.operation,
+        args.context,
+        serverBase || args.source.location || "",
+      ));
+    } catch {
+      throw new InvocationError("ERR_REFUSED");
+    }
+    try {
+      const media = requiredMediaContext(model, args.context, profile);
+      if (media && media.target === "") {
+        media.target = serverBase || args.source.location || "";
+      }
+      combined = mergeContextRequirements(combined, media);
+    } catch {
+      // Invalid request-media configuration keeps this optional historical
+      // preflight unavailable; invocation supplies its terminal refusal.
+      return null;
+    }
+    if (combined) return combined;
+
+    try {
+      const implicitScope = requiredImplicitConnectionScopeContext(
+        model.document,
+        model.operation,
+        args.context,
+        serverBase,
+        model.parameters,
+        serverBase || args.source.location || "",
+      );
+      if (implicitScope) return implicitScope;
+      const selection = electSecurityAlternative(
+        model.document,
+        model.operation,
+        args.context,
+        serverBase,
+        model.parameters,
+      );
+      const security = requiredSelectedSecurityContext(
+        selection,
+        args.context,
+        serverBase || args.source.location || "",
+        this.securityHandlers,
+      );
+      return security;
+    } catch (error: unknown) {
+      if (error instanceof InvocationError) throw error;
+      throw new InvocationError("ERR_REFUSED");
     }
   }
 
@@ -231,6 +339,59 @@ export class OpenAPIInvoker implements BindingInvoker {
     const bindingSpec = args.source.bindingSpec;
     const profile = profileForInvocation(bindingSpec);
     const model = await loadRuntimeOperationModel(args, bindingSpec);
+    if (args.source.location) {
+      this.runtimeModels.set(runtimeModelCacheKey(args), cloneRuntimeModel(model));
+    }
+    let resolvedServerBase: string;
+    try {
+      resolvedServerBase = resolveServer(
+        model.document,
+        model.pathItem,
+        model.operation,
+        args.context,
+        args.source.location,
+      );
+    } catch (error: unknown) {
+      if (error instanceof ConfigRequired) {
+        throw new InvocationError(CONTEXT_REQUIRED, configRequiredDetails(error, args.source.location ?? ""));
+      }
+      throw new InvocationError("ERR_REFUSED");
+    }
+    let selectedSecurity: SecuritySelection | null;
+    let pendingSecurityRequirement: ContextRequiredDetails | null;
+    try {
+      const scopeRequired = requiredImplicitConnectionScopeContext(
+        model.document,
+        model.operation,
+        args.context,
+        resolvedServerBase,
+        model.parameters,
+        resolvedServerBase,
+      );
+      if (scopeRequired) throw new InvocationError(CONTEXT_REQUIRED, scopeRequired);
+      selectedSecurity = electSecurityAlternative(
+        model.document,
+        model.operation,
+        args.context,
+        resolvedServerBase,
+        model.parameters,
+      );
+      pendingSecurityRequirement = requiredSelectedSecurityContext(
+        selectedSecurity,
+        args.context,
+        resolvedServerBase,
+        this.securityHandlers,
+      );
+      validateSelectedCredentials(selectedSecurity, args.context);
+    } catch (error: unknown) {
+      if (error instanceof InvocationError) throw error;
+      throw new InvocationError("ERR_REFUSED");
+    }
+
+    const engineServerBase = resolvedServerBase.replace(/\/+$/u, "") || resolvedServerBase;
+    installEngineAdapterView(model, engineServerBase, selectedSecurity);
+    model.resolvedServerBase = resolvedServerBase;
+    model.engineServerBase = engineServerBase;
     const required = requiredMediaContext(model, args.context, profile);
     if (required) throw new InvocationError(CONTEXT_REQUIRED, required);
     prepareEnginePropertyMediaView(model.plans, args.context);
@@ -242,7 +403,7 @@ export class OpenAPIInvoker implements BindingInvoker {
       // The standalone client engine's own API names the selector `ref`.
       ref: args.selector,
       profile,
-      context: args.context,
+      context: contextWithoutConfigurationPoints(args.context, "server", "security", "implicitConnectionScope"),
       signal: outer.signal,
       fetch: adaptRuntimeFetch(
         args.fetch ?? globalThis.fetch,
@@ -254,6 +415,9 @@ export class OpenAPIInvoker implements BindingInvoker {
       maxDeliveryUnitBytes: args.maxDeliveryUnitBytes,
       securityHandlers: this.securityHandlers,
     });
+    if (pendingSecurityRequirement) {
+      throw new InvocationError(CONTEXT_REQUIRED, pendingSecurityRequirement);
+    }
     // start() resolves only after all artifact/configuration checks that do
     // not require application input. Only then does the bridge acquire the
     // SDK input sequence.
@@ -285,12 +449,16 @@ interface RuntimeOperationModel {
   bindingSpec: string;
   document: OpenAPIDocument;
   engineContent: unknown;
+  pathItem: OpenAPIPathItem;
   operation: OpenAPIOperation;
   governanceOperation: OpenAPIOperation;
   parameters: OpenAPIParameter[];
   plans: BodyPlan[];
   routes: AbstractInputRoutes;
   method: string;
+  path: string;
+  resolvedServerBase?: string;
+  engineServerBase?: string;
   emptyResponse: boolean;
   maxDeliveryUnitBytes?: number;
   transportError?: InvocationError;
@@ -326,6 +494,7 @@ async function loadRuntimeOperationModel(
       {
         signal: args.signal,
         onRawDocument: (raw) => { rawDocument = structuredClone(raw); },
+        onResource: (root, baseURI) => { markBindingOrigins(root, baseURI); },
       },
       args.fetch,
     );
@@ -437,16 +606,95 @@ async function loadRuntimeOperationModel(
     bindingSpec,
     document,
     engineContent,
+    pathItem,
     operation,
     governanceOperation,
     parameters: callerParameters,
     plans,
     routes,
     method: target.method,
+    path: target.path,
     emptyResponse: false,
     maxDeliveryUnitBytes: args.maxDeliveryUnitBytes,
     rawCookieHeader,
   };
+}
+
+function configRequiredDetails(required: ConfigRequired, target: string): ContextRequiredDetails {
+  return {
+    target,
+    alternatives: [{ requirements: [{
+      type: "config.value",
+      point: required.point,
+      path: required.path,
+      ...(required.schema ? { schema: required.schema } : {}),
+      ...(required.durable === true ? { durable: true } : {}),
+      ...(required.message ? { description: required.message } : {}),
+    }] }],
+  };
+}
+
+function runtimeModelCacheKey(args: BindingInvocationArgs): string {
+  return `${args.source.bindingSpec}\u0000${args.source.location ?? ""}\u0000${args.selector}`;
+}
+
+function cloneRuntimeModel(model: RuntimeOperationModel): RuntimeOperationModel {
+  const { routes: _routes, ...data } = model;
+  const clone = structuredClone(data);
+  return {
+    ...clone,
+    routes: planAbstractInputRoutes(clone.parameters, clone.plans),
+  };
+}
+
+function mergeContextRequirements(
+  left: ContextRequiredDetails | null,
+  right: ContextRequiredDetails | null,
+): ContextRequiredDetails | null {
+  if (!left) return right;
+  if (!right) return left;
+  return {
+    target: left.target || right.target,
+    alternatives: left.alternatives.flatMap((leftAlternative) =>
+      right.alternatives.map((rightAlternative) => ({
+        requirements: [...leftAlternative.requirements, ...rightAlternative.requirements],
+      }))),
+  };
+}
+
+function contextWithoutConfigurationPoints(
+  context: Record<string, unknown> | undefined,
+  ...points: string[]
+): Record<string, unknown> | undefined {
+  if (!context) return undefined;
+  const configuration = { ...contextConfiguration(context) };
+  for (const point of points) delete configuration[point];
+  return { ...context, configuration };
+}
+
+function installEngineAdapterView(
+  model: RuntimeOperationModel,
+  engineServerBase: string,
+  selection: SecuritySelection | null,
+): void {
+  installSelectedSecurityAlternative(model.document, model.operation, selection);
+  model.operation.servers = [{ url: engineServerBase }];
+  if (model.engineContent === model.document) return;
+
+  const rawDocument = asRecord(model.engineContent);
+  const rawPathItem = asRecord(asRecord(rawDocument?.paths)?.[model.path]);
+  const rawOperation = asRecord(rawPathItem?.[model.method]);
+  if (!rawDocument || !rawOperation) return;
+  rawOperation.servers = [{ url: engineServerBase }];
+  if (selection) rawOperation.security = [{ ...selection.requirement }];
+  if (!selection) return;
+  const components = asRecord(rawDocument.components) ?? {};
+  rawDocument.components = components;
+  const schemes = asRecord(components.securitySchemes) ?? {};
+  components.securitySchemes = schemes;
+  for (const plan of selection.plans) {
+    for (const named of plan.schemes) schemes[named.name] = named.scheme;
+  }
 }
 
 function cyclicEngineDocument(
@@ -541,27 +789,40 @@ function adaptRuntimeFetch(
   responseContentCodings: ReadonlyMap<string, ContentDecoder>,
 ): typeof globalThis.fetch {
   return async (input, init) => {
-    const completedURL = input instanceof Request ? input.url : String(input);
-    if (model.bindingSpec === BINDING_SPEC_OPENAPI_31) {
-      try {
-        validateCompletedURL(completedURL);
-      } catch {
-        throw new InvocationError("ERR_REFUSED");
-      }
-    }
-
+    model.transportError = undefined;
     let nextInput: RequestInfo | URL = input;
     let nextInit = init;
+    if (model.resolvedServerBase && model.engineServerBase) {
+      try {
+        const currentURL = input instanceof Request ? input.url : String(input);
+        const completedURL = verbatimCompletedURL(
+          currentURL,
+          model.resolvedServerBase,
+          model.engineServerBase,
+        );
+        nextInput = input instanceof Request
+          ? requestWithURL(input, completedURL)
+          : completedURL;
+      } catch {
+        return transportRefusal(model);
+      }
+    }
+    const completedURL = nextInput instanceof Request ? nextInput.url : String(nextInput);
+    try {
+      validateCompletedURL(completedURL);
+    } catch {
+      return transportRefusal(model);
+    }
     if (model.rawCookieHeader) {
-      const sourceHeaders = init?.headers ?? (input instanceof Request ? input.headers : undefined);
+      const sourceHeaders = init?.headers ?? (nextInput instanceof Request ? nextInput.headers : undefined);
       const headers = new Headers(sourceHeaders);
       const rawCookie = headers.get(model.rawCookieHeader);
       if (rawCookie !== null) {
-        if (headers.has("Cookie")) throw new InvocationError("ERR_REFUSED");
+        if (headers.has("Cookie")) return transportRefusal(model);
         headers.delete(model.rawCookieHeader);
         headers.set("Cookie", rawCookie);
-        if (input instanceof Request && init?.headers === undefined) {
-          nextInput = new Request(input, { headers });
+        if (nextInput instanceof Request && init?.headers === undefined) {
+          nextInput = new Request(nextInput, { headers });
         } else {
           nextInit = { ...init, headers };
         }
@@ -578,7 +839,7 @@ function adaptRuntimeFetch(
         && isJSONMediaType(contentType)
         && text?.trim() === "{}"
       ) {
-        throw new InvocationError("ERR_REFUSED");
+        return transportRefusal(model);
       }
 
       if (text !== undefined) {
@@ -614,7 +875,6 @@ function adaptRuntimeFetch(
       emptyResponse: model.emptyResponse,
       maxDeliveryUnitBytes: model.maxDeliveryUnitBytes,
     };
-    model.transportError = undefined;
     try {
       const governed = await governRequest(nextInput, next, governedModel, requestContentCodings);
       const response = await fetchFn(governed.input, governed.init);
@@ -626,6 +886,41 @@ function adaptRuntimeFetch(
       throw error;
     }
   };
+}
+
+function transportRefusal(model: RuntimeOperationModel): never {
+  const error = new InvocationError("ERR_REFUSED");
+  model.transportError = error;
+  throw error;
+}
+
+function verbatimCompletedURL(current: string, resolvedBase: string, engineBase: string): string {
+  const parsed = new URL(current);
+  const enginePath = serializedBasePath(engineBase);
+  if (!parsed.pathname.startsWith(enginePath)) {
+    throw new Error("serialized operation path does not retain the engine server base");
+  }
+  const suffix = parsed.pathname.slice(enginePath.length);
+  return `${resolvedBase}${suffix}${parsed.search}`;
+}
+
+function serializedBasePath(base: string): string {
+  const match = /^[A-Za-z][A-Za-z0-9+.-]*:\/\/[^/]*(\/[^?#]*)?$/u.exec(base);
+  return match?.[1] ?? "";
+}
+
+function requestWithURL(request: Request, url: string): Request {
+  const init: RequestInit & { duplex?: "half" } = {
+    method: request.method,
+    headers: request.headers,
+    redirect: request.redirect,
+    signal: request.signal,
+  };
+  if (request.method !== "GET" && request.method !== "HEAD") {
+    init.body = request.body;
+    init.duplex = "half";
+  }
+  return new Request(url, init);
 }
 
 function bodyText(body: BodyInit): string | undefined {

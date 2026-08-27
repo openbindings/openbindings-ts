@@ -2,9 +2,9 @@ import { describe, it, expect } from "vitest";
 import { resolveServer } from "./servers.js";
 import type { OpenAPIDocument } from "./types.js";
 
-// Mirrors Go's servers_test.go: §9.3 (OAPI-P-05) server resolution — the
+// Mirrors Go's servers_test.go: §10 (OAPI-P-04) server resolution — the
 // effective list, variable substitution, the configuration point, relative
-// resolution against the artifact's base URI, and the pre-dispatch refusal.
+// resolution against the declaring document, and the pre-dispatch refusal.
 
 function serversDoc(): OpenAPIDocument {
   return {
@@ -40,7 +40,7 @@ describe("resolveServer — effective list precedence", () => {
 
   it("the implied / resolves against the artifact's base URI (the location)", () => {
     expect(resolveServer({}, null, null, undefined, "https://host.example.com/openapi.json")).toBe(
-      "https://host.example.com",
+      "https://host.example.com/",
     );
   });
 });
@@ -93,10 +93,10 @@ describe("resolveServer — the configuration point", () => {
     ).toBe("https://override.example.com/x");
   });
 
-  it("selects another entry by url (trailing slash trimmed for joining)", () => {
+  it("selects another entry by url and preserves its trailing slash", () => {
     expect(
       resolveServer(doc, null, null, ctxWith({ url: "https://alt.example.com/base/" }), ""),
-    ).toBe("https://alt.example.com/base");
+    ).toBe("https://alt.example.com/base/");
   });
 
   it("a string matching a declared entry's url template selects that entry", () => {
@@ -107,7 +107,7 @@ describe("resolveServer — the configuration point", () => {
 
   it("selects by index", () => {
     expect(resolveServer(doc, null, null, ctxWith({ index: 1 }), "")).toBe(
-      "https://alt.example.com/base",
+      "https://alt.example.com/base/",
     );
   });
 
@@ -137,9 +137,9 @@ describe("resolveServer — the configuration point", () => {
   });
 });
 
-// A relative effective-server URL resolves against the artifact's base URI
-// (the source's location) per RFC 3986; the one pre-dispatch refusal is a
-// server URL that cannot resolve absolute.
+// A relative effective-server URL resolves against its declaring document's
+// location per RFC 3986; the one recoverable pre-dispatch requirement is a
+// server URL that cannot resolve absolute without consumer configuration.
 describe("resolveServer — relative resolution", () => {
   it("resolves a path-absolute server against the location", () => {
     const doc: OpenAPIDocument = { servers: [{ url: "/api/v3" }] };
@@ -170,7 +170,7 @@ describe("resolveServer — legacy metadata.baseURL", () => {
     const ctx: Record<string, unknown> = {
       metadata: { baseURL: "https://meta.example.com/" },
     };
-    expect(resolveServer(serversDoc(), null, null, ctx, "")).toBe("https://meta.example.com");
+    expect(resolveServer(serversDoc(), null, null, ctx, "")).toBe("https://meta.example.com/");
 
     // configuration.server wins over metadata.baseURL.
     ctx["configuration"] = { server: "https://config.example.com" };

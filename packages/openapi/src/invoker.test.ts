@@ -1457,7 +1457,7 @@ describe("invokeBinding — context negotiation", () => {
     });
   });
 
-  it("treats multiple security-requirement objects as alternatives (OR)", async () => {
+  it("requires an explicit choice between multiple security alternatives", async () => {
     const spec = authSpec({
       securitySchemes: {
         bearerAuth: { type: "http", scheme: "bearer" },
@@ -1470,22 +1470,14 @@ describe("invokeBinding — context negotiation", () => {
     const { fetch: f1 } = mockFetch(() => jsonResponse({}));
     await expect(
       inv.invokeBinding({ source: authSource(spec), selector: REF_DATA, fetch: f1 }).closed,
-    ).rejects.toMatchObject({
-      code: CONTEXT_REQUIRED,
-      data: {
-        alternatives: [
-          { requirements: [{ type: "auth.bearer" }] },
-          { requirements: [{ type: "auth.apiKey" }] },
-        ],
-      },
-    });
+    ).rejects.toMatchObject({ code: ERR_REFUSED });
 
     // Satisfying any one alternative suffices.
     const { fetch: f2, requests: r2 } = mockFetch(() => jsonResponse({}));
     const call = inv.invokeBinding({
       source: authSource(spec),
       selector: REF_DATA,
-      context: { apiKey: "k1" },
+      context: { apiKey: "k1", configuration: { security: { index: 1 } } },
       fetch: f2,
     });
     await single(call.outputs);
@@ -1504,7 +1496,11 @@ describe("invokeBinding — context negotiation", () => {
     const call = new OpenAPIInvoker().invokeBinding({
       source: authSource(spec),
       selector: REF_DATA,
-      context: { bearerToken: "tok", apiKey: "k1" },
+      context: {
+        bearerToken: "tok",
+        apiKey: "k1",
+        configuration: { security: { index: 0 } },
+      },
       fetch,
     });
 
@@ -1594,7 +1590,7 @@ describe("invokeBinding — context negotiation", () => {
     expect(requests[0]?.headers.get("Authorization")).toBeNull();
   });
 
-  it("requires no context when an empty requirement object allows anonymous access", async () => {
+  it("lets an explicitly selected empty requirement object allow anonymous access", async () => {
     const spec = authSpec({
       securitySchemes: { bearerAuth: { type: "http", scheme: "bearer" } },
       security: [{ bearerAuth: [] }, {}],
@@ -1603,6 +1599,7 @@ describe("invokeBinding — context negotiation", () => {
     const call = new OpenAPIInvoker().invokeBinding({
       source: authSource(spec),
       selector: REF_DATA,
+      context: { configuration: { security: { index: 1 } } },
       fetch,
     });
 
@@ -1725,14 +1722,14 @@ describe("invokeBinding — context negotiation", () => {
     const call = new OpenAPIInvoker().invokeBinding({
       source: authSource(spec),
       selector: REF_DATA,
-      context: { bearerToken: "tok" },
+      context: { bearerToken: "tok", configuration: { security: { index: 0 } } },
       fetch,
     });
     await single(call.outputs);
     expect(requests[0]?.headers.get("Authorization")).toBe("Bearer tok");
   });
 
-  it("a document whose EVERY alternative is unmappable challenges CONTEXT_REQUIRED instead of dispatching unauthenticated", async () => {
+  it("requires selection before challenging for one unmappable alternative", async () => {
     const spec = authSpec({
       securitySchemes: {
         digestAuth: { type: "http", scheme: "digest" },
@@ -1743,14 +1740,17 @@ describe("invokeBinding — context negotiation", () => {
     const { fetch, requests } = mockFetch(() => jsonResponse({}));
     await expect(
       new OpenAPIInvoker().invokeBinding({ source: authSource(spec), selector: REF_DATA, fetch }).closed,
+    ).rejects.toMatchObject({ code: ERR_REFUSED });
+    await expect(
+      new OpenAPIInvoker().invokeBinding({
+        source: authSource(spec),
+        selector: REF_DATA,
+        context: { configuration: { security: { index: 0 } } },
+        fetch,
+      }).closed,
     ).rejects.toMatchObject({
       code: CONTEXT_REQUIRED,
-      data: {
-        alternatives: [
-          { requirements: [{ type: "auth.http.digest", name: "digestAuth" }] },
-          { requirements: [{ type: "auth.mutualTLS", name: "mtls" }] },
-        ],
-      },
+      data: { alternatives: [{ requirements: [{ type: "auth.http.digest", name: "digestAuth" }] }] },
     });
     expect(requests).toHaveLength(0);
   });
@@ -1919,7 +1919,7 @@ describe("invokeBinding — context negotiation", () => {
     expect(requests).toHaveLength(0);
   });
 
-  it("selects a cookie credential when the co-declared raw Cookie parameter is absent", async () => {
+  it("refuses a cookie credential colliding with a declared raw Cookie parameter", async () => {
     const spec = authSpec({
       securitySchemes: {
         cookieKey: { type: "apiKey", name: "session", in: "cookie" },
@@ -1932,14 +1932,15 @@ describe("invokeBinding — context negotiation", () => {
     const call = new OpenAPIInvoker().invokeBinding({
       source: authSource(spec),
       selector: REF_DATA,
-      context: { apiKey: "cookie-secret", bearerToken: "bearer-secret" },
+      context: {
+        apiKey: "cookie-secret",
+        bearerToken: "bearer-secret",
+        configuration: { security: { index: 0 } },
+      },
       fetch,
     });
-    await call.close();
-
-    await single(call.outputs);
-    expect(requests[0]?.headers.get("Authorization")).toBeNull();
-    expect(requests[0]?.headers.get("Cookie")).toBe("session=cookie-secret");
+    await expect(call.closed).rejects.toMatchObject({ code: ERR_REFUSED });
+    expect(requests).toHaveLength(0);
   });
 });
 
