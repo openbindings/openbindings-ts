@@ -215,16 +215,18 @@ describe("BEC Integration (real HTTP)", () => {
     const store = new MemoryStore();
     await store.set(contextKey(), { bearerToken: SECRET });
 
-    const opInvoker = new OperationInvoker([new OpenAPIInvoker()], {
+    const opInvoker = new OperationInvoker([new OpenAPIInvoker({ parameterConversion: String })], {
       contextResolver: storeContextResolver(store),
       transformEvaluator: { evaluate: (expression, data) => jsonata(expression).evaluate(data) },
     });
     const iface = await fetchIface();
 
     const call1 = opInvoker.invoke(iface, operationSignature("listItems"));
+    await call1.close();
     await expect(single(call1.outputs)).resolves.toEqual(ITEMS);
 
     const call2 = opInvoker.invoke(iface, operationSignature("listItems"));
+    await call2.close();
     await expect(single(call2.outputs)).resolves.toEqual(ITEMS);
 
     const call3 = opInvoker.invoke(iface, operationSignature("getItem"));
@@ -246,6 +248,7 @@ describe("BEC Integration (real HTTP)", () => {
       context: { bearerToken: SECRET },
     });
 
+    await call.close();
     await expect(single(call.outputs)).resolves.toEqual(ITEMS);
     expect(resolves).toBe(0);
   });
@@ -260,6 +263,7 @@ describe("BEC Integration (real HTTP)", () => {
     const iface = await fetchIface();
 
     const call = opInvoker.invoke(iface, operationSignature("listItems"));
+    await call.close();
     const error = await call.closed.catch((caught: unknown) => caught) as InvocationError;
     expect(error.code).toBe(ERR_PROTOCOL);
     expect(Object.hasOwn(error, "data")).toBe(false);
@@ -280,6 +284,7 @@ describe("BEC Integration (real HTTP)", () => {
     const iface = await fetchIface();
 
     const call1 = opInvoker1.invoke(iface, operationSignature("listItems"));
+    await call1.close();
     await expect(single(call1.outputs)).resolves.toEqual(ITEMS);
 
     const call2 = opInvoker2.invoke(iface, operationSignature("listItems"));

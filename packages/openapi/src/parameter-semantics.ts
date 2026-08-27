@@ -1,4 +1,5 @@
 import {
+  FAMILY_MULTIPART,
   serializeCookieValue,
   serializeHeaderValue,
   serializeParamContent,
@@ -6,7 +7,7 @@ import {
   type BodyPlan,
   type OpenAPIExecutionProfile,
 } from "@openbindings/openapi-client/analysis";
-import { BINDING_SPEC_OPENAPI_31 } from "./constants.js";
+import { BINDING_SPEC_OPENAPI_30, BINDING_SPEC_OPENAPI_31 } from "./constants.js";
 import type {
   OpenAPIDocument,
   OpenAPIOperation,
@@ -62,12 +63,14 @@ export function effectiveParameterDeclarationRows(
   ].filter((parameter) => !ignoredHeaderParameter(parameter));
 }
 
-/** Returns the first 3.1 effective Parameter Object that violates the closed gate. */
+/** Returns the first effective Parameter Object that violates its sibling's closed gate. */
 export function malformedEffectiveParameter(
   parameters: OpenAPIParameter[],
   bindingSpec: string,
 ): string | undefined {
-  if (bindingSpec !== BINDING_SPEC_OPENAPI_31) return undefined;
+  if (bindingSpec !== BINDING_SPEC_OPENAPI_30 && bindingSpec !== BINDING_SPEC_OPENAPI_31) {
+    return undefined;
+  }
   for (const parameter of parameters) {
     const name = typeof parameter?.name === "string" && parameter.name !== ""
       ? parameter.name
@@ -185,14 +188,13 @@ export function formStyleCookieMultiValueProof(
   oas30: boolean,
 ): boolean {
   if (
-    oas30
-    || parameter.in !== "cookie"
+    parameter.in !== "cookie"
     || asRecord(parameter.content)
     || !Object.hasOwn(parameter, "schema")
   ) return false;
   const method = serializationMethod(parameter);
   if (method.style !== "form" || !method.explode) return false;
-  const resolved = resolveDeclaration(parameter.schema, false);
+  const resolved = resolveDeclaration(parameter.schema, oas30);
   return resolved.declaresOnly("array")
     || (resolved.declaresOnly("object") && resolved.propertyNames().length > 0);
 }
@@ -225,8 +227,10 @@ export function checkPathTemplateDeclaration(
   if (missing.length > 0) {
     return `path template variable(s) ${uniqueSorted(missing).join(", ")} have no declared path parameter`;
   }
-  if (bindingSpec !== BINDING_SPEC_OPENAPI_31) return undefined;
-  if (duplicates.length > 0) {
+  if (bindingSpec !== BINDING_SPEC_OPENAPI_30 && bindingSpec !== BINDING_SPEC_OPENAPI_31) {
+    return undefined;
+  }
+  if (bindingSpec === BINDING_SPEC_OPENAPI_31 && duplicates.length > 0) {
     return `path template expression(s) ${uniqueSorted(duplicates).join(", ")} occur more than once`;
   }
   const unmatched = [...declared].filter((name) => !seen.has(name)).sort(codePointCompare);
@@ -315,7 +319,10 @@ export function prepareSchemaParameterValue(
   }
   if (parameter.in === "cookie") {
     const units = serializeCookieValue(parameter.name ?? "", engineValue, method.style, method.explode);
-    if (bindingSpec === BINDING_SPEC_OPENAPI_31 && units.length > 1) {
+    if (
+      (bindingSpec === BINDING_SPEC_OPENAPI_30 || bindingSpec === BINDING_SPEC_OPENAPI_31)
+      && units.length > 1
+    ) {
       throw new Error("supplied value would produce multiple cookie pairs");
     }
     return { value: engineValue, cookieEmits: units.length > 0 };
@@ -331,10 +338,26 @@ export function prepareEncodingStylePropertyValue(
   conversion: ParameterConversion | undefined,
 ): unknown {
   const encoding = asRecord(asRecord(plan?.media?.encoding)?.[name]);
-  if (!encoding || !encodingUsesSerialization(encoding)) return value;
+  if (!encoding || !encodingUsesSerializationForPlan(plan, encoding)) {
+    return prepareContentFormPropertyValue(plan, name, value, bindingSpec, conversion);
+  }
   const style = typeof encoding.style === "string" && encoding.style !== "" ? encoding.style : "form";
   const prepared = prepareStyleValue(name, value, style, bindingSpec, conversion);
   return delimitedObjectAsSequence(prepared, style);
+}
+
+/** Whether an optional null is omitted on the 3.0 content-based form/part path. */
+export function contentFormNullIsElided(
+  plan: BodyPlan | undefined,
+  name: string,
+  value: unknown,
+  bindingSpec: string,
+): boolean {
+  if (value !== null || !plan?.media || bindingSpec !== BINDING_SPEC_OPENAPI_30) return false;
+  const encoding = asRecord(asRecord(plan.media.encoding)?.[name]);
+  if (encodingUsesSerializationForPlan(plan, encoding)) return false;
+  const root = resolveDeclaration(plan.media.schema, true);
+  return !root.requiresProperty(name) && root.property(name).admitsNull();
 }
 
 function prepareStyleValue(
@@ -344,11 +367,14 @@ function prepareStyleValue(
   bindingSpec: string,
   conversion: ParameterConversion | undefined,
 ): unknown {
-  if (bindingSpec === BINDING_SPEC_OPENAPI_31 && value === null) {
+  if (
+    (bindingSpec === BINDING_SPEC_OPENAPI_30 || bindingSpec === BINDING_SPEC_OPENAPI_31)
+    && value === null
+  ) {
     if (["matrix", "label", "simple", "form"].includes(style)) return null;
     throw new Error(`JSON null has n/a in style ${JSON.stringify(style)}'s undefined cell`);
   }
-  const prepared = bindingSpec === BINDING_SPEC_OPENAPI_31
+  const prepared = bindingSpec === BINDING_SPEC_OPENAPI_30 || bindingSpec === BINDING_SPEC_OPENAPI_31
     ? convertParameterScalars(value, conversion)
     : value;
   const delimiters = nonRFCStyleDelimiters(style);
@@ -388,7 +414,7 @@ export function prepareEngineParameterView(
   let foundRaw = false;
   for (const parameter of parameters) {
     if (
-      bindingSpec === BINDING_SPEC_OPENAPI_31
+      (bindingSpec === BINDING_SPEC_OPENAPI_30 || bindingSpec === BINDING_SPEC_OPENAPI_31)
       && parameter.in === "header"
       && parameter.name?.toLowerCase() === "cookie"
     ) {
@@ -414,7 +440,7 @@ export function prepareEngineEncodingView(plans: BodyPlan[]): void {
     const oas30 = plan.openapiVersion?.startsWith("3.0") === true;
     for (const [name, rawEncoding] of Object.entries(encoding)) {
       const entry = asRecord(rawEncoding);
-      if (!encodingUsesSerialization(entry)) continue;
+      if (!encodingUsesSerializationForPlan(plan, entry)) continue;
       const style = typeof entry!.style === "string" && entry!.style !== "" ? entry!.style : "form";
       for (const slot of resolvedPropertySlots(root, name, oas30)) {
         slot.owner[slot.name] = engineSchemaForStyle(style);
@@ -579,6 +605,59 @@ function encodingUsesSerialization(encoding: Record<string, unknown> | null): bo
     || Object.hasOwn(encoding, "explode")
     || Object.hasOwn(encoding, "allowReserved")
   );
+}
+
+function encodingUsesSerializationForPlan(
+  plan: BodyPlan | undefined,
+  encoding: Record<string, unknown> | null,
+): boolean {
+  if (!encodingUsesSerialization(encoding)) return false;
+  const oas30 = plan?.openapiVersion?.startsWith("3.0") === true
+    || (plan !== undefined && "oas30" in plan && plan.oas30 === true);
+  return !(oas30 && plan?.family === FAMILY_MULTIPART);
+}
+
+function prepareContentFormPropertyValue(
+  plan: BodyPlan | undefined,
+  name: string,
+  value: unknown,
+  bindingSpec: string,
+  conversion: ParameterConversion | undefined,
+): unknown {
+  // M3 closes this content-based conversion point on 3.0 only. The 3.1
+  // sibling retains its separately adjudicated multipart behavior.
+  if (!plan?.media || bindingSpec !== BINDING_SPEC_OPENAPI_30) return value;
+  const declaration = resolveDeclaration(plan.media.schema, true).property(name);
+  try {
+    return convertContentFormScalars(declaration, value, conversion);
+  } catch (error: unknown) {
+    throw new Error(`body property ${JSON.stringify(name)}: ${errorMessage(error)}`, { cause: error });
+  }
+}
+
+function convertContentFormScalars(
+  declaration: ReturnType<typeof resolveDeclaration>,
+  value: unknown,
+  conversion: ParameterConversion | undefined,
+): unknown {
+  if (value === null || declaration.ambiguous || declaration.typeless()) return value;
+  if (declaration.declaresOnly("array", "null")) {
+    if (!Array.isArray(value)) return value;
+    return value.map((member, index) => {
+      try {
+        return convertContentFormScalars(declaration.items(), member, conversion);
+      } catch (error: unknown) {
+        throw new Error(`array member ${index}: ${errorMessage(error)}`, { cause: error });
+      }
+    });
+  }
+  if (
+    declaration.declaresOnly("boolean", "number", "integer", "null")
+    && (typeof value === "boolean" || typeof value === "number")
+  ) {
+    return convertParameterScalars(value, conversion);
+  }
+  return value;
 }
 
 function ignoredHeaderParameter(parameter: OpenAPIParameter): boolean {

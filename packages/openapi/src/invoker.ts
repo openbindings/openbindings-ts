@@ -81,6 +81,7 @@ import {
   type MediaGovernanceModel,
 } from "./media-transport.js";
 import {
+  caseFoldedHeaderCollision,
   duplicateEffectiveParameterIdentity,
   effectiveParameters,
   requestBodyIgnoredForBindingSpec,
@@ -89,6 +90,7 @@ import {
 } from "./params.js";
 import {
   engineInputForCallerEnvelope,
+  parseCallerEnvelope,
   planAbstractInputRoutes,
   type AbstractInputRoutes,
 } from "./input-routes-v2.js";
@@ -109,7 +111,7 @@ import {
   type ParameterConversion,
 } from "./parameter-semantics.js";
 import { ConfigRequired, resolveServer } from "./servers.js";
-import { markBindingOrigins } from "./binding-origins.js";
+import { markBindingOrigins, markReferencedPathItemOrigins } from "./binding-origins.js";
 import {
   electSecurityAlternative,
   installSelectedSecurityAlternative,
@@ -418,6 +420,9 @@ export class OpenAPIInvoker implements BindingInvoker {
     if (pendingSecurityRequirement) {
       throw new InvocationError(CONTEXT_REQUIRED, pendingSecurityRequirement);
     }
+    const prefetchedInput = model.preStartBodyGate
+      ? await preReadBodyFreeInput(outer)
+      : undefined;
     // start() resolves only after all artifact/configuration checks that do
     // not require application input. Only then does the bridge acquire the
     // SDK input sequence.
@@ -441,7 +446,7 @@ export class OpenAPIInvoker implements BindingInvoker {
         bindingSpec,
         this.parameterConversion,
       );
-    }, model);
+    }, model, prefetchedInput);
   }
 }
 
@@ -463,6 +468,7 @@ interface RuntimeOperationModel {
   maxDeliveryUnitBytes?: number;
   transportError?: InvocationError;
   rawCookieHeader?: string;
+  preStartBodyGate: boolean;
 }
 
 function unsupportedBindingSpecError(bindingSpec: string): InvocationError {
@@ -487,6 +493,7 @@ async function loadRuntimeOperationModel(
 ): Promise<RuntimeOperationModel> {
   let document: OpenAPIDocument;
   let rawDocument: unknown;
+  const resourceBases = new WeakMap<object, string | undefined>();
   try {
     document = await loadOpenAPIDocument(
       args.source.location,
@@ -494,7 +501,13 @@ async function loadRuntimeOperationModel(
       {
         signal: args.signal,
         onRawDocument: (raw) => { rawDocument = structuredClone(raw); },
-        onResource: (root, baseURI) => { markBindingOrigins(root, baseURI); },
+        onResource: (root, baseURI) => {
+          resourceBases.set(root, baseURI);
+          markBindingOrigins(root, baseURI);
+        },
+        onRefTarget: (target, declaringRoot) => {
+          markReferencedPathItemOrigins(target, declaringRoot, resourceBases.get(declaringRoot));
+        },
       },
       args.fetch,
     );
@@ -535,6 +548,9 @@ async function loadRuntimeOperationModel(
   if (duplicateEffectiveParameterIdentity(parameters)) {
     throw new InvocationError("ERR_REFUSED");
   }
+  if (caseFoldedHeaderCollision(parameters)) {
+    throw new InvocationError("ERR_REFUSED");
+  }
   if (checkPathTemplateDeclaration(target.path, parameters, bindingSpec)) {
     throw new InvocationError("ERR_REFUSED");
   }
@@ -565,7 +581,8 @@ async function loadRuntimeOperationModel(
     throw new InvocationError("ERR_REFUSED");
   }
 
-  if (requestBodyIgnoredForBindingSpec(bindingSpec, target.method)) {
+  const preStartBodyGate = requestBodyIgnoredForBindingSpec(bindingSpec, target.method);
+  if (preStartBodyGate) {
     delete operation.requestBody;
   }
   prioritizeNoncollidingRequestMedia(operation, parameters);
@@ -617,6 +634,7 @@ async function loadRuntimeOperationModel(
     emptyResponse: false,
     maxDeliveryUnitBytes: args.maxDeliveryUnitBytes,
     rawCookieHeader,
+    preStartBodyGate,
   };
 }
 
@@ -1125,11 +1143,22 @@ async function bridgeExecution<I, O>(
   outer: InvocationImpl<I, O>,
   mapInput: (input: I) => unknown,
   model: RuntimeOperationModel,
+  prefetched?: PrefetchedInput<I>,
 ): Promise<void> {
   const mirrorInnerInputClose = execution.inputFinished.then(() => outer.closeInput());
   const input = (async () => {
     try {
-      for await (const value of outer.inputs()) {
+      // A body-forbidden method has already consumed one body-free envelope
+      // (or EOF) before the carrier started. A no-parameter carrier dispatches
+      // immediately and has no input slot to receive that harmless envelope.
+      if (prefetched && model.parameters.length === 0 && model.operation.requestBody == null) return;
+      const iterator = prefetched?.iterator ?? outer.inputs()[Symbol.asyncIterator]();
+      let next = prefetched?.result;
+      while (true) {
+        const item = next ?? await iterator.next();
+        next = undefined;
+        if (item.done) break;
+        const value = item.value;
         let mapped: unknown;
         try {
           mapped = mapInput(value);
@@ -1171,6 +1200,25 @@ async function bridgeExecution<I, O>(
     await execution.cancel();
     await Promise.allSettled([input, mirrorInnerInputClose]);
   }
+}
+
+interface PrefetchedInput<I> {
+  iterator: AsyncIterator<I>;
+  result: IteratorResult<I, void>;
+}
+
+/** Proves a forbidden-method body is absent before the carrier can dispatch. */
+async function preReadBodyFreeInput<I, O>(outer: InvocationImpl<I, O>): Promise<PrefetchedInput<I>> {
+  const iterator = outer.inputs()[Symbol.asyncIterator]();
+  const result = await iterator.next();
+  if (!result.done) {
+    try {
+      if (parseCallerEnvelope(result.value).bodyPresent) throw new Error("body is unroutable");
+    } catch {
+      throw new InvocationError("ERR_REFUSED");
+    }
+  }
+  return { iterator, result };
 }
 
 function adaptHooks(args: BindingInvocationArgs): OpenAPIExecutionHooks | undefined {

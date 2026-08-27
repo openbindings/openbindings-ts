@@ -3,6 +3,7 @@ import type { OpenAPIParameter } from "./types.js";
 import { FAMILY_JSON, type BodyPlan } from "./media.js";
 import { codePointCompare, escapePointerSegment } from "./util.js";
 import {
+  contentFormNullIsElided,
   prepareEncodingStylePropertyValue,
   prepareSchemaParameterValue,
   type ParameterConversion,
@@ -295,6 +296,9 @@ export function engineInputForCallerEnvelope(
       }
       if (Object.keys(body).length > 0) bodyDescriptor.present = true;
       for (const [name, member] of Object.entries(body)) {
+        if (bindingSpec !== undefined && contentFormNullIsElided(plan, name, member, bindingSpec)) {
+          continue;
+        }
         value[routes.bodyField(name)] = bindingSpec === undefined
           ? member
           : prepareEncodingStylePropertyValue(

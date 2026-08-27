@@ -658,7 +658,7 @@ describe("OAPI-P-03 — flattened-model refusals", () => {
       },
     };
     const { fetch, requests } = mockFetch(() => jsonResponse({}));
-    const call = new OpenAPIInvoker().invokeBinding({
+    const call = new OpenAPIInvoker({ parameterConversion: String }).invokeBinding({
       source: src(spec),
       selector: "#/paths/~1search/get",
       fetch,
@@ -702,7 +702,7 @@ describe("OAPI-P-03 — flattened-model refusals", () => {
       },
     };
     const { fetch, requests } = mockFetch(() => jsonResponse({}));
-    const call = new OpenAPIInvoker().invokeBinding({
+    const call = new OpenAPIInvoker({ parameterConversion: String }).invokeBinding({
       source: src(spec),
       selector: "#/paths/~1map~1{coords}/get",
       fetch,
@@ -886,7 +886,7 @@ describe("OAPI-P-04 — request media on the wire", () => {
       },
     };
     const { fetch, requests } = mockFetch(() => jsonResponse({}));
-    const call = new OpenAPIInvoker().invokeBinding({
+    const call = new OpenAPIInvoker({ parameterConversion: String }).invokeBinding({
       source: src(spec),
       selector: "#/paths/~1form/post",
       fetch,
@@ -896,7 +896,7 @@ describe("OAPI-P-04 — request media on the wire", () => {
     expect(requests[0]?.headers.get("Content-Type")).toBe(
       "application/x-www-form-urlencoded",
     );
-    expect(requests[0]?.body).toBe("ids=%5B1%2C2%5D&name=a+b");
+    expect(requests[0]?.body).toBe("ids=%5B%221%22%2C%222%22%5D&name=a+b");
   });
 
   // Synthetic body unwrap on the wire: with an array body schema, the
@@ -1019,6 +1019,7 @@ describe("OAPI-P-04 — request media on the wire", () => {
       selector: "#/paths/~1csvjson/get",
       fetch,
     });
+    await call.close();
     await single(call.outputs);
     expect(requests[0]?.headers.get("Accept")).toBeNull();
   });
@@ -1076,6 +1077,7 @@ describe("OAPI-P-06 / §8 — interaction shape", () => {
       selector: REF_DUAL,
       fetch: sseFetch,
     });
+    await streamCall.close();
     const events: unknown[] = [];
     for await (const e of streamCall.outputs) events.push(e);
     await streamCall.closed;
@@ -1090,6 +1092,7 @@ describe("OAPI-P-06 / §8 — interaction shape", () => {
       selector: REF_DUAL,
       fetch: jsonFetch,
     });
+    await unaryCall.close();
     await expect(single(unaryCall.outputs)).resolves.toEqual({ mode: "unary" });
   });
 
@@ -1295,6 +1298,7 @@ describe("OAPI-P-05 — the server configuration point end to end", () => {
       },
       fetch,
     });
+    await call.close();
     await expect(single(call.outputs)).resolves.toEqual({ ok: true });
     expect(requests).toHaveLength(1);
     expect(requests[0]?.url).toBe("https://real.example.test/ping");

@@ -27,6 +27,16 @@ describe("resolved declaration procedure", () => {
     expect(resolveDeclaration({ type: ["string", "null"] }, true).types).toBeNull();
   });
 
+  it("reports required properties across resolved allOf conjuncts", () => {
+    const resolved = resolveDeclaration({
+      type: "object",
+      allOf: [{ required: ["left"] }, { required: ["right"] }],
+    }, true);
+    expect(resolved.requiresProperty("left")).toBe(true);
+    expect(resolved.requiresProperty("right")).toBe(true);
+    expect(resolved.requiresProperty("optional")).toBe(false);
+  });
+
   it("conjoins members from allOf and the selected choice", () => {
     const resolved = resolveDeclaration({
       allOf: [

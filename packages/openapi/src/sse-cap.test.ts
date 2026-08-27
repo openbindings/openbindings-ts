@@ -57,6 +57,7 @@ describe("unary SSE size cap", () => {
       selector: "#/paths/~1events/get",
     });
 
+    await call.close();
     await expect(call.closed).rejects.toMatchObject({ code: "ERR_RESPONSE_ERROR" });
   });
 
@@ -85,6 +86,7 @@ describe("unary SSE size cap", () => {
       maxDeliveryUnitBytes: 1024,
     });
 
+    await call.close();
     const error = await call.closed.catch((caught: unknown) => caught) as { code?: string };
     expect(error.code).toBe("ERR_RESPONSE_ERROR");
     expect(Object.hasOwn(error, "data")).toBe(false);
