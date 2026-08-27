@@ -958,7 +958,7 @@ describe("deterministic ordering", () => {
 
 describe("directional request/response schema projection", () => {
   for (const openapi of ["3.0.3", "3.1.0"]) {
-    it(`projects readOnly/writeOnly through nested, allOf, and recursive refs in OpenAPI ${openapi}`, async () => {
+    it(`preserves readOnly/writeOnly through nested, allOf, and recursive refs in OpenAPI ${openapi}`, async () => {
       const spec = {
         openapi,
         info: { title: "Directional API", version: "1" },
@@ -1067,62 +1067,60 @@ describe("directional request/response schema projection", () => {
       const inputProps = input.properties as Record<string, Record<string, unknown>>;
 
       expect(Object.keys(inputProps)).toEqual(expect.arrayContaining([
-        "filter", "password", "clientSecret", "displayName", "nested", "manager",
+        "filter", "id", "password", "serverNote", "clientSecret", "displayName", "nested", "manager",
+        "neverDirectional",
       ]));
-      expect(inputProps).not.toHaveProperty("id");
-      expect(inputProps).not.toHaveProperty("serverNote");
-      expect(inputProps).not.toHaveProperty("neverDirectional");
       expect(input.required).toEqual(expect.arrayContaining([
-        "filter", "password", "clientSecret", "displayName", "nested", "manager",
-      ]));
-      expect(input.required).not.toEqual(expect.arrayContaining([
-        "id", "serverNote", "neverDirectional",
+        "filter", "id", "password", "serverNote", "clientSecret", "displayName", "nested", "manager",
+        "neverDirectional",
       ]));
 
       const filterProps = inputProps.filter!.properties as Record<string, unknown>;
-      expect(filterProps).not.toHaveProperty("serverGenerated");
+      expect(filterProps).toHaveProperty("serverGenerated");
       expect(filterProps).toHaveProperty("clientProvided");
-      expect(inputProps.filter!.required).toEqual(["clientProvided", "ordinary"]);
+      expect(inputProps.filter!.required).toEqual(["serverGenerated", "clientProvided", "ordinary"]);
 
       const inputNested = inputProps.nested!.items as Record<string, unknown>;
       const inputNestedProps = inputNested.properties as Record<string, unknown>;
-      expect(inputNestedProps).not.toHaveProperty("createdAt");
+      expect(inputNestedProps).toHaveProperty("createdAt");
       expect(inputNestedProps).toHaveProperty("draft");
-      expect(inputNested.required).toEqual(["draft", "label"]);
+      expect(inputNested.required).toEqual(["createdAt", "draft", "label"]);
 
       const outputProfile = findSchemaWithProperty(output, "displayName");
       const outputProfileProps = outputProfile.properties as Record<string, unknown>;
       expect(outputProfileProps).toHaveProperty("serverNote");
-      expect(outputProfileProps).not.toHaveProperty("clientSecret");
-      expect(outputProfileProps).not.toHaveProperty("neverDirectional");
-      expect(outputProfile.required).toEqual(["serverNote", "displayName", "nested"]);
+      expect(outputProfileProps).toHaveProperty("clientSecret");
+      expect(outputProfileProps).toHaveProperty("neverDirectional");
+      expect(outputProfile.required).toEqual([
+        "serverNote", "clientSecret", "displayName", "nested", "neverDirectional",
+      ]);
 
       const outputIdentity = findSchemaWithProperty(output, "id");
       const outputIdentityProps = outputIdentity.properties as Record<string, unknown>;
       expect(outputIdentityProps).toHaveProperty("id");
-      expect(outputIdentityProps).not.toHaveProperty("password");
-      expect(outputIdentity.required).toEqual(["id", "manager"]);
+      expect(outputIdentityProps).toHaveProperty("password");
+      expect(outputIdentity.required).toEqual(["id", "password", "manager"]);
 
       const outputNested = findSchemaWithProperty(output, "label");
       const outputNestedProps = outputNested.properties as Record<string, unknown>;
       expect(outputNestedProps).toHaveProperty("createdAt");
-      expect(outputNestedProps).not.toHaveProperty("draft");
-      expect(outputNested.required).toEqual(["createdAt", "label"]);
+      expect(outputNestedProps).toHaveProperty("draft");
+      expect(outputNested.required).toEqual(["createdAt", "draft", "label"]);
 
       const outputRoot = findSchemaWithRequired(output, "manager");
       expect(outputRoot.required).toEqual(expect.arrayContaining([
-        "id", "serverNote", "displayName", "nested", "manager",
-      ]));
-      expect(outputRoot.required).not.toEqual(expect.arrayContaining([
-        "password", "clientSecret", "neverDirectional",
+        "id", "password", "serverNote", "clientSecret", "displayName", "nested", "manager",
+        "neverDirectional",
       ]));
 
       // The recursive component keeps its stable name after projection and
       // decycling; directionality is applied inside the reachable definition.
       expect(JSON.stringify(input)).toContain("#/operations/upsertUser/input/$defs/User");
       expect(JSON.stringify(output)).toContain("#/operations/upsertUser/output/$defs/User");
-      expect(JSON.stringify(input)).not.toContain('"readOnly":true');
-      expect(JSON.stringify(output)).not.toContain('"writeOnly":true');
+      expect(JSON.stringify(input)).toContain('"readOnly":true');
+      expect(JSON.stringify(input)).toContain('"writeOnly":true');
+      expect(JSON.stringify(output)).toContain('"readOnly":true');
+      expect(JSON.stringify(output)).toContain('"writeOnly":true');
     });
   }
 });

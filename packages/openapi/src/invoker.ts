@@ -58,11 +58,26 @@ import {
 } from "./util.js";
 import {
   FAMILY_JSON,
+  FAMILY_MULTIPART,
   configureRequestMedia,
+  configuredPropertyMedia,
   isJSONMediaType,
+  parseMediaType,
   planRequestBodies,
+  prepareEnginePropertyMediaView,
+  requiredPropertyMediaNames,
   type BodyPlan,
 } from "./media.js";
+import {
+  ACTUAL_CONTENT_TYPE_HEADER,
+  governRequest,
+  governResponse,
+  normalizeContentCodings,
+  prepareEngineResponseView,
+  type ContentDecoder,
+  type ContentEncoder,
+  type MediaGovernanceModel,
+} from "./media-transport.js";
 import {
   duplicateEffectiveParameterIdentity,
   effectiveParameters,
@@ -121,12 +136,19 @@ export interface OpenAPIInvokerOptions {
    * adapter cannot apply, keyed by the authored security-scheme name.
    */
   securityHandlers?: Record<string, OpenAPIEngineSecurityHandler>;
+  /** Deterministic whole-representation request content-coding capabilities. */
+  requestContentCodings?: Record<string, ContentEncoder>;
+  /** Deterministic whole-representation response content-coding capabilities. */
+  responseContentCodings?: Record<string, ContentDecoder>;
 }
 
 export class OpenAPIInvoker implements BindingInvoker {
   private readonly engine: OpenAPIEngine;
   private readonly securityHandlers?: Record<string, OpenAPIEngineSecurityHandler>;
   private readonly parameterConversion?: ParameterConversion;
+  private readonly requestContentCodings: ReadonlyMap<string, ContentEncoder>;
+  private readonly responseContentCodings: ReadonlyMap<string, ContentDecoder>;
+  private readonly contentCodingDefect?: Error;
 
   constructor(options: OpenAPIInvokerOptions = {}) {
     this.engine = options?.engine ?? new OpenAPIEngine();
@@ -134,6 +156,11 @@ export class OpenAPIInvoker implements BindingInvoker {
       ? { ...options.securityHandlers }
       : undefined;
     this.parameterConversion = options.parameterConversion;
+    const requestCodings = normalizeContentCodings(options.requestContentCodings, "request");
+    const responseCodings = normalizeContentCodings(options.responseContentCodings, "response");
+    this.requestContentCodings = requestCodings.codecs;
+    this.responseContentCodings = responseCodings.codecs;
+    this.contentCodingDefect = requestCodings.defect ?? responseCodings.defect;
   }
 
   checkBindingSpecs(bindingSpecs: readonly string[]): BindingSpecVerdict[] {
@@ -200,9 +227,13 @@ export class OpenAPIInvoker implements BindingInvoker {
     args: BindingInvocationArgs,
     outer: InvocationImpl<I, O>,
   ): Promise<void> {
+    if (this.contentCodingDefect) throw new InvocationError("ERR_REFUSED");
     const bindingSpec = args.source.bindingSpec;
     const profile = profileForInvocation(bindingSpec);
     const model = await loadRuntimeOperationModel(args, bindingSpec);
+    const required = requiredMediaContext(model, args.context, profile);
+    if (required) throw new InvocationError(CONTEXT_REQUIRED, required);
+    prepareEnginePropertyMediaView(model.plans, args.context);
     const prepared = await this.engine.prepare({
       // The model is an adapter-local loaded view: edition and method-body
       // gates have already run, and ignored requestBody declarations have
@@ -213,7 +244,12 @@ export class OpenAPIInvoker implements BindingInvoker {
       profile,
       context: args.context,
       signal: outer.signal,
-      fetch: adaptRuntimeFetch(args.fetch ?? globalThis.fetch, model),
+      fetch: adaptRuntimeFetch(
+        args.fetch ?? globalThis.fetch,
+        model,
+        this.requestContentCodings,
+        this.responseContentCodings,
+      ),
       hooks: adaptHooks(args),
       maxDeliveryUnitBytes: args.maxDeliveryUnitBytes,
       securityHandlers: this.securityHandlers,
@@ -222,21 +258,26 @@ export class OpenAPIInvoker implements BindingInvoker {
     // not require application input. Only then does the bridge acquire the
     // SDK input sequence.
     const execution = await prepared.start<I, O>();
-    const selectedPlans = configuredRequestPlans(
-      model.plans,
-      args.context,
-      profile,
-      model.document.openapi,
-    );
-    await bridgeExecution(execution, outer, (input) => engineInputForCallerEnvelope(
-      input,
-      model.parameters,
-      selectedPlans,
-      model.routes,
-      profile,
-      bindingSpec,
-      this.parameterConversion,
-    ));
+    await bridgeExecution(execution, outer, (input) => {
+      const selectedPlans = configuredRequestPlans(
+        model.operation,
+        model.plans,
+        args.context,
+        profile,
+        model.document.openapi,
+        inputHasBody(input),
+      );
+      for (const plan of selectedPlans) configuredPropertyMedia(plan, args.context);
+      return engineInputForCallerEnvelope(
+        input,
+        model.parameters,
+        selectedPlans,
+        model.routes,
+        profile,
+        bindingSpec,
+        this.parameterConversion,
+      );
+    }, model);
   }
 }
 
@@ -245,10 +286,14 @@ interface RuntimeOperationModel {
   document: OpenAPIDocument;
   engineContent: unknown;
   operation: OpenAPIOperation;
+  governanceOperation: OpenAPIOperation;
   parameters: OpenAPIParameter[];
   plans: BodyPlan[];
   routes: AbstractInputRoutes;
-  typeAbsentParts: string[];
+  method: string;
+  emptyResponse: boolean;
+  maxDeliveryUnitBytes?: number;
+  transportError?: InvocationError;
   rawCookieHeader?: string;
 }
 
@@ -312,6 +357,7 @@ async function loadRuntimeOperationModel(
     throw new InvocationError("ERR_SELECTOR_NOT_FOUND");
   }
   const operation = rawOperation as OpenAPIOperation;
+  const governanceOperation = structuredClone(operation);
   const declarationRows = effectiveParameterDeclarationRows(pathItem, operation);
   if (malformedEffectiveParameter(declarationRows, bindingSpec)) {
     throw new InvocationError("ERR_REFUSED");
@@ -353,25 +399,6 @@ async function loadRuntimeOperationModel(
   if (requestBodyIgnoredForBindingSpec(bindingSpec, target.method)) {
     delete operation.requestBody;
   }
-  const typeAbsentParts = multipartTypeAbsentParts(operation);
-  if (bindingSpec === BINDING_SPEC_OPENAPI_30 && typeAbsentParts.length > 0) {
-    const configuration = asRecord(args.context?.configuration);
-    const partMedia = asRecord(configuration?.partMedia);
-    const missing = typeAbsentParts.find((name) => typeof partMedia?.[name] !== "string");
-    if (missing !== undefined) {
-      throw new InvocationError(CONTEXT_REQUIRED, {
-        target: args.source.location ?? "",
-        alternatives: [{ requirements: [{
-          type: "config.value",
-          point: "partMedia",
-          path: `/${missing.replaceAll("~", "~0").replaceAll("/", "~1")}`,
-        }] }],
-      });
-    }
-  }
-  if (bindingSpec === BINDING_SPEC_OPENAPI_31) {
-    adaptOpenAPI31TypeAbsentParts(operation);
-  }
   prioritizeNoncollidingRequestMedia(operation, parameters);
   let plans: BodyPlan[] = [];
   let forcedJSONEnvelope = false;
@@ -398,6 +425,7 @@ async function loadRuntimeOperationModel(
   const routes = planAbstractInputRoutes(callerParameters, plans);
   const rawCookieHeader = prepareEngineParameterView(parameters, routes, bindingSpec);
   prepareEngineEncodingView(plans);
+  prepareEngineResponseView(operation);
   // A fully dereferenced recursive schema is cyclic. Passing that adapter
   // view through the standalone engine's loader a second time cannot preserve
   // its graph, so let the engine load the original authored artifact in that
@@ -410,10 +438,13 @@ async function loadRuntimeOperationModel(
     document,
     engineContent,
     operation,
+    governanceOperation,
     parameters: callerParameters,
     plans,
     routes,
-    typeAbsentParts,
+    method: target.method,
+    emptyResponse: false,
+    maxDeliveryUnitBytes: args.maxDeliveryUnitBytes,
     rawCookieHeader,
   };
 }
@@ -476,38 +507,6 @@ function forceJSONBodyEnvelopeCarriage(plans: BodyPlan[]): boolean {
   return changed;
 }
 
-function multipartTypeAbsentParts(operation: OpenAPIOperation): string[] {
-  const content = operation.requestBody?.content;
-  const media = content?.["multipart/form-data"];
-  const schema = media?.schema;
-  if (!schema || typeof schema !== "object" || Array.isArray(schema)) return [];
-  const properties = schema.properties;
-  if (!properties || typeof properties !== "object" || Array.isArray(properties)) return [];
-  return Object.entries(properties as Record<string, unknown>)
-    .filter(([, raw]) => raw !== null && typeof raw === "object" && !Array.isArray(raw)
-      && !("type" in (raw as Record<string, unknown>)))
-    .map(([name]) => name)
-    .sort(codePointCompare);
-}
-
-/** Invocation-local bridge for the 3.1 authority's type-absent octet part row. */
-function adaptOpenAPI31TypeAbsentParts(operation: OpenAPIOperation): void {
-  const content = operation.requestBody?.content;
-  const media = content?.["multipart/form-data"];
-  const schema = media?.schema;
-  if (!schema || typeof schema !== "object" || Array.isArray(schema)) return;
-  const properties = schema.properties;
-  if (!properties || typeof properties !== "object" || Array.isArray(properties)) return;
-  for (const name of multipartTypeAbsentParts(operation)) {
-    const raw = (properties as Record<string, unknown>)[name] as Record<string, unknown>;
-    (properties as Record<string, unknown>)[name] = {
-      ...raw,
-      type: "string",
-      contentEncoding: "base64",
-    };
-  }
-}
-
 function prioritizeNoncollidingRequestMedia(
   operation: OpenAPIOperation,
   parameters: OpenAPIParameter[],
@@ -538,6 +537,8 @@ function prioritizeNoncollidingRequestMedia(
 function adaptRuntimeFetch(
   fetchFn: typeof globalThis.fetch,
   model: RuntimeOperationModel,
+  requestContentCodings: ReadonlyMap<string, ContentEncoder>,
+  responseContentCodings: ReadonlyMap<string, ContentDecoder>,
 ): typeof globalThis.fetch {
   return async (input, init) => {
     const completedURL = input instanceof Request ? input.url : String(input);
@@ -567,40 +568,63 @@ function adaptRuntimeFetch(
       }
     }
 
-    if (!nextInit?.body) return fetchFn(nextInput, nextInit);
-    const text = bodyText(nextInit.body);
-    const contentType = new Headers(nextInit.headers).get("Content-Type")?.split(";", 1)[0]?.trim().toLowerCase();
-    if (
-      model.operation.requestBody?.required
-      && contentType !== undefined
-      && isJSONMediaType(contentType)
-      && text?.trim() === "{}"
-    ) {
-      throw new InvocationError("ERR_REFUSED");
-    }
+    let next: RequestInit = nextInit ?? {};
+    if (next.body) {
+      const text = bodyText(next.body);
+      const contentType = new Headers(next.headers).get("Content-Type")?.split(";", 1)[0]?.trim().toLowerCase();
+      if (
+        model.operation.requestBody?.required
+        && contentType !== undefined
+        && isJSONMediaType(contentType)
+        && text?.trim() === "{}"
+      ) {
+        throw new InvocationError("ERR_REFUSED");
+      }
 
-    let next: RequestInit = nextInit;
-    if (text !== undefined) {
-      try {
-        const value = JSON.parse(text) as unknown;
-        if (value && typeof value === "object" && !Array.isArray(value)) {
-          const keys = Object.keys(value);
-          const selected = model.plans.find((plan) =>
-            plan.family === FAMILY_JSON
-            && !plan.synthetic
-            && keys.every((key) => plan.props?.has(key) === true));
-          if (selected) {
-            const headers = new Headers(next.headers);
-            headers.set("Content-Type", selected.mediaType || selected.mediaKey);
-            next = { ...next, headers };
+      if (text !== undefined) {
+        try {
+          const value = JSON.parse(text) as unknown;
+          if (value && typeof value === "object" && !Array.isArray(value)) {
+            const keys = Object.keys(value);
+            const selected = model.plans.find((plan) =>
+              plan.family === FAMILY_JSON
+              && !plan.synthetic
+              && keys.every((key) => plan.props?.has(key) === true));
+            if (selected) {
+              const headers = new Headers(next.headers);
+              headers.set("Content-Type", selected.mediaType || selected.mediaKey);
+              next = { ...next, headers };
+            }
           }
-        }
-      } catch { /* not a JSON body */ }
-    }
+        } catch { /* not a JSON body */ }
+      }
 
-    const rewritten = rewriteEncodedMultipartParts(next.body!, model.typeAbsentParts);
-    if (rewritten !== next.body) next = { ...next, body: rewritten };
-    return fetchFn(nextInput, next);
+      const rawPartNames = [...new Set(model.plans.flatMap((plan) =>
+        (plan as { rawProperties?: string[] }).rawProperties ?? []))];
+      let rewritten = rewriteEncodedMultipartParts(next.body!, rawPartNames);
+      const transferEncodings = selectedMultipartPlan(model, contentType)?.transferEncodings ?? {};
+      rewritten = rewriteMultipartTransferEncodings(rewritten, transferEncodings);
+      if (rewritten !== next.body) next = { ...next, body: rewritten };
+    }
+    const governedModel: MediaGovernanceModel = {
+      document: model.document,
+      operation: model.governanceOperation,
+      parameters: model.parameters,
+      method: model.method,
+      emptyResponse: model.emptyResponse,
+      maxDeliveryUnitBytes: model.maxDeliveryUnitBytes,
+    };
+    model.transportError = undefined;
+    try {
+      const governed = await governRequest(nextInput, next, governedModel, requestContentCodings);
+      const response = await fetchFn(governed.input, governed.init);
+      const result = await governResponse(response, governedModel, responseContentCodings);
+      model.emptyResponse = governedModel.emptyResponse;
+      return result;
+    } catch (error: unknown) {
+      if (error instanceof InvocationError) model.transportError = error;
+      throw error;
+    }
   };
 }
 
@@ -652,17 +676,147 @@ function rewriteEncodedMultipartParts(body: BodyInit, names: string[]): BodyInit
   return Uint8Array.from(binary, (character) => character.charCodeAt(0));
 }
 
+function selectedMultipartPlan(
+  model: RuntimeOperationModel,
+  contentType: string | undefined,
+): { transferEncodings?: Record<string, string> } | undefined {
+  if (!contentType) return undefined;
+  try {
+    const selected = configureRequestMedia(model.plans, contentType, {
+      profile: profileForBindingSpec(model.bindingSpec),
+      openapiVersion: model.document.openapi,
+    }).filter((plan) => plan.family === FAMILY_MULTIPART);
+    return selected.length === 1
+      ? selected[0] as BodyPlan & { transferEncodings?: Record<string, string> }
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Removes predecessor-invented fields, then restores the one OAS 3.0 explicit exception. */
+function rewriteMultipartTransferEncodings(
+  body: BodyInit,
+  declared: Record<string, string>,
+): BodyInit {
+  let bytes: Uint8Array;
+  if (typeof body === "string") bytes = new TextEncoder().encode(body);
+  else if (body instanceof ArrayBuffer) bytes = new Uint8Array(body);
+  else if (ArrayBuffer.isView(body)) bytes = new Uint8Array(body.buffer, body.byteOffset, body.byteLength);
+  else return body;
+
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  const withoutImplicit = binary.replace(/\r\nContent-Transfer-Encoding:[^\r\n]*/giu, "");
+  let changed = withoutImplicit !== binary;
+  binary = withoutImplicit;
+  for (const [name, encoding] of Object.entries(declared)) {
+    const markerAt = binary.indexOf(`name="${name}"`);
+    if (markerAt < 0) continue;
+    const headersEnd = binary.indexOf("\r\n\r\n", markerAt);
+    if (headersEnd < 0) continue;
+    binary = `${binary.slice(0, headersEnd)}\r\nContent-Transfer-Encoding: ${encoding}${binary.slice(headersEnd)}`;
+    changed = true;
+  }
+  return changed ? Uint8Array.from(binary, (character) => character.charCodeAt(0)) : body;
+}
+
 function configuredRequestPlans(
+  operation: OpenAPIOperation,
   plans: BodyPlan[],
   context: Record<string, unknown> | undefined,
   profile: OpenAPIExecutionProfile,
   openapiVersion: string | undefined,
+  bodyEmitting = true,
 ): BodyPlan[] {
+  if (!bodyEmitting) return plans;
   const configuration = asRecord(context?.configuration);
   const configured = configuration?.requestMedia;
-  if (configured == null) return plans.filter((plan) => !plan.range && !plan.unsupported);
-  if (typeof configured !== "string") return [];
-  return configureRequestMedia(plans, configured, { profile, openapiVersion });
+  if (configured == null) {
+    const sole = soleConcreteRequestPlan(operation, plans);
+    if (sole) return [sole];
+    if (operation.requestBody?.required === true) {
+      throw new InvocationError(CONTEXT_REQUIRED, configRequirement("requestMedia", ""));
+    }
+    // Optional bodies reach this point only after the caller has supplied an
+    // input body. A retry challenge would require replaying consumed input, so
+    // the missing prior choice is a plain pre-dispatch refusal.
+    throw new InvocationError("ERR_REFUSED");
+  }
+  if (typeof configured !== "string") throw new InvocationError("ERR_REFUSED");
+  const selected = configureRequestMedia(plans, configured, { profile, openapiVersion });
+  if (selected.length !== 1) throw new InvocationError("ERR_REFUSED");
+  return selected;
+}
+
+function requiredMediaContext(
+  model: RuntimeOperationModel,
+  context: Record<string, unknown> | undefined,
+  profile: OpenAPIExecutionProfile,
+): ContextRequiredDetails | null {
+  if (model.operation.requestBody?.required !== true) return null;
+  let selected: BodyPlan[];
+  const configuration = asRecord(context?.configuration);
+  if (configuration?.requestMedia == null) {
+    const usable = model.plans.filter((plan) => !plan.unsupported);
+    if (usable.length === 0) throw new InvocationError("ERR_REFUSED");
+    const sole = soleConcreteRequestPlan(model.operation, usable);
+    if (!sole) return configRequirement("requestMedia", "");
+    selected = [sole];
+  } else {
+    if (typeof configuration.requestMedia !== "string") throw new InvocationError("ERR_REFUSED");
+    selected = configureRequestMedia(model.plans, configuration.requestMedia, {
+      profile,
+      openapiVersion: model.document.openapi,
+    });
+    if (selected.length !== 1) throw new InvocationError("ERR_REFUSED");
+  }
+  const propertyMedia = asRecord(configuration?.propertyMedia);
+  const missing = [...new Set(selected.flatMap(requiredPropertyMediaNames))]
+    .filter((name) => typeof propertyMedia?.[name] !== "string")
+    .sort(codePointCompare);
+  if (missing.length === 0) {
+    for (const plan of selected) {
+      try { configuredPropertyMedia(plan, context); } catch { throw new InvocationError("ERR_REFUSED"); }
+    }
+    return null;
+  }
+  return {
+    target: "",
+    alternatives: [{ requirements: missing.map((name) => ({
+      type: "config.value",
+      point: "propertyMedia",
+      path: `/${name.replaceAll("~", "~0").replaceAll("/", "~1")}`,
+    })) }],
+  };
+}
+
+function soleConcreteRequestPlan(
+  _operation: OpenAPIOperation,
+  plans: BodyPlan[],
+): BodyPlan | null {
+  // Election is over the confinement-filtered USABLE plans, not the authored
+  // content-map size. A normalized collision can therefore remove two map
+  // entries and leave one ordinary concrete sibling to self-select.
+  if (plans.length !== 1) return null;
+  const plan = plans[0]!;
+  if (plan.range || plan.unsupported) return null;
+  try { parseMediaType(plan.mediaKey, true); } catch { return null; }
+  return plan;
+}
+
+function configRequirement(point: string, path: string): ContextRequiredDetails {
+  return {
+    target: "",
+    alternatives: [{ requirements: [{ type: "config.value", point, path }] }],
+  };
+}
+
+function inputHasBody(value: unknown): boolean {
+  return value !== null
+    && typeof value === "object"
+    && !Array.isArray(value)
+    && Object.hasOwn(value, "body");
 }
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
@@ -675,6 +829,7 @@ async function bridgeExecution<I, O>(
   execution: OpenAPIExecution<I, O>,
   outer: InvocationImpl<I, O>,
   mapInput: (input: I) => unknown,
+  model: RuntimeOperationModel,
 ): Promise<void> {
   const mirrorInnerInputClose = execution.inputFinished.then(() => outer.closeInput());
   const input = (async () => {
@@ -706,6 +861,7 @@ async function bridgeExecution<I, O>(
 
   const output = (async () => {
     for await (const event of execution.events) {
+      if (model.emptyResponse) continue;
       await outer.emitOutput(event.value);
     }
     await execution.completed;
@@ -715,7 +871,7 @@ async function bridgeExecution<I, O>(
   try {
     await output;
   } catch (error: unknown) {
-    outer.fireError(toSDKError(error));
+    outer.fireError(model.transportError ?? toSDKError(error));
   } finally {
     await execution.cancel();
     await Promise.allSettled([input, mirrorInnerInputClose]);
@@ -736,11 +892,15 @@ function adaptHooks(args: BindingInvocationArgs): OpenAPIExecutionHooks | undefi
     }),
     target,
   });
-  const raw = (result: OpenAPIHookResult) => ({
-    status: result.status,
-    body: result.body,
-    meta: cloneMetadata(result.metadata),
-  });
+  const raw = (result: OpenAPIHookResult) => {
+    const meta = cloneMetadata(result.metadata);
+    const actualEntry = Object.entries(meta)
+      .find(([name]) => name.toLowerCase() === ACTUAL_CONTENT_TYPE_HEADER.toLowerCase());
+    const actual = actualEntry?.[1];
+    if (actualEntry) delete meta[actualEntry[0]];
+    if (actual) meta["Content-Type"] = [...actual];
+    return { status: result.status, body: result.body, meta };
+  };
   return {
     decode: async (engineSite, result) => {
       const declined = Symbol("openapi-adapter: decode declined");

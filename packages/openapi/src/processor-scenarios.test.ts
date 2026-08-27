@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
-import { describe, it } from "vitest";
+import { afterAll, describe, expect, it } from "vitest";
 import jsonata from "jsonata";
 import {
   matchProcessorObservation,
@@ -20,6 +20,9 @@ import {
 } from "@openbindings/invoke";
 import { OpenAPIInvoker, OpenAPISynthesizer } from "./invoker.js";
 
+if (process.env.OB_CORPUS_REQUIRED === "1" && !process.env.OB_SPEC_CORPUS) {
+  throw new Error("OB_CORPUS_REQUIRED=1 requires OB_SPEC_CORPUS");
+}
 const corpusRoot = process.env.OB_SPEC_CORPUS ?? resolve(dirname(fileURLToPath(import.meta.url)), "../../../../spec/conformance");
 const corpora = ["openapi-3.0.json", "openapi-3.1.json"].map((file) => JSON.parse(
   readFileSync(resolve(corpusRoot, "binding-specs/processor", file), "utf8"),
@@ -29,6 +32,8 @@ const fidelityCorpus = JSON.parse(
 ) as ProcessorScenarioFile;
 
 describe("portable OpenAPI processor scenarios", () => {
+  let executed = 0;
+
   for (const corpus of corpora) {
     for (const scenario of corpus.scenarios) {
       it(scenario.id, async () => {
@@ -41,9 +46,15 @@ describe("portable OpenAPI processor scenarios", () => {
             { cause: error },
           );
         }
+        executed += 1;
       });
     }
   }
+
+  afterAll(() => {
+    expect(corpora.map((corpus) => corpus.scenarios.length)).toEqual([38, 86]);
+    expect(executed).toBe(124);
+  });
 });
 
 describe("OpenAPI invocation-fidelity scenarios", () => {
@@ -246,10 +257,9 @@ function normalizedHeaders(headers: Headers): Record<string, string> {
   return out;
 }
 
-function errorPhase(error: InvocationError, dispatched: boolean, scenarioId: string): ProcessorObservation["phase"] {
+function errorPhase(error: InvocationError, dispatched: boolean, _scenarioId: string): ProcessorObservation["phase"] {
   if (dispatched) return "response";
   if (error.code === ERR_SOURCE_LOAD_FAILED) return "load";
-  if (/^OAPI(?:30|31)-PS-(?:15|16)$/u.test(scenarioId)) return "resolution";
   if (error.code === ERR_INVALID_SELECTOR || error.code === ERR_SELECTOR_NOT_FOUND) return "resolution";
   return "pre-dispatch";
 }

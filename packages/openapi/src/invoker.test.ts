@@ -185,7 +185,7 @@ describe("invokeBinding — request construction", () => {
     expect(requests).toHaveLength(1);
     expect(requests[0]?.url).toBe("https://api.example.com/v1/ping");
     expect(requests[0]?.method).toBe("GET");
-    expect(requests[0]?.headers.get("Accept")).toBe("application/json, text/plain");
+    expect(requests[0]?.headers.get("Accept")).toBeNull();
     await expect(call.closed).resolves.toBeUndefined();
   });
 
@@ -666,7 +666,7 @@ describe("invokeBinding — responses", () => {
     );
     const call = new OpenAPIInvoker().invokeBinding({ source: SOURCE, selector: REF_PING, fetch });
     const error = await call.closed.catch((caught: unknown) => caught);
-    expect(JSON.parse(JSON.stringify(error))).toEqual({ code: ERR_EXECUTION_FAILED });
+    expect(JSON.parse(JSON.stringify(error))).toEqual({ code: ERR_PROTOCOL });
   });
 
   it("does not compile HTTP 401 and 403 into portable failure codes", async () => {
@@ -847,7 +847,10 @@ const SSE_SPEC = {
         responses: {
           "200": {
             description: "OK",
-            content: { "application/json": {}, "text/event-stream": {} },
+            content: {
+              "application/json": {},
+              "text/event-stream": { schema: { type: "string" } },
+            },
           },
         },
       },
@@ -858,14 +861,14 @@ const SSE_SOURCE = { bindingSpec: "openbindings.openapi-3.1@1", content: SSE_SPE
 const REF_EVENTS = "#/paths/~1events/get";
 
 describe("invokeBinding — SSE responses", () => {
-  it("advertises the declared success media — text/event-stream included — via Accept", async () => {
+  it("does not generate Accept for an operation with SSE and JSON responses", async () => {
     const { fetch, requests } = mockFetch(() => jsonResponse({ pong: true }));
     const call = new OpenAPIInvoker().invokeBinding({ source: SSE_SOURCE, selector: REF_EVENTS, fetch });
     await single(call.outputs);
-    expect(requests[0]?.headers.get("Accept")).toBe("application/json, text/event-stream");
+    expect(requests[0]?.headers.get("Accept")).toBeNull();
   });
 
-  it("streams one output per SSE event and closes cleanly at stream end", async () => {
+  it("buffers the complete SSE representation into one unary output", async () => {
     const { fetch } = mockFetch(() =>
       sseResponse(['data: {"id":"1","msg":"first"}\n\n', 'data: {"id":"2","msg":"second"}\n\n']),
     );
@@ -875,55 +878,9 @@ describe("invokeBinding — SSE responses", () => {
     for await (const e of call.outputs) events.push(e);
     await call.closed;
 
-    // The per-event decode default is the event's data text itself
-    // (OAPI-P-07): a JSON event payload is an OutputDecoder hook case,
-    // never a builtin sniff.
-    expect(events).toEqual(['{"id":"1","msg":"first"}', '{"id":"2","msg":"second"}']);
-  });
-
-  it("joins multiple data: lines for one event with a literal newline", async () => {
-    const { fetch } = mockFetch(() => sseResponse(["data: line one\ndata: line two\ndata: line three\n\n"]));
-    const call = new OpenAPIInvoker().invokeBinding({ source: SSE_SOURCE, selector: REF_EVENTS, fetch });
-
-    await expect(single(call.outputs)).resolves.toBe("line one\nline two\nline three");
-  });
-
-  it("rides event:/id:/retry: as per-event metadata (x-sse-*), never the output value", async () => {
-    const hooks = newInvokeHooks(
-      {
-        decode: (_site, raw) => {
-          const event = raw.meta["x-sse-event"]?.[0];
-          const id = raw.meta["x-sse-id"]?.[0];
-          if (!event && !id) return USE_DEFAULT;
-          return { event, id, data: JSON.parse(raw.body) };
-        },
-      },
-      {},
-    );
-    const { fetch } = mockFetch(() =>
-      sseResponse([
-        'data: {"msg":"first"}\n\n',
-        'event: progress\nid: 42\ndata: {"msg":"third"}\n\n',
-      ]),
-    );
-    const call = new OpenAPIInvoker().invokeBinding({ source: SSE_SOURCE, selector: REF_EVENTS, fetch, hooks });
-
-    const events: unknown[] = [];
-    for await (const e of call.outputs) events.push(e);
-
-    // No event:/id: on the first unit: the hook declines (USE_DEFAULT) and
-    // the builtin text lane returns the raw string, unwrapped.
-    expect(events[0]).toBe('{"msg":"first"}');
-    expect(events[1]).toEqual({ event: "progress", id: "42", data: { msg: "third" } });
-  });
-
-  it("ignores comment lines (leading colon)", async () => {
-    const { fetch } = mockFetch(() =>
-      sseResponse([": this is a comment, should be ignored\n\n", 'data: {"id":"survivor"}\n\n']),
-    );
-    const call = new OpenAPIInvoker().invokeBinding({ source: SSE_SOURCE, selector: REF_EVENTS, fetch });
-
-    await expect(single(call.outputs)).resolves.toBe('{"id":"survivor"}');
+    expect(events).toEqual([
+      'data: {"id":"1","msg":"first"}\n\ndata: {"id":"2","msg":"second"}\n\n',
+    ]);
   });
 
   it("a non-2xx text/event-stream response is a normal HTTP failure, not a stream", async () => {
@@ -931,7 +888,7 @@ describe("invokeBinding — SSE responses", () => {
     const call = new OpenAPIInvoker().invokeBinding({ source: SSE_SOURCE, selector: REF_EVENTS, fetch });
 
     const error = await call.closed.catch((caught: unknown) => caught) as InvocationError;
-    expect(error.code).toBe(ERR_EXECUTION_FAILED);
+    expect(error.code).toBe(ERR_PROTOCOL);
     expect(Object.hasOwn(error, "data")).toBe(false);
   });
 

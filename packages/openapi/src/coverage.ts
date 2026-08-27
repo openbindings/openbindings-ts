@@ -9,6 +9,7 @@ import {
   candidateCollides,
   normalizedMediaCollisions,
   planRequestBodies,
+  requiredPropertyMediaNames,
 } from "./media.js";
 import { effectiveParameters } from "./params.js";
 import {
@@ -214,9 +215,14 @@ function requestMediaTargetRequirements(
     const params = effectiveParameters(pathItem, operation);
     const admissible = planRequestBodies(operation, { profile: profileForBindingSpec(bindingSpec), openapiVersion })
       .filter((plan) => hasRoutedInputs(bindingSpec) || !candidateCollides(params, plan));
-    return admissible.length > 0 && admissible.every((plan) => plan.range)
-      ? ["configuration.requestMedia"]
-      : [];
+    if (admissible.length === 1 && requiredPropertyMediaNames(admissible[0]!).length > 0) {
+      return ["configuration.propertyMedia"];
+    }
+    return admissible.some((plan) => !plan.range && !plan.unsupported)
+      ? []
+      : admissible.some((plan) => plan.range && !plan.unsupported)
+        ? ["configuration.requestMedia"]
+        : [];
   } catch {
     return [];
   }
@@ -259,11 +265,9 @@ function requestMediaCoverage(
   // map's non-colliding siblings stay represented beside them.
   const colliding = normalizedMediaCollisions(content, hasMediaFidelity(bindingSpec));
   const planned = new Set(plans.map((plan) => plan.mediaKey));
-  const represented = new Set(
-    plans
-      .filter((plan) => hasRoutedInputs(bindingSpec) || !candidateCollides(params, plan))
-      .map((plan) => plan.mediaKey),
-  );
+  const usable = plans
+    .filter((plan) => hasRoutedInputs(bindingSpec) || !candidateCollides(params, plan));
+  const represented = new Set(usable.map((plan) => plan.mediaKey));
   return Object.keys(content).sort(codePointCompare).map((mediaType): SynthesisCoverageEntry => {
     const sourceRef = `${identity.selector}/requestBody/content/${escapeJSONPointerToken(mediaType)}`;
     const invalidDefects = verdict?.invalidAlternatives.get(sourceRef);
@@ -293,9 +297,15 @@ function requestMediaCoverage(
         operationKey: identity.operationKey,
         bindingSelector: identity.selector,
       };
-      if (hasMediaFidelity(bindingSpec) && plans.some((plan) => plan.mediaKey === mediaType && plan.range)) {
-        entry.requirements = ["configuration.requestMedia"];
+      const requirements: string[] = [];
+      if (usable.some((plan) => plan.mediaKey === mediaType && plan.range)) {
+        requirements.push("configuration.requestMedia");
       }
+      if (usable.some((plan) =>
+        plan.mediaKey === mediaType && requiredPropertyMediaNames(plan).length > 0)) {
+        requirements.push("configuration.propertyMedia");
+      }
+      if (requirements.length > 0) entry.requirements = requirements;
       return entry;
     }
     const collision = planned.has(mediaType);

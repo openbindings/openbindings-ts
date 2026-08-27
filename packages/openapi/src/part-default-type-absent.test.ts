@@ -7,6 +7,7 @@ import {
   loadOpenAPIDocument,
   OPENAPI_PROFILE_FULL,
   planRequestBodies,
+  plansRequirePropertyMedia,
 } from "./media.js";
 import type { OpenAPIDocument, OpenAPIMediaType, OpenAPIOperation } from "./types.js";
 
@@ -19,7 +20,7 @@ import type { OpenAPIDocument, OpenAPIMediaType, OpenAPIOperation } from "./type
 // openbindings-go/formats/openapi/testdata, openapi-client/go/testdata and
 // openapi-client/typescript/src/testdata.
 export const PART_DEFAULT_TYPE_ABSENT_CASES_DIGEST =
-  "2d871e381018d76ff8e4cce4c8cf4c70aa3e32278a2b003291aaef104ed07d75";
+  "c6494b3b833f03d13e1e7e5cb83547f484b0e20f8f77b70f5f893075eb04e46c";
 
 export interface PartDefaultTypeAbsentCase {
   name: string;
@@ -120,7 +121,8 @@ export async function partDefaultTypeAbsentDecision(c: PartDefaultTypeAbsentCase
   const op = (doc as unknown as Record<string, any>).paths?.["/form"]?.post as OpenAPIOperation | undefined;
   if (!op) throw new Error(`${c.name}: loaded document has no form operation`);
   try {
-    planRequestBodies(op, { profile: OPENAPI_PROFILE_FULL, openapiVersion: c.openapi });
+    const plans = planRequestBodies(op, { profile: OPENAPI_PROFILE_FULL, openapiVersion: c.openapi });
+    if (plansRequirePropertyMedia(plans)) return "missing-required-choice";
   } catch {
     return "refused";
   }
@@ -130,17 +132,11 @@ export async function partDefaultTypeAbsentDecision(c: PartDefaultTypeAbsentCase
 }
 
 /**
- * The claim the table exists for, stated in its own right rather than left
- * implicit in 128 cells: a form part whose resolved schema declares no `type`
- * refuses on EVERY accepted edition — the 3.1 editions state
- * application/octet-stream for it and this revision defines no JSON-to-octet
- * part boundary to cross, the 3.0 editions state no row at all and this
- * revision authors none — while a part that declares a type is admitted on all
- * eight. It replaces assertTypeAbsentPartRefusesExactlyOnThe31Line, whose
- * predicate was the deleted 3.0-line value-keyed convention as an executed
- * assertion (escalation M2, ruled 2026-08-20).
+ * Pins the corrected family split independently of the table expectations:
+ * 3.0 reaches the required propertyMedia choice, while 3.1 admits typeless
+ * parts through the canonical-Base64 raw-octet boundary.
  */
-export async function assertTypeAbsentPartRefusesOnEveryAcceptedEdition(
+export async function assertCorrectedTypeAbsentPartSplit(
   cases: PartDefaultTypeAbsentCase[],
 ): Promise<number> {
   // EXECUTED, not read off the table's own expectations: the claim is about
@@ -148,11 +144,18 @@ export async function assertTypeAbsentPartRefusesOnEveryAcceptedEdition(
   let checked = 0;
   for (const c of cases) {
     const got = await partDefaultTypeAbsentDecision(c);
-    const admitted = got.startsWith("admitted;");
-    const want = c.declaresType;
-    if (admitted !== want) {
+    const correct = c.declaresType
+      ? got.startsWith("admitted;")
+      : c.media === "application/x-www-form-urlencoded"
+        ? got === "refused"
+        : c.openapi.startsWith("3.0")
+          ? c.kind === "boolean-literal-true"
+            ? got === "refused"
+            : got === "missing-required-choice"
+          : got.startsWith("admitted;");
+    if (!correct) {
       throw new Error(
-        `${c.name}: admitted = ${admitted}, want ${want} (decision ${JSON.stringify(got)})\nbasis: ${c.basis}`,
+        `${c.name}: corrected type-absent split failed (decision ${JSON.stringify(got)})\nbasis: ${c.basis}`,
       );
     }
     checked += 1;
@@ -176,7 +179,7 @@ describe("type-absent part default case table", () => {
     });
   }
 
-  it("refuses a type-absent part on every accepted edition", async () => {
-    expect(await assertTypeAbsentPartRefusesOnEveryAcceptedEdition(cases)).toBe(128);
+  it("pins the corrected type-absent family split", async () => {
+    expect(await assertCorrectedTypeAbsentPartSplit(cases)).toBe(128);
   });
 });

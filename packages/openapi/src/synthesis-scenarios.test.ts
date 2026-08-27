@@ -2,9 +2,12 @@ import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseSynthesisScenarioFile, verifySynthesisScenario, type SynthesisScenario } from "@openbindings/synthesize";
-import { describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it } from "vitest";
 import { OpenAPISynthesizer } from "./invoker.js";
 
+if (process.env.OB_CORPUS_REQUIRED === "1" && !process.env.OB_SPEC_CORPUS) {
+  throw new Error("OB_CORPUS_REQUIRED=1 requires OB_SPEC_CORPUS");
+}
 const root = process.env.OB_SPEC_CORPUS
   ?? resolve(dirname(fileURLToPath(import.meta.url)), "../../../../spec/conformance");
 const corpora = ["openapi-3.0", "openapi-3.1"].map((family) =>
@@ -15,10 +18,6 @@ const corpora = ["openapi-3.0", "openapi-3.1"].map((family) =>
 const scenarios = corpora.flatMap((corpus) => corpus.scenarios);
 
 const pendingReasons = new Map<string, string>([
-  ["OAPI30-SS-42", "pending N10 M2/M3 (multipart part-default convergence)"],
-  ["OAPI31-SS-23", "pending N10 M2/M3 (multipart part-default convergence)"],
-  ["OAPI31-SS-24", "pending N10 M2/M3 (multipart part-default convergence)"],
-  ["OAPI31-SS-30", "pending N10 M2/M3 (multipart part-default convergence)"],
   ["OAPI31-SS-01", "pending N10 dependencies node"],
 ]);
 
@@ -56,8 +55,9 @@ function synthesizerFor(scenario: SynthesisScenario): OpenAPISynthesizer {
 }
 
 describe("portable OpenAPI synthesis scenarios", () => {
-  // These five were run as the mandatory native fence before being listed as
-  // skips. Keeping them first makes the known dependency boundary prominent.
+  let executed = 0;
+
+  // The one remaining skip is the independently scheduled dependency node.
   for (const [id, reason] of pendingReasons) {
     it.skip(`${id}: ${reason}`, () => {});
   }
@@ -69,8 +69,15 @@ describe("portable OpenAPI synthesis scenarios", () => {
       await verifySynthesisScenario(scenario, () => synthesizer.synthesizeInterfaceWithCoverage({
         sources: [scenario.source],
       }));
+      executed += 1;
     });
   }
+
+  afterAll(() => {
+    expect(corpora.map((corpus) => corpus.scenarios.length)).toEqual([14, 30]);
+    expect([...pendingReasons.keys()]).toEqual(["OAPI31-SS-01"]);
+    expect(executed).toBe(43);
+  });
 
   it("serves only the addresses a scenario declares", async () => {
     const serve = synthesisResourceFetch({

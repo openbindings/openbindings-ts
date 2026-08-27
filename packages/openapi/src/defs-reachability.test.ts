@@ -120,12 +120,16 @@ async function synthesizeReachabilityDoc(): Promise<Record<string, any>> {
 }
 
 describe("$defs reachability closure (F-O1-5b)", () => {
-  it("omits a cut point reached only through a branch the request projection removes", async () => {
+  it("preserves an annotated request branch and its reachable cut point", async () => {
     const op = await synthesizeReachabilityDoc();
     const input = op.input as Record<string, any>;
 
-    expect(Object.keys(input.properties)).not.toContain("audit");
-    expect(input.$defs, "emitted input reaches no definition").toBeUndefined();
+    expect(Object.keys(input.properties)).toContain("audit");
+    expect(Object.keys(input.$defs ?? {})).toEqual(["AuditEntry"]);
+    const want = "#/operations/createRecord/input/$defs/AuditEntry";
+    const { $defs, ...root } = input;
+    expect(refStrings(root)).toEqual([want]);
+    expect(refStrings($defs.AuditEntry)).toEqual([want]);
     assertDefsReachabilityClosed(input, "#/operations/createRecord/input");
   });
 

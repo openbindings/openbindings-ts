@@ -1,0 +1,940 @@
+{
+  "$comment": "Array-items part-default case table shared byte-for-byte by the OpenAPI form engines. Each case is rendered as a whole OpenAPI document and derives an array property’s multipart part type from its resolved items declaration. Multipart rendering is <Content-Type>:<body> joined in element order; urlencoded observations remain explicitly open where identified by each basis. Outcomes distinguish refusal from missing-required-choice. Corrected 2026-08-26: the superseded typeless-items refusal was removed. On the 3.1 line unconstrained items are typeless parts, default to application/octet-stream, and use the canonical-Base64 raw-octet boundary. On the 3.0 line they have no default and require configuration.propertyMedia; this table supplies none, so those cells, their direct write-lane probes, and their non-array probes decide missing-required-choice before inspecting a value. Nested arrays remain refused and all other items-derived defaults remain unchanged.",
+  "cases": [
+    {
+      "name": "3.0.3|multipart|string",
+      "openapi": "3.0.3",
+      "media": "multipart/form-data",
+      "items": "string",
+      "itemsSchema": {
+        "type": "string"
+      },
+      "propertyName": "p",
+      "value": [
+        "a",
+        "b"
+      ],
+      "derivedFrom": "items",
+      "expect": "admitted;emit=text/plain:a&text/plain:b",
+      "nonArrayValue": "scalar",
+      "nonArrayValueExpect": "admitted;emit=error",
+      "basis": "OAS 3.0.3 Encoding Object, contentType: 'for array - the default is defined based on the inner type'. The items schema is a string with no binary signal, so the applicable row is 'for other primitive types - text/plain'. The same edition's multipart guidance states it a second time and directly for arrays: 'If the property is a primitive, or an array of primitive values, the default Content-Type is text/plain'; 'If the property is complex, or an array of complex values, the default Content-Type is application/json'."
+    },
+    {
+      "name": "3.0.3|multipart|integer",
+      "openapi": "3.0.3",
+      "media": "multipart/form-data",
+      "items": "integer",
+      "itemsSchema": {
+        "type": "integer"
+      },
+      "propertyName": "p",
+      "value": [
+        1,
+        2
+      ],
+      "derivedFrom": "items",
+      "expect": "admitted;emit=text/plain:1&text/plain:2",
+      "nonArrayValue": "scalar",
+      "nonArrayValueExpect": "admitted;emit=error",
+      "basis": "OAS 3.0.3 Encoding Object, contentType: 'for array - the default is defined based on the inner type'. The items schema is an integer, so the applicable row is 'for other primitive types - text/plain'. The same edition's multipart guidance states it a second time and directly for arrays: 'If the property is a primitive, or an array of primitive values, the default Content-Type is text/plain'; 'If the property is complex, or an array of complex values, the default Content-Type is application/json'."
+    },
+    {
+      "name": "3.0.3|multipart|object",
+      "openapi": "3.0.3",
+      "media": "multipart/form-data",
+      "items": "object",
+      "itemsSchema": {
+        "type": "object"
+      },
+      "propertyName": "p",
+      "value": [
+        {
+          "k": "v"
+        }
+      ],
+      "derivedFrom": "items",
+      "expect": "admitted;emit=application/json:{\"k\":\"v\"}",
+      "nonArrayValue": "scalar",
+      "nonArrayValueExpect": "admitted;emit=error",
+      "basis": "OAS 3.0.3 Encoding Object, contentType: 'for array - the default is defined based on the inner type'. The items schema is an object, so the applicable row is 'for object - application/json'. The same edition's multipart guidance states it a second time and directly for arrays: 'If the property is a primitive, or an array of primitive values, the default Content-Type is text/plain'; 'If the property is complex, or an array of complex values, the default Content-Type is application/json'."
+    },
+    {
+      "name": "3.0.3|multipart|nested-array",
+      "openapi": "3.0.3",
+      "media": "multipart/form-data",
+      "items": "nested-array",
+      "itemsSchema": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "propertyName": "p",
+      "value": [
+        [
+          "a"
+        ]
+      ],
+      "derivedFrom": "items",
+      "expect": "refused",
+      "writeLane": "refused",
+      "nonArrayValue": "scalar",
+      "nonArrayValueExpect": "refused",
+      "basis": "OAS 3.0.3 Encoding Object, contentType: 'for array - the default is defined based on the inner type'. The items schema is itself an array, so the row recurses with no base case, and no accepted edition states how the members of an inner array map onto one part name. Deciding that would be authorship rather than incorporation, so the candidate refuses before dispatch (deference order rung 4)."
+    },
+    {
+      "name": "3.0.3|multipart|unconstrained",
+      "openapi": "3.0.3",
+      "media": "multipart/form-data",
+      "items": "unconstrained",
+      "itemsSchema": {},
+      "propertyName": "p",
+      "value": [
+        "a",
+        1
+      ],
+      "derivedFrom": "items",
+      "expect": "missing-required-choice",
+      "writeLane": "missing-required-choice",
+      "nonArrayValue": "scalar",
+      "nonArrayValueExpect": "missing-required-choice",
+      "basis": "The openapi-3.0 family specification §9.3 derives this array part from its resolved items declaration. The items declaration is typeless, has no default concrete part type, and requires configuration.propertyMedia. This table supplies no configuration, so admission remains represented while invocation and the direct write probe reach missing-required-choice before inspecting either supplied value."
+    },
+    {
+      "name": "3.0.3|multipart|string-base64",
+      "openapi": "3.0.3",
+      "media": "multipart/form-data",
+      "items": "string-base64",
+      "itemsSchema": {
+        "type": "string",
+        "contentEncoding": "base64"
+      },
+      "propertyName": "p",
+      "value": [
+        "QUJD"
+      ],
+      "derivedFrom": "items",
+      "expect": "admitted;emit=text/plain:QUJD",
+      "nonArrayValue": "scalar",
+      "nonArrayValueExpect": "admitted;emit=error",
+      "basis": "OAS 3.0.3 Encoding Object, contentType: 'for array - the default is defined based on the inner type'. `contentEncoding` is not a keyword of the 3.0 Schema Object's dialect - the 3.0 binary signal is `format` - so the applicable row is the one for a string with no binary format, and the annotation carries no content-encoding force."
+    },
+    {
+      "name": "3.0.3|multipart|union-type",
+      "openapi": "3.0.3",
+      "media": "multipart/form-data",
+      "items": "union-type",
+      "itemsSchema": {
+        "type": [
+          "string",
+          "integer"
+        ]
+      },
+      "propertyName": "p",
+      "value": [
+        "a"
+      ],
+      "derivedFrom": "items",
+      "expect": "refused",
+      "nonArrayValue": "scalar",
+      "nonArrayValueExpect": "refused",
+      "basis": "OAS 3.0.3 Encoding Object, contentType: 'for array - the default is defined based on the inner type'. Every 3.0 edition states of the Schema Object: 'type - Value MUST be a string. Multiple types via an array are not supported.' An array-valued `type` is therefore not a union declaration on this line and no part carriage follows from one."
+    },
+    {
+      "name": "3.0.3|multipart|union-choice",
+      "openapi": "3.0.3",
+      "media": "multipart/form-data",
+      "items": "union-choice",
+      "itemsSchema": {
+        "oneOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "integer"
+          }
+        ]
+      },
+      "propertyName": "p",
+      "value": [
+        "a"
+      ],
+      "derivedFrom": "items",
+      "expect": "refused",
+      "nonArrayValue": "scalar",
+      "nonArrayValueExpect": "refused",
+      "basis": "OAS 3.0.3 Encoding Object, contentType: 'for array - the default is defined based on the inner type'. The items schema declares a choice with more than one non-null branch, which `the openapi family specifications` §9.2 refuses: it declares value-dependent alternatives and leaves no single faithful form carriage."
+    },
+    {
+      "name": "3.0.3|urlencoded|string",
+      "openapi": "3.0.3",
+      "media": "application/x-www-form-urlencoded",
+      "items": "string",
+      "itemsSchema": {
+        "type": "string"
+      },
+      "propertyName": "p",
+      "value": [
+        "a",
+        "b"
+      ],
+      "derivedFrom": "not-consulted",
+      "expect": "admitted;emit=p=%5B%22a%22%2C%22b%22%5D",
+      "basis": "OAS 3.0.0-3.0.3 apply the Encoding Object's serialization defaults to every urlencoded property: `style` follows the Parameter Object's query default `form`, and `explode` 'when style is form, the default value is true'. The content-based interpretation first appears in 3.0.4, so on this edition the property takes the style path and the contentType default table is not consulted at all - which is why the items schema does not change the emission here. LANE, RESTATED 2026-08-17: this edition reaches the CONTENT path, like every other accepted edition. Its own text states no lane-selection rule, and the rule that governs it is its own section 4.1 — \"Tooling which supports OAS 3.0 SHOULD be compatible with all OAS 3.0.* versions. The patch version SHOULD NOT be considered by tooling, making no distinction between 3.0.0 and 3.0.1 for example\" — together with 3.0.4, a 3.0.* version, whose section 4.7.15.1.2 states that with all three RFC6570-style fields absent \"Encoding is to be based on contentType alone\". Until 2026-08-17 a legacyOpenAPIFormEncoding predicate in all three engines put this cell on the RFC6570-style path instead, where the contentType default table was never consulted; this cell's prior expectation recorded that. Ruling: design/openapi-30-urlencoded-default-lane-ruling.md. Specification: the openapi family specifications sections 2 and 9.2."
+    },
+    {
+      "name": "3.0.3|urlencoded|integer",
+      "openapi": "3.0.3",
+      "media": "application/x-www-form-urlencoded",
+      "items": "integer",
+      "itemsSchema": {
+        "type": "integer"
+      },
+      "propertyName": "p",
+      "value": [
+        1,
+        2
+      ],
+      "derivedFrom": "not-consulted",
+      "expect": "admitted;emit=p=%5B1%2C2%5D",
+      "basis": "OAS 3.0.0-3.0.3 apply the Encoding Object's serialization defaults to every urlencoded property: `style` follows the Parameter Object's query default `form`, and `explode` 'when style is form, the default value is true'. The content-based interpretation first appears in 3.0.4, so on this edition the property takes the style path and the contentType default table is not consulted at all - which is why the items schema does not change the emission here. LANE, RESTATED 2026-08-17: this edition reaches the CONTENT path, like every other accepted edition. Its own text states no lane-selection rule, and the rule that governs it is its own section 4.1 — \"Tooling which supports OAS 3.0 SHOULD be compatible with all OAS 3.0.* versions. The patch version SHOULD NOT be considered by tooling, making no distinction between 3.0.0 and 3.0.1 for example\" — together with 3.0.4, a 3.0.* version, whose section 4.7.15.1.2 states that with all three RFC6570-style fields absent \"Encoding is to be based on contentType alone\". Until 2026-08-17 a legacyOpenAPIFormEncoding predicate in all three engines put this cell on the RFC6570-style path instead, where the contentType default table was never consulted; this cell's prior expectation recorded that. Ruling: design/openapi-30-urlencoded-default-lane-ruling.md. Specification: the openapi family specifications sections 2 and 9.2."
+    },
+    {
+      "name": "3.0.3|urlencoded|object",
+      "openapi": "3.0.3",
+      "media": "application/x-www-form-urlencoded",
+      "items": "object",
+      "itemsSchema": {
+        "type": "object"
+      },
+      "propertyName": "p",
+      "value": [
+        {
+          "k": "v"
+        }
+      ],
+      "derivedFrom": "not-consulted",
+      "expect": "admitted;emit=p=%5B%7B%22k%22%3A%22v%22%7D%5D",
+      "basis": "OAS 3.0.0-3.0.3 apply the Encoding Object's serialization defaults to every urlencoded property: `style` follows the Parameter Object's query default `form`, and `explode` 'when style is form, the default value is true'. The content-based interpretation first appears in 3.0.4, so on this edition the property takes the style path and the contentType default table is not consulted at all - which is why the items schema does not change the emission here. RFC 6570 form expansion is defined for a string, a list of strings, and an associative array of strings; a list whose members are themselves composite has no expansion, so the encoder refuses the value. That the media-admission lane still admits this declaration is a separate, filed residue - see corpus-lab/OPENAPI-RUNTIME.md, 'The array-items part default'. LANE, RESTATED 2026-08-17: this edition reaches the CONTENT path, like every other accepted edition. Its own text states no lane-selection rule, and the rule that governs it is its own section 4.1 — \"Tooling which supports OAS 3.0 SHOULD be compatible with all OAS 3.0.* versions. The patch version SHOULD NOT be considered by tooling, making no distinction between 3.0.0 and 3.0.1 for example\" — together with 3.0.4, a 3.0.* version, whose section 4.7.15.1.2 states that with all three RFC6570-style fields absent \"Encoding is to be based on contentType alone\". Until 2026-08-17 a legacyOpenAPIFormEncoding predicate in all three engines put this cell on the RFC6570-style path instead, where the contentType default table was never consulted; this cell's prior expectation recorded that. Ruling: design/openapi-30-urlencoded-default-lane-ruling.md. Specification: the openapi family specifications sections 2 and 9.2."
+    },
+    {
+      "name": "3.0.3|urlencoded|nested-array",
+      "openapi": "3.0.3",
+      "media": "application/x-www-form-urlencoded",
+      "items": "nested-array",
+      "itemsSchema": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "propertyName": "p",
+      "value": [
+        [
+          "a"
+        ]
+      ],
+      "derivedFrom": "not-consulted",
+      "expect": "admitted;emit=p=%5B%5B%22a%22%5D%5D",
+      "basis": "OAS 3.0.0-3.0.3 apply the Encoding Object's serialization defaults to every urlencoded property: `style` follows the Parameter Object's query default `form`, and `explode` 'when style is form, the default value is true'. The content-based interpretation first appears in 3.0.4, so on this edition the property takes the style path and the contentType default table is not consulted at all - which is why the items schema does not change the emission here. RFC 6570 form expansion is defined for a string, a list of strings, and an associative array of strings; a list whose members are themselves composite has no expansion, so the encoder refuses the value. That the media-admission lane still admits this declaration is a separate, filed residue - see corpus-lab/OPENAPI-RUNTIME.md, 'The array-items part default'. LANE, RESTATED 2026-08-17: this edition reaches the CONTENT path, like every other accepted edition. Its own text states no lane-selection rule, and the rule that governs it is its own section 4.1 — \"Tooling which supports OAS 3.0 SHOULD be compatible with all OAS 3.0.* versions. The patch version SHOULD NOT be considered by tooling, making no distinction between 3.0.0 and 3.0.1 for example\" — together with 3.0.4, a 3.0.* version, whose section 4.7.15.1.2 states that with all three RFC6570-style fields absent \"Encoding is to be based on contentType alone\". Until 2026-08-17 a legacyOpenAPIFormEncoding predicate in all three engines put this cell on the RFC6570-style path instead, where the contentType default table was never consulted; this cell's prior expectation recorded that. Ruling: design/openapi-30-urlencoded-default-lane-ruling.md. Specification: the openapi family specifications sections 2 and 9.2."
+    },
+    {
+      "name": "3.0.3|urlencoded|unconstrained",
+      "openapi": "3.0.3",
+      "media": "application/x-www-form-urlencoded",
+      "items": "unconstrained",
+      "itemsSchema": {},
+      "propertyName": "p",
+      "value": [
+        "a",
+        1
+      ],
+      "derivedFrom": "not-consulted",
+      "expect": "admitted;emit=p=%5B%22a%22%2C1%5D",
+      "basis": "OAS 3.0.0-3.0.3 apply the Encoding Object's serialization defaults to every urlencoded property: `style` follows the Parameter Object's query default `form`, and `explode` 'when style is form, the default value is true'. The content-based interpretation first appears in 3.0.4, so on this edition the property takes the style path and the contentType default table is not consulted at all - which is why the items schema does not change the emission here. LANE, RESTATED 2026-08-17: this edition reaches the CONTENT path, like every other accepted edition. Its own text states no lane-selection rule, and the rule that governs it is its own section 4.1 — \"Tooling which supports OAS 3.0 SHOULD be compatible with all OAS 3.0.* versions. The patch version SHOULD NOT be considered by tooling, making no distinction between 3.0.0 and 3.0.1 for example\" — together with 3.0.4, a 3.0.* version, whose section 4.7.15.1.2 states that with all three RFC6570-style fields absent \"Encoding is to be based on contentType alone\". Until 2026-08-17 a legacyOpenAPIFormEncoding predicate in all three engines put this cell on the RFC6570-style path instead, where the contentType default table was never consulted; this cell's prior expectation recorded that. Ruling: design/openapi-30-urlencoded-default-lane-ruling.md. Specification: the openapi family specifications sections 2 and 9.2."
+    },
+    {
+      "name": "3.0.3|urlencoded|string-base64",
+      "openapi": "3.0.3",
+      "media": "application/x-www-form-urlencoded",
+      "items": "string-base64",
+      "itemsSchema": {
+        "type": "string",
+        "contentEncoding": "base64"
+      },
+      "propertyName": "p",
+      "value": [
+        "QUJD"
+      ],
+      "derivedFrom": "not-consulted",
+      "expect": "admitted;emit=p=%5B%22QUJD%22%5D",
+      "basis": "OAS 3.0.0-3.0.3 apply the Encoding Object's serialization defaults to every urlencoded property: `style` follows the Parameter Object's query default `form`, and `explode` 'when style is form, the default value is true'. The content-based interpretation first appears in 3.0.4, so on this edition the property takes the style path and the contentType default table is not consulted at all - which is why the items schema does not change the emission here. LANE, RESTATED 2026-08-17: this edition reaches the CONTENT path, like every other accepted edition. Its own text states no lane-selection rule, and the rule that governs it is its own section 4.1 — \"Tooling which supports OAS 3.0 SHOULD be compatible with all OAS 3.0.* versions. The patch version SHOULD NOT be considered by tooling, making no distinction between 3.0.0 and 3.0.1 for example\" — together with 3.0.4, a 3.0.* version, whose section 4.7.15.1.2 states that with all three RFC6570-style fields absent \"Encoding is to be based on contentType alone\". Until 2026-08-17 a legacyOpenAPIFormEncoding predicate in all three engines put this cell on the RFC6570-style path instead, where the contentType default table was never consulted; this cell's prior expectation recorded that. Ruling: design/openapi-30-urlencoded-default-lane-ruling.md. Specification: the openapi family specifications sections 2 and 9.2."
+    },
+    {
+      "name": "3.0.3|urlencoded|union-type",
+      "openapi": "3.0.3",
+      "media": "application/x-www-form-urlencoded",
+      "items": "union-type",
+      "itemsSchema": {
+        "type": [
+          "string",
+          "integer"
+        ]
+      },
+      "propertyName": "p",
+      "value": [
+        "a"
+      ],
+      "derivedFrom": "not-consulted",
+      "expect": "admitted;emit=p=%5B%22a%22%5D",
+      "basis": "OAS 3.0.0-3.0.3 apply the Encoding Object's serialization defaults to every urlencoded property: `style` follows the Parameter Object's query default `form`, and `explode` 'when style is form, the default value is true'. The content-based interpretation first appears in 3.0.4, so on this edition the property takes the style path and the contentType default table is not consulted at all - which is why the items schema does not change the emission here. LANE, RESTATED 2026-08-17: this edition reaches the CONTENT path, like every other accepted edition. Its own text states no lane-selection rule, and the rule that governs it is its own section 4.1 — \"Tooling which supports OAS 3.0 SHOULD be compatible with all OAS 3.0.* versions. The patch version SHOULD NOT be considered by tooling, making no distinction between 3.0.0 and 3.0.1 for example\" — together with 3.0.4, a 3.0.* version, whose section 4.7.15.1.2 states that with all three RFC6570-style fields absent \"Encoding is to be based on contentType alone\". Until 2026-08-17 a legacyOpenAPIFormEncoding predicate in all three engines put this cell on the RFC6570-style path instead, where the contentType default table was never consulted; this cell's prior expectation recorded that. Ruling: design/openapi-30-urlencoded-default-lane-ruling.md. Specification: the openapi family specifications sections 2 and 9.2."
+    },
+    {
+      "name": "3.0.3|urlencoded|union-choice",
+      "openapi": "3.0.3",
+      "media": "application/x-www-form-urlencoded",
+      "items": "union-choice",
+      "itemsSchema": {
+        "oneOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "integer"
+          }
+        ]
+      },
+      "propertyName": "p",
+      "value": [
+        "a"
+      ],
+      "derivedFrom": "not-consulted",
+      "expect": "admitted;emit=p=%5B%22a%22%5D",
+      "basis": "OAS 3.0.0-3.0.3 apply the Encoding Object's serialization defaults to every urlencoded property: `style` follows the Parameter Object's query default `form`, and `explode` 'when style is form, the default value is true'. The content-based interpretation first appears in 3.0.4, so on this edition the property takes the style path and the contentType default table is not consulted at all - which is why the items schema does not change the emission here. LANE, RESTATED 2026-08-17: this edition reaches the CONTENT path, like every other accepted edition. Its own text states no lane-selection rule, and the rule that governs it is its own section 4.1 — \"Tooling which supports OAS 3.0 SHOULD be compatible with all OAS 3.0.* versions. The patch version SHOULD NOT be considered by tooling, making no distinction between 3.0.0 and 3.0.1 for example\" — together with 3.0.4, a 3.0.* version, whose section 4.7.15.1.2 states that with all three RFC6570-style fields absent \"Encoding is to be based on contentType alone\". Until 2026-08-17 a legacyOpenAPIFormEncoding predicate in all three engines put this cell on the RFC6570-style path instead, where the contentType default table was never consulted; this cell's prior expectation recorded that. Ruling: design/openapi-30-urlencoded-default-lane-ruling.md. Specification: the openapi family specifications sections 2 and 9.2."
+    },
+    {
+      "name": "3.0.4|multipart|string",
+      "openapi": "3.0.4",
+      "media": "multipart/form-data",
+      "items": "string",
+      "itemsSchema": {
+        "type": "string"
+      },
+      "propertyName": "p",
+      "value": [
+        "a",
+        "b"
+      ],
+      "derivedFrom": "items",
+      "expect": "admitted;emit=text/plain:a&text/plain:b",
+      "nonArrayValue": "scalar",
+      "nonArrayValueExpect": "admitted;emit=error",
+      "basis": "OAS 3.0.4 Encoding Object, contentType default table: 'array | n/a | according to the type and format of the items schema'. The items schema is a string with no binary signal, so the applicable row is 'string | none, or any except binary or byte | text/plain'."
+    },
+    {
+      "name": "3.0.4|multipart|integer",
+      "openapi": "3.0.4",
+      "media": "multipart/form-data",
+      "items": "integer",
+      "itemsSchema": {
+        "type": "integer"
+      },
+      "propertyName": "p",
+      "value": [
+        1,
+        2
+      ],
+      "derivedFrom": "items",
+      "expect": "admitted;emit=text/plain:1&text/plain:2",
+      "nonArrayValue": "scalar",
+      "nonArrayValueExpect": "admitted;emit=error",
+      "basis": "OAS 3.0.4 Encoding Object, contentType default table: 'array | n/a | according to the type and format of the items schema'. The items schema is an integer, so the applicable row is 'number, integer, or boolean | n/a | text/plain'."
+    },
+    {
+      "name": "3.0.4|multipart|object",
+      "openapi": "3.0.4",
+      "media": "multipart/form-data",
+      "items": "object",
+      "itemsSchema": {
+        "type": "object"
+      },
+      "propertyName": "p",
+      "value": [
+        {
+          "k": "v"
+        }
+      ],
+      "derivedFrom": "items",
+      "expect": "admitted;emit=application/json:{\"k\":\"v\"}",
+      "nonArrayValue": "scalar",
+      "nonArrayValueExpect": "admitted;emit=error",
+      "basis": "OAS 3.0.4 Encoding Object, contentType default table: 'array | n/a | according to the type and format of the items schema'. The items schema is an object, so the applicable row is 'object | n/a | application/json'."
+    },
+    {
+      "name": "3.0.4|multipart|nested-array",
+      "openapi": "3.0.4",
+      "media": "multipart/form-data",
+      "items": "nested-array",
+      "itemsSchema": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "propertyName": "p",
+      "value": [
+        [
+          "a"
+        ]
+      ],
+      "derivedFrom": "items",
+      "expect": "refused",
+      "writeLane": "refused",
+      "nonArrayValue": "scalar",
+      "nonArrayValueExpect": "refused",
+      "basis": "OAS 3.0.4 Encoding Object, contentType default table: 'array | n/a | according to the type and format of the items schema'. The items schema is itself an array, so the row recurses with no base case, and no accepted edition states how the members of an inner array map onto one part name. Deciding that would be authorship rather than incorporation, so the candidate refuses before dispatch (deference order rung 4)."
+    },
+    {
+      "name": "3.0.4|multipart|unconstrained",
+      "openapi": "3.0.4",
+      "media": "multipart/form-data",
+      "items": "unconstrained",
+      "itemsSchema": {},
+      "propertyName": "p",
+      "value": [
+        "a",
+        1
+      ],
+      "derivedFrom": "items",
+      "expect": "missing-required-choice",
+      "writeLane": "missing-required-choice",
+      "nonArrayValue": "scalar",
+      "nonArrayValueExpect": "missing-required-choice",
+      "basis": "The openapi-3.0 family specification §9.3 derives this array part from its resolved items declaration. The items declaration is typeless, has no default concrete part type, and requires configuration.propertyMedia. This table supplies no configuration, so admission remains represented while invocation and the direct write probe reach missing-required-choice before inspecting either supplied value."
+    },
+    {
+      "name": "3.0.4|multipart|string-base64",
+      "openapi": "3.0.4",
+      "media": "multipart/form-data",
+      "items": "string-base64",
+      "itemsSchema": {
+        "type": "string",
+        "contentEncoding": "base64"
+      },
+      "propertyName": "p",
+      "value": [
+        "QUJD"
+      ],
+      "derivedFrom": "items",
+      "expect": "admitted;emit=text/plain:QUJD",
+      "nonArrayValue": "scalar",
+      "nonArrayValueExpect": "admitted;emit=error",
+      "basis": "OAS 3.0.4 Encoding Object, contentType default table: 'array | n/a | according to the type and format of the items schema'. `contentEncoding` is not a keyword of the 3.0 Schema Object's dialect - the 3.0 binary signal is `format` - so the applicable row is the one for a string with no binary format, and the annotation carries no content-encoding force."
+    },
+    {
+      "name": "3.0.4|multipart|union-type",
+      "openapi": "3.0.4",
+      "media": "multipart/form-data",
+      "items": "union-type",
+      "itemsSchema": {
+        "type": [
+          "string",
+          "integer"
+        ]
+      },
+      "propertyName": "p",
+      "value": [
+        "a"
+      ],
+      "derivedFrom": "items",
+      "expect": "refused",
+      "nonArrayValue": "scalar",
+      "nonArrayValueExpect": "refused",
+      "basis": "OAS 3.0.4 Encoding Object, contentType default table: 'array | n/a | according to the type and format of the items schema'. Every 3.0 edition states of the Schema Object: 'type - Value MUST be a string. Multiple types via an array are not supported.' An array-valued `type` is therefore not a union declaration on this line and no part carriage follows from one."
+    },
+    {
+      "name": "3.0.4|multipart|union-choice",
+      "openapi": "3.0.4",
+      "media": "multipart/form-data",
+      "items": "union-choice",
+      "itemsSchema": {
+        "oneOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "integer"
+          }
+        ]
+      },
+      "propertyName": "p",
+      "value": [
+        "a"
+      ],
+      "derivedFrom": "items",
+      "expect": "refused",
+      "nonArrayValue": "scalar",
+      "nonArrayValueExpect": "refused",
+      "basis": "OAS 3.0.4 Encoding Object, contentType default table: 'array | n/a | according to the type and format of the items schema'. The items schema declares a choice with more than one non-null branch, which `the openapi family specifications` §9.2 refuses: it declares value-dependent alternatives and leaves no single faithful form carriage."
+    },
+    {
+      "name": "3.0.4|urlencoded|string",
+      "openapi": "3.0.4",
+      "media": "application/x-www-form-urlencoded",
+      "items": "string",
+      "itemsSchema": {
+        "type": "string"
+      },
+      "propertyName": "p",
+      "value": [
+        "a",
+        "b"
+      ],
+      "derivedFrom": "array",
+      "expect": "admitted;emit=p=%5B%22a%22%2C%22b%22%5D",
+      "basis": "OPEN. On 3.0.4 and the 3.1 line an urlencoded property with no Encoding Object takes the content path, and there the engines derive the default from the ARRAY (application/json) rather than from the items schema, against the array row quoted in this file's $comment. The emission below is pinned AS OBSERVED so a change must be a deliberate edit of this table; it is not an authority claim. Filed in corpus-lab/OPENAPI-RUNTIME.md under 'The array-items part default', with its measured corpus incidence and with the reason a literal application of the array row costs represented coverage on this lane."
+    },
+    {
+      "name": "3.0.4|urlencoded|integer",
+      "openapi": "3.0.4",
+      "media": "application/x-www-form-urlencoded",
+      "items": "integer",
+      "itemsSchema": {
+        "type": "integer"
+      },
+      "propertyName": "p",
+      "value": [
+        1,
+        2
+      ],
+      "derivedFrom": "array",
+      "expect": "admitted;emit=p=%5B1%2C2%5D",
+      "basis": "OPEN. On 3.0.4 and the 3.1 line an urlencoded property with no Encoding Object takes the content path, and there the engines derive the default from the ARRAY (application/json) rather than from the items schema, against the array row quoted in this file's $comment. The emission below is pinned AS OBSERVED so a change must be a deliberate edit of this table; it is not an authority claim. Filed in corpus-lab/OPENAPI-RUNTIME.md under 'The array-items part default', with its measured corpus incidence and with the reason a literal application of the array row costs represented coverage on this lane."
+    },
+    {
+      "name": "3.0.4|urlencoded|object",
+      "openapi": "3.0.4",
+      "media": "application/x-www-form-urlencoded",
+      "items": "object",
+      "itemsSchema": {
+        "type": "object"
+      },
+      "propertyName": "p",
+      "value": [
+        {
+          "k": "v"
+        }
+      ],
+      "derivedFrom": "array",
+      "expect": "admitted;emit=p=%5B%7B%22k%22%3A%22v%22%7D%5D",
+      "basis": "OPEN. On 3.0.4 and the 3.1 line an urlencoded property with no Encoding Object takes the content path, and there the engines derive the default from the ARRAY (application/json) rather than from the items schema, against the array row quoted in this file's $comment. The emission below is pinned AS OBSERVED so a change must be a deliberate edit of this table; it is not an authority claim. Filed in corpus-lab/OPENAPI-RUNTIME.md under 'The array-items part default', with its measured corpus incidence and with the reason a literal application of the array row costs represented coverage on this lane."
+    },
+    {
+      "name": "3.0.4|urlencoded|nested-array",
+      "openapi": "3.0.4",
+      "media": "application/x-www-form-urlencoded",
+      "items": "nested-array",
+      "itemsSchema": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "propertyName": "p",
+      "value": [
+        [
+          "a"
+        ]
+      ],
+      "derivedFrom": "array",
+      "expect": "admitted;emit=p=%5B%5B%22a%22%5D%5D",
+      "basis": "OPEN. On 3.0.4 and the 3.1 line an urlencoded property with no Encoding Object takes the content path, and there the engines derive the default from the ARRAY (application/json) rather than from the items schema, against the array row quoted in this file's $comment. The emission below is pinned AS OBSERVED so a change must be a deliberate edit of this table; it is not an authority claim. Filed in corpus-lab/OPENAPI-RUNTIME.md under 'The array-items part default', with its measured corpus incidence and with the reason a literal application of the array row costs represented coverage on this lane."
+    },
+    {
+      "name": "3.0.4|urlencoded|unconstrained",
+      "openapi": "3.0.4",
+      "media": "application/x-www-form-urlencoded",
+      "items": "unconstrained",
+      "itemsSchema": {},
+      "propertyName": "p",
+      "value": [
+        "a",
+        1
+      ],
+      "derivedFrom": "array",
+      "expect": "admitted;emit=p=%5B%22a%22%2C1%5D",
+      "basis": "OPEN. On 3.0.4 and the 3.1 line an urlencoded property with no Encoding Object takes the content path, and there the engines derive the default from the ARRAY (application/json) rather than from the items schema, against the array row quoted in this file's $comment. The emission below is pinned AS OBSERVED so a change must be a deliberate edit of this table; it is not an authority claim. Filed in corpus-lab/OPENAPI-RUNTIME.md under 'The array-items part default', with its measured corpus incidence and with the reason a literal application of the array row costs represented coverage on this lane."
+    },
+    {
+      "name": "3.0.4|urlencoded|string-base64",
+      "openapi": "3.0.4",
+      "media": "application/x-www-form-urlencoded",
+      "items": "string-base64",
+      "itemsSchema": {
+        "type": "string",
+        "contentEncoding": "base64"
+      },
+      "propertyName": "p",
+      "value": [
+        "QUJD"
+      ],
+      "derivedFrom": "array",
+      "expect": "admitted;emit=p=%5B%22QUJD%22%5D",
+      "basis": "OPEN. On 3.0.4 and the 3.1 line an urlencoded property with no Encoding Object takes the content path, and there the engines derive the default from the ARRAY (application/json) rather than from the items schema, against the array row quoted in this file's $comment. The emission below is pinned AS OBSERVED so a change must be a deliberate edit of this table; it is not an authority claim. Filed in corpus-lab/OPENAPI-RUNTIME.md under 'The array-items part default', with its measured corpus incidence and with the reason a literal application of the array row costs represented coverage on this lane."
+    },
+    {
+      "name": "3.0.4|urlencoded|union-type",
+      "openapi": "3.0.4",
+      "media": "application/x-www-form-urlencoded",
+      "items": "union-type",
+      "itemsSchema": {
+        "type": [
+          "string",
+          "integer"
+        ]
+      },
+      "propertyName": "p",
+      "value": [
+        "a"
+      ],
+      "derivedFrom": "array",
+      "expect": "admitted;emit=p=%5B%22a%22%5D",
+      "basis": "OPEN. On 3.0.4 and the 3.1 line an urlencoded property with no Encoding Object takes the content path, and there the engines derive the default from the ARRAY (application/json) rather than from the items schema, against the array row quoted in this file's $comment. The emission below is pinned AS OBSERVED so a change must be a deliberate edit of this table; it is not an authority claim. Filed in corpus-lab/OPENAPI-RUNTIME.md under 'The array-items part default', with its measured corpus incidence and with the reason a literal application of the array row costs represented coverage on this lane."
+    },
+    {
+      "name": "3.0.4|urlencoded|union-choice",
+      "openapi": "3.0.4",
+      "media": "application/x-www-form-urlencoded",
+      "items": "union-choice",
+      "itemsSchema": {
+        "oneOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "integer"
+          }
+        ]
+      },
+      "propertyName": "p",
+      "value": [
+        "a"
+      ],
+      "derivedFrom": "array",
+      "expect": "admitted;emit=p=%5B%22a%22%5D",
+      "basis": "OPEN. On 3.0.4 and the 3.1 line an urlencoded property with no Encoding Object takes the content path, and there the engines derive the default from the ARRAY (application/json) rather than from the items schema, against the array row quoted in this file's $comment. The emission below is pinned AS OBSERVED so a change must be a deliberate edit of this table; it is not an authority claim. Filed in corpus-lab/OPENAPI-RUNTIME.md under 'The array-items part default', with its measured corpus incidence and with the reason a literal application of the array row costs represented coverage on this lane."
+    },
+    {
+      "name": "3.1.1|multipart|string",
+      "openapi": "3.1.1",
+      "media": "multipart/form-data",
+      "items": "string",
+      "itemsSchema": {
+        "type": "string"
+      },
+      "propertyName": "p",
+      "value": [
+        "a",
+        "b"
+      ],
+      "derivedFrom": "items",
+      "expect": "admitted;emit=text/plain:a&text/plain:b",
+      "nonArrayValue": "scalar",
+      "nonArrayValueExpect": "admitted;emit=error",
+      "basis": "OAS 3.1.1 Encoding Object, contentType default table: 'array | n/a | according to the type of the items schema'. The items schema is a string with no binary signal, so the applicable row is 'string | absent | text/plain'."
+    },
+    {
+      "name": "3.1.1|multipart|integer",
+      "openapi": "3.1.1",
+      "media": "multipart/form-data",
+      "items": "integer",
+      "itemsSchema": {
+        "type": "integer"
+      },
+      "propertyName": "p",
+      "value": [
+        1,
+        2
+      ],
+      "derivedFrom": "items",
+      "expect": "admitted;emit=text/plain:1&text/plain:2",
+      "nonArrayValue": "scalar",
+      "nonArrayValueExpect": "admitted;emit=error",
+      "basis": "OAS 3.1.1 Encoding Object, contentType default table: 'array | n/a | according to the type of the items schema'. The items schema is an integer, so the applicable row is 'number, integer, or boolean | n/a | text/plain'."
+    },
+    {
+      "name": "3.1.1|multipart|object",
+      "openapi": "3.1.1",
+      "media": "multipart/form-data",
+      "items": "object",
+      "itemsSchema": {
+        "type": "object"
+      },
+      "propertyName": "p",
+      "value": [
+        {
+          "k": "v"
+        }
+      ],
+      "derivedFrom": "items",
+      "expect": "admitted;emit=application/json:{\"k\":\"v\"}",
+      "nonArrayValue": "scalar",
+      "nonArrayValueExpect": "admitted;emit=error",
+      "basis": "OAS 3.1.1 Encoding Object, contentType default table: 'array | n/a | according to the type of the items schema'. The items schema is an object, so the applicable row is 'object | n/a | application/json'."
+    },
+    {
+      "name": "3.1.1|multipart|nested-array",
+      "openapi": "3.1.1",
+      "media": "multipart/form-data",
+      "items": "nested-array",
+      "itemsSchema": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "propertyName": "p",
+      "value": [
+        [
+          "a"
+        ]
+      ],
+      "derivedFrom": "items",
+      "expect": "refused",
+      "writeLane": "refused",
+      "nonArrayValue": "scalar",
+      "nonArrayValueExpect": "refused",
+      "basis": "OAS 3.1.1 Encoding Object, contentType default table: 'array | n/a | according to the type of the items schema'. The items schema is itself an array, so the row recurses with no base case, and no accepted edition states how the members of an inner array map onto one part name. Deciding that would be authorship rather than incorporation, so the candidate refuses before dispatch (deference order rung 4)."
+    },
+    {
+      "name": "3.1.1|multipart|unconstrained",
+      "openapi": "3.1.1",
+      "media": "multipart/form-data",
+      "items": "unconstrained",
+      "itemsSchema": {},
+      "propertyName": "p",
+      "value": [
+        "YQ==",
+        "MQ=="
+      ],
+      "derivedFrom": "items",
+      "expect": "admitted;emit=application/octet-stream:a&application/octet-stream:1",
+      "nonArrayValue": "scalar",
+      "nonArrayValueExpect": "admitted;emit=error",
+      "basis": "The openapi-3.1 family specification §9.3 derives each array part from the resolved items declaration. A typeless resolved part defaults to application/octet-stream and uses §9.2’s canonical-Base64 raw-octet boundary, so the two canonical strings emit decoded octets in element order. A supplied non-array still has no faithful repeated-part carriage and errors at invocation."
+    },
+    {
+      "name": "3.1.1|multipart|string-base64",
+      "openapi": "3.1.1",
+      "media": "multipart/form-data",
+      "items": "string-base64",
+      "itemsSchema": {
+        "type": "string",
+        "contentEncoding": "base64"
+      },
+      "propertyName": "p",
+      "value": [
+        "QUJD"
+      ],
+      "derivedFrom": "items",
+      "expect": "admitted;emit=application/octet-stream:QUJD",
+      "nonArrayValue": "scalar",
+      "nonArrayValueExpect": "admitted;emit=error",
+      "basis": "OAS 3.1.1 Encoding Object, contentType default table: 'array | n/a | according to the type of the items schema'. The items schema is a string carrying contentEncoding, so the applicable row is 'string | present | application/octet-stream'."
+    },
+    {
+      "name": "3.1.1|multipart|union-type",
+      "openapi": "3.1.1",
+      "media": "multipart/form-data",
+      "items": "union-type",
+      "itemsSchema": {
+        "type": [
+          "string",
+          "integer"
+        ]
+      },
+      "propertyName": "p",
+      "value": [
+        "a"
+      ],
+      "derivedFrom": "items",
+      "expect": "refused",
+      "nonArrayValue": "scalar",
+      "nonArrayValueExpect": "refused",
+      "basis": "OAS 3.1.1 Encoding Object, contentType default table: 'array | n/a | according to the type of the items schema'. [JSON Schema 2020-12] §6.1.1 makes an array-valued `type` a union - 'an instance validates successfully if its type matches any of the types indicated by the strings in the array' - and two non-null members declare value-dependent alternatives, which `the openapi family specifications` §9.2 refuses."
+    },
+    {
+      "name": "3.1.1|multipart|union-choice",
+      "openapi": "3.1.1",
+      "media": "multipart/form-data",
+      "items": "union-choice",
+      "itemsSchema": {
+        "oneOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "integer"
+          }
+        ]
+      },
+      "propertyName": "p",
+      "value": [
+        "a"
+      ],
+      "derivedFrom": "items",
+      "expect": "refused",
+      "nonArrayValue": "scalar",
+      "nonArrayValueExpect": "refused",
+      "basis": "OAS 3.1.1 Encoding Object, contentType default table: 'array | n/a | according to the type of the items schema'. The items schema declares a choice with more than one non-null branch, which `the openapi family specifications` §9.2 refuses: it declares value-dependent alternatives and leaves no single faithful form carriage."
+    },
+    {
+      "name": "3.1.1|urlencoded|string",
+      "openapi": "3.1.1",
+      "media": "application/x-www-form-urlencoded",
+      "items": "string",
+      "itemsSchema": {
+        "type": "string"
+      },
+      "propertyName": "p",
+      "value": [
+        "a",
+        "b"
+      ],
+      "derivedFrom": "array",
+      "expect": "admitted;emit=p=%5B%22a%22%2C%22b%22%5D",
+      "basis": "OPEN. On 3.0.4 and the 3.1 line an urlencoded property with no Encoding Object takes the content path, and there the engines derive the default from the ARRAY (application/json) rather than from the items schema, against the array row quoted in this file's $comment. The emission below is pinned AS OBSERVED so a change must be a deliberate edit of this table; it is not an authority claim. Filed in corpus-lab/OPENAPI-RUNTIME.md under 'The array-items part default', with its measured corpus incidence and with the reason a literal application of the array row costs represented coverage on this lane."
+    },
+    {
+      "name": "3.1.1|urlencoded|integer",
+      "openapi": "3.1.1",
+      "media": "application/x-www-form-urlencoded",
+      "items": "integer",
+      "itemsSchema": {
+        "type": "integer"
+      },
+      "propertyName": "p",
+      "value": [
+        1,
+        2
+      ],
+      "derivedFrom": "array",
+      "expect": "admitted;emit=p=%5B1%2C2%5D",
+      "basis": "OPEN. On 3.0.4 and the 3.1 line an urlencoded property with no Encoding Object takes the content path, and there the engines derive the default from the ARRAY (application/json) rather than from the items schema, against the array row quoted in this file's $comment. The emission below is pinned AS OBSERVED so a change must be a deliberate edit of this table; it is not an authority claim. Filed in corpus-lab/OPENAPI-RUNTIME.md under 'The array-items part default', with its measured corpus incidence and with the reason a literal application of the array row costs represented coverage on this lane."
+    },
+    {
+      "name": "3.1.1|urlencoded|object",
+      "openapi": "3.1.1",
+      "media": "application/x-www-form-urlencoded",
+      "items": "object",
+      "itemsSchema": {
+        "type": "object"
+      },
+      "propertyName": "p",
+      "value": [
+        {
+          "k": "v"
+        }
+      ],
+      "derivedFrom": "array",
+      "expect": "admitted;emit=p=%5B%7B%22k%22%3A%22v%22%7D%5D",
+      "basis": "OPEN. On 3.0.4 and the 3.1 line an urlencoded property with no Encoding Object takes the content path, and there the engines derive the default from the ARRAY (application/json) rather than from the items schema, against the array row quoted in this file's $comment. The emission below is pinned AS OBSERVED so a change must be a deliberate edit of this table; it is not an authority claim. Filed in corpus-lab/OPENAPI-RUNTIME.md under 'The array-items part default', with its measured corpus incidence and with the reason a literal application of the array row costs represented coverage on this lane."
+    },
+    {
+      "name": "3.1.1|urlencoded|nested-array",
+      "openapi": "3.1.1",
+      "media": "application/x-www-form-urlencoded",
+      "items": "nested-array",
+      "itemsSchema": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "propertyName": "p",
+      "value": [
+        [
+          "a"
+        ]
+      ],
+      "derivedFrom": "array",
+      "expect": "admitted;emit=p=%5B%5B%22a%22%5D%5D",
+      "basis": "OPEN. On 3.0.4 and the 3.1 line an urlencoded property with no Encoding Object takes the content path, and there the engines derive the default from the ARRAY (application/json) rather than from the items schema, against the array row quoted in this file's $comment. The emission below is pinned AS OBSERVED so a change must be a deliberate edit of this table; it is not an authority claim. Filed in corpus-lab/OPENAPI-RUNTIME.md under 'The array-items part default', with its measured corpus incidence and with the reason a literal application of the array row costs represented coverage on this lane."
+    },
+    {
+      "name": "3.1.1|urlencoded|unconstrained",
+      "openapi": "3.1.1",
+      "media": "application/x-www-form-urlencoded",
+      "items": "unconstrained",
+      "itemsSchema": {},
+      "propertyName": "p",
+      "value": [
+        "a",
+        1
+      ],
+      "derivedFrom": "array",
+      "expect": "admitted;emit=p=%5B%22a%22%2C1%5D",
+      "basis": "OPEN. On 3.0.4 and the 3.1 line an urlencoded property with no Encoding Object takes the content path, and there the engines derive the default from the ARRAY (application/json) rather than from the items schema, against the array row quoted in this file's $comment. The emission below is pinned AS OBSERVED so a change must be a deliberate edit of this table; it is not an authority claim. Filed in corpus-lab/OPENAPI-RUNTIME.md under 'The array-items part default', with its measured corpus incidence and with the reason a literal application of the array row costs represented coverage on this lane."
+    },
+    {
+      "name": "3.1.1|urlencoded|string-base64",
+      "openapi": "3.1.1",
+      "media": "application/x-www-form-urlencoded",
+      "items": "string-base64",
+      "itemsSchema": {
+        "type": "string",
+        "contentEncoding": "base64"
+      },
+      "propertyName": "p",
+      "value": [
+        "QUJD"
+      ],
+      "derivedFrom": "array",
+      "expect": "admitted;emit=p=%5B%22QUJD%22%5D",
+      "basis": "OPEN. On 3.0.4 and the 3.1 line an urlencoded property with no Encoding Object takes the content path, and there the engines derive the default from the ARRAY (application/json) rather than from the items schema, against the array row quoted in this file's $comment. The emission below is pinned AS OBSERVED so a change must be a deliberate edit of this table; it is not an authority claim. Filed in corpus-lab/OPENAPI-RUNTIME.md under 'The array-items part default', with its measured corpus incidence and with the reason a literal application of the array row costs represented coverage on this lane."
+    },
+    {
+      "name": "3.1.1|urlencoded|union-type",
+      "openapi": "3.1.1",
+      "media": "application/x-www-form-urlencoded",
+      "items": "union-type",
+      "itemsSchema": {
+        "type": [
+          "string",
+          "integer"
+        ]
+      },
+      "propertyName": "p",
+      "value": [
+        "a"
+      ],
+      "derivedFrom": "array",
+      "expect": "admitted;emit=p=%5B%22a%22%5D",
+      "basis": "OPEN. On 3.0.4 and the 3.1 line an urlencoded property with no Encoding Object takes the content path, and there the engines derive the default from the ARRAY (application/json) rather than from the items schema, against the array row quoted in this file's $comment. The emission below is pinned AS OBSERVED so a change must be a deliberate edit of this table; it is not an authority claim. Filed in corpus-lab/OPENAPI-RUNTIME.md under 'The array-items part default', with its measured corpus incidence and with the reason a literal application of the array row costs represented coverage on this lane."
+    },
+    {
+      "name": "3.1.1|urlencoded|union-choice",
+      "openapi": "3.1.1",
+      "media": "application/x-www-form-urlencoded",
+      "items": "union-choice",
+      "itemsSchema": {
+        "oneOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "integer"
+          }
+        ]
+      },
+      "propertyName": "p",
+      "value": [
+        "a"
+      ],
+      "derivedFrom": "array",
+      "expect": "admitted;emit=p=%5B%22a%22%5D",
+      "basis": "OPEN. On 3.0.4 and the 3.1 line an urlencoded property with no Encoding Object takes the content path, and there the engines derive the default from the ARRAY (application/json) rather than from the items schema, against the array row quoted in this file's $comment. The emission below is pinned AS OBSERVED so a change must be a deliberate edit of this table; it is not an authority claim. Filed in corpus-lab/OPENAPI-RUNTIME.md under 'The array-items part default', with its measured corpus incidence and with the reason a literal application of the array row costs represented coverage on this lane."
+    }
+  ]
+}

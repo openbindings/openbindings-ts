@@ -1,0 +1,754 @@
+{
+  "schemaVersion": 1,
+  "title": "Schema Object dialect verdicts -- the acceptance floor's D15 class",
+  "note": "One cell is one Schema Object placed at `#/paths/~1a/get/responses/200/content/application~1json/schema`, beside a clean `GET /b` that every cell must leave represented. `positions` are relative to that schema root and carry the class that owns them; `disposition` is the ladder verdict for `#/paths/~1a/get` (a defective success-response schema with no surviving media alternative climbs by P2). The 3.1 cells are decided by the OAS 3.1 Schema Object dialect's own published artifact and the 3.0 cells by a labeled transcription of that edition's own sentences, because the draft the 3.0 Schema Object extends published no meta-schema (https://json-schema.org/draft-05/schema is 404). The same file, at the same digest, is embedded by openapi-client/go, openapi-client/typescript, openbindings-go/formats/openapi and openbindings-ts/packages/openapi. `downstream` states what the two ADAPTER engines then do with the cell's document, which is not always the floor's verdict reaching a consumer: `coverage` is the ordinary case; `obi-invalid` marks a document the floor correctly leaves alone whose synthesized OBI still fails OBI-D-17 in BOTH adapters, a second leak of this failure mode owned by the 3.0-to-2020-12 translation; and `go-loader-refusal` marks a live twin divergence in which the Go adapter's typed loader refuses the whole source before the floor is consulted while TypeScript confines the unit. Each such cell carries a `downstreamNote` naming the owning layer.",
+  "cells": [
+    {
+      "id": "31-control",
+      "line": "3.1",
+      "openapi": "3.1.0",
+      "schema": {
+        "type": "object"
+      },
+      "positions": [],
+      "disposition": "represented",
+      "downstream": "coverage",
+      "why": "The clean control: the dialect admits it, the target is represented."
+    },
+    {
+      "id": "31-recursive-anchor-boolean",
+      "line": "3.1",
+      "openapi": "3.1.0",
+      "schema": {
+        "type": "object",
+        "$recursiveAnchor": true
+      },
+      "positions": [
+        {
+          "position": "/$recursiveAnchor",
+          "class": "D15"
+        }
+      ],
+      "disposition": "invalid",
+      "downstream": "coverage",
+      "why": "OpenAI defect class 1, and the case no enumeration finds. `$recursiveAnchor` is in NEITHER pinned 2020-12 draft text, but the ROOT meta-schema the OAS dialect composes re-declares it as `meta/core#/$defs/anchorString` -- deliberately, 'to prevent incompatible extensions as they remain in common use' -- so a boolean fails a type guard the vocabularies never state. Two sites of this in OpenAI's document escaped the old table and zeroed 3 MB."
+    },
+    {
+      "id": "31-recursive-anchor-string",
+      "line": "3.1",
+      "openapi": "3.1.0",
+      "schema": {
+        "type": "object",
+        "$recursiveAnchor": "foo"
+      },
+      "positions": [],
+      "disposition": "represented",
+      "downstream": "coverage",
+      "why": "The negative control the same guard produces: the dialect types the keyword, it does not ban it, so a STRING passes. An enumeration written as 'reject $recursiveAnchor' would fail here."
+    },
+    {
+      "id": "31-recursive-ref",
+      "line": "3.1",
+      "openapi": "3.1.0",
+      "schema": {
+        "type": "object",
+        "$recursiveRef": "#"
+      },
+      "positions": [],
+      "disposition": "represented",
+      "downstream": "coverage",
+      "why": "The other legacy spelling, also re-declared by the root meta-schema -- as `uriReferenceString`, which `#` satisfies. OpenAI's document carries two of these and they are LEGAL. Redocly refuses them; the dialect does not."
+    },
+    {
+      "id": "31-exclusive-minimum-boolean",
+      "line": "3.1",
+      "openapi": "3.1.0",
+      "schema": {
+        "type": "number",
+        "exclusiveMinimum": true
+      },
+      "positions": [
+        {
+          "position": "/exclusiveMinimum",
+          "class": "D15"
+        }
+      ],
+      "disposition": "invalid",
+      "downstream": "coverage",
+      "why": "OpenAI defect class 2, and one the old table already caught: the draft-4 boolean spelling on a line whose Validation section 6.2.5 says the value MUST be a number. Seven sites in OpenAI's document; the floor confined them correctly before this block and still does."
+    },
+    {
+      "id": "31-exclusive-minimum-number",
+      "line": "3.1",
+      "openapi": "3.1.0",
+      "schema": {
+        "type": "number",
+        "exclusiveMinimum": 0
+      },
+      "positions": [],
+      "disposition": "represented",
+      "downstream": "coverage",
+      "why": "The 3.1 line's own correct spelling."
+    },
+    {
+      "id": "31-exclusive-maximum-string",
+      "line": "3.1",
+      "openapi": "3.1.0",
+      "schema": {
+        "type": "number",
+        "exclusiveMaximum": "2"
+      },
+      "positions": [
+        {
+          "position": "/exclusiveMaximum",
+          "class": "D15"
+        }
+      ],
+      "disposition": "invalid",
+      "downstream": "go-loader-refusal",
+      "why": "The sibling cell the old table also caught, kept so the delegation is proven to cover it.",
+      "downstreamNote": "LIVE TWIN DIVERGENCE, pre-existing and outside this class's owning layer. The floor answers identically in all four engines, and the TypeScript adapter confines exactly as stated -- but the Go adapter's typed loader (kin-openapi) refuses the whole source before the floor is consulted ('cannot unmarshal exclusiveMinimum/exclusiveMaximum: value must be either a number or a boolean'). A whole-source refusal for a defect the acceptance-floor ruling confines is owned by the load path, not by this class; the cell pins the split so fixing it flips one line here."
+    },
+    {
+      "id": "31-required-duplicated",
+      "line": "3.1",
+      "openapi": "3.1.0",
+      "schema": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "id"
+        ]
+      },
+      "positions": [
+        {
+          "position": "/required",
+          "class": "D15"
+        }
+      ],
+      "disposition": "invalid",
+      "downstream": "coverage",
+      "why": "OpenAI defect class 3, and the second case no enumeration found: the old table asked whether `required` was a LIST and never whether its items were unique. The dialect asks through `$defs/stringArray`, which carries `uniqueItems: true`. ONE duplicated string in ONE component schema zeroed OpenAI's whole document."
+    },
+    {
+      "id": "31-required-not-a-list",
+      "line": "3.1",
+      "openapi": "3.1.0",
+      "schema": {
+        "type": "object",
+        "required": true
+      },
+      "positions": [
+        {
+          "position": "/required",
+          "class": "D15"
+        }
+      ],
+      "disposition": "invalid",
+      "downstream": "coverage",
+      "why": "The array-ness half the old table did catch, kept so the delegation is proven to cover it."
+    },
+    {
+      "id": "31-required-clean",
+      "line": "3.1",
+      "openapi": "3.1.0",
+      "schema": {
+        "type": "object",
+        "required": [
+          "id",
+          "name"
+        ]
+      },
+      "positions": [],
+      "disposition": "represented",
+      "downstream": "coverage",
+      "why": "Unique required entries pass."
+    },
+    {
+      "id": "31-enum-not-a-list",
+      "line": "3.1",
+      "openapi": "3.1.0",
+      "schema": {
+        "enum": "a"
+      },
+      "positions": [
+        {
+          "position": "/enum",
+          "class": "D15"
+        }
+      ],
+      "disposition": "invalid",
+      "downstream": "coverage",
+      "why": "An old-table cell, now the dialect's."
+    },
+    {
+      "id": "31-items-array",
+      "line": "3.1",
+      "openapi": "3.1.0",
+      "schema": {
+        "type": "array",
+        "items": [
+          {
+            "type": "string"
+          }
+        ]
+      },
+      "positions": [
+        {
+          "position": "/items",
+          "class": "D15"
+        }
+      ],
+      "disposition": "invalid",
+      "downstream": "coverage",
+      "why": "The 2020-12 tuple spelling moved to `prefixItems`; an array-valued `items` fails the dialect. An old-table cell."
+    },
+    {
+      "id": "31-properties-member-not-schema",
+      "line": "3.1",
+      "openapi": "3.1.0",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "f": "array"
+        }
+      },
+      "positions": [
+        {
+          "position": "/properties/f",
+          "class": "D15"
+        }
+      ],
+      "disposition": "invalid",
+      "downstream": "coverage",
+      "why": "A bare string where a Schema Object belongs. An old-table cell, and the position keeps its member granularity."
+    },
+    {
+      "id": "31-properties-member-boolean",
+      "line": "3.1",
+      "openapi": "3.1.0",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "f": true
+        }
+      },
+      "positions": [],
+      "disposition": "represented",
+      "downstream": "coverage",
+      "why": "The boolean schema literals ARE this line's dialect, so a boolean member is legal here. The 3.0 twin of this cell is a defect."
+    },
+    {
+      "id": "31-contains-not-schema",
+      "line": "3.1",
+      "openapi": "3.1.0",
+      "schema": {
+        "type": "array",
+        "contains": 3
+      },
+      "positions": [
+        {
+          "position": "/contains",
+          "class": "D15"
+        }
+      ],
+      "disposition": "invalid",
+      "downstream": "coverage",
+      "why": "An old-table cell."
+    },
+    {
+      "id": "31-nullable",
+      "line": "3.1",
+      "openapi": "3.1.0",
+      "schema": {
+        "type": "string",
+        "nullable": true
+      },
+      "positions": [],
+      "disposition": "represented",
+      "downstream": "coverage",
+      "why": "`nullable` is not a 3.1 keyword and the dialect is OPEN, so it is a legal annotation. OpenAI's document carries 112 of them and every one is legal; a closed enumeration would have refused them all."
+    },
+    {
+      "id": "31-min-items-snake",
+      "line": "3.1",
+      "openapi": "3.1.0",
+      "schema": {
+        "type": "array",
+        "min_items": 3
+      },
+      "positions": [],
+      "disposition": "represented",
+      "downstream": "coverage",
+      "why": "A misspelled keyword is an unknown keyword, and unknown keywords annotate."
+    },
+    {
+      "id": "31-unknown-keyword",
+      "line": "3.1",
+      "openapi": "3.1.0",
+      "schema": {
+        "type": "object",
+        "totallyUnknownKeyword": 42
+      },
+      "positions": [],
+      "disposition": "represented",
+      "downstream": "coverage",
+      "why": "Core section 4.3.1: 'A JSON Schema MAY contain properties which are not schema keywords', and OAS section 4.8.24.1 restates it for Schema Objects ('or entirely arbitrary properties')."
+    },
+    {
+      "id": "31-min-items-negative",
+      "line": "3.1",
+      "openapi": "3.1.0",
+      "schema": {
+        "type": "array",
+        "minItems": -1
+      },
+      "positions": [
+        {
+          "position": "/minItems",
+          "class": "D15"
+        }
+      ],
+      "disposition": "invalid",
+      "downstream": "go-loader-refusal",
+      "why": "A case the old table never had and never would have: `minItems` is a `nonNegativeInteger`. Delegation gets the whole vocabulary, not the cells someone remembered.",
+      "downstreamNote": "The same live twin divergence as `31-exclusive-maximum-string`: the Go adapter's typed loader refuses the source ('cannot unmarshal number -1 into field Schema.minItems of type uint64') where TypeScript confines the unit."
+    },
+    {
+      "id": "31-pattern-not-string",
+      "line": "3.1",
+      "openapi": "3.1.0",
+      "schema": {
+        "type": "string",
+        "pattern": 42
+      },
+      "positions": [
+        {
+          "position": "/pattern",
+          "class": "D15"
+        }
+      ],
+      "disposition": "invalid",
+      "downstream": "coverage",
+      "why": "Likewise: `pattern` is a `format: regex` STRING."
+    },
+    {
+      "id": "31-multiple-of-zero",
+      "line": "3.1",
+      "openapi": "3.1.0",
+      "schema": {
+        "type": "number",
+        "multipleOf": 0
+      },
+      "positions": [
+        {
+          "position": "/multipleOf",
+          "class": "D15"
+        }
+      ],
+      "disposition": "invalid",
+      "downstream": "coverage",
+      "why": "Likewise: `multipleOf` carries `exclusiveMinimum: 0`, so zero fails."
+    },
+    {
+      "id": "31-type-duplicated-members",
+      "line": "3.1",
+      "openapi": "3.1.0",
+      "schema": {
+        "type": [
+          "string",
+          "string"
+        ]
+      },
+      "positions": [
+        {
+          "position": "/type",
+          "class": "D15"
+        }
+      ],
+      "disposition": "invalid",
+      "downstream": "coverage",
+      "why": "The `type` gate asks only whether each member NAMES a type, and both do; the dialect additionally carries `uniqueItems` on the array form. So this position is D15 rather than D1 -- the two classes share a position and the gate that fires first owns it."
+    },
+    {
+      "id": "31-type-unknown-name",
+      "line": "3.1",
+      "openapi": "3.1.0",
+      "schema": {
+        "type": "strin"
+      },
+      "positions": [
+        {
+          "position": "/type",
+          "class": "D1"
+        }
+      ],
+      "disposition": "invalid",
+      "downstream": "coverage",
+      "why": "The class-routing control in the other direction: `type` naming no type is D1's own class with D1's own citation, and the dialect's agreement at the same position never displaces it."
+    },
+    {
+      "id": "31-discriminator-missing-property-name",
+      "line": "3.1",
+      "openapi": "3.1.0",
+      "schema": {
+        "oneOf": [
+          {
+            "type": "object"
+          },
+          {
+            "type": "object"
+          }
+        ],
+        "discriminator": {
+          "mapping": {
+            "a": "#/components/schemas/A"
+          }
+        }
+      },
+      "positions": [
+        {
+          "position": "/discriminator",
+          "class": "D15"
+        }
+      ],
+      "disposition": "invalid",
+      "downstream": "coverage",
+      "why": "The OAS's OWN vocabulary half of the dialect: `oas/3.1/meta/base` requires `propertyName`. A 2020-12-only check would not have this, which is why the delegation is to the dialect the edition names and not to the meta-schema it composes."
+    },
+    {
+      "id": "31-discriminator-clean",
+      "line": "3.1",
+      "openapi": "3.1.0",
+      "schema": {
+        "oneOf": [
+          {
+            "type": "object"
+          },
+          {
+            "type": "object"
+          }
+        ],
+        "discriminator": {
+          "propertyName": "kind"
+        }
+      },
+      "positions": [],
+      "disposition": "represented",
+      "downstream": "coverage",
+      "why": "The same vocabulary's positive control."
+    },
+    {
+      "id": "31-nested-required-duplicated",
+      "line": "3.1",
+      "openapi": "3.1.0",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "f": {
+            "type": "object",
+            "required": [
+              "a",
+              "a"
+            ]
+          }
+        }
+      },
+      "positions": [
+        {
+          "position": "/properties/f/required",
+          "class": "D15"
+        }
+      ],
+      "disposition": "invalid",
+      "downstream": "coverage",
+      "why": "The defect is reported at the nested schema position that owns it, not at the root -- the walk visits every Schema Object and each answers for its own keywords."
+    },
+    {
+      "id": "30-control",
+      "line": "3.0",
+      "openapi": "3.0.3",
+      "schema": {
+        "type": "object"
+      },
+      "positions": [],
+      "disposition": "represented",
+      "downstream": "coverage",
+      "why": "The clean control."
+    },
+    {
+      "id": "30-exclusive-minimum-boolean",
+      "line": "3.0",
+      "openapi": "3.0.3",
+      "schema": {
+        "type": "number",
+        "minimum": 0,
+        "exclusiveMinimum": true
+      },
+      "positions": [],
+      "disposition": "represented",
+      "downstream": "coverage",
+      "why": "THE edition-split control. A boolean `exclusiveMinimum` is this line's own correct draft-4 spelling -- which is exactly why the 3.1 delegation is scoped to the 3.1 line rather than applied to both. Validating a 3.0 Schema Object against 2020-12 would refuse what this edition admits."
+    },
+    {
+      "id": "30-required-duplicated",
+      "line": "3.0",
+      "openapi": "3.0.3",
+      "schema": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "id"
+        ]
+      },
+      "positions": [
+        {
+          "position": "/required",
+          "class": "D15"
+        }
+      ],
+      "disposition": "invalid",
+      "downstream": "coverage",
+      "why": "The 3.0 half of the OpenAI class-3 defect. OAS 3.0.x section 4.7.24.1 lists `required` among the keywords 'taken directly from the JSON Schema definition and follow the same specifications', and that definition requires the elements to be unique. This cell is NEW behavior on this line: before this block a duplicated `required` in a 3.0 document escaped the floor exactly as it did in OpenAI's 3.1 one."
+    },
+    {
+      "id": "30-required-not-a-list",
+      "line": "3.0",
+      "openapi": "3.0.3",
+      "schema": {
+        "type": "object",
+        "required": true
+      },
+      "positions": [
+        {
+          "position": "/required",
+          "class": "D15"
+        }
+      ],
+      "disposition": "invalid",
+      "downstream": "coverage",
+      "why": "The array-ness half, unchanged."
+    },
+    {
+      "id": "30-required-clean",
+      "line": "3.0",
+      "openapi": "3.0.3",
+      "schema": {
+        "type": "object",
+        "required": [
+          "id",
+          "name"
+        ]
+      },
+      "positions": [],
+      "disposition": "represented",
+      "downstream": "coverage",
+      "why": "Unique required entries pass."
+    },
+    {
+      "id": "30-enum-not-a-list",
+      "line": "3.0",
+      "openapi": "3.0.3",
+      "schema": {
+        "enum": "a"
+      },
+      "positions": [
+        {
+          "position": "/enum",
+          "class": "D15"
+        }
+      ],
+      "disposition": "invalid",
+      "downstream": "coverage",
+      "why": "Unchanged."
+    },
+    {
+      "id": "30-items-array",
+      "line": "3.0",
+      "openapi": "3.0.3",
+      "schema": {
+        "type": "array",
+        "items": [
+          {
+            "type": "string"
+          }
+        ]
+      },
+      "positions": [
+        {
+          "position": "/items",
+          "class": "D15"
+        }
+      ],
+      "disposition": "invalid",
+      "downstream": "coverage",
+      "why": "'items - Value MUST be an object and not an array' -- this line's own narrowing of the draft it extends, which is one reason the 3.0 dialect cannot be delegated to that draft's meta-schema even if one had been published."
+    },
+    {
+      "id": "30-properties-member-boolean",
+      "line": "3.0",
+      "openapi": "3.0.3",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "f": true
+        }
+      },
+      "positions": [
+        {
+          "position": "/properties/f",
+          "class": "D15"
+        }
+      ],
+      "disposition": "invalid",
+      "downstream": "coverage",
+      "why": "F-O1-13, ruled 2026-08-20: the boolean schema literals are not in this line's dialect, so a boolean member is a defect here and legal on the 3.1 line. The pair of cells is the edition split."
+    },
+    {
+      "id": "30-properties-member-not-schema",
+      "line": "3.0",
+      "openapi": "3.0.3",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "f": "array"
+        }
+      },
+      "positions": [
+        {
+          "position": "/properties/f",
+          "class": "D15"
+        }
+      ],
+      "disposition": "invalid",
+      "downstream": "coverage",
+      "why": "Unchanged."
+    },
+    {
+      "id": "30-recursive-anchor-boolean",
+      "line": "3.0",
+      "openapi": "3.0.3",
+      "schema": {
+        "type": "object",
+        "$recursiveAnchor": true
+      },
+      "positions": [],
+      "disposition": "represented",
+      "downstream": "obi-invalid",
+      "why": "DELIBERATE non-widening. This line's Schema Object dialect declares no `$recursiveAnchor` at all, so the keyword is unknown here and refusing it would invent a rule the edition never states. The 3.1 twin of this cell IS a defect, and the difference is the dialect's, not ours.",
+      "downstreamNote": "A SECOND LEAK OF THE SAME FAILURE MODE, in a different layer, filed by this cell in both engines. The floor is right to leave this upstream-VALID document alone -- and the 3.0-to-2020-12 translation then carries the keyword into the OBI unchanged, where OBI-D-17 reads it under 2020-12 and fails the WHOLE document. The owning layer is the translation, whose fix is the specification's own 'strictly unsupported keywords decide as if absent' reading applied on the way out; deciding which keywords those are is an authority question of its own and does not belong to the floor."
+    },
+    {
+      "id": "30-min-items-negative",
+      "line": "3.0",
+      "openapi": "3.0.3",
+      "schema": {
+        "type": "array",
+        "minItems": -1
+      },
+      "positions": [],
+      "disposition": "represented",
+      "downstream": "obi-invalid",
+      "why": "The visible cost of having nothing to point at on this line: the transcription carries the four cells the edition's own sentences state and no more, so a negative `minItems` is not judged here. Pinned so the asymmetry with the 3.1 line is a recorded fact rather than an accident.",
+      "downstreamNote": "Unlike the `$recursiveAnchor` cell above, this document is upstream-INVALID (the 3.0 line takes `minItems` 'directly from the JSON Schema definition', where it is a non-negative integer) -- the transcription simply does not carry a cell for it, and the defect then reaches OBI-D-17 and fails the whole document. It is the sharpest available statement of what a transcription costs on a line with no artifact to point at."
+    },
+    {
+      "id": "30-nullable",
+      "line": "3.0",
+      "openapi": "3.0.3",
+      "schema": {
+        "type": "string",
+        "nullable": true
+      },
+      "positions": [],
+      "disposition": "represented",
+      "downstream": "coverage",
+      "why": "`nullable` is this line's own keyword."
+    },
+    {
+      "id": "30-unknown-keyword",
+      "line": "3.0",
+      "openapi": "3.0.3",
+      "schema": {
+        "type": "object",
+        "totallyUnknownKeyword": 42
+      },
+      "positions": [],
+      "disposition": "represented",
+      "downstream": "coverage",
+      "why": "Unknown keywords are not judged."
+    },
+    {
+      "id": "30-type-null",
+      "line": "3.0",
+      "openapi": "3.0.3",
+      "schema": {
+        "type": "null"
+      },
+      "positions": [],
+      "disposition": "represented",
+      "downstream": "coverage",
+      "why": "D1n is REFERRED on this line and deliberately not emitted; the transcription adds no `type` cell, so the referral stands."
+    },
+    {
+      "id": "30-type-array",
+      "line": "3.0",
+      "openapi": "3.0.3",
+      "schema": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "positions": [],
+      "disposition": "represented",
+      "downstream": "coverage",
+      "why": "D1a is REFERRED likewise."
+    },
+    {
+      "id": "30-type-unknown-name",
+      "line": "3.0",
+      "openapi": "3.0.3",
+      "schema": {
+        "type": "strin"
+      },
+      "positions": [
+        {
+          "position": "/type",
+          "class": "D1"
+        }
+      ],
+      "disposition": "invalid",
+      "downstream": "coverage",
+      "why": "The `type` gate is D1's on both lines."
+    },
+    {
+      "id": "30-nested-required-duplicated",
+      "line": "3.0",
+      "openapi": "3.0.3",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "f": {
+            "type": "object",
+            "required": [
+              "a",
+              "a"
+            ]
+          }
+        }
+      },
+      "positions": [
+        {
+          "position": "/properties/f/required",
+          "class": "D15"
+        }
+      ],
+      "disposition": "invalid",
+      "downstream": "coverage",
+      "why": "The nested-position cell on this line."
+    }
+  ]
+}

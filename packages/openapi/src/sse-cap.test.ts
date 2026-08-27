@@ -3,13 +3,9 @@ import { describe, it, expect, afterAll } from "vitest";
 import { OpenAPIInvoker } from "./test-helpers.js";
 import { BINDING_SPEC_OPENAPI_31 as BINDING_SPEC } from "./constants.js";
 
-// The SSE size cap is PER EVENT — each event is one delivery unit, so the
-// consumer-configurable delivery-unit bound applies per emission, never
-// cumulatively (a long-lived stream legitimately exceeds it in total).
-// Mirrors asyncapi's sse-cap.test.ts and the Go SDK's
-// TestDeliveryUnitBound_SSEPerEventNotCumulative /
-// TestDeliveryUnitBound_SSETinyBoundRefusesLoudly.
-describe("SSE size cap is per-event, not cumulative", () => {
+// SSE is unary on this binding line: the complete representation is one
+// delivery unit, so the ordinary response bound applies to its total bytes.
+describe("unary SSE size cap", () => {
   let server: Server;
   let port: number;
 
@@ -38,37 +34,6 @@ describe("SSE size cap is per-event, not cumulative", () => {
       },
     };
   }
-
-  it("keeps flowing across a >10MB cumulative stream of under-bound events", async () => {
-    const eventSize = 2 * 1024 * 1024; // 2 MB per event, 6 events = 12 MB total
-    const payload = "x".repeat(eventSize);
-
-    await new Promise<void>((resolve) => {
-      server = createServer((_req: IncomingMessage, res: ServerResponse) => {
-        res.writeHead(200, { "Content-Type": "text/event-stream" });
-        for (let i = 0; i < 6; i++) {
-          res.write(`data: ${payload}\n\n`);
-        }
-        res.end();
-      });
-      server.listen(0, "127.0.0.1", () => {
-        const addr = server.address();
-        port = typeof addr === "object" && addr ? addr.port : 0;
-        resolve();
-      });
-    });
-
-    const invoker = new OpenAPIInvoker();
-    const call = invoker.invokeBinding({
-      source: { bindingSpec: BINDING_SPEC, content: spec() },
-      selector: "#/paths/~1events/get",
-    });
-    const events: unknown[] = [];
-    for await (const v of call.outputs) events.push(v);
-    await call.closed;
-
-    expect(events).toHaveLength(6);
-  });
 
   it("errors a single event larger than the default bound with ERR_RESPONSE_ERROR", async () => {
     const DEFAULT_MAX = 10 * 1024 * 1024;
