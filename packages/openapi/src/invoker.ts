@@ -97,7 +97,6 @@ import {
 } from "./params.js";
 import {
   engineInputForCallerEnvelope,
-  parseCallerEnvelope,
   planAbstractInputRoutes,
   type AbstractInputRoutes,
 } from "./input-routes-v2.js";
@@ -633,6 +632,7 @@ async function loadRuntimeOperationModel(
     throw new InvocationError("ERR_REFUSED");
   }
   for (const parameter of parameters) {
+    if (bindingSpec === BINDING_SPEC_OPENAPI_32) break;
     try {
       validateParameterSerialization(parameter, bindingSpec === BINDING_SPEC_OPENAPI_30);
     } catch {
@@ -898,11 +898,17 @@ function adaptRuntimeFetch(
     if (model.resolvedServerBase && model.engineServerBase) {
       try {
         const currentURL = input instanceof Request ? input.url : String(input);
-        const completedURL = replaceSerializedServerBase(
-          currentURL,
-          model.resolvedServerBase,
-          model.engineServerBase,
-        );
+        const completedURL = model.bindingSpec === BINDING_SPEC_OPENAPI_32
+          ? replaceOpenAPI32SerializedServerBase(
+            currentURL,
+            model.resolvedServerBase,
+            model.engineServerBase,
+          )
+          : replaceSerializedServerBase(
+            currentURL,
+            model.resolvedServerBase,
+            model.engineServerBase,
+          );
         nextInput = input instanceof Request
           ? requestWithOpenAPIURL(input, completedURL)
           : completedURL;
@@ -973,6 +979,18 @@ function adaptRuntimeFetch(
       throw error;
     }
   };
+}
+
+/** Preserves 3.2's serialized path bytes, including terminal dot segments. */
+function replaceOpenAPI32SerializedServerBase(
+  currentURL: string,
+  resolvedServerBase: string,
+  engineServerBase: string,
+): string {
+  if (!currentURL.startsWith(engineServerBase)) {
+    throw new Error("serialized request URL does not begin with the engine server base");
+  }
+  return resolvedServerBase + currentURL.slice(engineServerBase.length);
 }
 
 function transportRefusal(model: RuntimeOperationModel): never {

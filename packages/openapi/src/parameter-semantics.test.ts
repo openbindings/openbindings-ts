@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { BINDING_SPEC_OPENAPI_30, BINDING_SPEC_OPENAPI_31 } from "./constants.js";
+import {
+  BINDING_SPEC_OPENAPI_30,
+  BINDING_SPEC_OPENAPI_31,
+  BINDING_SPEC_OPENAPI_32,
+} from "./constants.js";
 import { OpenAPIInvoker } from "./invoker.js";
 import {
   checkPathTemplateDeclaration,
@@ -104,6 +108,35 @@ describe("OpenAPI parameter semantics", () => {
         undefined,
       )).toThrow(/multiple cookie pairs/);
     }
+  });
+
+  it("uses the document's explode=true default for explicit 3.2 cookie style", async () => {
+    const requests: Array<{ url: string; cookie: string | null }> = [];
+    const spec = operationDocument("get", {
+      parameters: [{
+        name: "parts",
+        in: "cookie",
+        style: "cookie",
+        schema: { type: "array", items: { type: "string" } },
+      }],
+    }, "3.2.0");
+    const call = new OpenAPIInvoker().invokeBinding({
+      source: { bindingSpec: BINDING_SPEC_OPENAPI_32, content: spec },
+      selector: "#/paths/~1x/get",
+      fetch: async (input, init) => {
+        requests.push({
+          url: input instanceof Request ? input.url : String(input),
+          cookie: new Headers(init?.headers).get("Cookie"),
+        });
+        return new Response(null, { status: 204 });
+      },
+    });
+    await call.write({ parameters: { parts: ["a", "b"] } });
+    await call.closed;
+    expect(requests).toEqual([{
+      url: "https://api.example.test/x",
+      cookie: "parts=a; parts=b",
+    }]);
   });
 
   it("enforces sibling path correspondence without importing 3.1 ambiguity rules into 3.0", () => {
@@ -254,9 +287,10 @@ describe("OpenAPI parameter semantics", () => {
 function operationDocument(
   method: "get" | "post",
   operation: Record<string, unknown>,
+  openapi = "3.1.2",
 ): Record<string, unknown> {
   return {
-    openapi: "3.1.2",
+    openapi,
     info: { title: "parameter semantics", version: "1" },
     servers: [{ url: "https://api.example.test" }],
     paths: {
