@@ -956,8 +956,10 @@ function adaptRuntimeFetch(
       const rawPartNames = [...new Set(model.plans.flatMap((plan) =>
         (plan as { rawProperties?: string[] }).rawProperties ?? []))];
       let rewritten = decodeBase64MultipartParts(next.body!, rawPartNames);
-      const transferEncodings = selectedMultipartPlan(model, contentType)?.transferEncodings ?? {};
-      rewritten = applyMultipartTransferEncodings(rewritten, transferEncodings);
+      if (model.bindingSpec !== BINDING_SPEC_OPENAPI_32) {
+        const transferEncodings = selectedMultipartPlan(model, contentType)?.transferEncodings ?? {};
+        rewritten = applyMultipartTransferEncodings(rewritten, transferEncodings);
+      }
       if (rewritten !== next.body) next = { ...next, body: rewritten };
     }
     const governedModel: MediaGovernanceModel = {
