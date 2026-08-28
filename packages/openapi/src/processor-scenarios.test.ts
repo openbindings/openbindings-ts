@@ -19,6 +19,7 @@ import {
   type InvocationError,
 } from "@openbindings/invoke";
 import { OpenAPIInvoker, OpenAPISynthesizer } from "./invoker.js";
+import { Swagger20Number } from "@openbindings/openapi-client/engine";
 
 if (process.env.OB_CORPUS_REQUIRED === "1" && !process.env.OB_SPEC_CORPUS) {
   throw new Error("OB_CORPUS_REQUIRED=1 requires OB_SPEC_CORPUS");
@@ -27,13 +28,19 @@ const corpusRoot = process.env.OB_SPEC_CORPUS ?? resolve(dirname(fileURLToPath(i
 const corpusEntries = [
   {
     file: "openapi-2.0.json",
-    wanted: new Set(["OAPI20-PS-02", "OAPI20-PS-03", "OAPI20-PS-04", "OAPI20-PS-05", "OAPI20-PS-06"]),
+    wanted: new Set([
+      "OAPI20-PS-02", "OAPI20-PS-03", "OAPI20-PS-04", "OAPI20-PS-05", "OAPI20-PS-06",
+      "OAPI20-PS-07", "OAPI20-PS-08", "OAPI20-PS-09", "OAPI20-PS-10", "OAPI20-PS-11",
+      "OAPI20-PS-12", "OAPI20-PS-13", "OAPI20-PS-14", "OAPI20-PS-15", "OAPI20-PS-16",
+      "OAPI20-PS-17", "OAPI20-PS-18", "OAPI20-PS-19", "OAPI20-PS-20", "OAPI20-PS-21",
+      "OAPI20-PS-22", "OAPI20-PS-23", "OAPI20-PS-24", "OAPI20-PS-25", "OAPI20-PS-26",
+    ]),
   },
   { file: "openapi-3.0.json" },
   { file: "openapi-3.1.json" },
 ] as const;
 const corpora = corpusEntries.map(({ file, ...entry }) => ({
-  corpus: JSON.parse(readFileSync(resolve(corpusRoot, "binding-specs/processor", file), "utf8")) as ProcessorScenarioFile,
+  corpus: parseProcessorCorpus(resolve(corpusRoot, "binding-specs/processor", file), file === "openapi-2.0.json"),
   ...entry,
 }));
 const fidelityCorpus = JSON.parse(
@@ -62,8 +69,8 @@ describe("portable OpenAPI processor scenarios", () => {
   }
 
   afterAll(() => {
-    expect(corpora.map(({ corpus, wanted }) => wanted?.size ?? corpus.scenarios.length)).toEqual([5, 73, 97]);
-    expect(executed).toBe(175);
+    expect(corpora.map(({ corpus, wanted }) => wanted?.size ?? corpus.scenarios.length)).toEqual([25, 73, 97]);
+    expect(executed).toBe(195);
   });
 });
 
@@ -141,7 +148,7 @@ async function runScenario(
       operationSignature(fidelityOperationId(source.content)),
       { context },
     )
-    : new OpenAPIInvoker().invokeBinding({
+    : new OpenAPIInvoker({ parameterConversion: scenarioParameterConversion(scenario) }).invokeBinding({
       source: invocationSource,
       selector: typeof binding.selector === "string" ? binding.selector : "",
       context,
@@ -188,6 +195,31 @@ async function runScenario(
         ...(Object.hasOwn(terminal, "data") ? { data: terminal.data } : {}),
       },
     },
+  };
+}
+
+function parseProcessorCorpus(path: string, preserveNumberTokens: boolean): ProcessorScenarioFile {
+  const source = readFileSync(path, "utf8");
+  if (!preserveNumberTokens) return JSON.parse(source) as ProcessorScenarioFile;
+  type SourceContext = { source?: string };
+  const reviver = (_key: string, value: unknown, context?: SourceContext): unknown => {
+    if (typeof value === "number" && context?.source && /[.eE]/u.test(context.source)) {
+      return new Swagger20Number(context.source);
+    }
+    return value;
+  };
+  return JSON.parse(source, reviver) as ProcessorScenarioFile;
+}
+
+function scenarioParameterConversion(scenario: ProcessorScenario): ((value: boolean | number) => string) | undefined {
+  const raw = scenario.given.configuration?.parameterConversion;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  return (value: boolean | number) => {
+    const exact = value as unknown;
+    const key = exact instanceof Swagger20Number ? exact.lexeme : JSON.stringify(value);
+    const converted = (raw as Record<string, unknown>)[key];
+    if (typeof converted !== "string") throw new Error(`parameterConversion has no result for ${key}`);
+    return converted;
   };
 }
 

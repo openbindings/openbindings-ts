@@ -346,7 +346,9 @@ export class OpenAPIInvoker implements BindingInvoker {
     outer: InvocationImpl<I, O>,
   ): Promise<void> {
     if (args.source.bindingSpec === BINDING_SPEC_OPENAPI_20) {
-      return runSwagger20Adapter(args, outer);
+      return runSwagger20Adapter(args, outer, {
+        parameterConversion: this.parameterConversion as ((value: unknown) => string) | undefined,
+      });
     }
     if (this.contentCodingDefect) throw new InvocationError("ERR_REFUSED");
     const bindingSpec = args.source.bindingSpec;

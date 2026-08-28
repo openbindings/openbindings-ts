@@ -1,9 +1,17 @@
 import { InvocationError, type BindingInvocationArgs, type InvocationImpl } from "@openbindings/invoke";
 import {
+  Swagger20Number,
   Swagger20ExecutionError,
   prepareSwagger20,
+  type Swagger20Input,
+  type Swagger20ParameterInfo,
+  type Swagger20Parameters,
   type Swagger20Source,
 } from "@openbindings/openapi-client/engine";
+
+export interface Swagger20AdapterOptions {
+  parameterConversion?: (value: unknown) => string;
+}
 
 /**
  * Edition-specific adapter dispatch. This file owns only SDK vocabulary;
@@ -13,11 +21,13 @@ import {
 export async function runSwagger20Adapter<I, O>(
   args: BindingInvocationArgs,
   invocation: InvocationImpl<I, O>,
+  options: Swagger20AdapterOptions = {},
 ): Promise<void> {
   const source: Swagger20Source = {
     ...(args.source.location !== undefined ? { location: args.source.location } : {}),
     ...(args.source.content !== undefined ? { content: args.source.content } : {}),
   };
+  const configuration = swagger20Configuration(args.context);
   let prepared;
   try {
     prepared = await prepareSwagger20({
@@ -26,23 +36,99 @@ export async function runSwagger20Adapter<I, O>(
       context: args.context,
       signal: args.signal,
       fetch: args.fetch,
+      server: configuration.server,
+      emptyValueForm: configuration.emptyValueForm,
+      parameterConverter: options.parameterConversion,
     });
   } catch (error: unknown) {
     throw bridgeSwagger20Error(error);
   }
 
+  let parameters: Swagger20ParameterInfo[];
+  try {
+    parameters = await prepared.parameters();
+  } catch (error: unknown) {
+    throw bridgeSwagger20Error(error);
+  }
   const iterator = invocation.inputs()[Symbol.asyncIterator]();
   const first = await iterator.next();
-  const second = first.done ? first : await iterator.next();
-  if (!second.done) throw new InvocationError("ERR_REFUSED");
   await invocation.closeInput();
   try {
-    const result = await prepared.execute(first.done ? undefined : first.value);
+    const input = first.done ? {} : swagger20InputForCallerEnvelope(first.value, parameters);
+    const result = await prepared.execute(input);
     if (result.outputPresent) await invocation.emitOutput(result.output as O);
     invocation.closeOutput();
   } catch (error: unknown) {
     throw bridgeSwagger20Error(error);
   }
+}
+
+interface Swagger20RuntimeConfiguration {
+  server?: string;
+  emptyValueForm?: "name-only" | "empty";
+}
+
+function swagger20Configuration(context: Record<string, unknown> | undefined): Swagger20RuntimeConfiguration {
+  const raw = asRecord(context?.configuration) ?? {};
+  const result: Swagger20RuntimeConfiguration = {};
+  if (Object.hasOwn(raw, "server")) {
+    const server = raw.server;
+    if (typeof server === "string" && server !== "") result.server = server;
+    else if (asRecord(server) && typeof asRecord(server)!.baseUrl === "string" && asRecord(server)!.baseUrl !== "") {
+      result.server = asRecord(server)!.baseUrl as string;
+    } else if (!(asRecord(server) && Number.isInteger(asRecord(server)!.index))) {
+      throw new InvocationError("ERR_REFUSED");
+    }
+  }
+  if (Object.hasOwn(raw, "emptyValueForm")) {
+    if (raw.emptyValueForm !== "name-only" && raw.emptyValueForm !== "empty") throw new InvocationError("ERR_REFUSED");
+    result.emptyValueForm = raw.emptyValueForm;
+  }
+  return result;
+}
+
+function swagger20InputForCallerEnvelope(input: unknown, parameters: Swagger20ParameterInfo[]): Swagger20Input {
+  const envelope = asRecord(input);
+  if (!envelope) throw new InvocationError("ERR_REFUSED");
+  for (const key of Object.keys(envelope)) {
+    if (key !== "parameters" && key !== "body") throw new InvocationError("ERR_REFUSED");
+  }
+  const supplied = Object.hasOwn(envelope, "parameters") ? asRecord(envelope.parameters) : {};
+  if (!supplied) throw new InvocationError("ERR_REFUSED");
+  const locations = new Map<string, string>();
+  let qualified = false;
+  for (const parameter of parameters) {
+    if (parameter.in === "body") continue;
+    const previous = locations.get(parameter.name);
+    if (previous !== undefined && previous !== parameter.in) qualified = true;
+    locations.set(parameter.name, parameter.in);
+  }
+  const byKey = new Map<string, Swagger20ParameterInfo>();
+  for (const parameter of parameters) {
+    if (parameter.in === "body") continue;
+    const key = qualified ? `${parameter.in}/${escapePointerToken(parameter.name)}` : parameter.name;
+    byKey.set(key, parameter);
+  }
+  const native: Swagger20Parameters = { path: {}, query: {}, header: {}, formData: {} };
+  for (const [key, value] of Object.entries(supplied)) {
+    const parameter = byKey.get(key);
+    if (!parameter || parameter.in === "body") throw new InvocationError("ERR_REFUSED");
+    native[parameter.in]![parameter.name] = value;
+  }
+  return {
+    parameters: native,
+    ...(Object.hasOwn(envelope, "body") ? { body: envelope.body, bodyPresent: true } : {}),
+  };
+}
+
+function escapePointerToken(value: string): string {
+  return value.replaceAll("~", "~0").replaceAll("/", "~1");
+}
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return value !== null && typeof value === "object" && !Array.isArray(value) && !(value instanceof Swagger20Number)
+    ? value as Record<string, unknown>
+    : undefined;
 }
 
 export function bridgeSwagger20Error(error: unknown): InvocationError {
