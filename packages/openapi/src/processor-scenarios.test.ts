@@ -24,7 +24,7 @@ if (process.env.OB_CORPUS_REQUIRED === "1" && !process.env.OB_SPEC_CORPUS) {
   throw new Error("OB_CORPUS_REQUIRED=1 requires OB_SPEC_CORPUS");
 }
 const corpusRoot = process.env.OB_SPEC_CORPUS ?? resolve(dirname(fileURLToPath(import.meta.url)), "../../../../spec/conformance");
-const corpora = ["openapi-3.0.json", "openapi-3.1.json"].map((file) => JSON.parse(
+const corpora = ["openapi-3.0.json", "openapi-3.1.json", "openapi-3.2.json"].map((file) => JSON.parse(
   readFileSync(resolve(corpusRoot, "binding-specs/processor", file), "utf8"),
 ) as ProcessorScenarioFile);
 const fidelityCorpus = JSON.parse(
@@ -36,6 +36,10 @@ describe("portable OpenAPI processor scenarios", () => {
 
   for (const corpus of corpora) {
     for (const scenario of corpus.scenarios) {
+      if (scenario.id === "OAPI32-PS-01") {
+        it.skip(`${scenario.id}: deferred to N10/M6 response mechanics`, () => {});
+        continue;
+      }
       it(scenario.id, async () => {
         const observation = await runScenario(scenario, corpus);
         try {
@@ -52,8 +56,8 @@ describe("portable OpenAPI processor scenarios", () => {
   }
 
   afterAll(() => {
-    expect(corpora.map((corpus) => corpus.scenarios.length)).toEqual([73, 97]);
-    expect(executed).toBe(170);
+    expect(corpora.map((corpus) => corpus.scenarios.length)).toEqual([73, 97, 131]);
+    expect(executed).toBe(300);
   });
 });
 

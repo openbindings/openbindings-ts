@@ -14,31 +14,47 @@ export const BINDING_SPEC_OPENAPI_32 = "openbindings.openapi-3.2@1";
 export const ERR_UNSUPPORTED_BINDING_SPEC = "ERR_UNSUPPORTED_BINDING_SPEC";
 
 interface OpenAPIBindingSpecRegistration {
-  implemented: boolean;
+  requestImplemented: boolean;
+  responseComplete: boolean;
   editions: ReadonlySet<string>;
 }
 
 const OPENAPI_BINDING_SPEC_REGISTRY: Readonly<Record<string, OpenAPIBindingSpecRegistration>> =
   Object.freeze({
-    [BINDING_SPEC_OPENAPI_20]: { implemented: false, editions: new Set<string>() },
+    [BINDING_SPEC_OPENAPI_20]: {
+      requestImplemented: false,
+      responseComplete: false,
+      editions: new Set<string>(),
+    },
     [BINDING_SPEC_OPENAPI_30]: {
-      implemented: true,
+      requestImplemented: true,
+      responseComplete: true,
       editions: new Set(["3.0.0", "3.0.1", "3.0.2", "3.0.3", "3.0.4"]),
     },
     [BINDING_SPEC_OPENAPI_31]: {
-      implemented: true,
+      requestImplemented: true,
+      responseComplete: true,
       editions: new Set(["3.1.0", "3.1.1", "3.1.2"]),
     },
-    [BINDING_SPEC_OPENAPI_32]: { implemented: false, editions: new Set<string>() },
+    [BINDING_SPEC_OPENAPI_32]: {
+      requestImplemented: true,
+      responseComplete: false,
+      editions: new Set(["3.2.0"]),
+    },
   });
 
 const PROFILES: Readonly<Record<string, OpenAPIExecutionProfile>> = Object.freeze({
   [BINDING_SPEC_OPENAPI_30]: withInputRouteMarker(OPENAPI_PROFILE_FULL, BINDING_SPEC_OPENAPI_30),
   [BINDING_SPEC_OPENAPI_31]: withInputRouteMarker(OPENAPI_PROFILE_FULL, BINDING_SPEC_OPENAPI_31),
+  [BINDING_SPEC_OPENAPI_32]: withInputRouteMarker(OPENAPI_PROFILE_FULL, BINDING_SPEC_OPENAPI_32),
 });
 
 export function isImplementedOpenAPIBindingSpec(bindingSpec: string): boolean {
-  return OPENAPI_BINDING_SPEC_REGISTRY[bindingSpec]?.implemented === true;
+  return OPENAPI_BINDING_SPEC_REGISTRY[bindingSpec]?.responseComplete === true;
+}
+
+export function isRequestImplementedOpenAPIBindingSpec(bindingSpec: string): boolean {
+  return OPENAPI_BINDING_SPEC_REGISTRY[bindingSpec]?.requestImplemented === true;
 }
 
 export function unsupportedBindingSpecMessage(bindingSpec: string): string {
@@ -57,7 +73,7 @@ export function profileForBindingSpec(bindingSpec: string): OpenAPIExecutionProf
 
 export function checkAcceptedOpenAPIEdition(bindingSpec: string, edition: unknown): void {
   const registration = OPENAPI_BINDING_SPEC_REGISTRY[bindingSpec];
-  if (!registration?.implemented) throw new Error(unsupportedBindingSpecMessage(bindingSpec));
+  if (!registration?.requestImplemented) throw new Error(unsupportedBindingSpecMessage(bindingSpec));
   if (typeof edition !== "string" || !registration.editions.has(edition)) {
     throw new Error(
       `document edition ${JSON.stringify(edition ?? "")} is not admitted by binding specification ${JSON.stringify(bindingSpec)}`,
@@ -72,32 +88,36 @@ export function bindingSpecForOpenAPIEdition(edition: string): string | undefine
   if (OPENAPI_BINDING_SPEC_REGISTRY[BINDING_SPEC_OPENAPI_31]!.editions.has(edition)) {
     return BINDING_SPEC_OPENAPI_31;
   }
+  if (OPENAPI_BINDING_SPEC_REGISTRY[BINDING_SPEC_OPENAPI_32]!.editions.has(edition)) {
+    return BINDING_SPEC_OPENAPI_32;
+  }
   return undefined;
 }
 
 export function openAPIRule(bindingSpec: string, rule: string): string {
   if (bindingSpec === BINDING_SPEC_OPENAPI_30) return `OAPI30-${rule}`;
   if (bindingSpec === BINDING_SPEC_OPENAPI_31) return `OAPI31-${rule}`;
+  if (bindingSpec === BINDING_SPEC_OPENAPI_32) return `OAPI32-${rule}`;
   return `OAPI-${rule}`;
 }
 
 export function hasRoutedInputs(bindingSpec: string): boolean {
-  return isImplementedOpenAPIBindingSpec(bindingSpec);
+  return isRequestImplementedOpenAPIBindingSpec(bindingSpec);
 }
 export function hasMediaFidelity(bindingSpec: string): boolean {
-  return isImplementedOpenAPIBindingSpec(bindingSpec);
+  return isRequestImplementedOpenAPIBindingSpec(bindingSpec);
 }
 export function hasResponseFidelity(bindingSpec: string): boolean {
-  return isImplementedOpenAPIBindingSpec(bindingSpec);
+  return OPENAPI_BINDING_SPEC_REGISTRY[bindingSpec]?.responseComplete === true;
 }
 export function hasDynamicObjectCarriage(bindingSpec: string): boolean {
-  return isImplementedOpenAPIBindingSpec(bindingSpec);
+  return isRequestImplementedOpenAPIBindingSpec(bindingSpec);
 }
 export function hasWholeJSONCarriage(bindingSpec: string): boolean {
-  return isImplementedOpenAPIBindingSpec(bindingSpec);
+  return isRequestImplementedOpenAPIBindingSpec(bindingSpec);
 }
 export function hasSchemaOmittedOAS30ByteCarriage(bindingSpec: string): boolean {
-  return isImplementedOpenAPIBindingSpec(bindingSpec);
+  return isRequestImplementedOpenAPIBindingSpec(bindingSpec);
 }
 
 export { VALID_METHODS } from "@openbindings/openapi-client/analysis";
