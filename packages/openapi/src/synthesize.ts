@@ -11,6 +11,7 @@ import type {
 import {
   DEFAULT_SOURCE_NAME,
   BINDING_SPEC_OPENAPI_31,
+  BINDING_SPEC_OPENAPI_32,
   checkAcceptedOpenAPIEdition,
   hasMediaFidelity,
   hasResponseFidelity,
@@ -64,8 +65,11 @@ import {
   computeAcceptanceFloor,
   floorInvalidTargetMessage,
   floorOpVerdict,
+  loadOpenAPIArtifact,
   type AcceptanceFloor,
   type FloorOp,
+  type OpenAPIOperationResolutionError,
+  type OpenAPIResolvedOperation,
 } from "@openbindings/openapi-client/analysis";
 import {
   checkPathTemplateDeclaration,
@@ -80,7 +84,11 @@ import {
   effectiveSecurityRequirements,
   securityAlternativeUsable,
 } from "./security.js";
-import { markBindingOrigins, markReferencedPathItemOrigins } from "./binding-origins.js";
+import {
+  REFERRING_SECURITY_SCHEMES_MARKER,
+  markBindingOrigins,
+  markReferencedPathItemOrigins,
+} from "./binding-origins.js";
 
 /**
  * A paths operation admitted by the artifact but unrepresentable under
@@ -145,27 +153,53 @@ export async function convertToInterface(
   // at load: the floor invalidates each unit whose closure reaches it, so a
   // tolerated node is never read by synthesis.
   let floor: AcceptanceFloor | undefined;
-  const doc = await loadOpenAPIDocument(
-    location,
-    content,
-    {
-      ...options,
-      onResource: (root, baseURI) => {
-        resourceBases.set(root, baseURI);
-        markBindingOrigins(root, baseURI);
-        resources.push({ root, baseURI });
+  let doc: OpenAPIDocument;
+  const openAPI32Exclusions = new Map<string, OpenAPIOperationResolutionError>();
+  if (exactBindingSpec === BINDING_SPEC_OPENAPI_32) {
+    const artifact = await loadOpenAPIArtifact(
+      {
+        ...(location ? { location } : {}),
+        ...(content !== undefined ? { content } : {}),
       },
-      onRefTarget: (node, declaringRoot, pointer) => {
-        markReferencedPathItemOrigins(node, declaringRoot, resourceBases.get(declaringRoot));
-        addressed.push({ node, declaringRoot, pointer });
+      {
+        ...options,
+        allowExternalRefs: true,
       },
-      onRawDocument: (raw) => {
-        floor = computeAcceptanceFloor(raw);
+    );
+    if (artifact.refusal) throw new Error(artifact.refusal);
+    if (artifact.sourceExclusion) throw new Error(artifact.sourceExclusion);
+    doc = structuredClone(artifact.document);
+    resources.push({ root: doc, baseURI: location });
+    for (const disposition of await artifact.operationInventory()) {
+      if (disposition.target) {
+        installOpenAPI32SynthesisTarget(doc, disposition.target);
+      } else if (disposition.error) {
+        openAPI32Exclusions.set(disposition.reference.ref, disposition.error);
+      }
+    }
+  } else {
+    doc = await loadOpenAPIDocument(
+      location,
+      content,
+      {
+        ...options,
+        onResource: (root, baseURI) => {
+          resourceBases.set(root, baseURI);
+          markBindingOrigins(root, baseURI);
+          resources.push({ root, baseURI });
+        },
+        onRefTarget: (node, declaringRoot, pointer) => {
+          markReferencedPathItemOrigins(node, declaringRoot, resourceBases.get(declaringRoot));
+          addressed.push({ node, declaringRoot, pointer });
+        },
+        onRawDocument: (raw) => {
+          floor = computeAcceptanceFloor(raw);
+        },
+        tolerateUnresolvableInternalRefs: true,
       },
-      tolerateUnresolvableInternalRefs: true,
-    },
-    options?.fetch,
-  );
+      options?.fetch,
+    );
+  }
   checkAcceptedOpenAPIEdition(exactBindingSpec, doc.openapi);
   // §3 part 2's single derived whole-source refusal fires here, on every
   // synthesis surface.
@@ -212,19 +246,28 @@ export async function convertToInterface(
 
   const usedKeys = new Set<string>();
 
-  for (const [pathStr, pathItemRaw] of sortedEntries(doc.paths)) {
-    if (pathStr.startsWith("x-") || !pathItemRaw || typeof pathItemRaw !== "object") continue;
-    const pathItem = pathItemRaw as OpenAPIPathItem;
-    for (const method of HTTP_METHODS) {
-      const op = pathItem[method];
-      if (!op || typeof op !== "object") continue;
-      const opObj = op as OpenAPIOperation;
+  for (const { pathStr, pathItem, method, opObj, selector } of synthesisOperationEntries(doc)) {
+      const openAPI32Exclusion = openAPI32Exclusions.get(selector);
+      if (openAPI32Exclusion) {
+        const operationKey = deriveOperationKey(opObj, pathStr, method, usedKeys);
+        if (onUnrealizable) {
+          onUnrealizable({
+            selector,
+            operationKey,
+            reasonCode: "openapi.target_excluded",
+            rule: openAPIRule(exactBindingSpec, "P-01"),
+            message: openAPI32Exclusion.message,
+          });
+          continue;
+        }
+        throw unrealizableOperation(operationKey, openAPI32Exclusion.message);
+      }
 
       // The acceptance floor (registered OpenAPI family §3): a ladder-invalid
       // target is not addressed. Tolerant surfaces skip it (its invalid
       // coverage entry is emitted by the coverage walk); the strict surface
       // throws. Skipped BEFORE key derivation, in every engine identically.
-      const floorVerdict = floorOpVerdict(floor, buildJsonPointerSelector(pathStr, method));
+      const floorVerdict = floorOpVerdict(floor, selector);
       if (floorVerdict && floorVerdict.disposition === "invalid") {
         if (onUnrealizable) continue;
         throw new Error(`cannot synthesize OpenAPI operation at ${JSON.stringify(buildJsonPointerSelector(pathStr, method))}: ${floorInvalidTargetMessage(floorVerdict.defects.length)}; synthesis would return a statically unbindable partial interface`);
@@ -232,8 +275,6 @@ export async function convertToInterface(
 
       const opKey = deriveOperationKey(opObj, pathStr, method, usedKeys);
       usedKeys.add(opKey);
-      const selector = buildJsonPointerSelector(pathStr, method);
-
       const declarationRows = effectiveParameterDeclarationRows(pathItem, opObj);
       const malformedParameter = malformedEffectiveParameter(declarationRows, exactBindingSpec);
       if (malformedParameter) {
@@ -570,11 +611,49 @@ export async function convertToInterface(
         binding.inputTransform = routes.transformExpression();
       }
       (iface.bindings as Record<string, BindingEntry>)[bindingKey] = binding;
-    }
   }
 
   if (Object.keys(iface.bindings ?? {}).length === 0) delete iface.bindings;
   return iface;
+}
+
+function installOpenAPI32SynthesisTarget(
+  document: OpenAPIDocument,
+  target: OpenAPIResolvedOperation,
+): void {
+  document.paths ??= {};
+  const pathItem = asRecord(document.paths[target.reference.path]) ?? {};
+  document.paths[target.reference.path] = pathItem;
+  const resolvedPath = target.pathItem as Record<string, unknown>;
+  for (const field of ["summary", "description", "parameters", "servers"]) {
+    if (Object.hasOwn(resolvedPath, field)) pathItem[field] = resolvedPath[field];
+  }
+  const operation = target.referringSecuritySchemes
+    ? {
+        ...target.operation,
+        [REFERRING_SECURITY_SCHEMES_MARKER]: structuredClone(target.referringSecuritySchemes),
+      }
+    : target.operation;
+  if (target.reference.additional) {
+    const additional = asRecord(pathItem.additionalOperations) ?? {};
+    pathItem.additionalOperations = additional;
+    additional[target.reference.method] = operation;
+  } else {
+    pathItem[target.reference.method] = operation;
+  }
+
+  const targetComponents = asRecord(target.document.components);
+  if (!targetComponents) return;
+  const components = asRecord(document.components) ?? {};
+  document.components = components;
+  for (const [group, rawMembers] of Object.entries(targetComponents)) {
+    const members = asRecord(rawMembers);
+    if (!members) {
+      if (!Object.hasOwn(components, group)) components[group] = rawMembers;
+      continue;
+    }
+    components[group] = { ...(asRecord(components[group]) ?? {}), ...members };
+  }
 }
 
 function unrealizableOperation(operationKey: string, reason: string): Error {
@@ -591,6 +670,12 @@ function safeErrorMessage(value: unknown): string {
   } catch {
     return "unknown request-body planning error";
   }
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
 }
 
 interface OperationSchemaDialectIssue {
@@ -779,6 +864,49 @@ function projectedSuccessSchemaRoots(op: OpenAPIOperation, bindingSpec: string):
  */
 export const HTTP_METHODS = ["get", "put", "post", "delete", "options", "head", "patch", "trace"];
 
+export interface SynthesisOperationEntry {
+  pathStr: string;
+  pathItem: OpenAPIPathItem;
+  method: string;
+  opObj: OpenAPIOperation;
+  selector: string;
+}
+
+/** Edition-aware operation inventory shared by synthesis and coverage. */
+export function synthesisOperationEntries(doc: OpenAPIDocument): SynthesisOperationEntry[] {
+  const result: SynthesisOperationEntry[] = [];
+  for (const [pathStr, pathItemRaw] of sortedEntries(doc.paths ?? {})) {
+    if (pathStr.startsWith("x-") || !pathItemRaw || typeof pathItemRaw !== "object") continue;
+    const pathItem = pathItemRaw as OpenAPIPathItem;
+    const fixed = doc.openapi === "3.2.0" ? [...HTTP_METHODS, "query"] : HTTP_METHODS;
+    for (const method of fixed) {
+      const op = pathItem[method];
+      if (!op || typeof op !== "object") continue;
+      result.push({
+        pathStr,
+        pathItem,
+        method,
+        opObj: op as OpenAPIOperation,
+        selector: buildJsonPointerSelector(pathStr, method),
+      });
+    }
+    if (doc.openapi !== "3.2.0") continue;
+    const additional = asRecord(pathItem.additionalOperations);
+    for (const method of Object.keys(additional ?? {}).sort(codePointCompare)) {
+      const op = additional?.[method];
+      if (!op || typeof op !== "object") continue;
+      result.push({
+        pathStr,
+        pathItem,
+        method,
+        opObj: op as OpenAPIOperation,
+        selector: `#/paths/${escapePointerSegment(pathStr)}/additionalOperations/${escapePointerSegment(method)}`,
+      });
+    }
+  }
+  return result;
+}
+
 /**
  * Derives the operation key SynthesizeInterface would assign. Exported so
  * `inspectSource` (invoker.ts) can suggest the same key synthesis would
@@ -857,9 +985,12 @@ function buildInputSchema(
 
   if (op.requestBody && requestPlan) {
     const rb = op.requestBody;
-    let projectedBodySchema: unknown = requestPlan.media && Object.hasOwn(requestPlan.media, "schema")
-      ? projector.project(requestPlan.media.schema)
-      : undefined;
+    let projectedBodySchema: unknown = requestPlan.openapiVersion === "3.2.0"
+      && requestPlan.media && Object.hasOwn(requestPlan.media, "itemSchema")
+      ? { type: "array", items: projector.project(requestPlan.media.itemSchema) }
+      : requestPlan.media && Object.hasOwn(requestPlan.media, "schema")
+        ? projector.project(requestPlan.media.schema)
+        : undefined;
     if (
       projectedBodySchema
       && typeof projectedBodySchema === "object"

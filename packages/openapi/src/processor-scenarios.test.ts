@@ -53,6 +53,7 @@ const corpusEntries = [
   },
   { file: "openapi-3.0.json" },
   { file: "openapi-3.1.json" },
+  { file: "openapi-3.2.json" },
 ] as const;
 const corpora = corpusEntries.map(({ file, ...entry }) => ({
   corpus: parseProcessorCorpus(resolve(corpusRoot, "binding-specs/processor", file), file === "openapi-2.0.json"),
@@ -64,10 +65,15 @@ const fidelityCorpus = JSON.parse(
 
 describe("portable OpenAPI processor scenarios", () => {
   let executed = 0;
+  const executedByCorpus = corpora.map(() => 0);
 
-  for (const { corpus, wanted } of corpora) {
+  for (const [corpusIndex, { corpus, wanted }] of corpora.entries()) {
     for (const scenario of corpus.scenarios) {
       if (wanted && !wanted.has(scenario.id)) continue;
+      if (scenario.id === "OAPI32-PS-01") {
+        it.skip(`${scenario.id}: deferred to N10/M6 response mechanics`, () => {});
+        continue;
+      }
       it(scenario.id, async () => {
         const observation = await runScenario(scenario, corpus);
         try {
@@ -79,13 +85,15 @@ describe("portable OpenAPI processor scenarios", () => {
           );
         }
         executed += 1;
+        executedByCorpus[corpusIndex]! += 1;
       });
     }
   }
 
   afterAll(() => {
-    expect(corpora.map(({ corpus, wanted }) => wanted?.size ?? corpus.scenarios.length)).toEqual([92, 73, 97]);
-    expect(executed).toBe(262);
+    expect(corpora.map(({ corpus, wanted }) => wanted?.size ?? corpus.scenarios.length)).toEqual([92, 73, 97, 131]);
+    expect(executedByCorpus).toEqual([92, 73, 97, 130]);
+    expect(executed).toBe(392);
   });
 });
 
@@ -120,7 +128,10 @@ async function runScenario(
     if (body.present) {
       dispatch.body = body.value;
       if (body.base64 !== undefined) dispatch.bodyBase64 = body.base64;
-      if (body.byteLength !== undefined) dispatch.bodyByteLength = body.byteLength;
+      if (body.byteLength !== undefined) {
+        dispatch.bodyByteLength = body.byteLength;
+        dispatch.byteLength = body.byteLength;
+      }
     }
     dispatches.push(dispatch);
 
@@ -163,7 +174,10 @@ async function runScenario(
       operationSignature(fidelityOperationId(source.content)),
       { context },
     )
-    : new OpenAPIInvoker({ parameterConversion: scenarioParameterConversion(scenario) }).invokeBinding({
+    : new OpenAPIInvoker({
+      parameterConversion: scenarioParameterConversion(scenario),
+      requestContentCodings: scenarioRequestContentCodings(scenario.given.runtime),
+    }).invokeBinding({
       source: invocationSource,
       selector: typeof binding.selector === "string" ? binding.selector : "",
       context,
@@ -211,6 +225,24 @@ async function runScenario(
       },
     },
   };
+}
+
+function scenarioRequestContentCodings(
+  runtime: Record<string, unknown> | undefined,
+): Record<string, (body: Uint8Array) => Uint8Array> | undefined {
+  const declarations = runtime?.requestContentCodings;
+  if (declarations === undefined) return undefined;
+  if (declarations === null || typeof declarations !== "object" || Array.isArray(declarations)) {
+    throw new Error("scenario runtime.requestContentCodings must be an object");
+  }
+  const result: Record<string, (body: Uint8Array) => Uint8Array> = {};
+  for (const [name, implementation] of Object.entries(declarations)) {
+    if (implementation !== "reverse") {
+      throw new Error(`unknown scenario request content-coding implementation ${JSON.stringify(implementation)}`);
+    }
+    result[name] = (body) => Uint8Array.from(body).reverse();
+  }
+  return result;
 }
 
 function parseProcessorCorpus(path: string, preserveNumberTokens: boolean): ProcessorScenarioFile {

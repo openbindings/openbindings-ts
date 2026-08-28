@@ -18,7 +18,11 @@ import {
   type BodyPlan,
   type OpenAPIParameterConverter,
 } from "@openbindings/openapi-client/analysis";
-import { BINDING_SPEC_OPENAPI_30, BINDING_SPEC_OPENAPI_31 } from "./constants.js";
+import {
+  BINDING_SPEC_OPENAPI_30,
+  BINDING_SPEC_OPENAPI_31,
+  BINDING_SPEC_OPENAPI_32,
+} from "./constants.js";
 import type {
   OpenAPIDocument,
   OpenAPIParameter,
@@ -69,10 +73,15 @@ export function checkPathTemplateDeclaration(
 export function prepareSchemaParameterValue(
   parameter: OpenAPIParameter | undefined,
   value: unknown,
-  _bindingSpec: string,
+  bindingSpec: string,
   conversion: ParameterConversion | undefined,
 ): ReturnType<typeof prepareNativeParameterValue> {
-  return prepareNativeParameterValue(parameter, value, conversion);
+  return prepareNativeParameterValue(
+    parameter,
+    value,
+    conversion,
+    bindingSpec === BINDING_SPEC_OPENAPI_32 ? "3.2.0" : undefined,
+  );
 }
 
 /** §5.2's one source-scope exclusion, intentionally distinct from load refusal. */

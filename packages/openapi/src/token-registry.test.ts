@@ -8,8 +8,10 @@ import {
   ERR_UNSUPPORTED_BINDING_SPEC,
   checkAcceptedOpenAPIEdition,
   isImplementedOpenAPIBindingSpec,
+  isRequestImplementedOpenAPIBindingSpec,
 } from "./constants.js";
 import { OpenAPIInvoker, OpenAPISynthesizer } from "./invoker.js";
+import { OPENAPI32_M6_RESPONSE_SEAMS } from "./openapi32-response-seams.js";
 
 const DOC_30 = {
   openapi: "3.0.4",
@@ -39,6 +41,10 @@ describe("exact OpenAPI family-token registry", () => {
     expect(isImplementedOpenAPIBindingSpec(BINDING_SPEC_OPENAPI_30)).toBe(true);
     expect(isImplementedOpenAPIBindingSpec(BINDING_SPEC_OPENAPI_31)).toBe(true);
     expect(isImplementedOpenAPIBindingSpec(BINDING_SPEC_OPENAPI_32)).toBe(false);
+    expect(isRequestImplementedOpenAPIBindingSpec(BINDING_SPEC_OPENAPI_32)).toBe(true);
+    expect(OPENAPI32_M6_RESPONSE_SEAMS.map((seam) => seam.section)).toEqual([
+      "5.1", "6.2", "9.4", "9.5", "9.6",
+    ]);
     expect(publicAPI).not.toHaveProperty("BINDING_SPEC");
   });
 
@@ -53,13 +59,17 @@ describe("exact OpenAPI family-token registry", () => {
       expect(() => checkAcceptedOpenAPIEdition(BINDING_SPEC_OPENAPI_31, edition)).not.toThrow();
       expect(() => checkAcceptedOpenAPIEdition(BINDING_SPEC_OPENAPI_30, edition)).toThrow();
     }
+    expect(() => checkAcceptedOpenAPIEdition(BINDING_SPEC_OPENAPI_32, "3.2.0")).not.toThrow();
     for (const edition of ["3.0.5", "3.1.3", "3.2.0", "3.1"]) {
       expect(() => checkAcceptedOpenAPIEdition(BINDING_SPEC_OPENAPI_30, edition)).toThrow();
       expect(() => checkAcceptedOpenAPIEdition(BINDING_SPEC_OPENAPI_31, edition)).toThrow();
+      if (edition !== "3.2.0") {
+        expect(() => checkAcceptedOpenAPIEdition(BINDING_SPEC_OPENAPI_32, edition)).toThrow();
+      }
     }
   });
 
-  it.each(["", "example.unknown@1", BINDING_SPEC_OPENAPI_32])(
+  it.each(["", "example.unknown@1"])(
     "refuses token %j before synthesis reads artifact content",
     async (bindingSpec) => {
       let reads = 0;
@@ -71,7 +81,7 @@ describe("exact OpenAPI family-token registry", () => {
     },
   );
 
-  it.each(["", "example.unknown@1", BINDING_SPEC_OPENAPI_32])(
+  it.each(["", "example.unknown@1"])(
     "refuses token %j before invocation reads or fetches the artifact",
     async (bindingSpec) => {
       let reads = 0;

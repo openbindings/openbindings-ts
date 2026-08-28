@@ -26,14 +26,18 @@ import {
 } from "@openbindings/synthesize";
 import {
   OPENAPI_USE_DEFAULT,
+  OpenAPIArtifact,
   OpenAPIEngine,
   OpenAPIExecutionError,
+  OpenAPIOperationResolutionError,
+  loadOpenAPIArtifact,
   openAPIPortableFailureData,
   type OpenAPIExecution,
   type OpenAPIExecutionProfile,
   type OpenAPIExecutionHooks,
   type OpenAPIEngineSecurityHandler,
   type OpenAPIHookResult,
+  type OpenAPIResolvedOperation,
 } from "@openbindings/openapi-client/engine";
 import type {
   OpenAPIDocument,
@@ -43,9 +47,10 @@ import type {
 } from "./types.js";
 import {
   DEFAULT_SOURCE_NAME,
+  BINDING_SPEC_OPENAPI_20,
   BINDING_SPEC_OPENAPI_30,
   BINDING_SPEC_OPENAPI_31,
-  BINDING_SPEC_OPENAPI_20,
+  BINDING_SPEC_OPENAPI_32,
   ERR_UNSUPPORTED_BINDING_SPEC,
   checkAcceptedOpenAPIEdition,
   profileForBindingSpec,
@@ -93,7 +98,6 @@ import {
 } from "./params.js";
 import {
   engineInputForCallerEnvelope,
-  parseCallerEnvelope,
   planAbstractInputRoutes,
   type AbstractInputRoutes,
 } from "./input-routes-v2.js";
@@ -118,7 +122,11 @@ import {
   requestWithOpenAPIURL,
   resolveServer,
 } from "./servers.js";
-import { markBindingOrigins, markReferencedPathItemOrigins } from "./binding-origins.js";
+import {
+  REFERRING_SECURITY_SCHEMES_MARKER,
+  markBindingOrigins,
+  markReferencedPathItemOrigins,
+} from "./binding-origins.js";
 import {
   electSecurityAlternative,
   installSelectedSecurityAlternative,
@@ -415,11 +423,24 @@ export class OpenAPIInvoker implements BindingInvoker {
     const required = requiredMediaContext(model, args.context, profile);
     if (required) throw new InvocationError(CONTEXT_REQUIRED, required);
     prepareEnginePropertyMediaView(model.plans, args.context);
+    const preparedTarget = model.target
+      ? {
+          ...model.target,
+          document: model.document,
+          pathItem: model.pathItem,
+          operation: model.operation,
+        }
+      : undefined;
+    const preparedArtifact = model.artifact && preparedTarget
+      ? model.artifact.withOperationTarget(preparedTarget)
+      : undefined;
     const prepared = await this.engine.prepare({
       // The model is an adapter-local loaded view: edition and method-body
       // gates have already run, and ignored requestBody declarations have
       // been removed before the standalone engine sees the operation.
-      source: { location: args.source.location, content: model.engineContent },
+      source: preparedArtifact
+        ? { ...(args.source.location ? { location: args.source.location } : {}), artifact: preparedArtifact }
+        : { ...(args.source.location ? { location: args.source.location } : {}), content: model.engineContent },
       // The standalone client engine's own API names the selector `ref`.
       ref: args.selector,
       profile,
@@ -438,14 +459,7 @@ export class OpenAPIInvoker implements BindingInvoker {
     if (pendingSecurityRequirement) {
       throw new InvocationError(CONTEXT_REQUIRED, pendingSecurityRequirement);
     }
-    const prefetchedInput = model.preStartBodyGate
-      ? await preReadBodyFreeInput(outer)
-      : undefined;
-    // start() resolves only after all artifact/configuration checks that do
-    // not require application input. Only then does the bridge acquire the
-    // SDK input sequence.
-    const execution = await prepared.start<I, O>();
-    await bridgeExecution(execution, outer, (input) => {
+    const mapInput = (input: unknown): unknown => {
       const selectedPlans = configuredRequestPlans(
         model.operation,
         model.plans,
@@ -464,12 +478,22 @@ export class OpenAPIInvoker implements BindingInvoker {
         bindingSpec,
         this.parameterConversion,
       );
-    }, model, prefetchedInput);
+    };
+    const prefetchedInput = model.preStartBodyGate
+      ? await preReadValidatedInput(outer, mapInput)
+      : undefined;
+    // start() resolves only after all artifact/configuration checks that do
+    // not require application input. Only then does the bridge acquire the
+    // SDK input sequence.
+    const execution = await prepared.start<I, O>();
+    await bridgeExecution(execution, outer, mapInput, model, prefetchedInput);
   }
 }
 
 interface RuntimeOperationModel {
   bindingSpec: string;
+  artifact?: OpenAPIArtifact;
+  target?: OpenAPIResolvedOperation;
   document: OpenAPIDocument;
   engineContent: unknown;
   pathItem: OpenAPIPathItem;
@@ -510,52 +534,103 @@ async function loadRuntimeOperationModel(
 ): Promise<RuntimeOperationModel> {
   let document: OpenAPIDocument;
   let rawDocument: unknown;
-  const resourceBases = new WeakMap<object, string | undefined>();
-  try {
-    document = await loadOpenAPIDocument(
-      args.source.location,
-      args.source.content,
-      {
-        signal: args.signal,
-        onRawDocument: (raw) => { rawDocument = structuredClone(raw); },
-        onResource: (root, baseURI) => {
-          resourceBases.set(root, baseURI);
-          markBindingOrigins(root, baseURI);
+  let artifact: OpenAPIArtifact | undefined;
+  let operationTarget: OpenAPIResolvedOperation | undefined;
+  let target: { path: string; method: string };
+  let pathItem: OpenAPIPathItem;
+  let operation: OpenAPIOperation;
+
+  if (bindingSpec === BINDING_SPEC_OPENAPI_32) {
+    try {
+      artifact = await loadOpenAPIArtifact(
+        {
+          ...(args.source.location ? { location: args.source.location } : {}),
+          ...(Object.hasOwn(args.source, "content") ? { content: args.source.content } : {}),
         },
-        onRefTarget: (target, declaringRoot) => {
-          markReferencedPathItemOrigins(target, declaringRoot, resourceBases.get(declaringRoot));
+        {
+          ...(args.signal ? { signal: args.signal } : {}),
+          ...(args.fetch ? { fetch: args.fetch } : {}),
+          allowExternalRefs: true,
         },
-      },
-      args.fetch,
-    );
-  } catch {
-    throw new InvocationError("ERR_SOURCE_LOAD_FAILED");
+      );
+      document = artifact.document;
+    } catch {
+      throw new InvocationError("ERR_SOURCE_LOAD_FAILED");
+    }
+  } else {
+    const resourceBases = new WeakMap<object, string | undefined>();
+    try {
+      document = await loadOpenAPIDocument(
+        args.source.location,
+        args.source.content,
+        {
+          signal: args.signal,
+          onRawDocument: (raw) => { rawDocument = structuredClone(raw); },
+          onResource: (root, baseURI) => {
+            resourceBases.set(root, baseURI);
+            markBindingOrigins(root, baseURI);
+          },
+          onRefTarget: (referenced, declaringRoot) => {
+            markReferencedPathItemOrigins(referenced, declaringRoot, resourceBases.get(declaringRoot));
+          },
+        },
+        args.fetch,
+      );
+    } catch {
+      throw new InvocationError("ERR_SOURCE_LOAD_FAILED");
+    }
   }
   try {
     checkAcceptedOpenAPIEdition(bindingSpec, document.openapi);
   } catch {
     throw new InvocationError("ERR_SOURCE_LOAD_FAILED");
   }
-  if (sourceExclusionReason(document, bindingSpec)) {
+  if (artifact?.refusal || artifact?.sourceExclusion) {
+    throw new InvocationError("ERR_REFUSED");
+  }
+  if (!artifact && sourceExclusionReason(document, bindingSpec)) {
     throw new InvocationError("ERR_REFUSED");
   }
 
-  let target: { path: string; method: string };
-  try {
-    target = parseSelector(args.selector);
-  } catch {
-    throw new InvocationError("ERR_INVALID_SELECTOR");
+  if (artifact) {
+    try {
+      operationTarget = await artifact.resolveOperation(args.selector);
+    } catch (error: unknown) {
+      if (error instanceof OpenAPIOperationResolutionError) {
+        if (error.kind === "excluded") throw new InvocationError("ERR_REFUSED");
+        if (error.kind === "invalid-reference") throw new InvocationError("ERR_INVALID_SELECTOR");
+      }
+      throw new InvocationError("ERR_SELECTOR_NOT_FOUND");
+    }
+    document = operationTarget.document;
+    pathItem = operationTarget.pathItem;
+    operation = operationTarget.operation;
+    if (operationTarget.referringSecuritySchemes) {
+      operation[REFERRING_SECURITY_SCHEMES_MARKER] = structuredClone(
+        operationTarget.referringSecuritySchemes,
+      );
+    }
+    target = {
+      path: operationTarget.reference.path,
+      method: operationTarget.reference.method,
+    };
+  } else {
+    try {
+      target = parseSelector(args.selector);
+    } catch {
+      throw new InvocationError("ERR_INVALID_SELECTOR");
+    }
+    const rawPathItem = document.paths?.[target.path];
+    if (!rawPathItem || typeof rawPathItem !== "object") {
+      throw new InvocationError("ERR_SELECTOR_NOT_FOUND");
+    }
+    pathItem = rawPathItem;
+    const rawOperation = pathItem[target.method];
+    if (!rawOperation || typeof rawOperation !== "object") {
+      throw new InvocationError("ERR_SELECTOR_NOT_FOUND");
+    }
+    operation = rawOperation as OpenAPIOperation;
   }
-  const rawPathItem = document.paths?.[target.path];
-  if (!rawPathItem || typeof rawPathItem !== "object") {
-    throw new InvocationError("ERR_SELECTOR_NOT_FOUND");
-  }
-  const pathItem = rawPathItem;
-  const rawOperation = pathItem[target.method];
-  if (!rawOperation || typeof rawOperation !== "object") {
-    throw new InvocationError("ERR_SELECTOR_NOT_FOUND");
-  }
-  const operation = rawOperation as OpenAPIOperation;
   const governanceOperation = structuredClone(operation);
   const declarationRows = effectiveParameterDeclarationRows(pathItem, operation);
   if (malformedEffectiveParameter(declarationRows, bindingSpec)) {
@@ -578,6 +653,7 @@ async function loadRuntimeOperationModel(
     throw new InvocationError("ERR_REFUSED");
   }
   for (const parameter of parameters) {
+    if (bindingSpec === BINDING_SPEC_OPENAPI_32) break;
     try {
       validateParameterSerialization(parameter, bindingSpec === BINDING_SPEC_OPENAPI_30);
     } catch {
@@ -598,8 +674,9 @@ async function loadRuntimeOperationModel(
     throw new InvocationError("ERR_REFUSED");
   }
 
-  const preStartBodyGate = requestBodyIgnoredForBindingSpec(bindingSpec, target.method);
-  if (preStartBodyGate) {
+  const bodyForbidden = requestBodyIgnoredForBindingSpec(bindingSpec, target.method);
+  const preStartBodyGate = bodyForbidden || bindingSpec === BINDING_SPEC_OPENAPI_32;
+  if (bodyForbidden) {
     delete operation.requestBody;
   }
   prioritizeNoncollidingRequestMedia(operation, parameters);
@@ -632,11 +709,15 @@ async function loadRuntimeOperationModel(
   // view through the standalone engine's loader a second time cannot preserve
   // its graph, so let the engine load the original authored artifact in that
   // one case. Non-cyclic views retain the method/body adaptations above.
-  const engineContent = hasObjectCycle(document)
+  const engineContent = artifact
+    ? document
+    : hasObjectCycle(document)
     ? cyclicEngineDocument(rawDocument, target, bindingSpec, forcedJSONEnvelope)
     : document;
   return {
     bindingSpec,
+    ...(artifact ? { artifact } : {}),
+    ...(operationTarget ? { target: operationTarget } : {}),
     document,
     engineContent,
     pathItem,
@@ -672,10 +753,20 @@ function runtimeModelCacheKey(args: BindingInvocationArgs): string {
 }
 
 function cloneRuntimeModel(model: RuntimeOperationModel): RuntimeOperationModel {
-  const { routes: _routes, ...data } = model;
+  const { routes: _routes, artifact, target, ...data } = model;
   const clone = structuredClone(data);
+  const clonedTarget = target
+    ? {
+        ...target,
+        document: clone.document,
+        pathItem: clone.pathItem,
+        operation: clone.operation,
+      }
+    : undefined;
   return {
     ...clone,
+    ...(artifact ? { artifact } : {}),
+    ...(clonedTarget ? { target: clonedTarget } : {}),
     routes: planAbstractInputRoutes(clone.parameters, clone.plans),
   };
 }
@@ -828,11 +919,17 @@ function adaptRuntimeFetch(
     if (model.resolvedServerBase && model.engineServerBase) {
       try {
         const currentURL = input instanceof Request ? input.url : String(input);
-        const completedURL = replaceSerializedServerBase(
-          currentURL,
-          model.resolvedServerBase,
-          model.engineServerBase,
-        );
+        const completedURL = model.bindingSpec === BINDING_SPEC_OPENAPI_32
+          ? replaceOpenAPI32SerializedServerBase(
+            currentURL,
+            model.resolvedServerBase,
+            model.engineServerBase,
+          )
+          : replaceSerializedServerBase(
+            currentURL,
+            model.resolvedServerBase,
+            model.engineServerBase,
+          );
         nextInput = input instanceof Request
           ? requestWithOpenAPIURL(input, completedURL)
           : completedURL;
@@ -880,8 +977,10 @@ function adaptRuntimeFetch(
       const rawPartNames = [...new Set(model.plans.flatMap((plan) =>
         (plan as { rawProperties?: string[] }).rawProperties ?? []))];
       let rewritten = decodeBase64MultipartParts(next.body!, rawPartNames);
-      const transferEncodings = selectedMultipartPlan(model, contentType)?.transferEncodings ?? {};
-      rewritten = applyMultipartTransferEncodings(rewritten, transferEncodings);
+      if (model.bindingSpec !== BINDING_SPEC_OPENAPI_32) {
+        const transferEncodings = selectedMultipartPlan(model, contentType)?.transferEncodings ?? {};
+        rewritten = applyMultipartTransferEncodings(rewritten, transferEncodings);
+      }
       if (rewritten !== next.body) next = { ...next, body: rewritten };
     }
     const governedModel: MediaGovernanceModel = {
@@ -903,6 +1002,18 @@ function adaptRuntimeFetch(
       throw error;
     }
   };
+}
+
+/** Preserves 3.2's serialized path bytes, including terminal dot segments. */
+function replaceOpenAPI32SerializedServerBase(
+  currentURL: string,
+  resolvedServerBase: string,
+  engineServerBase: string,
+): string {
+  if (!currentURL.startsWith(engineServerBase)) {
+    throw new Error("serialized request URL does not begin with the engine server base");
+  }
+  return resolvedServerBase + currentURL.slice(engineServerBase.length);
 }
 
 function transportRefusal(model: RuntimeOperationModel): never {
@@ -1111,13 +1222,16 @@ interface PrefetchedInput<I> {
   result: IteratorResult<I, void>;
 }
 
-/** Proves a forbidden-method body is absent before the carrier can dispatch. */
-async function preReadBodyFreeInput<I, O>(outer: InvocationImpl<I, O>): Promise<PrefetchedInput<I>> {
+/** Validates the first 3.2 caller envelope before the carrier can dispatch. */
+async function preReadValidatedInput<I, O>(
+  outer: InvocationImpl<I, O>,
+  mapInput: (input: I) => unknown,
+): Promise<PrefetchedInput<I>> {
   const iterator = outer.inputs()[Symbol.asyncIterator]();
   const result = await iterator.next();
   if (!result.done) {
     try {
-      if (parseCallerEnvelope(result.value).bodyPresent) throw new Error("body is unroutable");
+      mapInput(result.value);
     } catch {
       throw new InvocationError("ERR_REFUSED");
     }
