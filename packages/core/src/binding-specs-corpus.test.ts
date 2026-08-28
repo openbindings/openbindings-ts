@@ -34,7 +34,18 @@ import { fileURLToPath } from "node:url";
 
 import { validateDocument } from "./parse.js";
 
-const ALL_FAMILIES = ["asyncapi", "connect", "graphql", "grpc", "mcp", "openapi", "usage"] as const;
+const ALL_FAMILIES = [
+  "asyncapi",
+  "connect",
+  "graphql",
+  "grpc",
+  "mcp",
+  "openapi-2.0",
+  "openapi-3.0",
+  "openapi-3.1",
+  "openapi-3.2",
+  "usage",
+] as const;
 
 function corpusRoot(): string | undefined {
   const root =

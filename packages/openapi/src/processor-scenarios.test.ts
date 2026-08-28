@@ -19,23 +19,57 @@ import {
   type InvocationError,
 } from "@openbindings/invoke";
 import { OpenAPIInvoker, OpenAPISynthesizer } from "./invoker.js";
+import { Swagger20Number } from "@openbindings/openapi-client/engine";
 
 if (process.env.OB_CORPUS_REQUIRED === "1" && !process.env.OB_SPEC_CORPUS) {
   throw new Error("OB_CORPUS_REQUIRED=1 requires OB_SPEC_CORPUS");
 }
 const corpusRoot = process.env.OB_SPEC_CORPUS ?? resolve(dirname(fileURLToPath(import.meta.url)), "../../../../spec/conformance");
-const corpora = ["openapi-3.0.json", "openapi-3.1.json", "openapi-3.2.json"].map((file) => JSON.parse(
-  readFileSync(resolve(corpusRoot, "binding-specs/processor", file), "utf8"),
-) as ProcessorScenarioFile);
+const corpusEntries = [
+  {
+    file: "openapi-2.0.json",
+    wanted: new Set([
+      "OAPI20-PS-01",
+      "OAPI20-PS-02", "OAPI20-PS-03", "OAPI20-PS-04", "OAPI20-PS-05", "OAPI20-PS-06",
+      "OAPI20-PS-07", "OAPI20-PS-08", "OAPI20-PS-09", "OAPI20-PS-10", "OAPI20-PS-11",
+      "OAPI20-PS-12", "OAPI20-PS-13", "OAPI20-PS-14", "OAPI20-PS-15", "OAPI20-PS-16",
+      "OAPI20-PS-17", "OAPI20-PS-18", "OAPI20-PS-19", "OAPI20-PS-20", "OAPI20-PS-21",
+      "OAPI20-PS-22", "OAPI20-PS-23", "OAPI20-PS-24", "OAPI20-PS-25", "OAPI20-PS-26",
+      "OAPI20-PS-27", "OAPI20-PS-28", "OAPI20-PS-29", "OAPI20-PS-30", "OAPI20-PS-31",
+      "OAPI20-PS-32", "OAPI20-PS-33", "OAPI20-PS-34", "OAPI20-PS-35", "OAPI20-PS-36",
+      "OAPI20-PS-37", "OAPI20-PS-38", "OAPI20-PS-39", "OAPI20-PS-40", "OAPI20-PS-41",
+      "OAPI20-PS-42", "OAPI20-PS-43", "OAPI20-PS-44", "OAPI20-PS-45", "OAPI20-PS-46",
+      "OAPI20-PS-47", "OAPI20-PS-48", "OAPI20-PS-49", "OAPI20-PS-50", "OAPI20-PS-51",
+      "OAPI20-PS-52", "OAPI20-PS-53",
+      "OAPI20-PS-54", "OAPI20-PS-55", "OAPI20-PS-56", "OAPI20-PS-57", "OAPI20-PS-58",
+      "OAPI20-PS-59", "OAPI20-PS-60", "OAPI20-PS-61", "OAPI20-PS-62", "OAPI20-PS-63",
+      "OAPI20-PS-64", "OAPI20-PS-65", "OAPI20-PS-66", "OAPI20-PS-67", "OAPI20-PS-68",
+      "OAPI20-PS-69", "OAPI20-PS-70", "OAPI20-PS-71", "OAPI20-PS-72", "OAPI20-PS-73",
+      "OAPI20-PS-74", "OAPI20-PS-75", "OAPI20-PS-76", "OAPI20-PS-77", "OAPI20-PS-78",
+      "OAPI20-PS-79", "OAPI20-PS-80", "OAPI20-PS-81", "OAPI20-PS-82", "OAPI20-PS-83",
+      "OAPI20-PS-84", "OAPI20-PS-85", "OAPI20-PS-86", "OAPI20-PS-87", "OAPI20-PS-88",
+      "OAPI20-PS-89", "OAPI20-PS-90", "OAPI20-PS-91", "OAPI20-PS-92",
+    ]),
+  },
+  { file: "openapi-3.0.json" },
+  { file: "openapi-3.1.json" },
+  { file: "openapi-3.2.json" },
+] as const;
+const corpora = corpusEntries.map(({ file, ...entry }) => ({
+  corpus: parseProcessorCorpus(resolve(corpusRoot, "binding-specs/processor", file), file === "openapi-2.0.json"),
+  ...entry,
+}));
 const fidelityCorpus = JSON.parse(
   readFileSync(resolve(corpusRoot, "invocation-fidelity/openapi.json"), "utf8"),
 ) as ProcessorScenarioFile;
 
 describe("portable OpenAPI processor scenarios", () => {
   let executed = 0;
+  const executedByCorpus = corpora.map(() => 0);
 
-  for (const corpus of corpora) {
+  for (const [corpusIndex, { corpus, wanted }] of corpora.entries()) {
     for (const scenario of corpus.scenarios) {
+      if (wanted && !wanted.has(scenario.id)) continue;
       if (scenario.id === "OAPI32-PS-01") {
         it.skip(`${scenario.id}: deferred to N10/M6 response mechanics`, () => {});
         continue;
@@ -51,13 +85,15 @@ describe("portable OpenAPI processor scenarios", () => {
           );
         }
         executed += 1;
+        executedByCorpus[corpusIndex]! += 1;
       });
     }
   }
 
   afterAll(() => {
-    expect(corpora.map((corpus) => corpus.scenarios.length)).toEqual([73, 97, 131]);
-    expect(executed).toBe(300);
+    expect(corpora.map(({ corpus, wanted }) => wanted?.size ?? corpus.scenarios.length)).toEqual([92, 73, 97, 131]);
+    expect(executedByCorpus).toEqual([92, 73, 97, 130]);
+    expect(executed).toBe(392);
   });
 });
 
@@ -139,6 +175,7 @@ async function runScenario(
       { context },
     )
     : new OpenAPIInvoker({
+      parameterConversion: scenarioParameterConversion(scenario),
       requestContentCodings: scenarioRequestContentCodings(scenario.given.runtime),
     }).invokeBinding({
       source: invocationSource,
@@ -208,6 +245,31 @@ function scenarioRequestContentCodings(
   return result;
 }
 
+function parseProcessorCorpus(path: string, preserveNumberTokens: boolean): ProcessorScenarioFile {
+  const source = readFileSync(path, "utf8");
+  if (!preserveNumberTokens) return JSON.parse(source) as ProcessorScenarioFile;
+  type SourceContext = { source?: string };
+  const reviver = (_key: string, value: unknown, context?: SourceContext): unknown => {
+    if (typeof value === "number" && context?.source && /[.eE]/u.test(context.source)) {
+      return new Swagger20Number(context.source);
+    }
+    return value;
+  };
+  return JSON.parse(source, reviver) as ProcessorScenarioFile;
+}
+
+function scenarioParameterConversion(scenario: ProcessorScenario): ((value: boolean | number) => string) | undefined {
+  const raw = scenario.given.configuration?.parameterConversion;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  return (value: boolean | number) => {
+    const exact = value as unknown;
+    const key = exact instanceof Swagger20Number ? exact.lexeme : JSON.stringify(value);
+    const converted = (raw as Record<string, unknown>)[key];
+    if (typeof converted !== "string") throw new Error(`parameterConversion has no result for ${key}`);
+    return converted;
+  };
+}
+
 function fidelityOperationId(content: unknown): string {
   const document = content as { paths?: Record<string, Record<string, { operationId?: unknown }>> };
   for (const path of Object.values(document.paths ?? {})) {
@@ -251,7 +313,7 @@ async function observedBody(
     const bytes = new Uint8Array(body.buffer, body.byteOffset, body.byteLength);
     return {
       present: true,
-      value: new TextDecoder().decode(bytes),
+      value: observedTextValue(bytes),
       base64: bytesToBase64(bytes),
       byteLength: bytes.byteLength,
     };
@@ -260,12 +322,18 @@ async function observedBody(
     const bytes = new Uint8Array(body);
     return {
       present: true,
-      value: new TextDecoder().decode(bytes),
+      value: observedTextValue(bytes),
       base64: bytesToBase64(bytes),
       byteLength: bytes.byteLength,
     };
   }
   return { present: true, value: String(body) };
+}
+
+function observedTextValue(bytes: Uint8Array): unknown {
+  const text = new TextDecoder().decode(bytes);
+  try { return JSON.parse(text) as unknown; }
+  catch { return text; }
 }
 
 function bytesToBase64(bytes: Uint8Array): string {
