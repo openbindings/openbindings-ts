@@ -129,6 +129,7 @@ import {
   type SecuritySelection,
 } from "./security.js";
 import { runSwagger20Adapter } from "./swagger20-adapter.js";
+import { synthesizeSwagger20 } from "./swagger20-synthesis.js";
 
 // ---------------------------------------------------------------------------
 // Invoker
@@ -136,6 +137,7 @@ import { runSwagger20Adapter } from "./swagger20-adapter.js";
 
 function openAPIBindingSpecs(): BindingSpecInfo[] {
   return [
+    { bindingSpec: BINDING_SPEC_OPENAPI_20, description: "Swagger 2.0 HTTP APIs" },
     { bindingSpec: BINDING_SPEC_OPENAPI_30, description: "OpenAPI 3.0 HTTP APIs" },
     { bindingSpec: BINDING_SPEC_OPENAPI_31, description: "OpenAPI 3.1 HTTP APIs" },
   ];
@@ -1271,6 +1273,9 @@ export class OpenAPISynthesizer implements InterfaceSynthesizer, CoverageSynthes
     input: SynthesizeInput,
     options?: { signal?: AbortSignal },
   ): Promise<OBInterface> {
+    if (input.sources?.[0]?.bindingSpec === BINDING_SPEC_OPENAPI_20) {
+      return (await synthesizeSwagger20(input, this.fetchFn, false, options)).iface;
+    }
     const { iface } = await this.synthesizeObserved(input, options);
     return iface;
   }
@@ -1288,6 +1293,10 @@ export class OpenAPISynthesizer implements InterfaceSynthesizer, CoverageSynthes
     input: SynthesizeInput,
     options?: { signal?: AbortSignal },
   ): Promise<SynthesizeResult> {
+    if (input.sources?.[0]?.bindingSpec === BINDING_SPEC_OPENAPI_20) {
+      const observed = await synthesizeSwagger20(input, this.fetchFn, true, options);
+      return finalizeSynthesisCoverage(observed.iface, observed.coverage, true, undefined, { revalidateInterface: false });
+    }
     const unrealizable = new Map<string, UnrealizableTarget>();
     const { iface, document, floor } = await this.synthesizeObserved(
       input,
@@ -1361,6 +1370,16 @@ export class OpenAPISynthesizer implements InterfaceSynthesizer, CoverageSynthes
     source: Source,
     options?: { signal?: AbortSignal },
   ): Promise<SourceInspection> {
+    if (source.bindingSpec === BINDING_SPEC_OPENAPI_20) {
+      const observed = await synthesizeSwagger20({ sources: [source] }, this.fetchFn, true, options);
+      const targets = Object.values(observed.iface.bindings ?? {}).map((binding) => ({
+        selector: binding.selector ?? "",
+        operationKey: binding.operation,
+        operation: observed.iface.operations[binding.operation],
+      }));
+      targets.sort((left, right) => codePointCompare(left.selector, right.selector));
+      return { targets, exhaustive: true };
+    }
     // Inspection and synthesis share the same realizability filter. A selector
     // whose registered-family boundary cannot be represented is not
     // advertised as a bindable target merely because it appears in paths —

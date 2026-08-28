@@ -140,8 +140,9 @@ function authSource(spec: Record<string, unknown>) {
 // ---------------------------------------------------------------------------
 
 describe("OpenAPIInvoker.bindingSpecs", () => {
-  it("advertises the two implemented family registrations", () => {
+  it("advertises the three implemented family registrations", () => {
     expect(new OpenAPIInvoker().bindingSpecs()).toEqual([
+      { bindingSpec: "openbindings.openapi-2.0@1", description: "Swagger 2.0 HTTP APIs" },
       { bindingSpec: "openbindings.openapi-3.0@1", description: "OpenAPI 3.0 HTTP APIs" },
       { bindingSpec: "openbindings.openapi-3.1@1", description: "OpenAPI 3.1 HTTP APIs" },
     ]);

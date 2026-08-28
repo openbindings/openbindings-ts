@@ -47,6 +47,8 @@ const corpusEntries = [
       "OAPI20-PS-69", "OAPI20-PS-70", "OAPI20-PS-71", "OAPI20-PS-72", "OAPI20-PS-73",
       "OAPI20-PS-74", "OAPI20-PS-75", "OAPI20-PS-76", "OAPI20-PS-77", "OAPI20-PS-78",
       "OAPI20-PS-79", "OAPI20-PS-80", "OAPI20-PS-81", "OAPI20-PS-82", "OAPI20-PS-83",
+      "OAPI20-PS-84", "OAPI20-PS-85", "OAPI20-PS-86", "OAPI20-PS-87", "OAPI20-PS-88",
+      "OAPI20-PS-89", "OAPI20-PS-90", "OAPI20-PS-91", "OAPI20-PS-92",
     ]),
   },
   { file: "openapi-3.0.json" },
@@ -82,8 +84,8 @@ describe("portable OpenAPI processor scenarios", () => {
   }
 
   afterAll(() => {
-    expect(corpora.map(({ corpus, wanted }) => wanted?.size ?? corpus.scenarios.length)).toEqual([83, 73, 97]);
-    expect(executed).toBe(253);
+    expect(corpora.map(({ corpus, wanted }) => wanted?.size ?? corpus.scenarios.length)).toEqual([92, 73, 97]);
+    expect(executed).toBe(262);
   });
 });
 

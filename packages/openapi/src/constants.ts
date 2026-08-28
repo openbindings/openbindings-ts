@@ -20,7 +20,7 @@ interface OpenAPIBindingSpecRegistration {
 
 const OPENAPI_BINDING_SPEC_REGISTRY: Readonly<Record<string, OpenAPIBindingSpecRegistration>> =
   Object.freeze({
-    [BINDING_SPEC_OPENAPI_20]: { implemented: false, editions: new Set<string>() },
+    [BINDING_SPEC_OPENAPI_20]: { implemented: true, editions: new Set(["2.0"]) },
     [BINDING_SPEC_OPENAPI_30]: {
       implemented: true,
       editions: new Set(["3.0.0", "3.0.1", "3.0.2", "3.0.3", "3.0.4"]),
@@ -33,6 +33,7 @@ const OPENAPI_BINDING_SPEC_REGISTRY: Readonly<Record<string, OpenAPIBindingSpecR
   });
 
 const PROFILES: Readonly<Record<string, OpenAPIExecutionProfile>> = Object.freeze({
+  [BINDING_SPEC_OPENAPI_20]: withInputRouteMarker(OPENAPI_PROFILE_FULL, BINDING_SPEC_OPENAPI_20),
   [BINDING_SPEC_OPENAPI_30]: withInputRouteMarker(OPENAPI_PROFILE_FULL, BINDING_SPEC_OPENAPI_30),
   [BINDING_SPEC_OPENAPI_31]: withInputRouteMarker(OPENAPI_PROFILE_FULL, BINDING_SPEC_OPENAPI_31),
 });
@@ -66,6 +67,9 @@ export function checkAcceptedOpenAPIEdition(bindingSpec: string, edition: unknow
 }
 
 export function bindingSpecForOpenAPIEdition(edition: string): string | undefined {
+  if (OPENAPI_BINDING_SPEC_REGISTRY[BINDING_SPEC_OPENAPI_20]!.editions.has(edition)) {
+    return BINDING_SPEC_OPENAPI_20;
+  }
   if (OPENAPI_BINDING_SPEC_REGISTRY[BINDING_SPEC_OPENAPI_30]!.editions.has(edition)) {
     return BINDING_SPEC_OPENAPI_30;
   }
@@ -76,6 +80,7 @@ export function bindingSpecForOpenAPIEdition(edition: string): string | undefine
 }
 
 export function openAPIRule(bindingSpec: string, rule: string): string {
+  if (bindingSpec === BINDING_SPEC_OPENAPI_20) return `OAPI20-${rule}`;
   if (bindingSpec === BINDING_SPEC_OPENAPI_30) return `OAPI30-${rule}`;
   if (bindingSpec === BINDING_SPEC_OPENAPI_31) return `OAPI31-${rule}`;
   return `OAPI-${rule}`;
