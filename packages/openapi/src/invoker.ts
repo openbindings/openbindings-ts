@@ -59,6 +59,8 @@ import {
   validateDocumentAddress,
 } from "./util.js";
 import {
+  applyMultipartTransferEncodings,
+  decodeBase64MultipartParts,
   FAMILY_JSON,
   FAMILY_MULTIPART,
   configureRequestMedia,
@@ -105,12 +107,16 @@ import {
   formStyleCookieMultiValueParameter,
   malformedEffectiveParameter,
   prepareEngineEncodingView,
-  prepareEngineParameterView,
   sourceExclusionReason,
   validateCompletedURL,
   type ParameterConversion,
 } from "./parameter-semantics.js";
-import { ConfigRequired, resolveServer } from "./servers.js";
+import {
+  ConfigRequired,
+  replaceSerializedServerBase,
+  requestWithOpenAPIURL,
+  resolveServer,
+} from "./servers.js";
 import { markBindingOrigins, markReferencedPathItemOrigins } from "./binding-origins.js";
 import {
   electSecurityAlternative,
@@ -467,7 +473,6 @@ interface RuntimeOperationModel {
   emptyResponse: boolean;
   maxDeliveryUnitBytes?: number;
   transportError?: InvocationError;
-  rawCookieHeader?: string;
   preStartBodyGate: boolean;
 }
 
@@ -609,7 +614,6 @@ async function loadRuntimeOperationModel(
   }
   const callerParameters = parameters.map((parameter) => ({ ...parameter }));
   const routes = planAbstractInputRoutes(callerParameters, plans);
-  const rawCookieHeader = prepareEngineParameterView(parameters, routes, bindingSpec);
   prepareEngineEncodingView(plans);
   prepareEngineResponseView(operation);
   // A fully dereferenced recursive schema is cyclic. Passing that adapter
@@ -633,7 +637,6 @@ async function loadRuntimeOperationModel(
     path: target.path,
     emptyResponse: false,
     maxDeliveryUnitBytes: args.maxDeliveryUnitBytes,
-    rawCookieHeader,
     preStartBodyGate,
   };
 }
@@ -809,17 +812,17 @@ function adaptRuntimeFetch(
   return async (input, init) => {
     model.transportError = undefined;
     let nextInput: RequestInfo | URL = input;
-    let nextInit = init;
+    const nextInit = init;
     if (model.resolvedServerBase && model.engineServerBase) {
       try {
         const currentURL = input instanceof Request ? input.url : String(input);
-        const completedURL = verbatimCompletedURL(
+        const completedURL = replaceSerializedServerBase(
           currentURL,
           model.resolvedServerBase,
           model.engineServerBase,
         );
         nextInput = input instanceof Request
-          ? requestWithURL(input, completedURL)
+          ? requestWithOpenAPIURL(input, completedURL)
           : completedURL;
       } catch {
         return transportRefusal(model);
@@ -831,22 +834,6 @@ function adaptRuntimeFetch(
     } catch {
       return transportRefusal(model);
     }
-    if (model.rawCookieHeader) {
-      const sourceHeaders = init?.headers ?? (nextInput instanceof Request ? nextInput.headers : undefined);
-      const headers = new Headers(sourceHeaders);
-      const rawCookie = headers.get(model.rawCookieHeader);
-      if (rawCookie !== null) {
-        if (headers.has("Cookie")) return transportRefusal(model);
-        headers.delete(model.rawCookieHeader);
-        headers.set("Cookie", rawCookie);
-        if (nextInput instanceof Request && init?.headers === undefined) {
-          nextInput = new Request(nextInput, { headers });
-        } else {
-          nextInit = { ...init, headers };
-        }
-      }
-    }
-
     let next: RequestInit = nextInit ?? {};
     if (next.body) {
       const text = bodyText(next.body);
@@ -880,9 +867,9 @@ function adaptRuntimeFetch(
 
       const rawPartNames = [...new Set(model.plans.flatMap((plan) =>
         (plan as { rawProperties?: string[] }).rawProperties ?? []))];
-      let rewritten = rewriteEncodedMultipartParts(next.body!, rawPartNames);
+      let rewritten = decodeBase64MultipartParts(next.body!, rawPartNames);
       const transferEncodings = selectedMultipartPlan(model, contentType)?.transferEncodings ?? {};
-      rewritten = rewriteMultipartTransferEncodings(rewritten, transferEncodings);
+      rewritten = applyMultipartTransferEncodings(rewritten, transferEncodings);
       if (rewritten !== next.body) next = { ...next, body: rewritten };
     }
     const governedModel: MediaGovernanceModel = {
@@ -912,35 +899,6 @@ function transportRefusal(model: RuntimeOperationModel): never {
   throw error;
 }
 
-function verbatimCompletedURL(current: string, resolvedBase: string, engineBase: string): string {
-  const parsed = new URL(current);
-  const enginePath = serializedBasePath(engineBase);
-  if (!parsed.pathname.startsWith(enginePath)) {
-    throw new Error("serialized operation path does not retain the engine server base");
-  }
-  const suffix = parsed.pathname.slice(enginePath.length);
-  return `${resolvedBase}${suffix}${parsed.search}`;
-}
-
-function serializedBasePath(base: string): string {
-  const match = /^[A-Za-z][A-Za-z0-9+.-]*:\/\/[^/]*(\/[^?#]*)?$/u.exec(base);
-  return match?.[1] ?? "";
-}
-
-function requestWithURL(request: Request, url: string): Request {
-  const init: RequestInit & { duplex?: "half" } = {
-    method: request.method,
-    headers: request.headers,
-    redirect: request.redirect,
-    signal: request.signal,
-  };
-  if (request.method !== "GET" && request.method !== "HEAD") {
-    init.body = request.body;
-    init.duplex = "half";
-  }
-  return new Request(url, init);
-}
-
 function bodyText(body: BodyInit): string | undefined {
   if (typeof body === "string") return body;
   if (body instanceof ArrayBuffer) return new TextDecoder().decode(body);
@@ -948,45 +906,6 @@ function bodyText(body: BodyInit): string | undefined {
     return new TextDecoder().decode(new Uint8Array(body.buffer, body.byteOffset, body.byteLength));
   }
   return undefined;
-}
-
-function rewriteEncodedMultipartParts(body: BodyInit, names: string[]): BodyInit {
-  let bytes: Uint8Array;
-  if (typeof body === "string") {
-    bytes = new TextEncoder().encode(body);
-  } else if (body instanceof ArrayBuffer) {
-    bytes = new Uint8Array(body);
-  } else if (ArrayBuffer.isView(body)) {
-    bytes = new Uint8Array(body.buffer, body.byteOffset, body.byteLength);
-  } else {
-    return body;
-  }
-  let binary = "";
-  for (const byte of bytes) binary += String.fromCharCode(byte);
-  let changed = false;
-  for (const name of names) {
-    const marker = `name="${name}"`;
-    const markerAt = binary.indexOf(marker);
-    if (markerAt < 0) continue;
-    const headerStart = binary.lastIndexOf("\r\n", markerAt);
-    const bodyStart = binary.indexOf("\r\n\r\n", markerAt);
-    const bodyEnd = bodyStart < 0 ? -1 : binary.indexOf("\r\n--", bodyStart + 4);
-    if (headerStart < 0 || bodyStart < 0 || bodyEnd < 0) continue;
-    const encoded = binary.slice(bodyStart + 4, bodyEnd);
-    let decoded: string;
-    try {
-      decoded = atob(encoded);
-      if (btoa(decoded) !== encoded) continue;
-    } catch {
-      continue;
-    }
-    const headers = binary.slice(headerStart, bodyStart)
-      .replace("\r\nContent-Transfer-Encoding: base64", "");
-    binary = binary.slice(0, headerStart) + headers + "\r\n\r\n" + decoded + binary.slice(bodyEnd);
-    changed = true;
-  }
-  if (!changed) return body;
-  return Uint8Array.from(binary, (character) => character.charCodeAt(0));
 }
 
 function selectedMultipartPlan(
@@ -1005,33 +924,6 @@ function selectedMultipartPlan(
   } catch {
     return undefined;
   }
-}
-
-/** Removes predecessor-invented fields, then restores the one OAS 3.0 explicit exception. */
-function rewriteMultipartTransferEncodings(
-  body: BodyInit,
-  declared: Record<string, string>,
-): BodyInit {
-  let bytes: Uint8Array;
-  if (typeof body === "string") bytes = new TextEncoder().encode(body);
-  else if (body instanceof ArrayBuffer) bytes = new Uint8Array(body);
-  else if (ArrayBuffer.isView(body)) bytes = new Uint8Array(body.buffer, body.byteOffset, body.byteLength);
-  else return body;
-
-  let binary = "";
-  for (const byte of bytes) binary += String.fromCharCode(byte);
-  const withoutImplicit = binary.replace(/\r\nContent-Transfer-Encoding:[^\r\n]*/giu, "");
-  let changed = withoutImplicit !== binary;
-  binary = withoutImplicit;
-  for (const [name, encoding] of Object.entries(declared)) {
-    const markerAt = binary.indexOf(`name="${name}"`);
-    if (markerAt < 0) continue;
-    const headersEnd = binary.indexOf("\r\n\r\n", markerAt);
-    if (headersEnd < 0) continue;
-    binary = `${binary.slice(0, headersEnd)}\r\nContent-Transfer-Encoding: ${encoding}${binary.slice(headersEnd)}`;
-    changed = true;
-  }
-  return changed ? Uint8Array.from(binary, (character) => character.charCodeAt(0)) : body;
 }
 
 function configuredRequestPlans(

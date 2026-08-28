@@ -10,6 +10,14 @@ import {
   type ContextRequirement,
 } from "@openbindings/invoke";
 import type { OpenAPIEngineSecurityHandler } from "@openbindings/openapi-client/engine";
+import {
+  openAPICredentialCollision,
+  openAPICredentialDestinations,
+  validateOpenAPIBasicCredential,
+  validateOpenAPIBearerToken,
+  validateOpenAPICookieCredential,
+  type OpenAPINamedSecurityScheme,
+} from "@openbindings/openapi-client/analysis";
 import type {
   OpenAPIDocument,
   OpenAPIOperation,
@@ -119,7 +127,11 @@ export function viableSecurityPlans(
   context?: Record<string, unknown>,
 ): SecurityPlan[] {
   return securityPlans(document, operation, baseURL, context)
-    .filter((plan) => credentialCollision(credentialDestinations(plan), parameters) === "");
+    .filter((plan) => openAPICredentialCollision(
+      openAPICredentialDestinations(plan.schemes as OpenAPINamedSecurityScheme[]),
+      parameters,
+      { header: new Set(), query: new Set(), cookie: new Set() },
+    ) === "");
 }
 
 export function electSecurityAlternative(
@@ -270,26 +282,16 @@ export function validateSelectedCredentials(
     for (const { name, scheme } of plan.schemes) {
       if (scheme.type === "apiKey" && scheme.in === "cookie") {
         const value = contextApiKeyFor(context, name);
-        if (value && !validRFC6265CookieValue(value)) {
-          throw new Error(`cookie credential ${JSON.stringify(scheme.name)} cannot be carried as an RFC 6265 cookie-value`);
-        }
+        if (value) validateOpenAPICookieCredential(scheme.name ?? "", value);
       } else if (scheme.type === "http" && scheme.scheme?.toLowerCase() === "basic") {
         const basic = contextBasicAuthFor(context, name);
-        if (basic && (basic.username.includes(":")
-          || !validBasicCredentialText(basic.username)
-          || !validBasicCredentialText(basic.password))) {
-          throw new Error(`basic credential ${JSON.stringify(name)} violates RFC 7617 constraints`);
-        }
+        if (basic) validateOpenAPIBasicCredential(name, basic);
       } else if (scheme.type === "http" && scheme.scheme?.toLowerCase() === "bearer") {
         const token = contextBearerTokenFor(context, name);
-        if (token && !validBearerToken(token)) {
-          throw new Error(`bearer credential ${JSON.stringify(name)} is not an RFC 6750 b64token`);
-        }
+        if (token) validateOpenAPIBearerToken(`bearer credential ${JSON.stringify(name)}`, token);
       } else if (scheme.type === "oauth2" || scheme.type === "openIdConnect") {
         const token = contextAccessTokenFor(context, name) || contextBearerTokenFor(context, name);
-        if (token && !validBearerToken(token)) {
-          throw new Error(`access token for ${JSON.stringify(name)} is not an RFC 6750 b64token`);
-        }
+        if (token) validateOpenAPIBearerToken(`access token for ${JSON.stringify(name)}`, token);
       }
     }
     return;
@@ -461,49 +463,6 @@ function absolutize(value: string, baseURL: string): string {
   try { return new URL(value, baseURL).toString(); } catch { return value; }
 }
 
-interface CredentialDestination {
-  channel: "header" | "query" | "cookie";
-  name: string;
-}
-
-function credentialDestinations(plan: SecurityPlan): CredentialDestination[] {
-  const result: CredentialDestination[] = [];
-  for (const { scheme } of plan.schemes) {
-    if (scheme.type === "apiKey" && typeof scheme.name === "string"
-      && (scheme.in === "header" || scheme.in === "query" || scheme.in === "cookie")) {
-      result.push({ channel: scheme.in, name: scheme.name });
-    } else if (scheme.type === "oauth2" || scheme.type === "openIdConnect"
-      || (scheme.type === "http" && ["basic", "bearer"].includes(scheme.scheme?.toLowerCase() ?? ""))) {
-      result.push({ channel: "header", name: "Authorization" });
-    }
-  }
-  return result;
-}
-
-function credentialCollision(
-  destinations: CredentialDestination[],
-  parameters: OpenAPIParameter[],
-): string {
-  const parameterKeys = new Set(parameters.flatMap((parameter) => {
-    if (typeof parameter.name !== "string") return [];
-    const channel = parameter.in;
-    if (channel !== "header" && channel !== "query" && channel !== "cookie") return [];
-    return [`${channel}:${channel === "header" ? parameter.name.toLowerCase() : parameter.name}`];
-  }));
-  const rawCookie = parameterKeys.has("header:cookie");
-  const seen = new Set<string>();
-  for (const destination of destinations) {
-    const name = destination.channel === "header" ? destination.name.toLowerCase() : destination.name;
-    const key = `${destination.channel}:${name}`;
-    if (destination.channel === "header"
-      && ["host", "content-length", "content-type", "accept"].includes(name)) return key;
-    if (destination.channel === "cookie" && rawCookie) return key;
-    if (parameterKeys.has(key) || seen.has(key)) return key;
-    seen.add(key);
-  }
-  return "";
-}
-
 function securityConfigurationIndex(raw: unknown): number | null {
   if (typeof raw === "number" && Number.isInteger(raw)) return raw;
   const record = asRecord(raw);
@@ -515,26 +474,6 @@ function validateImplicitConnectionScope(raw: unknown): void {
   if (raw !== "entry" && raw !== "referring") {
     throw new Error("configuration.implicitConnectionScope must be entry or referring");
   }
-}
-
-function validBasicCredentialText(value: string): boolean {
-  return [...value].every((character) => {
-    const code = character.codePointAt(0)!;
-    return code >= 0x20 && code <= 0x7e;
-  });
-}
-
-function validBearerToken(value: string): boolean {
-  return /^[A-Za-z0-9\-._~+/]+={0,}$/u.test(value);
-}
-
-function validRFC6265CookieValue(value: string): boolean {
-  const bytes = new TextEncoder().encode(value);
-  return [...bytes].every((byte) => byte === 0x21
-    || (byte >= 0x23 && byte <= 0x2b)
-    || (byte >= 0x2d && byte <= 0x3a)
-    || (byte >= 0x3c && byte <= 0x5b)
-    || (byte >= 0x5d && byte <= 0x7e));
 }
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
