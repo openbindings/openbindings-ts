@@ -57,7 +57,7 @@ describe("exact OpenAPI family-token registry", () => {
     }
   });
 
-  it.each(["", "example.unknown@1", BINDING_SPEC_OPENAPI_20, BINDING_SPEC_OPENAPI_32])(
+  it.each(["", "example.unknown@1", BINDING_SPEC_OPENAPI_32])(
     "refuses token %j before synthesis reads artifact content",
     async (bindingSpec) => {
       let reads = 0;
@@ -69,7 +69,7 @@ describe("exact OpenAPI family-token registry", () => {
     },
   );
 
-  it.each(["", "example.unknown@1", BINDING_SPEC_OPENAPI_20, BINDING_SPEC_OPENAPI_32])(
+  it.each(["", "example.unknown@1", BINDING_SPEC_OPENAPI_32])(
     "refuses token %j before invocation reads or fetches the artifact",
     async (bindingSpec) => {
       let reads = 0;

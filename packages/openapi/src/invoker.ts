@@ -45,6 +45,7 @@ import {
   DEFAULT_SOURCE_NAME,
   BINDING_SPEC_OPENAPI_30,
   BINDING_SPEC_OPENAPI_31,
+  BINDING_SPEC_OPENAPI_20,
   ERR_UNSUPPORTED_BINDING_SPEC,
   checkAcceptedOpenAPIEdition,
   profileForBindingSpec,
@@ -127,6 +128,7 @@ import {
   validateSelectedCredentials,
   type SecuritySelection,
 } from "./security.js";
+import { runSwagger20Adapter } from "./swagger20-adapter.js";
 
 // ---------------------------------------------------------------------------
 // Invoker
@@ -343,6 +345,9 @@ export class OpenAPIInvoker implements BindingInvoker {
     args: BindingInvocationArgs,
     outer: InvocationImpl<I, O>,
   ): Promise<void> {
+    if (args.source.bindingSpec === BINDING_SPEC_OPENAPI_20) {
+      return runSwagger20Adapter(args, outer);
+    }
     if (this.contentCodingDefect) throw new InvocationError("ERR_REFUSED");
     const bindingSpec = args.source.bindingSpec;
     const profile = profileForInvocation(bindingSpec);

@@ -24,9 +24,18 @@ if (process.env.OB_CORPUS_REQUIRED === "1" && !process.env.OB_SPEC_CORPUS) {
   throw new Error("OB_CORPUS_REQUIRED=1 requires OB_SPEC_CORPUS");
 }
 const corpusRoot = process.env.OB_SPEC_CORPUS ?? resolve(dirname(fileURLToPath(import.meta.url)), "../../../../spec/conformance");
-const corpora = ["openapi-3.0.json", "openapi-3.1.json"].map((file) => JSON.parse(
-  readFileSync(resolve(corpusRoot, "binding-specs/processor", file), "utf8"),
-) as ProcessorScenarioFile);
+const corpusEntries = [
+  {
+    file: "openapi-2.0.json",
+    wanted: new Set(["OAPI20-PS-02", "OAPI20-PS-03", "OAPI20-PS-04", "OAPI20-PS-05", "OAPI20-PS-06"]),
+  },
+  { file: "openapi-3.0.json" },
+  { file: "openapi-3.1.json" },
+] as const;
+const corpora = corpusEntries.map(({ file, ...entry }) => ({
+  corpus: JSON.parse(readFileSync(resolve(corpusRoot, "binding-specs/processor", file), "utf8")) as ProcessorScenarioFile,
+  ...entry,
+}));
 const fidelityCorpus = JSON.parse(
   readFileSync(resolve(corpusRoot, "invocation-fidelity/openapi.json"), "utf8"),
 ) as ProcessorScenarioFile;
@@ -34,8 +43,9 @@ const fidelityCorpus = JSON.parse(
 describe("portable OpenAPI processor scenarios", () => {
   let executed = 0;
 
-  for (const corpus of corpora) {
+  for (const { corpus, wanted } of corpora) {
     for (const scenario of corpus.scenarios) {
+      if (wanted && !wanted.has(scenario.id)) continue;
       it(scenario.id, async () => {
         const observation = await runScenario(scenario, corpus);
         try {
@@ -52,8 +62,8 @@ describe("portable OpenAPI processor scenarios", () => {
   }
 
   afterAll(() => {
-    expect(corpora.map((corpus) => corpus.scenarios.length)).toEqual([73, 97]);
-    expect(executed).toBe(170);
+    expect(corpora.map(({ corpus, wanted }) => wanted?.size ?? corpus.scenarios.length)).toEqual([5, 73, 97]);
+    expect(executed).toBe(175);
   });
 });
 
