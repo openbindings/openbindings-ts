@@ -7,6 +7,7 @@ import {
   type Swagger20ContentCodec,
   type Swagger20ParameterInfo,
   type Swagger20Parameters,
+  type Swagger20SecurityCredentials,
   type Swagger20Source,
 } from "@openbindings/openapi-client/engine";
 
@@ -40,6 +41,9 @@ export async function runSwagger20Adapter<I, O>(
       signal: args.signal,
       fetch: args.fetch,
       server: configuration.server,
+      serverSchemeIndex: configuration.serverSchemeIndex,
+      securityAlternative: configuration.securityAlternative,
+      securityCredentials: swagger20Credentials(args.context),
       emptyValueForm: configuration.emptyValueForm,
       parameterConverter: options.parameterConversion,
       requestMedia: configuration.requestMedia,
@@ -72,6 +76,8 @@ export async function runSwagger20Adapter<I, O>(
 
 interface Swagger20RuntimeConfiguration {
   server?: string;
+  serverSchemeIndex?: number;
+  securityAlternative?: number;
   emptyValueForm?: "name-only" | "empty";
   requestMedia?: string;
   propertyMedia?: Record<string, string>;
@@ -83,11 +89,21 @@ function swagger20Configuration(context: Record<string, unknown> | undefined): S
   if (Object.hasOwn(raw, "server")) {
     const server = raw.server;
     if (typeof server === "string" && server !== "") result.server = server;
-    else if (asRecord(server) && typeof asRecord(server)!.baseUrl === "string" && asRecord(server)!.baseUrl !== "") {
-      result.server = asRecord(server)!.baseUrl as string;
-    } else if (!(asRecord(server) && Number.isInteger(asRecord(server)!.index))) {
-      throw new InvocationError("ERR_REFUSED");
+    else {
+      const object = asRecord(server);
+      if (!object || Object.keys(object).length !== 1) throw new InvocationError("ERR_REFUSED");
+      if (Object.hasOwn(object, "index")) {
+        if (!Number.isSafeInteger(object.index) || (object.index as number) < 0) throw new InvocationError("ERR_REFUSED");
+        result.serverSchemeIndex = object.index as number;
+      } else if (typeof object.baseUrl === "string" && object.baseUrl !== "") result.server = object.baseUrl;
+      else throw new InvocationError("ERR_REFUSED");
     }
+  }
+  if (Object.hasOwn(raw, "security")) {
+    const security = asRecord(raw.security);
+    if (!security || Object.keys(security).length !== 1 || !Number.isSafeInteger(security.index)
+      || (security.index as number) < 0) throw new InvocationError("ERR_REFUSED");
+    result.securityAlternative = security.index as number;
   }
   if (Object.hasOwn(raw, "emptyValueForm")) {
     if (raw.emptyValueForm !== "name-only" && raw.emptyValueForm !== "empty") throw new InvocationError("ERR_REFUSED");
@@ -106,6 +122,34 @@ function swagger20Configuration(context: Record<string, unknown> | undefined): S
       result.propertyMedia[name] = media;
     }
   }
+  return result;
+}
+
+function swagger20Credentials(context: Record<string, unknown> | undefined): Swagger20SecurityCredentials {
+  const result: Swagger20SecurityCredentials = { basic: {}, apiKeys: {}, oauth2: {} };
+  const add = (values: Record<string, unknown> | undefined): void => {
+    for (const [name, raw] of Object.entries(values ?? {})) {
+      if (typeof raw === "string") {
+        result.apiKeys![name] = raw;
+        continue;
+      }
+      const credential = asRecord(raw);
+      if (!credential) continue;
+      const userId = typeof credential.userId === "string" ? credential.userId
+        : typeof credential.username === "string" ? credential.username : undefined;
+      if (userId !== undefined && typeof credential.password === "string") {
+        result.basic![name] = { userId, password: credential.password };
+      }
+      if (typeof credential.accessToken === "string") {
+        const scopes = credential.scopes === undefined ? []
+          : Array.isArray(credential.scopes) && credential.scopes.every((scope) => typeof scope === "string")
+            ? credential.scopes as string[] : undefined;
+        if (scopes) result.oauth2![name] = { accessToken: credential.accessToken, scopes };
+      }
+    }
+  };
+  add(asRecord(context?.credentials));
+  add(asRecord(context?.apiKeys));
   return result;
 }
 
