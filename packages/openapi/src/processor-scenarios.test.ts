@@ -177,6 +177,7 @@ async function runScenario(
     : new OpenAPIInvoker({
       parameterConversion: scenarioParameterConversion(scenario),
       requestContentCodings: scenarioRequestContentCodings(scenario.given.runtime),
+      responseContentCodings: scenarioResponseContentCodings(scenario.given.runtime),
     }).invokeBinding({
       source: invocationSource,
       selector: typeof binding.selector === "string" ? binding.selector : "",
@@ -241,6 +242,37 @@ function scenarioRequestContentCodings(
       throw new Error(`unknown scenario request content-coding implementation ${JSON.stringify(implementation)}`);
     }
     result[name] = (body) => Uint8Array.from(body).reverse();
+  }
+  return result;
+}
+
+function scenarioResponseContentCodings(
+  runtime: Record<string, unknown> | undefined,
+): Record<string, (body: Uint8Array) => Uint8Array> | undefined {
+  const declarations = runtime?.responseContentCodings;
+  if (declarations === undefined) return undefined;
+  if (declarations === null || typeof declarations !== "object" || Array.isArray(declarations)) {
+    throw new Error("scenario runtime.responseContentCodings must be an object");
+  }
+  const result: Record<string, (body: Uint8Array) => Uint8Array> = {};
+  for (const [name, implementation] of Object.entries(declarations)) {
+    if (implementation === "reverse") {
+      result[name] = (body) => Uint8Array.from(body).reverse();
+      continue;
+    }
+    if (implementation === "unwrap") {
+      result[name] = (body) => {
+        const text = new TextDecoder().decode(body);
+        const token = name.toLowerCase();
+        const prefix = `${token}(`;
+        if (!text.startsWith(prefix) || !text.endsWith(")")) {
+          throw new Error(`scenario ${JSON.stringify(name)} decoder received malformed wrapper`);
+        }
+        return new TextEncoder().encode(text.slice(prefix.length, -1));
+      };
+      continue;
+    }
+    throw new Error(`unknown scenario response content-coding implementation ${JSON.stringify(implementation)}`);
   }
   return result;
 }
