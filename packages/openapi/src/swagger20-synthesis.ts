@@ -236,9 +236,11 @@ function projectSchema(value: unknown, request: boolean, sourceRef: string): {
       losses.push(...child.losses);
     }
     result.properties = properties;
-    if (Array.isArray(result.required) && removed.size > 0) {
-      result.required = result.required.filter((name) => typeof name !== "string" || !removed.has(name));
-      if (result.required.length === 0) delete result.required;
+    const required = result.required;
+    if (Array.isArray(required) && removed.size > 0) {
+      const retained = required.filter((name) => typeof name !== "string" || !removed.has(name));
+      if (retained.length > 0) result.required = retained;
+      else delete result.required;
     }
   }
   if (Object.hasOwn(value, "discriminator")) losses.push({
@@ -246,7 +248,7 @@ function projectSchema(value: unknown, request: boolean, sourceRef: string): {
     reasonCode: "openapi20.discriminator_projection_loss",
     message: "the OAS 2.0 discriminator annotation has no Core JSON Schema assertion with equivalent artifact semantics",
   });
-  return { schema: result as JSONSchema, losses };
+  return { schema: result, losses };
 }
 
 function projectExclusive(result: Record<string, unknown>, limit: string, exclusive: string): void {

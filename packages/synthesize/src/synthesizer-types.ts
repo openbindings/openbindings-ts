@@ -92,7 +92,7 @@ export interface SynthesizerWarning {
 }
 
 /** Granularity of one synthesis coverage entry. */
-export type SynthesisCoverageScope = "target" | "alternative" | "projection";
+export type SynthesisCoverageScope = "target" | "alternative" | "projection" | "dependency";
 
 /** Durable disposition of one source interaction unit. */
 export type SynthesisCoverageStatus =
@@ -109,17 +109,17 @@ export type SynthesisCoverageStatus =
 export interface SynthesisCoverageEntry {
   /** Zero-based index of the input source containing this interaction unit. */
   sourceIndex: number;
-  /** Emitted source key; required for represented and lossy entries. */
+  /** Emitted source key; required for represented and lossy binding-backed entries. */
   sourceKey?: string;
   /** Stable source-local identifier; need not be a conformant binding selector. */
   sourceRef: string;
   scope: SynthesisCoverageScope;
   status: SynthesisCoverageStatus;
-  /** Required for represented and lossy entries. */
+  /** Required for represented and lossy binding-backed entries. */
   operationKey?: string;
   /** Emitted binding key; required for represented and lossy entries. */
   bindingKey?: string;
-  /** Required for represented and lossy entries; empty denotes a binding with omitted selector. */
+  /** Required for represented and lossy binding-backed entries; empty denotes an omitted selector. */
   bindingSelector?: string;
   /** Stable family-namespaced code; required for non-represented entries. */
   reasonCode?: string;
@@ -213,7 +213,12 @@ export function finalizeSynthesisCoverage(
     if (!entry.sourceRef) {
       throw new Error(`synthesis coverage entry ${index} has empty sourceRef`);
     }
-    if (entry.scope !== "target" && entry.scope !== "alternative" && entry.scope !== "projection") {
+    if (
+      entry.scope !== "target"
+      && entry.scope !== "alternative"
+      && entry.scope !== "projection"
+      && entry.scope !== "dependency"
+    ) {
       throw new Error(`synthesis coverage entry ${index} has invalid scope`);
     }
     const key = `${entry.sourceIndex}\0${entry.scope}\0${entry.sourceRef}`;
@@ -229,6 +234,13 @@ export function finalizeSynthesisCoverage(
         throw new Error(`synthesis coverage entry ${index} repeats requirement ${JSON.stringify(requirement)}`);
       }
       requirements.add(requirement);
+    }
+
+    if (entry.scope === "dependency" && entry.status === "represented") {
+      if (entry.reasonCode) {
+        throw new Error(`represented synthesis coverage entry ${index} must not carry reasonCode`);
+      }
+      continue;
     }
 
     if (entry.status === "represented" || entry.status === "lossy") {

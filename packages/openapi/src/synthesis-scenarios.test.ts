@@ -17,10 +17,6 @@ const corpora = ["openapi-2.0", "openapi-3.0", "openapi-3.1", "openapi-3.2"].map
   ));
 const scenarios = corpora.flatMap((corpus) => corpus.scenarios);
 
-const pendingReasons = new Map<string, string>([
-  ["OAPI31-SS-01", "pending N10 dependencies node"],
-]);
-
 /**
  * Serves a scenario's declared companion documents and nothing else. Every
  * address a multi-document corpus scenario reaches must be answerable from its
@@ -57,13 +53,7 @@ function synthesizerFor(scenario: SynthesisScenario): OpenAPISynthesizer {
 describe("portable OpenAPI synthesis scenarios", () => {
   let executed = 0;
 
-  // The one remaining skip is the independently scheduled dependency node.
-  for (const [id, reason] of pendingReasons) {
-    it.skip(`${id}: ${reason}`, () => {});
-  }
-
   for (const scenario of scenarios) {
-    if (pendingReasons.has(scenario.id)) continue;
     it(scenario.id, async () => {
       const synthesizer = synthesizerFor(scenario);
       await verifySynthesisScenario(scenario, () => synthesizer.synthesizeInterfaceWithCoverage({
@@ -74,9 +64,8 @@ describe("portable OpenAPI synthesis scenarios", () => {
   }
 
   afterAll(() => {
-    expect(corpora.map((corpus) => corpus.scenarios.length)).toEqual([10, 14, 30, 4]);
-    expect([...pendingReasons.keys()]).toEqual(["OAPI31-SS-01"]);
-    expect(executed).toBe(57);
+    expect(corpora.map((corpus) => corpus.scenarios.length)).toEqual([10, 15, 31, 7]);
+    expect(executed).toBe(63);
   });
 
   it("serves only the addresses a scenario declares", async () => {

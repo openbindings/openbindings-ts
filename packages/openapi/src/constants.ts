@@ -14,31 +14,21 @@ export const BINDING_SPEC_OPENAPI_32 = "openbindings.openapi-3.2@1";
 export const ERR_UNSUPPORTED_BINDING_SPEC = "ERR_UNSUPPORTED_BINDING_SPEC";
 
 interface OpenAPIBindingSpecRegistration {
-  requestImplemented: boolean;
-  responseComplete: boolean;
   editions: ReadonlySet<string>;
 }
 
 const OPENAPI_BINDING_SPEC_REGISTRY: Readonly<Record<string, OpenAPIBindingSpecRegistration>> =
   Object.freeze({
     [BINDING_SPEC_OPENAPI_20]: {
-      requestImplemented: true,
-      responseComplete: true,
       editions: new Set(["2.0"]),
     },
     [BINDING_SPEC_OPENAPI_30]: {
-      requestImplemented: true,
-      responseComplete: true,
       editions: new Set(["3.0.0", "3.0.1", "3.0.2", "3.0.3", "3.0.4"]),
     },
     [BINDING_SPEC_OPENAPI_31]: {
-      requestImplemented: true,
-      responseComplete: true,
       editions: new Set(["3.1.0", "3.1.1", "3.1.2"]),
     },
     [BINDING_SPEC_OPENAPI_32]: {
-      requestImplemented: true,
-      responseComplete: false,
       editions: new Set(["3.2.0"]),
     },
   });
@@ -51,11 +41,7 @@ const PROFILES: Readonly<Record<string, OpenAPIExecutionProfile>> = Object.freez
 });
 
 export function isImplementedOpenAPIBindingSpec(bindingSpec: string): boolean {
-  return OPENAPI_BINDING_SPEC_REGISTRY[bindingSpec]?.responseComplete === true;
-}
-
-export function isRequestImplementedOpenAPIBindingSpec(bindingSpec: string): boolean {
-  return OPENAPI_BINDING_SPEC_REGISTRY[bindingSpec]?.requestImplemented === true;
+  return OPENAPI_BINDING_SPEC_REGISTRY[bindingSpec] !== undefined;
 }
 
 export function unsupportedBindingSpecMessage(bindingSpec: string): string {
@@ -74,7 +60,7 @@ export function profileForBindingSpec(bindingSpec: string): OpenAPIExecutionProf
 
 export function checkAcceptedOpenAPIEdition(bindingSpec: string, edition: unknown): void {
   const registration = OPENAPI_BINDING_SPEC_REGISTRY[bindingSpec];
-  if (!registration?.requestImplemented) throw new Error(unsupportedBindingSpecMessage(bindingSpec));
+  if (!registration) throw new Error(unsupportedBindingSpecMessage(bindingSpec));
   if (typeof edition !== "string" || !registration.editions.has(edition)) {
     throw new Error(
       `document edition ${JSON.stringify(edition ?? "")} is not admitted by binding specification ${JSON.stringify(bindingSpec)}`,
@@ -107,22 +93,22 @@ export function openAPIRule(bindingSpec: string, rule: string): string {
 }
 
 export function hasRoutedInputs(bindingSpec: string): boolean {
-  return isRequestImplementedOpenAPIBindingSpec(bindingSpec);
+  return isImplementedOpenAPIBindingSpec(bindingSpec);
 }
 export function hasMediaFidelity(bindingSpec: string): boolean {
-  return isRequestImplementedOpenAPIBindingSpec(bindingSpec);
+  return isImplementedOpenAPIBindingSpec(bindingSpec);
 }
 export function hasResponseFidelity(bindingSpec: string): boolean {
-  return OPENAPI_BINDING_SPEC_REGISTRY[bindingSpec]?.responseComplete === true;
+  return isImplementedOpenAPIBindingSpec(bindingSpec);
 }
 export function hasDynamicObjectCarriage(bindingSpec: string): boolean {
-  return isRequestImplementedOpenAPIBindingSpec(bindingSpec);
+  return isImplementedOpenAPIBindingSpec(bindingSpec);
 }
 export function hasWholeJSONCarriage(bindingSpec: string): boolean {
-  return isRequestImplementedOpenAPIBindingSpec(bindingSpec);
+  return isImplementedOpenAPIBindingSpec(bindingSpec);
 }
 export function hasSchemaOmittedOAS30ByteCarriage(bindingSpec: string): boolean {
-  return isRequestImplementedOpenAPIBindingSpec(bindingSpec);
+  return isImplementedOpenAPIBindingSpec(bindingSpec);
 }
 
 export { VALID_METHODS } from "@openbindings/openapi-client/analysis";

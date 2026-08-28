@@ -7,6 +7,7 @@ export type {
   TransformOrRef,
   TransformRef,
   BindingEntry,
+  DependencyEntry,
   OBInterface,
 } from "./types.js";
 export { isTransformRef, resolveTransform, schemaObjectForm } from "./types.js";

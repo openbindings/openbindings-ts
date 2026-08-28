@@ -8,7 +8,6 @@ import {
   ERR_UNSUPPORTED_BINDING_SPEC,
   checkAcceptedOpenAPIEdition,
   isImplementedOpenAPIBindingSpec,
-  isRequestImplementedOpenAPIBindingSpec,
 } from "./constants.js";
 import { OpenAPIInvoker, OpenAPISynthesizer } from "./invoker.js";
 
@@ -24,7 +23,7 @@ const DOC_31 = {
 };
 
 describe("exact OpenAPI family-token registry", () => {
-  it("exports four registered tokens, warrants 2.0 through 3.1, and has no legacy alias", () => {
+  it("exports and warrants four registered tokens with no legacy alias", () => {
     expect([
       publicAPI.BINDING_SPEC_OPENAPI_20,
       publicAPI.BINDING_SPEC_OPENAPI_30,
@@ -39,8 +38,7 @@ describe("exact OpenAPI family-token registry", () => {
     expect(isImplementedOpenAPIBindingSpec(BINDING_SPEC_OPENAPI_20)).toBe(true);
     expect(isImplementedOpenAPIBindingSpec(BINDING_SPEC_OPENAPI_30)).toBe(true);
     expect(isImplementedOpenAPIBindingSpec(BINDING_SPEC_OPENAPI_31)).toBe(true);
-    expect(isImplementedOpenAPIBindingSpec(BINDING_SPEC_OPENAPI_32)).toBe(false);
-    expect(isRequestImplementedOpenAPIBindingSpec(BINDING_SPEC_OPENAPI_32)).toBe(true);
+    expect(isImplementedOpenAPIBindingSpec(BINDING_SPEC_OPENAPI_32)).toBe(true);
     expect(publicAPI).not.toHaveProperty("BINDING_SPEC");
   });
 

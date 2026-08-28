@@ -160,3 +160,33 @@ describe("portable synthesis scenario assertions", () => {
     )).resolves.toBeUndefined();
   });
 });
+
+describe("portable synthesis identity", () => {
+  it("keeps targetless dependency contracts available to assertions but out of target operations", async () => {
+    const scenario: SynthesisScenario = {
+      id: "OAPI-SS-97",
+      description: "targetless dependency identity seam",
+      source: { bindingSpec: "openbindings.openapi@1", content: {} },
+      expected: {
+        outcome: "synthesized",
+        operations: ["call"],
+        bindings: [],
+        assertions: [{ path: "/operations/receive/input/type", equals: "string" }],
+        coverage: { exhaustive: true, fullyRepresented: true, entries: [] },
+      },
+    };
+    const result = {
+      interface: {
+        openbindings: "0.2.0",
+        operations: {
+          call: {},
+          receive: { input: { type: "string" } },
+        },
+        dependencies: { inbound: { operation: "receive" } },
+      },
+      coverage: { exhaustive: true, fullyRepresented: true, entries: [] },
+    } as unknown as SynthesizeResult;
+
+    await expect(verifySynthesisScenario(scenario, async () => result)).resolves.toBeUndefined();
+  });
+});

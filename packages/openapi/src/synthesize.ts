@@ -1,4 +1,11 @@
-import type { OBInterface, Operation, BindingEntry, JSONSchema, Source } from "@openbindings/core";
+import type {
+  OBInterface,
+  Operation,
+  BindingEntry,
+  DependencyEntry,
+  JSONSchema,
+  Source,
+} from "@openbindings/core";
 import type { SynthesizerWarning } from "@openbindings/synthesize";
 import { MAX_TESTED_VERSION } from "@openbindings/core";
 import type {
@@ -64,12 +71,14 @@ import { isSupportedOpenAPISchemaDialect } from "./ref-siblings.js";
 import {
   computeAcceptanceFloor,
   classifyOpenAPI32SequentialResponse,
+  documentInboundOperationInventory,
   floorInvalidTargetMessage,
   floorOpVerdict,
   loadOpenAPIArtifact,
   type AcceptanceFloor,
   type FloorOp,
   type OpenAPI32ResponseMediaExclusion,
+  type OpenAPIInboundOperationTarget,
   type OpenAPIOperationResolutionError,
   type OpenAPIResolvedOperation,
 } from "@openbindings/openapi-client/analysis";
@@ -112,6 +121,12 @@ export interface UnrealizableTarget {
   message: string;
 }
 
+export interface InboundDependencyDisposition {
+  sourceRef: string;
+  represented: boolean;
+  message?: string;
+}
+
 /**
  * Loads an OpenAPI document and converts it into an OBInterface with
  * operations and bindings.
@@ -136,6 +151,7 @@ export async function convertToInterface(
   onResponseMediaExclusions?: (
     exclusions: ReadonlyMap<string, readonly OpenAPI32ResponseMediaExclusion[]>,
   ) => void,
+  onInboundDependencies?: (dispositions: readonly InboundDependencyDisposition[]) => void,
 ): Promise<OBInterface> {
   // Exact-token refusal precedes artifact parsing or loading. Missing input is
   // deliberately not defaulted to any family.
@@ -245,11 +261,6 @@ export async function convertToInterface(
     if (doc.info.title) iface.name = doc.info.title;
     if (doc.info.version) iface.version = doc.info.version;
     if (doc.info.description) iface.description = doc.info.description;
-  }
-
-  if (!doc.paths) {
-    delete iface.bindings;
-    return iface;
   }
 
   // Full dereference aliases internal $refs to shared nodes, so a recursive
@@ -626,8 +637,154 @@ export async function convertToInterface(
       (iface.bindings as Record<string, BindingEntry>)[bindingKey] = binding;
   }
 
+  const inboundDispositions: InboundDependencyDisposition[] = [];
+  const dependencies: Record<string, DependencyEntry> = {};
+  const usedDependencyKeys = new Set<string>();
+  for (const disposition of documentInboundOperationInventory(doc)) {
+    if (!disposition.target) {
+      inboundDispositions.push({
+        sourceRef: disposition.reference.ref,
+        represented: false,
+        message: disposition.error?.message ?? "inbound declaration is unresolvable",
+      });
+      continue;
+    }
+    const target = disposition.target;
+    const opKey = deriveInboundOperationKey(target, usedKeys);
+    usedKeys.add(opKey);
+    let operation: Operation;
+    try {
+      operation = projectInboundOperation(
+        target,
+        opKey,
+        exactBindingSpec,
+        formatVersion,
+        profile,
+        schemaNames,
+        artifactBase,
+      );
+    } catch (error: unknown) {
+      const message = safeErrorMessage(error);
+      inboundDispositions.push({ sourceRef: target.ref, represented: false, message });
+      if (onUnrealizable) continue;
+      throw unrealizableOperation(opKey, message);
+    }
+    const dependencyKey = uniqueKey(
+      sanitizeKey(`${target.kind}.${target.ref.replace(/^#\//u, "")}`),
+      usedDependencyKeys,
+    );
+    usedDependencyKeys.add(dependencyKey);
+    iface.operations[opKey] = operation;
+    dependencies[dependencyKey] = { operation: opKey };
+    inboundDispositions.push({ sourceRef: target.ref, represented: true });
+  }
+  if (Object.keys(dependencies).length > 0) iface.dependencies = dependencies;
+  onInboundDependencies?.(inboundDispositions);
+
   if (Object.keys(iface.bindings ?? {}).length === 0) delete iface.bindings;
   return iface;
+}
+
+function deriveInboundOperationKey(
+  target: OpenAPIInboundOperationTarget,
+  used: Set<string>,
+): string {
+  if (target.operation.operationId) {
+    const candidate = sanitizeKey(target.operation.operationId);
+    if (!used.has(candidate)) return candidate;
+  }
+  return uniqueKey(sanitizeKey(`inbound.${target.ref.replace(/^#\//u, "")}`), used);
+}
+
+function projectInboundOperation(
+  target: OpenAPIInboundOperationTarget,
+  opKey: string,
+  bindingSpec: string,
+  formatVersion: string,
+  profile: ReturnType<typeof profileForBindingSpec>,
+  schemaNames: ReturnType<typeof componentSchemaNames>,
+  artifactBase: string | undefined,
+): Operation {
+  const op = target.operation;
+  const params = effectiveParameters(target.pathItem, op);
+  const malformed = malformedEffectiveParameter(
+    effectiveParameterDeclarationRows(target.pathItem, op),
+    bindingSpec,
+  );
+  if (malformed) throw new Error(`effective parameter ${JSON.stringify(malformed)} violates its closed declaration`);
+  const duplicate = duplicateEffectiveParameterIdentity(params);
+  if (duplicate) throw new Error(`parameter identity ${JSON.stringify(duplicate)} is declared more than once`);
+  const unsupported = unsupportedParameterContent(params, bindingSpec);
+  if (unsupported) throw new Error(`parameter ${JSON.stringify(unsupported)} has no faithful content carriage`);
+  const undefinedMember = styleLaneUndefinedExpansionParam(
+    params,
+    profile,
+    formatVersion.startsWith("3.0"),
+  );
+  if (undefinedMember !== null) throw new Error(`parameter member ${JSON.stringify(undefinedMember)} has no defined expansion`);
+  const multiValueCookie = formStyleCookieMultiValueParameter(params, formatVersion.startsWith("3.0"));
+  if (multiValueCookie !== undefined) throw new Error(`cookie parameter ${JSON.stringify(multiValueCookie)} proves multi-pair expansion`);
+
+  const inputOperation: OpenAPIOperation = requestBodyIgnoredForBindingSpec(bindingSpec, target.method)
+    ? { ...op, requestBody: undefined }
+    : op;
+  let requestPlans: BodyPlan[] = [];
+  if (inputOperation.requestBody) {
+    try {
+      requestPlans = planRequestBodies(inputOperation, {
+        profile,
+        openapiVersion: target.document.openapi,
+      }).filter((plan) => hasRoutedInputs(bindingSpec) || !candidateCollides(params, plan));
+    } catch (error: unknown) {
+      if (inputOperation.requestBody.required) throw error;
+    }
+    if (inputOperation.requestBody.required && requestPlans.length === 0) {
+      throw new Error("required request body has no faithful candidate carriage");
+    }
+  }
+  const dialectIssue = operationSchemaDialectIssue(
+    target.document,
+    params,
+    requestPlans,
+    inputOperation,
+    bindingSpec,
+  );
+  if (dialectIssue) throw new Error(`${dialectIssue.side} schema uses unsupported dialect ${JSON.stringify(dialectIssue.dialect)}`);
+
+  const result: Operation = {
+    description: op.description || op.summary || undefined,
+    deprecated: op.deprecated || undefined,
+  };
+  if (Array.isArray(op.tags) && op.tags.length > 0) result.tags = op.tags;
+  const opPointer = `#/operations/${escapePointerSegment(opKey)}`;
+  const routes = planAbstractInputRoutes(params, requestPlans);
+  const requestProjector = createOpenAPISchemaProjector("request", schemaNames);
+  const inputSchema = buildInputSchemaForPlans(
+    inputOperation,
+    params,
+    requestPlans,
+    routes,
+    requestProjector,
+  );
+  if (inputSchema !== undefined) {
+    result.input = translateSchemaDialect(decycleSchema(
+      inputSchema,
+      requestProjector.componentNames,
+      `${opPointer}/input`,
+      artifactBase,
+    ), formatVersion) as JSONSchema;
+  }
+  const responseProjector = createOpenAPISchemaProjector("response", schemaNames);
+  const outputSchema = buildOutputSchema(op, responseProjector, bindingSpec, target.document.openapi ?? "3.0");
+  if (outputSchema !== undefined) {
+    result.output = translateSchemaDialect(decycleSchema(
+      outputSchema,
+      responseProjector.componentNames,
+      `${opPointer}/output`,
+      artifactBase,
+    ), formatVersion) as JSONSchema;
+  }
+  return result;
 }
 
 function installOpenAPI32SynthesisTarget(
@@ -641,12 +798,20 @@ function installOpenAPI32SynthesisTarget(
   for (const field of ["summary", "description", "parameters", "servers"]) {
     if (Object.hasOwn(resolvedPath, field)) pathItem[field] = resolvedPath[field];
   }
-  const operation = target.referringSecuritySchemes
+  const adjacentOperation = target.reference.additional
+    ? asRecord(asRecord(pathItem.additionalOperations)?.[target.reference.method])
+    : asRecord(pathItem[target.reference.method]);
+  let operation: OpenAPIOperation = target.referringSecuritySchemes
     ? {
         ...target.operation,
         [REFERRING_SECURITY_SCHEMES_MARKER]: structuredClone(target.referringSecuritySchemes),
       }
     : target.operation;
+  // The 3.2 execution closure does not need callback declarations, while
+  // synthesis does: retain the raw parent slot for inbound inventory.
+  if (Object.hasOwn(adjacentOperation ?? {}, "callbacks") && !Object.hasOwn(operation, "callbacks")) {
+    operation = { ...operation, callbacks: adjacentOperation!.callbacks };
+  }
   if (target.reference.additional) {
     const additional = asRecord(pathItem.additionalOperations) ?? {};
     pathItem.additionalOperations = additional;
