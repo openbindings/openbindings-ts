@@ -4,6 +4,7 @@ import {
   Swagger20ExecutionError,
   prepareSwagger20,
   type Swagger20Input,
+  type Swagger20ContentCodec,
   type Swagger20ParameterInfo,
   type Swagger20Parameters,
   type Swagger20Source,
@@ -11,6 +12,8 @@ import {
 
 export interface Swagger20AdapterOptions {
   parameterConversion?: (value: unknown) => string;
+  requestContentCodings?: ReadonlyMap<string, Swagger20ContentCodec>;
+  responseContentCodings?: ReadonlyMap<string, Swagger20ContentCodec>;
 }
 
 /**
@@ -39,6 +42,10 @@ export async function runSwagger20Adapter<I, O>(
       server: configuration.server,
       emptyValueForm: configuration.emptyValueForm,
       parameterConverter: options.parameterConversion,
+      requestMedia: configuration.requestMedia,
+      propertyMedia: configuration.propertyMedia,
+      requestContentCodings: options.requestContentCodings,
+      responseContentCodings: options.responseContentCodings,
     });
   } catch (error: unknown) {
     throw bridgeSwagger20Error(error);
@@ -66,6 +73,8 @@ export async function runSwagger20Adapter<I, O>(
 interface Swagger20RuntimeConfiguration {
   server?: string;
   emptyValueForm?: "name-only" | "empty";
+  requestMedia?: string;
+  propertyMedia?: Record<string, string>;
 }
 
 function swagger20Configuration(context: Record<string, unknown> | undefined): Swagger20RuntimeConfiguration {
@@ -83,6 +92,19 @@ function swagger20Configuration(context: Record<string, unknown> | undefined): S
   if (Object.hasOwn(raw, "emptyValueForm")) {
     if (raw.emptyValueForm !== "name-only" && raw.emptyValueForm !== "empty") throw new InvocationError("ERR_REFUSED");
     result.emptyValueForm = raw.emptyValueForm;
+  }
+  if (Object.hasOwn(raw, "requestMedia")) {
+    if (typeof raw.requestMedia !== "string" || raw.requestMedia === "") throw new InvocationError("ERR_REFUSED");
+    result.requestMedia = raw.requestMedia;
+  }
+  if (Object.hasOwn(raw, "propertyMedia")) {
+    const propertyMedia = asRecord(raw.propertyMedia);
+    if (!propertyMedia) throw new InvocationError("ERR_REFUSED");
+    result.propertyMedia = {};
+    for (const [name, media] of Object.entries(propertyMedia)) {
+      if (typeof media !== "string" || media === "") throw new InvocationError("ERR_REFUSED");
+      result.propertyMedia[name] = media;
+    }
   }
   return result;
 }

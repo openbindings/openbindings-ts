@@ -29,11 +29,18 @@ const corpusEntries = [
   {
     file: "openapi-2.0.json",
     wanted: new Set([
+      "OAPI20-PS-01",
       "OAPI20-PS-02", "OAPI20-PS-03", "OAPI20-PS-04", "OAPI20-PS-05", "OAPI20-PS-06",
       "OAPI20-PS-07", "OAPI20-PS-08", "OAPI20-PS-09", "OAPI20-PS-10", "OAPI20-PS-11",
       "OAPI20-PS-12", "OAPI20-PS-13", "OAPI20-PS-14", "OAPI20-PS-15", "OAPI20-PS-16",
       "OAPI20-PS-17", "OAPI20-PS-18", "OAPI20-PS-19", "OAPI20-PS-20", "OAPI20-PS-21",
       "OAPI20-PS-22", "OAPI20-PS-23", "OAPI20-PS-24", "OAPI20-PS-25", "OAPI20-PS-26",
+      "OAPI20-PS-27", "OAPI20-PS-28", "OAPI20-PS-29", "OAPI20-PS-30", "OAPI20-PS-31",
+      "OAPI20-PS-32", "OAPI20-PS-33", "OAPI20-PS-34", "OAPI20-PS-35", "OAPI20-PS-36",
+      "OAPI20-PS-37", "OAPI20-PS-38", "OAPI20-PS-39", "OAPI20-PS-40", "OAPI20-PS-41",
+      "OAPI20-PS-42", "OAPI20-PS-43", "OAPI20-PS-44", "OAPI20-PS-45", "OAPI20-PS-46",
+      "OAPI20-PS-47", "OAPI20-PS-48", "OAPI20-PS-49", "OAPI20-PS-50", "OAPI20-PS-51",
+      "OAPI20-PS-52", "OAPI20-PS-53",
     ]),
   },
   { file: "openapi-3.0.json" },
@@ -69,8 +76,8 @@ describe("portable OpenAPI processor scenarios", () => {
   }
 
   afterAll(() => {
-    expect(corpora.map(({ corpus, wanted }) => wanted?.size ?? corpus.scenarios.length)).toEqual([25, 73, 97]);
-    expect(executed).toBe(195);
+    expect(corpora.map(({ corpus, wanted }) => wanted?.size ?? corpus.scenarios.length)).toEqual([53, 73, 97]);
+    expect(executed).toBe(223);
   });
 });
 
@@ -266,7 +273,7 @@ async function observedBody(
     const bytes = new Uint8Array(body.buffer, body.byteOffset, body.byteLength);
     return {
       present: true,
-      value: new TextDecoder().decode(bytes),
+      value: observedTextValue(bytes),
       base64: bytesToBase64(bytes),
       byteLength: bytes.byteLength,
     };
@@ -275,12 +282,18 @@ async function observedBody(
     const bytes = new Uint8Array(body);
     return {
       present: true,
-      value: new TextDecoder().decode(bytes),
+      value: observedTextValue(bytes),
       base64: bytesToBase64(bytes),
       byteLength: bytes.byteLength,
     };
   }
   return { present: true, value: String(body) };
+}
+
+function observedTextValue(bytes: Uint8Array): unknown {
+  const text = new TextDecoder().decode(bytes);
+  try { return JSON.parse(text) as unknown; }
+  catch { return text; }
 }
 
 function bytesToBase64(bytes: Uint8Array): string {
