@@ -641,9 +641,9 @@
           }
         }
       },
-      "expect": "refused",
+      "expect": "admitted",
       "member": ".tags",
-      "basis": "The multipart style lane is the same lane under the same rows."
+      "basis": "On the 3.0 line Encoding style controls apply only to application/x-www-form-urlencoded and are ignored for multipart. The declared array therefore follows multipart's content path and emits repeated parts rather than selecting an RFC 6570 style lane."
     },
     {
       "name": "multipart content-lane object with an array member",

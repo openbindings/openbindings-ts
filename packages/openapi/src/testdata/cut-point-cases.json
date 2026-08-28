@@ -489,17 +489,31 @@
         "operations": {
           "putFolder": {
             "input": {
-              "properties": {
-                "folder": {
+              "$defs": {
+                "Folder": {
                   "properties": {
                     "name": {
                       "type": "string"
+                    },
+                    "parent": {
+                      "allOf": [
+                        {
+                          "$ref": "#/operations/putFolder/input/$defs/Folder"
+                        }
+                      ],
+                      "readOnly": true
                     }
                   },
                   "required": [
-                    "name"
+                    "name",
+                    "parent"
                   ],
                   "type": "object"
+                }
+              },
+              "properties": {
+                "folder": {
+                  "$ref": "#/operations/putFolder/input/$defs/Folder"
                 }
               },
               "type": "object"
@@ -650,17 +664,31 @@
               "type": "object"
             },
             "output": {
-              "properties": {
-                "draft": {
+              "$defs": {
+                "Draft": {
                   "properties": {
+                    "previous": {
+                      "allOf": [
+                        {
+                          "$ref": "#/operations/putDraft/output/$defs/Draft"
+                        }
+                      ],
+                      "writeOnly": true
+                    },
                     "title": {
                       "type": "string"
                     }
                   },
                   "required": [
-                    "title"
+                    "title",
+                    "previous"
                   ],
                   "type": "object"
+                }
+              },
+              "properties": {
+                "draft": {
+                  "$ref": "#/operations/putDraft/output/$defs/Draft"
                 }
               },
               "type": "object"
@@ -1041,9 +1069,30 @@
         "operations": {
           "putArchive": {
             "input": {
+              "$defs": {
+                "Owner": {
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    },
+                    "supervisor": {
+                      "$ref": "#/operations/putArchive/input/$defs/Owner"
+                    }
+                  },
+                  "type": "object"
+                }
+              },
               "properties": {
                 "archive": {
                   "properties": {
+                    "owner": {
+                      "allOf": [
+                        {
+                          "$ref": "#/operations/putArchive/input/$defs/Owner"
+                        }
+                      ],
+                      "readOnly": true
+                    },
                     "title": {
                       "type": "string"
                     }
@@ -1564,6 +1613,14 @@
                         }
                       ],
                       "writeOnly": true
+                    },
+                    "prior": {
+                      "allOf": [
+                        {
+                          "$ref": "#/operations/putAudit/input/$defs/Audit"
+                        }
+                      ],
+                      "readOnly": true
                     }
                   },
                   "type": "object"
@@ -1590,6 +1647,14 @@
                         }
                       ],
                       "readOnly": true
+                    },
+                    "proposed": {
+                      "allOf": [
+                        {
+                          "$ref": "#/operations/putAudit/output/$defs/Audit"
+                        }
+                      ],
+                      "writeOnly": true
                     }
                   },
                   "type": "object"
@@ -1695,7 +1760,23 @@
               "$defs": {
                 "Ring": {
                   "properties": {
+                    "audit": {
+                      "allOf": [
+                        {
+                          "$ref": "#/operations/putRing/input/$defs/Trail"
+                        }
+                      ],
+                      "readOnly": true
+                    },
                     "next": {
+                      "$ref": "#/operations/putRing/input/$defs/Ring"
+                    }
+                  },
+                  "type": "object"
+                },
+                "Trail": {
+                  "properties": {
+                    "ring": {
                       "$ref": "#/operations/putRing/input/$defs/Ring"
                     }
                   },

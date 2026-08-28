@@ -17,15 +17,14 @@ export {
   encodePathValue,
   type RoutedInput,
 } from "@openbindings/openapi-client/analysis";
+import {
+  resolvedParameterStyleLaneUndefinedExpansionMember as parameterStyleLaneUndefinedExpansionMember,
+  resolvedStyleLaneUndefinedExpansionParam as styleLaneUndefinedExpansionParam,
+  validateResolvedParameterSerialization as validateNativeParameterSerialization,
+} from "@openbindings/openapi-client/analysis";
 
 import type { OpenAPIParameter } from "./types.js";
 import { BINDING_SPEC_OPENAPI_30, BINDING_SPEC_OPENAPI_31 } from "./constants.js";
-import {
-  parameterStyleLaneUndefinedExpansionMember,
-  styleLaneUndefinedExpansionParam,
-  validateParameterSerializationForBinding,
-} from "./parameter-semantics.js";
-
 export {
   parameterStyleLaneUndefinedExpansionMember,
   styleLaneUndefinedExpansionParam,
@@ -36,7 +35,7 @@ export function validateParameterSerialization(
   parameter: OpenAPIParameter,
   oas30 = false,
 ): void {
-  validateParameterSerializationForBinding(parameter, oas30);
+  validateNativeParameterSerialization(parameter, oas30);
 }
 
 /** Returns the first exact (in,name) identity declared more than once. */
