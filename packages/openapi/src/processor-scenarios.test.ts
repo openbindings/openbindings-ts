@@ -92,7 +92,10 @@ async function runScenario(
     if (body.present) {
       dispatch.body = body.value;
       if (body.base64 !== undefined) dispatch.bodyBase64 = body.base64;
-      if (body.byteLength !== undefined) dispatch.bodyByteLength = body.byteLength;
+      if (body.byteLength !== undefined) {
+        dispatch.bodyByteLength = body.byteLength;
+        dispatch.byteLength = body.byteLength;
+      }
     }
     dispatches.push(dispatch);
 

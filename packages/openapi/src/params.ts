@@ -24,7 +24,11 @@ import {
 } from "@openbindings/openapi-client/analysis";
 
 import type { OpenAPIParameter } from "./types.js";
-import { BINDING_SPEC_OPENAPI_30, BINDING_SPEC_OPENAPI_31 } from "./constants.js";
+import {
+  BINDING_SPEC_OPENAPI_30,
+  BINDING_SPEC_OPENAPI_31,
+  BINDING_SPEC_OPENAPI_32,
+} from "./constants.js";
 export {
   parameterStyleLaneUndefinedExpansionMember,
   styleLaneUndefinedExpansionParam,
@@ -71,6 +75,7 @@ export function caseFoldedHeaderCollision(params: OpenAPIParameter[]): string | 
 /** Family-specific requestBody method semantics. Method is lower-case. */
 export function requestBodyIgnoredForBindingSpec(bindingSpec: string, method: string): boolean {
   if (bindingSpec === BINDING_SPEC_OPENAPI_31) return method === "trace";
+  if (bindingSpec === BINDING_SPEC_OPENAPI_32) return method === "trace";
   if (bindingSpec === BINDING_SPEC_OPENAPI_30) {
     return ["get", "head", "delete", "options", "trace"].includes(method);
   }

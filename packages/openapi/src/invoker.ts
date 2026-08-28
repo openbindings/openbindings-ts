@@ -444,14 +444,7 @@ export class OpenAPIInvoker implements BindingInvoker {
     if (pendingSecurityRequirement) {
       throw new InvocationError(CONTEXT_REQUIRED, pendingSecurityRequirement);
     }
-    const prefetchedInput = model.preStartBodyGate
-      ? await preReadBodyFreeInput(outer)
-      : undefined;
-    // start() resolves only after all artifact/configuration checks that do
-    // not require application input. Only then does the bridge acquire the
-    // SDK input sequence.
-    const execution = await prepared.start<I, O>();
-    await bridgeExecution(execution, outer, (input) => {
+    const mapInput = (input: unknown): unknown => {
       const selectedPlans = configuredRequestPlans(
         model.operation,
         model.plans,
@@ -470,7 +463,15 @@ export class OpenAPIInvoker implements BindingInvoker {
         bindingSpec,
         this.parameterConversion,
       );
-    }, model, prefetchedInput);
+    };
+    const prefetchedInput = model.preStartBodyGate
+      ? await preReadValidatedInput(outer, mapInput)
+      : undefined;
+    // start() resolves only after all artifact/configuration checks that do
+    // not require application input. Only then does the bridge acquire the
+    // SDK input sequence.
+    const execution = await prepared.start<I, O>();
+    await bridgeExecution(execution, outer, mapInput, model, prefetchedInput);
   }
 }
 
@@ -1180,13 +1181,16 @@ interface PrefetchedInput<I> {
   result: IteratorResult<I, void>;
 }
 
-/** Proves a forbidden-method body is absent before the carrier can dispatch. */
-async function preReadBodyFreeInput<I, O>(outer: InvocationImpl<I, O>): Promise<PrefetchedInput<I>> {
+/** Validates the first 3.2 caller envelope before the carrier can dispatch. */
+async function preReadValidatedInput<I, O>(
+  outer: InvocationImpl<I, O>,
+  mapInput: (input: I) => unknown,
+): Promise<PrefetchedInput<I>> {
   const iterator = outer.inputs()[Symbol.asyncIterator]();
   const result = await iterator.next();
   if (!result.done) {
     try {
-      if (parseCallerEnvelope(result.value).bodyPresent) throw new Error("body is unroutable");
+      mapInput(result.value);
     } catch {
       throw new InvocationError("ERR_REFUSED");
     }
