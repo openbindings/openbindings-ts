@@ -14,6 +14,7 @@ import {
 import { effectiveParameters } from "./params.js";
 import {
   HTTP_METHODS,
+  synthesisOperationEntries,
   type UnrealizableTarget,
 } from "./synthesize.js";
 import {
@@ -46,6 +47,7 @@ import {
   hasMediaFidelity,
   hasRoutedInputs,
   isImplementedOpenAPIBindingSpec,
+  isRequestImplementedOpenAPIBindingSpec,
   openAPIRule,
   profileForBindingSpec,
 } from "./constants.js";
@@ -69,8 +71,9 @@ export function openAPISynthesisCoverage(
     if (binding.selector) bySelector.set(binding.selector, { operationKey: binding.operation, selector: binding.selector });
   }
   const source = Object.values(iface.sources ?? {})
-    .find((candidate) => isImplementedOpenAPIBindingSpec(candidate.bindingSpec));
-  // Coverage cannot make a family claim without an exact warranted source.
+    .find((candidate) => isImplementedOpenAPIBindingSpec(candidate.bindingSpec)
+      || isRequestImplementedOpenAPIBindingSpec(candidate.bindingSpec));
+  // Coverage cannot make a family claim without an exact request-implemented source.
   if (!source) return [];
   const sourceLocation = source?.location ?? "";
   const bindingSpec = source.bindingSpec;
@@ -84,14 +87,28 @@ export function openAPISynthesisCoverage(
   for (const path of Object.keys(doc.paths ?? {})) pathSet.add(path);
   if (floor) for (const selector of floor.opOrder) pathSet.add(floor.ops.get(selector)!.path);
 
-  const entries: SynthesisCoverageEntry[] = [];
-  for (const path of [...pathSet].sort(codePointCompare)) {
-    const rawPathItem = doc.paths?.[path];
-    const pathItem: OpenAPIPathItem | undefined = rawPathItem && typeof rawPathItem === "object" ? rawPathItem : undefined;
-    for (const method of HTTP_METHODS) {
+  const rows = doc.openapi === "3.2.0"
+    ? synthesisOperationEntries(doc).map(({ pathStr, pathItem, method, opObj, selector }) => ({
+        path: pathStr,
+        pathItem,
+        method,
+        loadedOperation: opObj,
+        selector,
+      }))
+    : [...pathSet].sort(codePointCompare).flatMap((path) => {
+        const rawPathItem = doc.paths?.[path];
+        const pathItem: OpenAPIPathItem | undefined = rawPathItem && typeof rawPathItem === "object"
+          ? rawPathItem
+          : undefined;
+        return HTTP_METHODS.map((method) => {
       const rawOperation = pathItem?.[method];
       const loadedOperation = rawOperation && typeof rawOperation === "object" ? (rawOperation as OpenAPIOperation) : undefined;
-      const selector = buildJsonPointerSelector(path, method);
+          return { path, pathItem, method, loadedOperation, selector: buildJsonPointerSelector(path, method) };
+        });
+      });
+
+  const entries: SynthesisCoverageEntry[] = [];
+  for (const { pathItem, loadedOperation, selector } of rows) {
       const verdict = floorOpVerdict(floor, selector);
       if (!loadedOperation && !verdict) continue;
       if (verdict && verdict.disposition === "invalid") {
@@ -183,7 +200,6 @@ export function openAPISynthesisCoverage(
       entries.push(...requestMediaCoverage(operation, pathItem!, identity, bindingSpec, doc.openapi, verdict));
       entries.push(...floorProjectionEntries(verdict));
       entries.push(...callbackCoverage(operation, selector));
-    }
   }
   if (bindingSpec === BINDING_SPEC_OPENAPI_31) entries.push(...webhookCoverage(doc));
   return entries;

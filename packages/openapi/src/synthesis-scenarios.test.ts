@@ -10,7 +10,7 @@ if (process.env.OB_CORPUS_REQUIRED === "1" && !process.env.OB_SPEC_CORPUS) {
 }
 const root = process.env.OB_SPEC_CORPUS
   ?? resolve(dirname(fileURLToPath(import.meta.url)), "../../../../spec/conformance");
-const corpora = ["openapi-3.0", "openapi-3.1"].map((family) =>
+const corpora = ["openapi-3.0", "openapi-3.1", "openapi-3.2"].map((family) =>
   parseSynthesisScenarioFile(
     JSON.parse(readFileSync(resolve(root, "binding-specs/synthesis", `${family}.json`), "utf8")),
     family,
@@ -74,9 +74,9 @@ describe("portable OpenAPI synthesis scenarios", () => {
   }
 
   afterAll(() => {
-    expect(corpora.map((corpus) => corpus.scenarios.length)).toEqual([14, 30]);
+    expect(corpora.map((corpus) => corpus.scenarios.length)).toEqual([14, 30, 4]);
     expect([...pendingReasons.keys()]).toEqual(["OAPI31-SS-01"]);
-    expect(executed).toBe(43);
+    expect(executed).toBe(47);
   });
 
   it("serves only the addresses a scenario declares", async () => {

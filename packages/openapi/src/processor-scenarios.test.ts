@@ -138,7 +138,9 @@ async function runScenario(
       operationSignature(fidelityOperationId(source.content)),
       { context },
     )
-    : new OpenAPIInvoker().invokeBinding({
+    : new OpenAPIInvoker({
+      requestContentCodings: scenarioRequestContentCodings(scenario.given.runtime),
+    }).invokeBinding({
       source: invocationSource,
       selector: typeof binding.selector === "string" ? binding.selector : "",
       context,
@@ -186,6 +188,24 @@ async function runScenario(
       },
     },
   };
+}
+
+function scenarioRequestContentCodings(
+  runtime: Record<string, unknown> | undefined,
+): Record<string, (body: Uint8Array) => Uint8Array> | undefined {
+  const declarations = runtime?.requestContentCodings;
+  if (declarations === undefined) return undefined;
+  if (declarations === null || typeof declarations !== "object" || Array.isArray(declarations)) {
+    throw new Error("scenario runtime.requestContentCodings must be an object");
+  }
+  const result: Record<string, (body: Uint8Array) => Uint8Array> = {};
+  for (const [name, implementation] of Object.entries(declarations)) {
+    if (implementation !== "reverse") {
+      throw new Error(`unknown scenario request content-coding implementation ${JSON.stringify(implementation)}`);
+    }
+    result[name] = (body) => Uint8Array.from(body).reverse();
+  }
+  return result;
 }
 
 function fidelityOperationId(content: unknown): string {

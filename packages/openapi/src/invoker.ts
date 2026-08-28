@@ -121,7 +121,11 @@ import {
   requestWithOpenAPIURL,
   resolveServer,
 } from "./servers.js";
-import { markBindingOrigins, markReferencedPathItemOrigins } from "./binding-origins.js";
+import {
+  REFERRING_SECURITY_SCHEMES_MARKER,
+  markBindingOrigins,
+  markReferencedPathItemOrigins,
+} from "./binding-origins.js";
 import {
   electSecurityAlternative,
   installSelectedSecurityAlternative,
@@ -589,6 +593,11 @@ async function loadRuntimeOperationModel(
     document = operationTarget.document;
     pathItem = operationTarget.pathItem;
     operation = operationTarget.operation;
+    if (operationTarget.referringSecuritySchemes) {
+      operation[REFERRING_SECURITY_SCHEMES_MARKER] = structuredClone(
+        operationTarget.referringSecuritySchemes,
+      );
+    }
     target = {
       path: operationTarget.reference.path,
       method: operationTarget.reference.method,
