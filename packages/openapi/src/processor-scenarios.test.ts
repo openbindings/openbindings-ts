@@ -59,9 +59,11 @@ const corpora = corpusEntries.map(({ file, ...entry }) => ({
   corpus: parseProcessorCorpus(resolve(corpusRoot, "binding-specs/processor", file), file === "openapi-2.0.json"),
   ...entry,
 }));
-const fidelityCorpus = JSON.parse(
-  readFileSync(resolve(corpusRoot, "invocation-fidelity/openapi.json"), "utf8"),
-) as ProcessorScenarioFile;
+const fidelityCorpora = ["openapi-3.0.json", "openapi-3.1.json"].map((file) =>
+  JSON.parse(
+    readFileSync(resolve(corpusRoot, "invocation-fidelity", file), "utf8"),
+  ) as ProcessorScenarioFile,
+);
 
 describe("portable OpenAPI processor scenarios", () => {
   let executed = 0;
@@ -94,8 +96,20 @@ describe("portable OpenAPI processor scenarios", () => {
 });
 
 describe("OpenAPI invocation-fidelity scenarios", () => {
-  for (const scenario of fidelityCorpus.scenarios) {
-    it.skip(`${scenario.id}: pending N10/M7 invocation-fidelity adapter migration`, () => {});
+  for (const corpus of fidelityCorpora) {
+    for (const scenario of corpus.scenarios) {
+      it(scenario.id, async () => {
+        const observation = await runScenario(scenario, corpus);
+        try {
+          matchProcessorObservation(scenario, observation);
+        } catch (error: unknown) {
+          throw new Error(
+            `${error instanceof Error ? error.message : String(error)}\nobservation: ${JSON.stringify(observation)}`,
+            { cause: error },
+          );
+        }
+      });
+    }
   }
 });
 
