@@ -63,6 +63,7 @@ import {
 import { isSupportedOpenAPISchemaDialect } from "./ref-siblings.js";
 import {
   computeAcceptanceFloor,
+  classifyOpenAPI32SequentialResponse,
   floorInvalidTargetMessage,
   floorOpVerdict,
   loadOpenAPIArtifact,
@@ -835,6 +836,14 @@ function projectedSuccessSchemaRoots(op: OpenAPIOperation, bindingSpec: string):
     const response = op.responses[key];
     if (!response?.content) continue;
     for (const [mediaKey, media] of Object.entries(response.content)) {
+      if (bindingSpec === BINDING_SPEC_OPENAPI_32) {
+        try {
+          if (classifyOpenAPI32SequentialResponse(mediaKey, media)) {
+            if (media.itemSchema && typeof media.itemSchema === "object") schemas.push(media.itemSchema);
+            continue;
+          }
+        } catch { continue; }
+      }
       let admitsJSON: boolean;
       try {
         admitsJSON = isJSONMediaType(parseMediaType(mediaKey, hasMediaFidelity(bindingSpec)).base);
@@ -1308,6 +1317,16 @@ function buildOutputSchema(
         try {
           base = parseMediaRange(mediaKey, true).base;
           range = true;
+        } catch { continue; }
+      }
+      if (bindingSpec === BINDING_SPEC_OPENAPI_32 && !range) {
+        try {
+          if (classifyOpenAPI32SequentialResponse(mediaKey, media)) {
+            if (Object.hasOwn(media, "itemSchema")) {
+              schemas.push(projector.project(media.itemSchema) as JSONSchema);
+            }
+            continue;
+          }
         } catch { continue; }
       }
       const admitsJSON = isJSONMediaType(base)

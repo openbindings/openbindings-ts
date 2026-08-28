@@ -704,7 +704,7 @@ async function loadRuntimeOperationModel(
   const callerParameters = parameters.map((parameter) => ({ ...parameter }));
   const routes = planAbstractInputRoutes(callerParameters, plans);
   prepareEngineEncodingView(plans);
-  prepareEngineResponseView(operation);
+  if (bindingSpec !== BINDING_SPEC_OPENAPI_32) prepareEngineResponseView(operation);
   // A fully dereferenced recursive schema is cyclic. Passing that adapter
   // view through the standalone engine's loader a second time cannot preserve
   // its graph, so let the engine load the original authored artifact in that

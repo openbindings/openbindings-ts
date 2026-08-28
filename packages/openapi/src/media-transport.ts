@@ -47,10 +47,12 @@ export async function governResponse(
 ): Promise<Response> {
   const nativeModel: OpenAPIResponseMechanicsModel = {
     ...model,
-    unaryEventStream: {
-      actualContentTypeHeader: ACTUAL_CONTENT_TYPE_HEADER,
-      mediaType: UNARY_EVENT_STREAM_TYPE,
-    },
+    ...(model.document.openapi === "3.2.0" ? {} : {
+      unaryEventStream: {
+        actualContentTypeHeader: ACTUAL_CONTENT_TYPE_HEADER,
+        mediaType: UNARY_EVENT_STREAM_TYPE,
+      },
+    }),
   };
   try {
     const result = await governOpenAPIResponse(response, nativeModel, codecs);

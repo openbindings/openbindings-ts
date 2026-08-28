@@ -70,10 +70,6 @@ describe("portable OpenAPI processor scenarios", () => {
   for (const [corpusIndex, { corpus, wanted }] of corpora.entries()) {
     for (const scenario of corpus.scenarios) {
       if (wanted && !wanted.has(scenario.id)) continue;
-      if (scenario.id === "OAPI32-PS-01") {
-        it.skip(`${scenario.id}: deferred to N10/M6 response mechanics`, () => {});
-        continue;
-      }
       it(scenario.id, async () => {
         const observation = await runScenario(scenario, corpus);
         try {
@@ -91,9 +87,9 @@ describe("portable OpenAPI processor scenarios", () => {
   }
 
   afterAll(() => {
-    expect(corpora.map(({ corpus, wanted }) => wanted?.size ?? corpus.scenarios.length)).toEqual([92, 73, 97, 131]);
-    expect(executedByCorpus).toEqual([92, 73, 97, 130]);
-    expect(executed).toBe(392);
+    expect(corpora.map(({ corpus, wanted }) => wanted?.size ?? corpus.scenarios.length)).toEqual([92, 73, 97, 174]);
+    expect(executedByCorpus).toEqual([92, 73, 97, 174]);
+    expect(executed).toBe(436);
   });
 });
 
@@ -183,6 +179,9 @@ async function runScenario(
       selector: typeof binding.selector === "string" ? binding.selector : "",
       context,
       fetch: fetchMock,
+      ...(typeof scenario.given.runtime?.maxDeliveryUnitBytes === "number"
+        ? { maxDeliveryUnitBytes: scenario.given.runtime.maxDeliveryUnitBytes }
+        : {}),
     });
 
   if (scenario.given.invocation.inputPresent === true) {
