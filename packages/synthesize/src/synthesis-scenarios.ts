@@ -184,8 +184,16 @@ export async function verifySynthesisScenario(
 }
 
 export function normalizeSynthesis(result: SynthesizeResult): NormalizedSynthesis {
+  const dependencyOperations = new Set(
+    Object.values(result.interface.dependencies ?? {}).map((entry) => entry.operation),
+  );
+  const boundOperations = new Set(
+    Object.values(result.interface.bindings ?? {}).map((entry) => entry.operation),
+  );
   return {
-    operations: Object.keys(result.interface.operations).sort(codePointCompare),
+    operations: Object.keys(result.interface.operations)
+      .filter((operationKey) => !dependencyOperations.has(operationKey) || boundOperations.has(operationKey))
+      .sort(codePointCompare),
     bindings: normalizeBindings(result.interface),
     coverage: {
       exhaustive: result.coverage.exhaustive,

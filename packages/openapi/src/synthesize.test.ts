@@ -463,7 +463,11 @@ describe("synthesis coverage", () => {
     expect(statusByRef.get("#/paths/~1jobs/post")).toBe("represented");
     expect(statusByRef.get("#/paths/~1jobs/post/requestBody/content/application~1json")).toBe("represented");
     expect(statusByRef.get("#/paths/~1jobs/post/requestBody/content/application~1x-custom")).toBe("excluded");
-    expect(statusByRef.get("#/webhooks/jobChanged/post")).toBe("excluded");
+    expect(statusByRef.get("#/webhooks/jobChanged/post")).toBe("represented");
+    expect(Object.values(result.interface.dependencies ?? {})).toEqual([
+      { operation: "inbound.paths__1jobs_post_callbacks_completed___request.body__1callbackUrl__post" },
+      { operation: "inbound.webhooks_jobChanged_post" },
+    ]);
   });
 
   it("keeps a 3.0 root webhooks spelling dependency- and coverage-silent", async () => {
@@ -486,6 +490,49 @@ describe("synthesis coverage", () => {
     expect(result.coverage.entries.some((entry) => entry.sourceRef.startsWith("#/webhooks")))
       .toBe(false);
     expect(result.coverage.fullyRepresented).toBe(true);
+  });
+
+  it("synthesizes a webhook-only 3.1 document as a targetless dependency", async () => {
+    const result = await new OpenAPISynthesizer().synthesizeInterfaceWithCoverage({
+      sources: [{
+        bindingSpec: "openbindings.openapi-3.1@1",
+        content: {
+          openapi: "3.1.2",
+          info: { title: "webhook only", version: "1" },
+          webhooks: {
+            received: {
+              post: {
+                operationId: "receiveEvent",
+                requestBody: {
+                  required: true,
+                  content: {
+                    "application/json": { schema: { type: "object", properties: { id: { type: "string" } } } },
+                  },
+                },
+                responses: { "204": { description: "accepted" } },
+              },
+            },
+          },
+        },
+      }],
+    });
+
+    expect(result.interface.bindings).toBeUndefined();
+    expect(result.interface.operations.receiveEvent?.input).toMatchObject({
+      properties: { id: { type: "string" } },
+    });
+    expect(Object.values(result.interface.dependencies ?? {})).toEqual([
+      { operation: "receiveEvent" },
+    ]);
+    expect(result.coverage).toMatchObject({
+      exhaustive: true,
+      fullyRepresented: true,
+      entries: [{
+        sourceRef: "#/webhooks/received/post",
+        scope: "dependency",
+        status: "represented",
+      }],
+    });
   });
 
   it("can prove full representation for an ordinary paths-only document", async () => {

@@ -47,6 +47,16 @@
         "$ref": "#/$defs/Operation"
       }
     },
+    "dependencies": {
+      "type": "object",
+      "description": "Named consumption points, each referencing an operation contract and optionally constraining acceptable binding specification families.",
+      "propertyNames": {
+        "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.-]*$"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/DependencyEntry"
+      }
+    },
     "sources": {
       "type": "object",
       "description": "Map of sources: each names its governing binding specification (bindingSpec) and carries a location, embedded content, or both.",
@@ -163,6 +173,28 @@
         },
         "output": {
           "description": "Example output value."
+        }
+      },
+      "additionalProperties": true
+    },
+    "DependencyEntry": {
+      "type": "object",
+      "required": ["operation"],
+      "properties": {
+        "operation": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.-]*$",
+          "description": "Operation key referenced by this named consumption point. Aliases are not valid here."
+        },
+        "bindingSpecs": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "Optional unordered any-of constraint over exact, opaque binding specification identifiers acceptable at this consumption point. Omission declares no binding-family constraint."
         }
       },
       "additionalProperties": true

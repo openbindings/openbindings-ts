@@ -143,7 +143,7 @@ function swagger20Credentials(context: Record<string, unknown> | undefined): Swa
       if (typeof credential.accessToken === "string") {
         const scopes = credential.scopes === undefined ? []
           : Array.isArray(credential.scopes) && credential.scopes.every((scope) => typeof scope === "string")
-            ? credential.scopes as string[] : undefined;
+            ? credential.scopes : undefined;
         if (scopes) result.oauth2![name] = { accessToken: credential.accessToken, scopes };
       }
     }

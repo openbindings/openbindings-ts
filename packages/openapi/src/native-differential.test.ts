@@ -12,9 +12,11 @@ const corpusRoot = process.env.OB_SPEC_CORPUS ?? resolve(
   dirname(fileURLToPath(import.meta.url)),
   "../../../../spec/conformance",
 );
-const corpus = JSON.parse(
-  readFileSync(resolve(corpusRoot, "invocation-fidelity/openapi.json"), "utf8"),
-) as ProcessorScenarioFile;
+const corpora = ["openapi-3.0.json", "openapi-3.1.json"].map((file) =>
+  JSON.parse(
+    readFileSync(resolve(corpusRoot, "invocation-fidelity", file), "utf8"),
+  ) as ProcessorScenarioFile,
+);
 
 // This is the independent-client gate for the first OpenAPI fidelity slice.
 // The native side uses Fetch against a real HTTP server; the OpenBindings side
@@ -22,83 +24,85 @@ const corpus = JSON.parse(
 // The native observation does not reuse the OpenAPI invoker's response decoder
 // or failure-evidence builder.
 describe("OpenAPI native-client differential", () => {
-  for (const scenario of corpus.scenarios) {
-    it(scenario.id, async () => {
-      const peer = scenario.given.peer ?? {};
-      const body = peerBody(peer);
-      const server = createServer((_request, response) => {
-        for (const [name, value] of Object.entries(peerHeaders(peer))) {
-          if (typeof value === "string") response.setHeader(name, value);
-        }
-        response.statusCode = typeof peer.status === "number" ? peer.status : 599;
-        response.end(body);
-      });
-      const baseURL = await listen(server);
-
-      try {
-        const { method, path } = nativeTarget(scenario);
-        const nativeResponse = await fetch(`${baseURL}${path}`, { method, redirect: "manual" });
-        const nativeBody = new Uint8Array(await nativeResponse.arrayBuffer());
-
-        const content = artifactForServer(scenario, baseURL);
-        const iface = await new OpenAPISynthesizer().synthesizeInterface({
-          sources: [{ bindingSpec: corpus.bindingSpec, content }],
-        });
-        const call = new OperationInvoker([new OpenAPIInvoker()], {
-          transformEvaluator: {
-            evaluate: (expression, data) => jsonata(expression).evaluate(data),
-          },
-        }).invoke(
-          iface,
-          operationSignature(fidelityOperationId(content)),
-          scenario.given.configuration
-            ? { context: { configuration: scenario.given.configuration } }
-            : undefined,
-        );
-        if (scenario.given.invocation.inputPresent === true) {
-          await call.write(scenario.given.invocation.input).catch(() => {});
-        } else {
-          await call.close().catch(() => {});
-        }
-        const outputs: unknown[] = [];
-        let terminal: InvocationError | undefined;
-        try {
-          for await (const output of call.outputs) outputs.push(output);
-        } catch (error: unknown) {
-          terminal = error as InvocationError;
-        }
-
-        const expectsContext = scenario.expected.some((alternative) => alternative.disposition === "context-required");
-        if (expectsContext) {
-          expect(terminal?.code).toBe(CONTEXT_REQUIRED);
-          expect(outputs).toEqual([]);
-          return;
-        }
-
-        const nativeSucceeded = nativeResponse.status >= 200 && nativeResponse.status < 300;
-        if (nativeSucceeded) {
-          expect(terminal).toBeUndefined();
-          if (nativeBody.byteLength === 0) {
-            expect(outputs).toEqual([]);
-          } else {
-            const complete = scenario.expected.find((alternative) => alternative.disposition === "complete");
-            const outputAssertion = complete?.assertions.find((assertion) => assertion.path === "/outputs");
-            expect(outputAssertion && "equals" in outputAssertion).toBe(true);
-            expect(outputs).toEqual(outputAssertion && "equals" in outputAssertion
-              ? outputAssertion.equals
-              : undefined);
+  for (const corpus of corpora) {
+    for (const scenario of corpus.scenarios) {
+      it(scenario.id, async () => {
+        const peer = scenario.given.peer ?? {};
+        const body = peerBody(peer);
+        const server = createServer((_request, response) => {
+          for (const [name, value] of Object.entries(peerHeaders(peer))) {
+            if (typeof value === "string") response.setHeader(name, value);
           }
-          return;
-        }
+          response.statusCode = typeof peer.status === "number" ? peer.status : 599;
+          response.end(body);
+        });
+        const baseURL = await listen(server);
 
-        expect(terminal).toBeDefined();
-        expect(outputs).toEqual([]);
-        expect(terminal?.code).toBe(scenario.id === "OAPI-FI-03" ? "ERR_PROTOCOL" : "ERR_EXECUTION_FAILED");
-        expect(Object.hasOwn(terminal as object, "diagnostics")).toBe(false);
-      } finally {
-        await close(server);
-      }
-    });
+        try {
+          const { method, path } = nativeTarget(scenario);
+          const nativeResponse = await fetch(`${baseURL}${path}`, { method, redirect: "manual" });
+          const nativeBody = new Uint8Array(await nativeResponse.arrayBuffer());
+
+          const content = artifactForServer(scenario, baseURL);
+          const iface = await new OpenAPISynthesizer().synthesizeInterface({
+            sources: [{ bindingSpec: corpus.bindingSpec, content }],
+          });
+          const call = new OperationInvoker([new OpenAPIInvoker()], {
+            transformEvaluator: {
+              evaluate: (expression, data) => jsonata(expression).evaluate(data),
+            },
+          }).invoke(
+            iface,
+            operationSignature(fidelityOperationId(content)),
+            scenario.given.configuration
+              ? { context: { configuration: scenario.given.configuration } }
+              : undefined,
+          );
+          if (scenario.given.invocation.inputPresent === true) {
+            await call.write(scenario.given.invocation.input).catch(() => {});
+          } else {
+            await call.close().catch(() => {});
+          }
+          const outputs: unknown[] = [];
+          let terminal: InvocationError | undefined;
+          try {
+            for await (const output of call.outputs) outputs.push(output);
+          } catch (error: unknown) {
+            terminal = error as InvocationError;
+          }
+
+          const expectsContext = scenario.expected.some((alternative) => alternative.disposition === "context-required");
+          if (expectsContext) {
+            expect(terminal?.code).toBe(CONTEXT_REQUIRED);
+            expect(outputs).toEqual([]);
+            return;
+          }
+
+          const nativeSucceeded = nativeResponse.status >= 200 && nativeResponse.status < 300;
+          if (nativeSucceeded) {
+            expect(terminal).toBeUndefined();
+            if (nativeBody.byteLength === 0) {
+              expect(outputs).toEqual([]);
+            } else {
+              const complete = scenario.expected.find((alternative) => alternative.disposition === "complete");
+              const outputAssertion = complete?.assertions.find((assertion) => assertion.path === "/outputs");
+              expect(outputAssertion && "equals" in outputAssertion).toBe(true);
+              expect(outputs).toEqual(outputAssertion && "equals" in outputAssertion
+                ? outputAssertion.equals
+                : undefined);
+            }
+            return;
+          }
+
+          expect(terminal).toBeDefined();
+          expect(outputs).toEqual([]);
+          expect(terminal?.code).toBe(expectedErrorCode(scenario));
+          expect(Object.hasOwn(terminal as object, "diagnostics")).toBe(false);
+        } finally {
+          await close(server);
+        }
+      });
+    }
   }
 
   it("preserves independent same-named path, query, and body values through revision 2", async () => {
@@ -315,6 +319,16 @@ function fidelityOperationId(content: unknown): string {
     }
   }
   throw new Error("fidelity artifact omits operationId");
+}
+
+function expectedErrorCode(scenario: ProcessorScenario): string {
+  for (const alternative of scenario.expected) {
+    const assertion = alternative.assertions.find(({ path }) => path === "/error/code");
+    if (assertion && "equals" in assertion && typeof assertion.equals === "string") {
+      return assertion.equals;
+    }
+  }
+  throw new Error(`${scenario.id} has no string /error/code assertion`);
 }
 
 function peerHeaders(peer: Record<string, unknown>): Record<string, unknown> {

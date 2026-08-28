@@ -68,9 +68,7 @@ describe("HTTP media transport governance", () => {
     });
 
     const malformedResponse = codingModel();
-    const malformedHeaders = malformedResponse.operation.responses?.["200"]?.headers as
-      | Record<string, { schema?: unknown }>
-      | undefined;
+    const malformedHeaders = malformedResponse.operation.responses?.["200"]?.headers;
     const responseHeader = malformedHeaders?.["Content-Encoding"];
     if (responseHeader && typeof responseHeader === "object") responseHeader.schema = { type: "string" };
     await expect(governResponse(new Response("payload", {

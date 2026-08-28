@@ -107,6 +107,15 @@ export interface BindingEntry {
   [key: string]: unknown;
 }
 
+/** A named consumption point for an operation contract. */
+export interface DependencyEntry {
+  /** Same-document operation key. Aliases are deliberately not accepted. */
+  operation: string;
+  /** Optional any-of constraint over exact, opaque binding-spec identifiers. */
+  bindingSpecs?: string[];
+  [key: string]: unknown;
+}
+
 /** The top-level OpenBindings interface document. */
 export interface OBInterface {
   openbindings: string;
@@ -115,6 +124,7 @@ export interface OBInterface {
   description?: string;
   schemas?: Record<string, JSONSchema>;
   operations: Record<string, Operation>;
+  dependencies?: Record<string, DependencyEntry>;
   sources?: Record<string, Source>;
   bindings?: Record<string, BindingEntry>;
   transforms?: Record<string, Transform>;

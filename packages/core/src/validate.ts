@@ -16,7 +16,7 @@ export interface ValidateOptions {
 const KNOWN_INTERFACE_FIELDS = new Set([
   "openbindings", "name", "version", "description",
   "schemas", "operations",
-  "sources", "bindings", "transforms",
+  "dependencies", "sources", "bindings", "transforms",
 ]);
 
 const KNOWN_OPERATION_FIELDS = new Set([
@@ -25,6 +25,7 @@ const KNOWN_OPERATION_FIELDS = new Set([
 ]);
 
 const KNOWN_SOURCE_FIELDS = new Set(["bindingSpec", "location", "content", "description"]);
+const KNOWN_DEPENDENCY_FIELDS = new Set(["operation", "bindingSpecs"]);
 const KNOWN_BINDING_FIELDS = new Set([
   "operation", "source", "selector", "preference", "description", "deprecated",
   "inputTransform", "outputTransform",
@@ -183,6 +184,21 @@ export function validateInterface(
       for (const [ek, ex] of Object.entries(op.examples ?? {})) {
         appendUnknown(errs, `operations["${k}"].examples["${ek}"]`, ex, KNOWN_EXAMPLE_FIELDS);
       }
+    }
+  }
+
+  for (const [k, dependency] of sortedEntries(iface.dependencies)) {
+    validateIdent(errs, "dependencies key", k);
+    if (!dependency || typeof dependency !== "object" || Array.isArray(dependency)) continue;
+    if (typeof dependency.operation !== "string" || !dependency.operation.trim()) {
+      errs.push(`dependencies["${k}"].operation: required`);
+    } else if (!iface.operations || !Object.hasOwn(iface.operations, dependency.operation)) {
+      errs.push(
+        `dependencies["${k}"].operation: references unknown operation ${JSON.stringify(dependency.operation)} (OBI-D-19)`,
+      );
+    }
+    if (opts.rejectUnknownTypedFields) {
+      appendUnknown(errs, `dependencies["${k}"]`, dependency, KNOWN_DEPENDENCY_FIELDS);
     }
   }
 

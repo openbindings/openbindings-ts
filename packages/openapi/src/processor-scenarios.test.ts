@@ -59,9 +59,11 @@ const corpora = corpusEntries.map(({ file, ...entry }) => ({
   corpus: parseProcessorCorpus(resolve(corpusRoot, "binding-specs/processor", file), file === "openapi-2.0.json"),
   ...entry,
 }));
-const fidelityCorpus = JSON.parse(
-  readFileSync(resolve(corpusRoot, "invocation-fidelity/openapi.json"), "utf8"),
-) as ProcessorScenarioFile;
+const fidelityCorpora = ["openapi-3.0.json", "openapi-3.1.json"].map((file) =>
+  JSON.parse(
+    readFileSync(resolve(corpusRoot, "invocation-fidelity", file), "utf8"),
+  ) as ProcessorScenarioFile,
+);
 
 describe("portable OpenAPI processor scenarios", () => {
   let executed = 0;
@@ -70,10 +72,6 @@ describe("portable OpenAPI processor scenarios", () => {
   for (const [corpusIndex, { corpus, wanted }] of corpora.entries()) {
     for (const scenario of corpus.scenarios) {
       if (wanted && !wanted.has(scenario.id)) continue;
-      if (scenario.id === "OAPI32-PS-01") {
-        it.skip(`${scenario.id}: deferred to N10/M6 response mechanics`, () => {});
-        continue;
-      }
       it(scenario.id, async () => {
         const observation = await runScenario(scenario, corpus);
         try {
@@ -91,15 +89,27 @@ describe("portable OpenAPI processor scenarios", () => {
   }
 
   afterAll(() => {
-    expect(corpora.map(({ corpus, wanted }) => wanted?.size ?? corpus.scenarios.length)).toEqual([92, 73, 97, 131]);
-    expect(executedByCorpus).toEqual([92, 73, 97, 130]);
-    expect(executed).toBe(392);
+    expect(corpora.map(({ corpus, wanted }) => wanted?.size ?? corpus.scenarios.length)).toEqual([92, 73, 97, 174]);
+    expect(executedByCorpus).toEqual([92, 73, 97, 174]);
+    expect(executed).toBe(436);
   });
 });
 
 describe("OpenAPI invocation-fidelity scenarios", () => {
-  for (const scenario of fidelityCorpus.scenarios) {
-    it.skip(`${scenario.id}: pending N10/M7 invocation-fidelity adapter migration`, () => {});
+  for (const corpus of fidelityCorpora) {
+    for (const scenario of corpus.scenarios) {
+      it(scenario.id, async () => {
+        const observation = await runScenario(scenario, corpus);
+        try {
+          matchProcessorObservation(scenario, observation);
+        } catch (error: unknown) {
+          throw new Error(
+            `${error instanceof Error ? error.message : String(error)}\nobservation: ${JSON.stringify(observation)}`,
+            { cause: error },
+          );
+        }
+      });
+    }
   }
 });
 
@@ -177,11 +187,15 @@ async function runScenario(
     : new OpenAPIInvoker({
       parameterConversion: scenarioParameterConversion(scenario),
       requestContentCodings: scenarioRequestContentCodings(scenario.given.runtime),
+      responseContentCodings: scenarioResponseContentCodings(scenario.given.runtime),
     }).invokeBinding({
       source: invocationSource,
       selector: typeof binding.selector === "string" ? binding.selector : "",
       context,
       fetch: fetchMock,
+      ...(typeof scenario.given.runtime?.maxDeliveryUnitBytes === "number"
+        ? { maxDeliveryUnitBytes: scenario.given.runtime.maxDeliveryUnitBytes }
+        : {}),
     });
 
   if (scenario.given.invocation.inputPresent === true) {
@@ -241,6 +255,37 @@ function scenarioRequestContentCodings(
       throw new Error(`unknown scenario request content-coding implementation ${JSON.stringify(implementation)}`);
     }
     result[name] = (body) => Uint8Array.from(body).reverse();
+  }
+  return result;
+}
+
+function scenarioResponseContentCodings(
+  runtime: Record<string, unknown> | undefined,
+): Record<string, (body: Uint8Array) => Uint8Array> | undefined {
+  const declarations = runtime?.responseContentCodings;
+  if (declarations === undefined) return undefined;
+  if (declarations === null || typeof declarations !== "object" || Array.isArray(declarations)) {
+    throw new Error("scenario runtime.responseContentCodings must be an object");
+  }
+  const result: Record<string, (body: Uint8Array) => Uint8Array> = {};
+  for (const [name, implementation] of Object.entries(declarations)) {
+    if (implementation === "reverse") {
+      result[name] = (body) => Uint8Array.from(body).reverse();
+      continue;
+    }
+    if (implementation === "unwrap") {
+      result[name] = (body) => {
+        const text = new TextDecoder().decode(body);
+        const token = name.toLowerCase();
+        const prefix = `${token}(`;
+        if (!text.startsWith(prefix) || !text.endsWith(")")) {
+          throw new Error(`scenario ${JSON.stringify(name)} decoder received malformed wrapper`);
+        }
+        return new TextEncoder().encode(text.slice(prefix.length, -1));
+      };
+      continue;
+    }
+    throw new Error(`unknown scenario response content-coding implementation ${JSON.stringify(implementation)}`);
   }
   return result;
 }

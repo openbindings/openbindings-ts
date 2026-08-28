@@ -15,6 +15,7 @@ import { effectiveParameters } from "./params.js";
 import {
   HTTP_METHODS,
   synthesisOperationEntries,
+  type InboundDependencyDisposition,
   type UnrealizableTarget,
 } from "./synthesize.js";
 import {
@@ -41,13 +42,12 @@ import {
   floorProjectionMessage,
   type AcceptanceFloor,
   type FloorOp,
+  type OpenAPI32ResponseMediaExclusion,
 } from "@openbindings/openapi-client/analysis";
 import {
-  BINDING_SPEC_OPENAPI_31,
   hasMediaFidelity,
   hasRoutedInputs,
   isImplementedOpenAPIBindingSpec,
-  isRequestImplementedOpenAPIBindingSpec,
   openAPIRule,
   profileForBindingSpec,
 } from "./constants.js";
@@ -64,6 +64,8 @@ export function openAPISynthesisCoverage(
   iface: OBInterface,
   unrealizable?: ReadonlyMap<string, UnrealizableTarget>,
   floor?: AcceptanceFloor,
+  responseMediaExclusions?: ReadonlyMap<string, readonly OpenAPI32ResponseMediaExclusion[]>,
+  inboundDependencies?: readonly InboundDependencyDisposition[],
 ): SynthesisCoverageEntry[] {
   if (!doc) return [];
   const bySelector = new Map<string, { operationKey: string; selector: string }>();
@@ -71,9 +73,8 @@ export function openAPISynthesisCoverage(
     if (binding.selector) bySelector.set(binding.selector, { operationKey: binding.operation, selector: binding.selector });
   }
   const source = Object.values(iface.sources ?? {})
-    .find((candidate) => isImplementedOpenAPIBindingSpec(candidate.bindingSpec)
-      || isRequestImplementedOpenAPIBindingSpec(candidate.bindingSpec));
-  // Coverage cannot make a family claim without an exact request-implemented source.
+    .find((candidate) => isImplementedOpenAPIBindingSpec(candidate.bindingSpec));
+  // Coverage cannot make a family claim without an exact implemented source.
   if (!source) return [];
   const sourceLocation = source?.location ?? "";
   const bindingSpec = source.bindingSpec;
@@ -198,10 +199,38 @@ export function openAPISynthesisCoverage(
         bindingSpec,
       ));
       entries.push(...requestMediaCoverage(operation, pathItem!, identity, bindingSpec, doc.openapi, verdict));
+      for (const exclusion of responseMediaExclusions?.get(selector) ?? []) {
+        entries.push({
+          sourceIndex: 0,
+          sourceRef: `${selector}/responses/${escapePointerToken(exclusion.responseKey)}/content/${escapePointerToken(exclusion.mediaType)}`,
+          scope: "alternative",
+          status: "excluded",
+          reasonCode: "openapi.response_media_excluded",
+          rule: openAPIRule(bindingSpec, "P-01"),
+          message: exclusion.reason,
+        });
+      }
       entries.push(...floorProjectionEntries(verdict));
-      entries.push(...callbackCoverage(operation, selector));
   }
-  if (bindingSpec === BINDING_SPEC_OPENAPI_31) entries.push(...webhookCoverage(doc));
+  for (const disposition of inboundDependencies ?? []) {
+    entries.push(disposition.represented
+      ? {
+          sourceIndex: 0,
+          sourceRef: disposition.sourceRef,
+          scope: "dependency",
+          status: "represented",
+          requirements: [],
+        }
+      : {
+          sourceIndex: 0,
+          sourceRef: disposition.sourceRef,
+          scope: "dependency",
+          status: "excluded",
+          reasonCode: "openapi.inbound_dependency_excluded",
+          rule: openAPIRule(bindingSpec, "P-03"),
+          message: disposition.message ?? "inbound dependency cannot be projected faithfully",
+        });
+  }
   return entries;
 }
 
@@ -247,6 +276,10 @@ function floorProjectionEntries(verdict: FloorOp | undefined): SynthesisCoverage
 
 function unescapeJSONPointerToken(value: string): string {
   return value.replaceAll("~1", "/").replaceAll("~0", "~");
+}
+
+function escapePointerToken(value: string): string {
+  return value.replaceAll("~", "~0").replaceAll("/", "~1");
 }
 
 function requestMediaTargetRequirements(
@@ -458,75 +491,6 @@ function requestMediaCoverage(
       details: { mediaType },
     };
   });
-}
-
-function callbackCoverage(operation: OpenAPIOperation, parentRef: string): SynthesisCoverageEntry[] {
-  const callbacks = operation["callbacks"];
-  if (!callbacks || typeof callbacks !== "object" || Array.isArray(callbacks)) return [];
-  const entries: SynthesisCoverageEntry[] = [];
-  for (const [name, rawCallback] of sortedEntries(callbacks as Record<string, unknown>)) {
-    if (!rawCallback || typeof rawCallback !== "object" || Array.isArray(rawCallback)) continue;
-    for (const [expression, rawPathItem] of sortedEntries(rawCallback as Record<string, unknown>)) {
-      if (!rawPathItem || typeof rawPathItem !== "object" || Array.isArray(rawPathItem)) continue;
-      for (const method of HTTP_METHODS) {
-        if (!(method in (rawPathItem as Record<string, unknown>))) continue;
-        entries.push(excludedReverseInteraction(
-          `${parentRef}/callbacks/${escapeJSONPointerToken(name)}/${escapeJSONPointerToken(expression)}/${method}`,
-        ));
-      }
-    }
-  }
-  return entries;
-}
-
-function webhookCoverage(doc: OpenAPIDocument): SynthesisCoverageEntry[] {
-  const webhooks = doc["webhooks"];
-  if (webhooks === undefined) return [];
-  if (!webhooks || typeof webhooks !== "object" || Array.isArray(webhooks)) {
-    return [{
-      sourceIndex: 0,
-      sourceRef: "#/webhooks",
-      scope: "target",
-      status: "invalid",
-      reasonCode: "openapi.invalid_webhooks",
-      message: "the OpenAPI 3.1 webhooks member is not an object",
-    }];
-  }
-  const entries: SynthesisCoverageEntry[] = [];
-  for (const [name, rawPathItem] of sortedEntries(webhooks as Record<string, unknown>)) {
-    if (!rawPathItem || typeof rawPathItem !== "object" || Array.isArray(rawPathItem)) {
-      entries.push({
-        sourceIndex: 0,
-        sourceRef: `#/webhooks/${escapeJSONPointerToken(name)}`,
-        scope: "target",
-        status: "invalid",
-        reasonCode: "openapi.invalid_webhook",
-        message: "webhook path item is not an object",
-      });
-      continue;
-    }
-    for (const method of HTTP_METHODS) {
-      if (!(method in (rawPathItem as Record<string, unknown>))) continue;
-      entries.push(excludedReverseInteraction(`#/webhooks/${escapeJSONPointerToken(name)}/${method}`));
-    }
-  }
-  return entries;
-}
-
-function excludedReverseInteraction(sourceRef: string): SynthesisCoverageEntry {
-  return {
-    sourceIndex: 0,
-    sourceRef,
-    scope: "target",
-    status: "excluded",
-    reasonCode: "openapi.reverse_direction",
-    rule: "OAPI-D-03",
-    message: "callbacks and webhooks describe service-to-consumer requests outside the registered OpenAPI family specifications",
-  };
-}
-
-function sortedEntries<T>(value: Record<string, T> | undefined): Array<[string, T]> {
-  return Object.entries(value ?? {}).sort(([a], [b]) => codePointCompare(a, b));
 }
 
 function escapeJSONPointerToken(value: string): string {
