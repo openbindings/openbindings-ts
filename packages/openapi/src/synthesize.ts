@@ -69,6 +69,7 @@ import {
   loadOpenAPIArtifact,
   type AcceptanceFloor,
   type FloorOp,
+  type OpenAPI32ResponseMediaExclusion,
   type OpenAPIOperationResolutionError,
   type OpenAPIResolvedOperation,
 } from "@openbindings/openapi-client/analysis";
@@ -132,6 +133,9 @@ export async function convertToInterface(
   onUnrealizable?: (target: UnrealizableTarget) => void,
   bindingSpec?: string,
   onFloor?: (floor: AcceptanceFloor | undefined) => void,
+  onResponseMediaExclusions?: (
+    exclusions: ReadonlyMap<string, readonly OpenAPI32ResponseMediaExclusion[]>,
+  ) => void,
 ): Promise<OBInterface> {
   // Exact-token refusal precedes artifact parsing or loading. Missing input is
   // deliberately not defaulted to any family.
@@ -156,6 +160,7 @@ export async function convertToInterface(
   let floor: AcceptanceFloor | undefined;
   let doc: OpenAPIDocument;
   const openAPI32Exclusions = new Map<string, OpenAPIOperationResolutionError>();
+  const openAPI32ResponseMediaExclusions = new Map<string, OpenAPI32ResponseMediaExclusion[]>();
   if (exactBindingSpec === BINDING_SPEC_OPENAPI_32) {
     const artifact = await loadOpenAPIArtifact(
       {
@@ -174,6 +179,12 @@ export async function convertToInterface(
     for (const disposition of await artifact.operationInventory()) {
       if (disposition.target) {
         installOpenAPI32SynthesisTarget(doc, disposition.target);
+        if (disposition.target.responseMediaExclusions?.length) {
+          openAPI32ResponseMediaExclusions.set(
+            disposition.reference.ref,
+            disposition.target.responseMediaExclusions,
+          );
+        }
       } else if (disposition.error) {
         openAPI32Exclusions.set(disposition.reference.ref, disposition.error);
       }
@@ -208,6 +219,7 @@ export async function convertToInterface(
   const sourceExclusion = sourceExclusionReason(doc, exactBindingSpec);
   if (sourceExclusion) throw new Error(sourceExclusion);
   onFloor?.(floor);
+  onResponseMediaExclusions?.(openAPI32ResponseMediaExclusions);
   // The artifact's own address as the loader used it: a qualified cut-point
   // name is relative to it.
   const artifactBase = resources[0]?.baseURI ?? location;

@@ -41,6 +41,7 @@ import {
   floorProjectionMessage,
   type AcceptanceFloor,
   type FloorOp,
+  type OpenAPI32ResponseMediaExclusion,
 } from "@openbindings/openapi-client/analysis";
 import {
   BINDING_SPEC_OPENAPI_31,
@@ -64,6 +65,7 @@ export function openAPISynthesisCoverage(
   iface: OBInterface,
   unrealizable?: ReadonlyMap<string, UnrealizableTarget>,
   floor?: AcceptanceFloor,
+  responseMediaExclusions?: ReadonlyMap<string, readonly OpenAPI32ResponseMediaExclusion[]>,
 ): SynthesisCoverageEntry[] {
   if (!doc) return [];
   const bySelector = new Map<string, { operationKey: string; selector: string }>();
@@ -198,6 +200,17 @@ export function openAPISynthesisCoverage(
         bindingSpec,
       ));
       entries.push(...requestMediaCoverage(operation, pathItem!, identity, bindingSpec, doc.openapi, verdict));
+      for (const exclusion of responseMediaExclusions?.get(selector) ?? []) {
+        entries.push({
+          sourceIndex: 0,
+          sourceRef: `${selector}/responses/${escapePointerToken(exclusion.responseKey)}/content/${escapePointerToken(exclusion.mediaType)}`,
+          scope: "alternative",
+          status: "excluded",
+          reasonCode: "openapi.response_media_excluded",
+          rule: openAPIRule(bindingSpec, "P-01"),
+          message: exclusion.reason,
+        });
+      }
       entries.push(...floorProjectionEntries(verdict));
       entries.push(...callbackCoverage(operation, selector));
   }
@@ -247,6 +260,10 @@ function floorProjectionEntries(verdict: FloorOp | undefined): SynthesisCoverage
 
 function unescapeJSONPointerToken(value: string): string {
   return value.replaceAll("~1", "/").replaceAll("~0", "~");
+}
+
+function escapePointerToken(value: string): string {
+  return value.replaceAll("~", "~0").replaceAll("/", "~1");
 }
 
 function requestMediaTargetRequirements(

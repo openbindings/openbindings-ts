@@ -56,7 +56,10 @@ import {
   profileForBindingSpec,
 } from "./constants.js";
 import { convertToInterface, type UnrealizableTarget } from "./synthesize.js";
-import type { AcceptanceFloor } from "@openbindings/openapi-client/analysis";
+import type {
+  AcceptanceFloor,
+  OpenAPI32ResponseMediaExclusion,
+} from "@openbindings/openapi-client/analysis";
 import { openAPISynthesisCoverage } from "./coverage.js";
 import {
   codePointCompare,
@@ -1412,7 +1415,7 @@ export class OpenAPISynthesizer implements InterfaceSynthesizer, CoverageSynthes
       return finalizeSynthesisCoverage(observed.iface, observed.coverage, true, undefined, { revalidateInterface: false });
     }
     const unrealizable = new Map<string, UnrealizableTarget>();
-    const { iface, document, floor } = await this.synthesizeObserved(
+    const { iface, document, floor, responseMediaExclusions } = await this.synthesizeObserved(
       input,
       options,
       (target) => unrealizable.set(target.selector, target),
@@ -1421,7 +1424,7 @@ export class OpenAPISynthesizer implements InterfaceSynthesizer, CoverageSynthes
     // same interface value); skip the redundant second validation.
     return finalizeSynthesisCoverage(
       iface,
-      openAPISynthesisCoverage(document, iface, unrealizable, floor),
+      openAPISynthesisCoverage(document, iface, unrealizable, floor, responseMediaExclusions),
       true,
       undefined,
       { revalidateInterface: false },
@@ -1432,7 +1435,12 @@ export class OpenAPISynthesizer implements InterfaceSynthesizer, CoverageSynthes
     input: SynthesizeInput,
     options?: { signal?: AbortSignal },
     onUnrealizable?: (target: UnrealizableTarget) => void,
-  ): Promise<{ iface: OBInterface; document?: OpenAPIDocument; floor?: AcceptanceFloor }> {
+  ): Promise<{
+    iface: OBInterface;
+    document?: OpenAPIDocument;
+    floor?: AcceptanceFloor;
+    responseMediaExclusions?: ReadonlyMap<string, readonly OpenAPI32ResponseMediaExclusion[]>;
+  }> {
     const sources = input.sources ?? [];
     const src = sources[0];
     if (src === undefined) {
@@ -1451,6 +1459,9 @@ export class OpenAPISynthesizer implements InterfaceSynthesizer, CoverageSynthes
       : src.content;
     let document: OpenAPIDocument | undefined;
     let floor: AcceptanceFloor | undefined;
+    let responseMediaExclusions:
+      | ReadonlyMap<string, readonly OpenAPI32ResponseMediaExclusion[]>
+      | undefined;
     const iface = await convertToInterface(
       location,
       artifactContent,
@@ -1464,6 +1475,9 @@ export class OpenAPISynthesizer implements InterfaceSynthesizer, CoverageSynthes
       (observedFloor) => {
         floor = observedFloor;
       },
+      (observed) => {
+        responseMediaExclusions = observed;
+      },
     );
     // Content is authoritative and remains verbatim in the synthesized
     // source. A co-present location is its base/provenance, not permission
@@ -1476,6 +1490,7 @@ export class OpenAPISynthesizer implements InterfaceSynthesizer, CoverageSynthes
       iface: finalizeSynthesis(iface, input, DEFAULT_SOURCE_NAME, src.bindingSpec),
       document,
       floor,
+      responseMediaExclusions,
     };
   }
 
