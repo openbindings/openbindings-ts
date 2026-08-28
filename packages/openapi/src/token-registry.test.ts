@@ -23,7 +23,7 @@ const DOC_31 = {
 };
 
 describe("exact OpenAPI family-token registry", () => {
-  it("exports four registered tokens, warrants only 3.0 and 3.1, and has no legacy alias", () => {
+  it("exports four registered tokens, warrants 2.0 through 3.1, and has no legacy alias", () => {
     expect([
       publicAPI.BINDING_SPEC_OPENAPI_20,
       publicAPI.BINDING_SPEC_OPENAPI_30,
@@ -35,7 +35,7 @@ describe("exact OpenAPI family-token registry", () => {
       BINDING_SPEC_OPENAPI_31,
       BINDING_SPEC_OPENAPI_32,
     ]);
-    expect(isImplementedOpenAPIBindingSpec(BINDING_SPEC_OPENAPI_20)).toBe(false);
+    expect(isImplementedOpenAPIBindingSpec(BINDING_SPEC_OPENAPI_20)).toBe(true);
     expect(isImplementedOpenAPIBindingSpec(BINDING_SPEC_OPENAPI_30)).toBe(true);
     expect(isImplementedOpenAPIBindingSpec(BINDING_SPEC_OPENAPI_31)).toBe(true);
     expect(isImplementedOpenAPIBindingSpec(BINDING_SPEC_OPENAPI_32)).toBe(false);
@@ -43,6 +43,8 @@ describe("exact OpenAPI family-token registry", () => {
   });
 
   it("admits only the exact editions registered to each warranted token", () => {
+    expect(() => checkAcceptedOpenAPIEdition(BINDING_SPEC_OPENAPI_20, "2.0")).not.toThrow();
+    expect(() => checkAcceptedOpenAPIEdition(BINDING_SPEC_OPENAPI_20, "2.1")).toThrow();
     for (const edition of ["3.0.0", "3.0.1", "3.0.2", "3.0.3", "3.0.4"]) {
       expect(() => checkAcceptedOpenAPIEdition(BINDING_SPEC_OPENAPI_30, edition)).not.toThrow();
       expect(() => checkAcceptedOpenAPIEdition(BINDING_SPEC_OPENAPI_31, edition)).toThrow();
@@ -57,7 +59,7 @@ describe("exact OpenAPI family-token registry", () => {
     }
   });
 
-  it.each(["", "example.unknown@1", BINDING_SPEC_OPENAPI_20, BINDING_SPEC_OPENAPI_32])(
+  it.each(["", "example.unknown@1", BINDING_SPEC_OPENAPI_32])(
     "refuses token %j before synthesis reads artifact content",
     async (bindingSpec) => {
       let reads = 0;
@@ -69,7 +71,7 @@ describe("exact OpenAPI family-token registry", () => {
     },
   );
 
-  it.each(["", "example.unknown@1", BINDING_SPEC_OPENAPI_20, BINDING_SPEC_OPENAPI_32])(
+  it.each(["", "example.unknown@1", BINDING_SPEC_OPENAPI_32])(
     "refuses token %j before invocation reads or fetches the artifact",
     async (bindingSpec) => {
       let reads = 0;
