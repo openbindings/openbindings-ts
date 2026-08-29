@@ -17,6 +17,7 @@ import type {
 } from "./types.js";
 import {
   DEFAULT_SOURCE_NAME,
+  BINDING_SPEC_OPENAPI_30,
   BINDING_SPEC_OPENAPI_31,
   BINDING_SPEC_OPENAPI_32,
   checkAcceptedOpenAPIEdition,
@@ -367,7 +368,8 @@ export async function convertToInterface(
 
       {
         const pathIssue = checkPathTemplateDeclaration(pathStr, params, exactBindingSpec);
-        const hierarchyCollision = exactBindingSpec === BINDING_SPEC_OPENAPI_31
+        const hierarchyCollision = exactBindingSpec === BINDING_SPEC_OPENAPI_30
+          || exactBindingSpec === BINDING_SPEC_OPENAPI_31
           ? equivalentPathTemplateCollision(doc.paths, pathStr)
           : undefined;
         if (pathIssue || hierarchyCollision) {

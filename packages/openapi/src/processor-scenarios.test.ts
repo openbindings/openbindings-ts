@@ -89,9 +89,9 @@ describe("portable OpenAPI processor scenarios", () => {
   }
 
   afterAll(() => {
-    expect(corpora.map(({ corpus, wanted }) => wanted?.size ?? corpus.scenarios.length)).toEqual([93, 73, 99, 177]);
-    expect(executedByCorpus).toEqual([93, 73, 99, 177]);
-    expect(executed).toBe(442);
+    expect(corpora.map(({ corpus, wanted }) => wanted?.size ?? corpus.scenarios.length)).toEqual([93, 73, 101, 177]);
+    expect(executedByCorpus).toEqual([93, 73, 101, 177]);
+    expect(executed).toBe(444);
   });
 });
 
@@ -387,9 +387,28 @@ function bytesToBase64(bytes: Uint8Array): string {
   return btoa(binary);
 }
 
+/**
+ * Records the OCTETS this substrate would put on the wire, not the JS string
+ * held in the Headers object. A `fetch` header value is a ByteString: each
+ * code unit becomes one octet (isomorphic encode). Reading those octets back
+ * as UTF-8 makes the observation portable against the Go twin, whose header
+ * strings already are their own UTF-8 octets.
+ */
+function wireHeaderValue(value: string): string {
+  const octets = new Uint8Array(value.length);
+  for (let index = 0; index < value.length; index += 1) {
+    const unit = value.charCodeAt(index);
+    // > U+00FF never reaches the wire: the substrate throws on conversion.
+    if (unit > 0xff) return value;
+    octets[index] = unit;
+  }
+  return new TextDecoder("utf-8", { fatal: false }).decode(octets);
+}
+
 function normalizedHeaders(headers: Headers): Record<string, string> {
   const out: Record<string, string> = {};
-  headers.forEach((value, name) => {
+  headers.forEach((rawValue, name) => {
+    const value = wireHeaderValue(rawValue);
     const canonical = name.split("-").map((part: string) => part.charAt(0).toUpperCase() + part.slice(1)).join("-");
     out[name] = value;
     out[canonical] = value;
