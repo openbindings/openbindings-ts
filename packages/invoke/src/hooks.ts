@@ -1,5 +1,9 @@
 import { InvocationError, type Metadata } from "./invocation.js";
-import { ERR_EXECUTION_FAILED, ERR_RESPONSE_ERROR, ERR_RUNTIME } from "./errcodes.js";
+import {
+  ERR_EXECUTION_FAILED,
+  ERR_RESPONSE_ERROR,
+  ERR_RUNTIME,
+} from "./errcodes.js";
 import { familyName } from "./helpers.js";
 import type { JSONSchema } from "@openbindings/core";
 
@@ -39,7 +43,7 @@ export interface InvokeSite {
 
 /**
  * Bare family name of a site's binding specification
- * ("openbindings.openapi@1" → "openapi"; a pre-promotion draft token like
+ * ("openbindings.openapi-3.1@1" → "openapi"; a pre-promotion draft token like
  * "graphql" passes through), so hook bodies never string-match
  * identifiers. Mirrors the Go SDK's InvokeSite.FamilyName.
  */
@@ -106,7 +110,11 @@ export type ResultClassifier = (
  * reaches CLIs through a running ob. An unrecognized token is refused
  * loudly by any consulting format, never a silent fallback.)
  */
-export type FieldRouter = (site: InvokeSite, field: string, value: unknown) => string;
+export type FieldRouter = (
+  site: InvokeSite,
+  field: string,
+  value: unknown,
+) => string;
 
 /** One tier's hook slots; either tier may be all-undefined. */
 export interface HookSlots {
@@ -123,7 +131,11 @@ const TIER_PER_INVOCATION = "per-invocation hook";
 const TIER_INVOKER_LEVEL = "invoker-level hook";
 
 /** Wraps a hook's thrown error per the seam's three failure channels. */
-function hookTerminal(_tier: string, nativeCode: string, err: unknown): InvocationError {
+function hookTerminal(
+  _tier: string,
+  nativeCode: string,
+  err: unknown,
+): InvocationError {
   if (err instanceof InvocationError) {
     // Deliberate passthrough: the hook chose its own code and portable data.
     // Tier provenance is implementation evidence and does not cross the
@@ -258,7 +270,10 @@ export class InvokeHooks {
  * Snapshots the two tiers into a carrier, or null when both are empty
  * (null carrier = builtins only; the module-level helpers are null-safe).
  */
-export function newInvokeHooks(perInvocation: HookSlots, invokerLevel: HookSlots): InvokeHooks | null {
+export function newInvokeHooks(
+  perInvocation: HookSlots,
+  invokerLevel: HookSlots,
+): InvokeHooks | null {
   if (slotsEmpty(perInvocation) && slotsEmpty(invokerLevel)) return null;
   return new InvokeHooks(perInvocation, invokerLevel);
 }
@@ -332,7 +347,7 @@ async function runBuiltinClassify(
  */
 export function floorStamped(schema: JSONSchema | undefined | null): boolean {
   if (!schema || typeof schema !== "object") return false;
-  const xob = (schema)["x-ob"];
+  const xob = schema["x-ob"];
   if (!xob || typeof xob !== "object" || Array.isArray(xob)) return false;
   return "floor" in (xob as Record<string, unknown>);
 }
@@ -343,7 +358,9 @@ export function floorStamped(schema: JSONSchema | undefined | null): boolean {
  * independent contract inspection (the unvalidated-assumption warning's
  * trigger arms).
  */
-export function nonDiscriminatingOutput(schema: JSONSchema | undefined | null): boolean {
+export function nonDiscriminatingOutput(
+  schema: JSONSchema | undefined | null,
+): boolean {
   if (typeof schema === "boolean") {
     // Boolean-true accepts everything (cannot catch a wrong lane);
     // boolean-false rejects everything (any wrong decode fails loudly).
@@ -389,7 +406,10 @@ export function assumptionWarning(
   let reason: string;
   if (floorStamped(outputSchema)) {
     reason = "floor-stamped output schema";
-  } else if (outputSchema == null || (isObj && Object.keys(outputSchema).length === 0)) {
+  } else if (
+    outputSchema == null ||
+    (isObj && Object.keys(outputSchema).length === 0)
+  ) {
     reason = "no output schema";
   } else if (nonDiscriminatingOutput(outputSchema)) {
     reason = "non-discriminating output schema";

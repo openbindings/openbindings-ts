@@ -9,10 +9,7 @@ import {
   type OBInterface,
   type OperationImplementation,
 } from "@openbindings/sdk";
-import {
-  OpenAPIInvoker,
-  OpenAPISynthesizer,
-} from "@openbindings/openapi";
+import { OpenAPIInvoker, OpenAPISynthesizer } from "@openbindings/openapi";
 import { TASK_REQUIREMENTS, type Activity } from "./contracts.js";
 
 const LOCAL_ACTIVITY_BINDING = "example.local-activity@1";
@@ -35,7 +32,8 @@ export async function tasksImplementation(
               description: "Tasks",
               content: {
                 "application/json": {
-                  schema: TASK_REQUIREMENTS.operations["example.tasks.list"]?.output,
+                  schema:
+                    TASK_REQUIREMENTS.operations["example.tasks.list"]?.output,
                 },
               },
             },
@@ -47,7 +45,8 @@ export async function tasksImplementation(
             required: true,
             content: {
               "application/json": {
-                schema: TASK_REQUIREMENTS.operations["example.tasks.create"]?.input,
+                schema:
+                  TASK_REQUIREMENTS.operations["example.tasks.create"]?.input,
               },
             },
           },
@@ -56,7 +55,9 @@ export async function tasksImplementation(
               description: "Created task",
               content: {
                 "application/json": {
-                  schema: TASK_REQUIREMENTS.operations["example.tasks.create"]?.output,
+                  schema:
+                    TASK_REQUIREMENTS.operations["example.tasks.create"]
+                      ?.output,
                 },
               },
             },
@@ -66,10 +67,12 @@ export async function tasksImplementation(
     },
   };
   const iface = await new OpenAPISynthesizer().synthesizeInterface({
-    sources: [{
-      bindingSpec: "openbindings.openapi@1",
-      content: artifact,
-    }],
+    sources: [
+      {
+        bindingSpec: "openbindings.openapi-3.1@1",
+        content: artifact,
+      },
+    ],
   });
   return {
     interface: iface,
@@ -101,16 +104,20 @@ class ActivityBinding implements BindingInvoker {
       signal: args.signal,
     });
     let completed = false;
-    invocation.signal.addEventListener("abort", () => {
-      if (!completed) {
-        this.onCancelled();
-      }
-    }, { once: true });
+    invocation.signal.addEventListener(
+      "abort",
+      () => {
+        if (!completed) {
+          this.onCancelled();
+        }
+      },
+      { once: true },
+    );
     queueMicrotask(() => {
       void (async () => {
         await invocation.closeInput();
         for (let sequence = 1; sequence <= 3; sequence++) {
-          await new Promise(resolve => setTimeout(resolve, 120));
+          await new Promise((resolve) => setTimeout(resolve, 120));
           if (invocation.signal.aborted) return;
           await invocation.emitOutput({
             sequence,
@@ -165,14 +172,18 @@ class SlowPreflightBinding implements BindingInvoker {
   prepareBinding(args: BindingInvocationArgs): Promise<null> {
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => resolve(null), 350);
-      args.signal?.addEventListener("abort", () => {
-        clearTimeout(timer);
-        reject(
-          args.signal?.reason instanceof Error
-            ? args.signal.reason
-            : new DOMException("preflight cancelled", "AbortError"),
-        );
-      }, { once: true });
+      args.signal?.addEventListener(
+        "abort",
+        () => {
+          clearTimeout(timer);
+          reject(
+            args.signal?.reason instanceof Error
+              ? args.signal.reason
+              : new DOMException("preflight cancelled", "AbortError"),
+          );
+        },
+        { once: true },
+      );
     });
   }
 

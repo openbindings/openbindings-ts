@@ -2,9 +2,9 @@
 
 Thin OpenBindings adapter and interface synthesizer over the standalone
 [`@openbindings/openapi-client`](https://github.com/openbindings/openapi-client)
-OpenAPI 3.x document-driven client and execution engine.
+Swagger 2.0 and OpenAPI 3.x document-driven client and execution engine.
 
-This package enables OpenBindings to invoke operations against OpenAPI specs and synthesize OBI documents from them. It reads OpenAPI 3.x documents, constructs HTTP requests, applies credentials via security schemes, and delivers results through the SDK's cardinality-agnostic `Invocation` handle.
+This package enables OpenBindings to invoke operations against OpenAPI specs and synthesize OBI documents from them. It reads Swagger 2.0 and OpenAPI 3.x documents, constructs HTTP requests, applies credentials via security schemes, and delivers results through the SDK's cardinality-agnostic `Invocation` handle.
 
 Applications that need faithful OpenAPI artifact invocation without an OBI
 can use `@openbindings/openapi-client` directly. This package owns OBI source,
@@ -34,16 +34,16 @@ import { OpenAPIInvoker } from "@openbindings/openapi";
 const invoker = new OperationInvoker([new OpenAPIInvoker()]);
 ```
 
-The invoker declares the unreleased first `openbindings.openapi@1` candidate.
-No OpenAPI binding specification has been published and there are no
-compatibility revisions. It handles exactly OpenAPI 3.0.0–3.0.4 and
-3.1.0–3.1.2 documents, discriminated by the artifact's own `openapi` field.
-The candidate
-[`openbindings.openapi@1`](https://github.com/openbindings/spec/blob/main/binding-specs/openapi/openbindings.openapi.md)
-document is normative for routed input mapping, OAS serialization,
+The invoker declares four exact sibling candidates:
+`openbindings.openapi-2.0@1`, `openbindings.openapi-3.0@1`,
+`openbindings.openapi-3.1@1`, and `openbindings.openapi-3.2@1`. They accept
+Swagger 2.0, OpenAPI 3.0.0–3.0.4, OpenAPI 3.1.0–3.1.2, and OpenAPI 3.2.0
+respectively. One source names exactly one sibling; the artifact's own version
+must fall within that sibling's finite range. The sibling documents under
+[`binding-specs/openapi-*`](https://github.com/openbindings/spec/tree/main/binding-specs)
+are normative for caller-envelope mapping, edition-specific serialization,
 request/response media selection and byte carriage, server resolution,
-interaction shape, and
-channel assembly.
+interaction shape, and channel assembly.
 
 ### Invoke a binding
 
@@ -56,14 +56,14 @@ const invoker = new OpenAPIInvoker();
 
 const call = invoker.invokeBinding({
   source: {
-    bindingSpec: "openbindings.openapi@1",
+    bindingSpec: "openbindings.openapi-3.1@1",
     location: "https://api.example.com/openapi.json",
   },
   selector: "#/paths/~1users~1{id}/get",
   context: { bearerToken: "tok_123" },
 });
 
-await call.write({ id: "42" }); // input flows through the handle
+await call.write({ parameters: { id: "42" } }); // public caller envelope
 const user = await single(call.outputs); // unary: expect exactly one output
 ```
 
@@ -102,7 +102,7 @@ const synth = new OpenAPISynthesizer();
 const iface = await synth.synthesizeInterface({
   sources: [
     {
-      bindingSpec: "openbindings.openapi@1",
+      bindingSpec: "openbindings.openapi-3.1@1",
       location: "https://api.example.com/openapi.json",
     },
   ],
@@ -120,12 +120,12 @@ result as `content`, while browsers and Workers keep the same package graph.
 ### Execution flow
 
 1. Loads and caches the OpenAPI document (JSON or YAML, from embedded content
-   or an absolute URI), discriminating the exact accepted 3.0.0–3.0.4 and
-   3.1.0–3.1.2 editions (OAPI-P-01)
+   or an absolute URI), checking Swagger 2.0, OpenAPI 3.0.0–3.0.4,
+   3.1.0–3.1.2, or 3.2.0 against the exact sibling named by the source
 2. Parses the ref as a JSON Pointer (`#/paths/~1users/get` -> path `/users`, method `get`); the method is lowercase exactly as the artifact spells it — an uppercase method is refused, never case-folded (OAPI-D-03)
 3. Resolves the server (the OAS effective list + variables + the `server` configuration point, OAPI-P-05)
 4. Derives auth requirements from the operation's (or document's) `security` and challenges `CONTEXT_REQUIRED` when the context can't satisfy them — before any request is dispatched
-5. Reads the input message from the handle and routes parameters and finite named body properties per OAPI-P-03; explicitly dynamic objects and declaration-complex exact JSON bodies remain one complete application value below a protocol-neutral field and use a binding-private whole-body route. Parameters serialize per the OAS style/explode rules (OAPI-P-02), and the configured `requestMedia` candidate or any faithfully supported declared candidate governs body carriage (OAPI-P-04).
+5. Reads the public `{parameters?, body?}` caller envelope from the handle and lowers it internally to the standalone client's routes. Explicitly dynamic objects and declaration-complex exact JSON bodies remain one complete application value. Parameters serialize under the governing edition, and the configured `requestMedia` candidate or any faithfully supported declared candidate governs body carriage.
 6. Selects one complete, satisfiable Security Requirement alternative and applies only that alternative's credentials with the artifact-declared placement, refusing credential/parameter and processor-owned-channel collisions before dispatch (OAPI-P-09/P-10)
 7. Makes the HTTP request; the governing success declaration and actual concrete media select unary or server-streaming framing (OAPI-P-06); classifies the outcome (success iff status is 2xx, OAPI-P-08); then emits strict JSON, charset-aware text/SSE, or canonical Base64 for artifact-authorized raw bytes (OAPI-P-07). Native headers/status/body evidence and hook provenance remain below the OpenBindings boundary and never become operation values or failure data.
 
@@ -177,13 +177,13 @@ different alternatives.
 
 When declared security is unsatisfied by the context, the invoker challenges `CONTEXT_REQUIRED` before any input is read or network touched, deriving the challenge from the artifact's `securitySchemes` (the negotiation surface is the [binding-invoker interface](https://openbindings.com/interfaces/binding-invoker); the challenge's `target` is the resolved base URL):
 
-| Scheme            | Requirement type | Carried fields                                                           |
-| ----------------- | ---------------- | ------------------------------------------------------------------------ |
-| `http` / `basic`  | `auth.basic`     | —                                                                        |
-| `http` / `bearer` | `auth.bearer`    | —                                                                        |
-| `apiKey`          | `auth.apiKey`    | —                                                                        |
+| Scheme            | Requirement type | Carried fields                                                                                               |
+| ----------------- | ---------------- | ------------------------------------------------------------------------------------------------------------ |
+| `http` / `basic`  | `auth.basic`     | —                                                                                                            |
+| `http` / `bearer` | `auth.bearer`    | —                                                                                                            |
+| `apiKey`          | `auth.apiKey`    | —                                                                                                            |
 | `oauth2`          | `auth.oauth2`    | `grantType`, `authorizeUrl`, `tokenUrl` from each usable flow; `scopes` required by the Security Requirement |
-| `openIdConnect`   | `auth.oauth2`    | `openIdConnectUrl`; `scopes` required by the Security Requirement        |
+| `openIdConnect`   | `auth.oauth2`    | `openIdConnectUrl`; `scopes` required by the Security Requirement                                            |
 
 An `oauth2` scheme declaring several usable flows surfaces each as a separate
 context alternative; it does not invent a flow preference. `grantType` names
@@ -205,7 +205,10 @@ built-in schemes' Core context resolution:
 const invoker = new OpenAPIInvoker({
   securityHandlers: {
     digestAuth(request, { schemeName }) {
-      request.headers.set("authorization", buildDigest(request, credentialFor(schemeName)));
+      request.headers.set(
+        "authorization",
+        buildDigest(request, credentialFor(schemeName)),
+      );
     },
   },
 });
@@ -221,11 +224,13 @@ scheme-specific credential or transport resolution it requires.
 
 ### Interface synthesis
 
-Deterministic generation of OBI documents is a synthesis concern outside the binding specification (`openbindings.openapi@1` §10); these are this package's conventions, chosen so both reference SDKs emit an identical OBI for the same artifact:
+Deterministic generation of OBI documents is a synthesis concern outside the
+four binding specifications; these are this package's conventions, chosen so
+both reference SDKs emit an identical OBI for the same artifact:
 
 - **Operation keys** come from `operationId` when present, sanitized to the OBI key grammar (non-key characters become `_`, leading/trailing `_` trimmed, a leading non-letter gets an `_` prefix). An `operationId` whose sanitized key is already taken falls through to path+method derivation: template segments (`{id}`) dropped, remaining segments joined with `.`, the lowercased method appended (`/users/{id}` + `GET` → `users.get`), then deduplicated deterministically with `_2`, `_3`, … suffixes.
 - **Iteration order is fixed**: paths alphabetically, methods in the order get, put, post, delete, options, head, patch, trace.
-- **Input schemas** merge effective path-level and operation-level parameters from every supported location (path, query, header, cookie) with each realizable request-media candidate's own body surface. Distinct finite declarations keep their application names when unique; collisions receive deterministic neutral suffixes and a binding-private `inputTransform` carries the exact protocol route. An explicitly dynamic object or declaration-complex exact JSON body is preserved as one full schema under a protocol-neutral `payload` property and privately routed whole, so runtime members cannot collide with independent parameters and no schema branch is selected by the binding. Distinct candidate surfaces are preserved with `anyOf`; parameter-only and non-JSON surfaces are closed against fields the invoker would refuse, while flattened JSON object candidates remain open for the binding's declared passthrough rule.
+- **Input schemas** merge effective path-level and operation-level parameters from every supported location with each realizable request-media candidate's body surface. Distinct finite declarations keep their application names when unique; collisions receive deterministic neutral suffixes. Every synthesized binding emits ordinary Core JSONata that maps those operation fields into the public `{parameters?, body?}` caller envelope. An explicitly dynamic object or declaration-complex exact JSON body is preserved as one full schema under a protocol-neutral `payload` property and mapped to the whole `body`, so runtime members cannot collide with independent parameters and no schema branch is selected by the binding. Distinct candidate surfaces are preserved with `anyOf`; parameter-only and non-JSON surfaces are closed against fields the invoker would refuse, while finite JSON object candidates retain the specification's declared passthrough rule.
 - **Output schemas** conservatively union every value-bearing success lane that can govern a 2xx response: exact 2xx entries, `2XX`, and an unshadowed `default`. Exact and ranged JSON declarations contribute their schemas, text/SSE declarations contribute strings, artifact-authorized raw-byte lanes contribute canonical Base64 strings, and a schema-less JSON lane leaves output unspecified rather than inventing a shape.
 - **Schema projection** targets JSON Schema 2020-12 (spec OBI-D-06), keyed on the artifact's declared `openapi` version and operation direction. OpenAPI 3.0.x schemas are translated from their subset dialect and ignore Reference Object siblings; 3.1.x Schema Object `$ref` siblings compose under JSON Schema semantics, while non-schema Reference Objects apply only their legal site-local `summary`/`description` overrides. External resources retain their own retrieval base even when a schema target is discovered after that resource was cached; late `$id` and anchor scopes are reindexed before projection. Request contracts omit `readOnly` properties and response contracts omit `writeOnly` properties, with required lists repaired through nested and recursive graphs. Unknown annotations remain annotations rather than being assigned invented validation meaning. An operation whose projected contract inherits a custom 3.1 schema dialect that cannot be losslessly projected to 2020-12 is excluded by tolerant synthesis and fails strict synthesis explicitly; schema-free operations and supported per-schema overrides remain available, and the dialect does not by itself prevent artifact-native invocation.
 - **Unrealizable targets fail synthesis**: declaration-complex form, multipart, text, raw, and media-range schemas without one artifact-defined carriage; case-colliding HTTP header declarations; and required bodies with no supported media candidate make the whole strict synthesis call fail. Exact JSON-family declaration-complex bodies use whole-value carriage. An optional body may be omitted with a warning only when the remaining no-body operation is still faithfully invocable.

@@ -1,10 +1,15 @@
-import type { OBInterface, BindingEntry, BindingSpecInfo, BindingSpecVerdict } from "@openbindings/core";
+import type {
+  OBInterface,
+  BindingEntry,
+  BindingSpecInfo,
+  BindingSpecVerdict,
+} from "@openbindings/core";
 import type { BindingInvocationArgs } from "./invoker-types.js";
 import type { ContextRequiredDetails, Invocation } from "./invocation.js";
 
 /**
  * Invokes bindings whose sources are governed by specific binding
- * specifications (e.g., openbindings.openapi@1, openbindings.mcp@1).
+ * specifications (e.g., openbindings.openapi-3.1@1, openbindings.mcp@1).
  *
  * `invokeBinding` returns the {@link Invocation} handle synchronously and
  * creation is inert: no I/O happens during construction. The binding's work
@@ -16,7 +21,9 @@ export interface BindingInvoker {
   checkBindingSpecs(bindingSpecs: readonly string[]): BindingSpecVerdict[];
   /** Advisory discoverability metadata; absence is not evidence of non-support. */
   bindingSpecs(): BindingSpecInfo[];
-  invokeBinding<I = unknown, O = unknown>(args: BindingInvocationArgs): Invocation<I, O>;
+  invokeBinding<I = unknown, O = unknown>(
+    args: BindingInvocationArgs,
+  ): Invocation<I, O>;
   /**
    * Optional side-effect-free preflight: reports the context the binding
    * would require for this invocation (the `prepareBinding` operation of
@@ -25,7 +32,9 @@ export interface BindingInvoker {
    * streams input, collapsing knowable-upfront challenges into the clean
    * no-input-consumed case.
    */
-  prepareBinding?(args: BindingInvocationArgs): Promise<ContextRequiredDetails | null>;
+  prepareBinding?(
+    args: BindingInvocationArgs,
+  ): Promise<ContextRequiredDetails | null>;
 }
 
 /** Evaluates a transform expression (e.g., JSONata) against input data. */
@@ -39,15 +48,21 @@ export interface TransformEvaluator {
  * context check for this interface via runtime duck-typing.
  */
 export interface TransformEvaluatorWithBindings extends TransformEvaluator {
-  evaluateWithBindings(expression: string, data: unknown, bindings: Record<string, unknown>): Promise<unknown>;
+  evaluateWithBindings(
+    expression: string,
+    data: unknown,
+    bindings: Record<string, unknown>,
+  ): Promise<unknown>;
 }
 
 /** Runtime check for whether a TransformEvaluator supports bindings. */
 export function isTransformEvaluatorWithBindings(
   e: TransformEvaluator,
 ): e is TransformEvaluatorWithBindings {
-  return "evaluateWithBindings" in e
-    && typeof (e as Record<string, unknown>)["evaluateWithBindings"] === "function";
+  return (
+    "evaluateWithBindings" in e &&
+    typeof (e as Record<string, unknown>)["evaluateWithBindings"] === "function"
+  );
 }
 
 /** Selects which binding to use for a given operation. */
