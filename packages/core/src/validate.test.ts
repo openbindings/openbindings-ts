@@ -22,7 +22,10 @@ function minimalInterface(): MinimalInterface {
       },
     },
     sources: {
-      main: { bindingSpec: "openbindings.openapi@1", location: "https://example.com/api.json" },
+      main: {
+        bindingSpec: "openbindings.openapi-3.1@1",
+        location: "https://example.com/api.json",
+      },
     },
     bindings: {
       "getUser.main": {
@@ -63,29 +66,41 @@ describe("validateInterface", () => {
     "[::1]:443",
     "dns:///grpc.example.com:443",
     "https://api.example.com/openapi.json",
-  ])("accepts format-defined absolute address %s as a source location (OBI-D-05)", (addr) => {
-    const iface = minimalInterface();
-    iface.sources!.main = { bindingSpec: "openbindings.grpc@1", location: addr };
-    delete iface.bindings;
-    expect(() => validateInterface(iface)).not.toThrow();
-  });
+  ])(
+    "accepts format-defined absolute address %s as a source location (OBI-D-05)",
+    (addr) => {
+      const iface = minimalInterface();
+      iface.sources!.main = {
+        bindingSpec: "openbindings.grpc@1",
+        location: addr,
+      };
+      delete iface.bindings;
+      expect(() => validateInterface(iface)).not.toThrow();
+    },
+  );
 
   // OBI-D-05: a relative reference needs a base URI and is not allowed.
   // Mirrors the Go SDK's TestInterfaceValidate_SourceLocationRelativeRejected.
-  it.each(["./openapi.json", "openapi.json", "../api/openapi.json", "/abs/openapi.json"])(
-    "rejects relative source location %s (OBI-D-05)",
-    (loc) => {
-      const iface = minimalInterface();
-      iface.sources!.main.location = loc;
-      expect(() => validateInterface(iface)).toThrow("not a relative reference (OBI-D-05)");
-    },
-  );
+  it.each([
+    "./openapi.json",
+    "openapi.json",
+    "../api/openapi.json",
+    "/abs/openapi.json",
+  ])("rejects relative source location %s (OBI-D-05)", (loc) => {
+    const iface = minimalInterface();
+    iface.sources!.main.location = loc;
+    expect(() => validateInterface(iface)).toThrow(
+      "not a relative reference (OBI-D-05)",
+    );
+  });
 
   it("rejects a dangling same-document $ref (OBI-D-16)", () => {
     const iface = minimalInterface();
     iface.schemas = { Task: { type: "object" } };
     iface.operations.getUser.output = { $ref: "#/schemas/Missing" };
-    expect(() => validateInterface(iface)).toThrow("does not resolve within the document (OBI-D-16)");
+    expect(() => validateInterface(iface)).toThrow(
+      "does not resolve within the document (OBI-D-16)",
+    );
   });
 
   it("skips D-16 for $refs under a nested $id (resource-internal)", () => {
@@ -152,7 +167,9 @@ describe("validateInterface", () => {
     const iface = minimalInterface();
     iface.schemas = { Task: { $id: "task.schema.json", type: "object" } };
     iface.operations.getUser.output = { $ref: "#/schemas/Task" };
-    expect(() => validateInterface(iface)).toThrow('$id: "task.schema.json" must be an absolute URI (OBI-D-05)');
+    expect(() => validateInterface(iface)).toThrow(
+      '$id: "task.schema.json" must be an absolute URI (OBI-D-05)',
+    );
   });
 
   it("rejects a percent-encoded fragment as not in literal form (OBI-D-05)", () => {
@@ -180,7 +197,9 @@ describe("validateInterface", () => {
     // OBI-D-05: the dynamic pair does not appear at OBI positions at all.
     const iface = minimalInterface();
     iface.operations.getUser.output = { $dynamicRef: "#node" };
-    expect(() => validateInterface(iface)).toThrow(/\$dynamicRef does not appear at OBI positions.*OBI-D-05/);
+    expect(() => validateInterface(iface)).toThrow(
+      /\$dynamicRef does not appear at OBI positions.*OBI-D-05/,
+    );
   });
 
   it("rejects $dynamicAnchor in the schemas map (OBI-D-05)", () => {
@@ -189,7 +208,9 @@ describe("validateInterface", () => {
     const iface = minimalInterface();
     iface.schemas = { Task: { $dynamicAnchor: "task", type: "object" } };
     iface.operations.getUser.output = { $ref: "#/schemas/Task" };
-    expect(() => validateInterface(iface)).toThrow(/\$dynamicAnchor does not appear at OBI positions.*OBI-D-05/);
+    expect(() => validateInterface(iface)).toThrow(
+      /\$dynamicAnchor does not appear at OBI positions.*OBI-D-05/,
+    );
   });
 
   it("permits the dynamic pair inside an embedded $id-declaring schema", () => {
@@ -258,7 +279,9 @@ describe("validateInterface", () => {
   it("catches binding referencing unknown operation", () => {
     const iface = minimalInterface();
     iface.bindings!["bad.main"] = { operation: "nonexistent", source: "main" };
-    expect(() => validateInterface(iface)).toThrow("references unknown operation");
+    expect(() => validateInterface(iface)).toThrow(
+      "references unknown operation",
+    );
   });
 
   it("catches binding referencing unknown source", () => {
@@ -352,7 +375,9 @@ describe("validateInterface", () => {
     iface.operations.createUser = {
       aliases: ["getUser"],
     };
-    expect(() => validateInterface(iface)).toThrow("conflicts with operation key");
+    expect(() => validateInterface(iface)).toThrow(
+      "conflicts with operation key",
+    );
   });
 });
 
@@ -382,52 +407,63 @@ describe("validateInterface example validation (OBI-D-11)", () => {
     }
     op.examples = {
       basic: {
-        ...(overrides?.input !== undefined ? { input: overrides.input } : { input: { name: "Alice" } }),
-        ...(overrides?.output !== undefined ? { output: overrides.output } : { output: { id: 42 } }),
+        ...(overrides?.input !== undefined
+          ? { input: overrides.input }
+          : { input: { name: "Alice" } }),
+        ...(overrides?.output !== undefined
+          ? { output: overrides.output }
+          : { output: { id: 42 } }),
       },
     };
     return {
       openbindings: "0.2.0",
       operations: { createUser: op },
       sources: {
-        main: { bindingSpec: "openbindings.openapi@1", location: "https://example.com/api.json" },
+        main: {
+          bindingSpec: "openbindings.openapi-3.1@1",
+          location: "https://example.com/api.json",
+        },
       },
       bindings: {
-        "createUser.main": { operation: "createUser", source: "main", selector: "#/paths/~1users/post" },
+        "createUser.main": {
+          operation: "createUser",
+          source: "main",
+          selector: "#/paths/~1users/post",
+        },
       },
     };
   }
 
   it("passes when examples match their schemas", () => {
     const iface = ifaceWithExample();
-    expect(() => validateInterface(iface,)).not.toThrow();
+    expect(() => validateInterface(iface)).not.toThrow();
   });
 
   it("fails when example input does not match the input schema", () => {
     const iface = ifaceWithExample({ input: { name: 123 } });
-    expect(() => validateInterface(iface,)).toThrow(
-      /OBI-D-11/,
-    );
+    expect(() => validateInterface(iface)).toThrow(/OBI-D-11/);
     try {
-      validateInterface(iface,);
+      validateInterface(iface);
     } catch (err) {
       expect(err).toBeInstanceOf(ValidationError);
       const problems = (err as InstanceType<typeof ValidationError>).problems;
-      expect(problems.some((p: string) => p.includes('examples["basic"].input'))).toBe(true);
+      expect(
+        problems.some((p: string) => p.includes('examples["basic"].input')),
+      ).toBe(true);
     }
   });
 
   it("fails when example output does not match the output schema", () => {
     const iface = ifaceWithExample({ output: { id: "not-a-number" } });
-    expect(() => validateInterface(iface,)).toThrow(
-      /OBI-D-11/,
-    );
+    expect(() => validateInterface(iface)).toThrow(/OBI-D-11/);
     try {
-      validateInterface(iface,);
+      validateInterface(iface);
     } catch (err) {
       expect(err).toBeInstanceOf(ValidationError);
       const problems = (err as InstanceType<typeof ValidationError>).problems;
-      expect(problems.some((p: string) => p.includes('examples["basic"].output'))).toBe(true);
+      expect(
+        problems.some((p: string) => p.includes('examples["basic"].output')),
+      ).toBe(true);
     }
   });
 
@@ -435,7 +471,7 @@ describe("validateInterface example validation (OBI-D-11)", () => {
     const iface = ifaceWithExample({ input: { name: 123 } });
     expect(() => validateInterface(iface)).toThrow(/OBI-D-11/);
     expect(() => validateInterface(iface, {})).toThrow(/OBI-D-11/);
-    expect(() => validateInterface(iface,)).toThrow(/OBI-D-11/);
+    expect(() => validateInterface(iface)).toThrow(/OBI-D-11/);
   });
 
   it("skips operations without examples gracefully", () => {
@@ -448,23 +484,33 @@ describe("validateInterface example validation (OBI-D-11)", () => {
         },
       },
       sources: {
-        main: { bindingSpec: "openbindings.openapi@1", location: "https://example.com/api.json" },
+        main: {
+          bindingSpec: "openbindings.openapi-3.1@1",
+          location: "https://example.com/api.json",
+        },
       },
       bindings: {
-        "noExamples.main": { operation: "noExamples", source: "main", selector: "#/paths/~1foo/get" },
+        "noExamples.main": {
+          operation: "noExamples",
+          source: "main",
+          selector: "#/paths/~1foo/get",
+        },
       },
     };
-    expect(() => validateInterface(iface,)).not.toThrow();
+    expect(() => validateInterface(iface)).not.toThrow();
   });
 
   it("skips examples when the operation has no schemas", () => {
     const iface = ifaceWithExample({ inputSchema: null, outputSchema: null });
-    expect(() => validateInterface(iface,)).not.toThrow();
+    expect(() => validateInterface(iface)).not.toThrow();
   });
 });
 
 describe("validateInterface example validation edge cases (OBI-D-11)", () => {
-  function baseIface(input: Record<string, unknown>, example: Record<string, unknown>): OBInterface {
+  function baseIface(
+    input: Record<string, unknown>,
+    example: Record<string, unknown>,
+  ): OBInterface {
     return {
       openbindings: "0.2.0",
       operations: {
@@ -554,8 +600,11 @@ describe("validateInterface example validation edge cases (OBI-D-11)", () => {
 // change field semantics in either direction). Mirrors the Go SDK's message.
 describe("OBI-T-04 downward refusal", () => {
   it("refuses a document below MIN_SUPPORTED_VERSION", () => {
-    expect(() => validateInterface({ openbindings: "0.1.0", operations: {} }))
-      .toThrowError(/older than the oldest version this implementation supports \(0\.2\.0\) \(OBI-T-04\)/);
+    expect(() =>
+      validateInterface({ openbindings: "0.1.0", operations: {} }),
+    ).toThrowError(
+      /older than the oldest version this implementation supports \(0\.2\.0\) \(OBI-T-04\)/,
+    );
   });
 });
 
@@ -585,8 +634,16 @@ describe("OBI-D-17 schema well-formedness", () => {
   });
 
   it.each([
-    ["type as number at input", { input: { type: 42 } }, 'operations["op"].input'],
-    ["unknown simple type", { input: { type: "str" } }, 'operations["op"].input'],
+    [
+      "type as number at input",
+      { input: { type: 42 } },
+      'operations["op"].input',
+    ],
+    [
+      "unknown simple type",
+      { input: { type: "str" } },
+      'operations["op"].input',
+    ],
     [
       "nested minLength as string",
       { output: { type: "object", properties: { a: { minLength: "3" } } } },
@@ -608,7 +665,9 @@ describe("OBI-D-17 schema well-formedness", () => {
     } catch (e) {
       msg = (e as Error).message;
     }
-    expect(msg).toContain(`${prefix}: not a well-formed JSON Schema 2020-12 schema:`);
+    expect(msg).toContain(
+      `${prefix}: not a well-formed JSON Schema 2020-12 schema:`,
+    );
     expect(msg).toContain("(OBI-D-17)");
   });
 
@@ -645,7 +704,9 @@ describe("OBI-D-17 schema well-formedness", () => {
               code: { type: "string", pattern: "([unclosed" },
             },
           },
-          output: { $ref: "https://schemas.example.com/never-published/task.json" },
+          output: {
+            $ref: "https://schemas.example.com/never-published/task.json",
+          },
         },
       },
     };
@@ -663,11 +724,20 @@ describe("OBI-D-17 schema well-formedness", () => {
 describe("OBI-D-17 on shared component graphs", () => {
   // One shared "component": a wide object whose properties are themselves
   // shared, so its expanded tree is far larger than its node count.
-  function component(depth: number, shared: Record<string, unknown>): Record<string, unknown> {
+  function component(
+    depth: number,
+    shared: Record<string, unknown>,
+  ): Record<string, unknown> {
     if (depth === 0) return shared;
     const properties: Record<string, unknown> = {};
-    for (let i = 0; i < 5; i++) properties[`field${i}`] = component(depth - 1, shared);
-    return { type: "object", properties, required: ["field0"], additionalProperties: false };
+    for (let i = 0; i < 5; i++)
+      properties[`field${i}`] = component(depth - 1, shared);
+    return {
+      type: "object",
+      properties,
+      required: ["field0"],
+      additionalProperties: false,
+    };
   }
 
   function corpusShapedInterface(operationCount: number): OBInterface {
@@ -702,7 +772,10 @@ describe("OBI-D-17 on shared component graphs", () => {
     // Deliberately small: a document that fails is decided by the ordinary
     // whole-tree walk, which is the sole authority on the diagnostics.
     const leaf = { type: "string" };
-    const shared = { type: "object", properties: { field0: leaf, field1: leaf } };
+    const shared = {
+      type: "object",
+      properties: { field0: leaf, field1: leaf },
+    };
     const iface: OBInterface = {
       openbindings: "0.2.0",
       operations: {
@@ -711,7 +784,10 @@ describe("OBI-D-17 on shared component graphs", () => {
       },
     };
     const input = iface.operations["op1"]!.input as Record<string, unknown>;
-    const properties = input["properties"] as Record<string, Record<string, unknown>>;
+    const properties = input["properties"] as Record<
+      string,
+      Record<string, unknown>
+    >;
     // `items` in array form is draft-4 syntax, not 2020-12 (prefixItems).
     properties["field1"]!["items"] = [{ type: "string" }];
     let msg = "";
@@ -720,7 +796,9 @@ describe("OBI-D-17 on shared component graphs", () => {
     } catch (e) {
       msg = (e as Error).message;
     }
-    expect(msg).toContain('operations["op1"].input: not a well-formed JSON Schema 2020-12 schema:');
+    expect(msg).toContain(
+      'operations["op1"].input: not a well-formed JSON Schema 2020-12 schema:',
+    );
     expect(msg).toContain("/properties/field1/items");
     expect(msg).toContain("(OBI-D-17)");
     // The identical, well-formed sibling operation is untouched.
@@ -743,7 +821,11 @@ describe("OBI-D-17 on shared component graphs", () => {
     } catch (e) {
       msg = (e as Error).message;
     }
-    for (const pointer of ["/properties/a/minLength", "/properties/b/minLength", "/items/minLength"]) {
+    for (const pointer of [
+      "/properties/a/minLength",
+      "/properties/b/minLength",
+      "/items/minLength",
+    ]) {
       expect(msg).toContain(pointer);
     }
   });
@@ -795,7 +877,8 @@ describe("OBI-D-18 transform parse-validity", () => {
 // form at every schema position).
 describe("boolean schema round-trip", () => {
   it("parses and re-serializes boolean input/output/schemas entries", () => {
-    const raw = '{"openbindings":"0.2.0","operations":{"op":{"input":true,"output":false}},"schemas":{"Anything":true}}';
+    const raw =
+      '{"openbindings":"0.2.0","operations":{"op":{"input":true,"output":false}},"schemas":{"Anything":true}}';
     const iface = JSON.parse(raw) as OBInterface;
     expect(() => validateInterface(iface)).not.toThrow();
     const round = JSON.parse(JSON.stringify(iface)) as Record<string, unknown>;

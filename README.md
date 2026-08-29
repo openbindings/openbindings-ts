@@ -4,7 +4,7 @@ TypeScript SDK for the [OpenBindings](https://openbindings.com) specification. P
 
 OpenBindings is an open standard. **One interface. Any binding.** Describe what a service does separately from how you access it. An OBI (OpenBindings Interface) document describes what operations a service offers and how to reach them, independent of protocol. See the [spec](https://github.com/openbindings/spec) and [guides](https://github.com/openbindings/spec/tree/main/guides) for details.
 
-**Spec version:** implements OpenBindings 0.2. To ask whether this SDK will accept a document of a given version, call `isSupportedVersion(version)` — the OBI-T-04 acceptance oracle: it returns true exactly when `validateInterface` / `parseDocument` would process (not refuse) that version, so it is patch-lenient within a supported minor line (a 0.2.0 SDK accepts 0.2.1, 0.2.99, …) and refuses a different major, a pre-1.0 different minor, and unsupported prereleases. `MIN_SUPPORTED_VERSION` / `MAX_TESTED_VERSION` / `supportedRange()` are a distinct, narrower notion — the maintainer-*tested* range — and a version can be accepted without falling inside it.
+**Spec version:** implements OpenBindings 0.2. To ask whether this SDK will accept a document of a given version, call `isSupportedVersion(version)` — the OBI-T-04 acceptance oracle: it returns true exactly when `validateInterface` / `parseDocument` would process (not refuse) that version, so it is patch-lenient within a supported minor line (a 0.2.0 SDK accepts 0.2.1, 0.2.99, …) and refuses a different major, a pre-1.0 different minor, and unsupported prereleases. `MIN_SUPPORTED_VERSION` / `MAX_TESTED_VERSION` / `supportedRange()` are a distinct, narrower notion — the maintainer-_tested_ range — and a version can be accepted without falling inside it.
 
 > **Draft status:** this branch implements the unreleased 0.2 working draft.
 > Package versions are staged at `0.2.0` but are not available from npm until
@@ -14,22 +14,22 @@ OpenBindings is an open standard. **One interface. Any binding.** Describe what 
 
 ## Packages
 
-| Package | Description | Install |
-|---------|-------------|---------|
-| `@openbindings/core` | The spec-defined core: document model, parse, validate, resolve, verify | `npm install @openbindings/core` |
-| `@openbindings/invoke` | Binding-invoker / operation-invoker pattern: invocation handles, context, hooks, operation requirements | `npm install @openbindings/invoke` |
-| `@openbindings/synthesize` | Interface synthesis, coverage accounting, source inspection, `fetchInterface` | `npm install @openbindings/synthesize` |
-| `@openbindings/compare` | Schema comparison under the published OB-2020-12 profile | `npm install @openbindings/compare` |
-| `@openbindings/sdk` | Facade re-exporting core + invoke + synthesize + compare | `npm install @openbindings/sdk` |
-| [`@openbindings/openapi-client`](../openapi-client) | Standalone OpenAPI 3.0/3.1 document-driven client and execution engine (separate repository) | `npm install @openbindings/openapi-client` |
-| `@openbindings/openapi` | OpenAPI 3.x binding invoker and interface synthesizer | `npm install @openbindings/openapi` |
-| `@openbindings/asyncapi` | AsyncAPI 3.x binding invoker and interface synthesizer | `npm install @openbindings/asyncapi` |
-| `@openbindings/mcp` | MCP binding invoker and interface synthesizer | `npm install @openbindings/mcp` |
-| `@openbindings/grpc` | gRPC binding invoker and interface synthesizer | `npm install @openbindings/grpc` |
-| `@openbindings/connect` | Connect binding invoker and interface synthesizer | `npm install @openbindings/connect` |
-| `@openbindings/usage` | jdx usage binding invoker and interface synthesizer | `npm install @openbindings/usage` |
-| `@openbindings/graphql` | GraphQL binding invoker and exhaustive root-field interface synthesizer | `npm install @openbindings/graphql` |
-| `@openbindings/operationgraph` | Operation-graph binding invoker (compose operations) | `npm install @openbindings/operationgraph` |
+| Package                                             | Description                                                                                              | Install                                    |
+| --------------------------------------------------- | -------------------------------------------------------------------------------------------------------- | ------------------------------------------ |
+| `@openbindings/core`                                | The spec-defined core: document model, parse, validate, resolve, verify                                  | `npm install @openbindings/core`           |
+| `@openbindings/invoke`                              | Binding-invoker / operation-invoker pattern: invocation handles, context, hooks, operation requirements  | `npm install @openbindings/invoke`         |
+| `@openbindings/synthesize`                          | Interface synthesis, coverage accounting, source inspection, `fetchInterface`                            | `npm install @openbindings/synthesize`     |
+| `@openbindings/compare`                             | Schema comparison under the published OB-2020-12 profile                                                 | `npm install @openbindings/compare`        |
+| `@openbindings/sdk`                                 | Facade re-exporting core + invoke + synthesize + compare                                                 | `npm install @openbindings/sdk`            |
+| [`@openbindings/openapi-client`](../openapi-client) | Standalone Swagger 2.0 and OpenAPI 3.x document-driven client and execution engine (separate repository) | `npm install @openbindings/openapi-client` |
+| `@openbindings/openapi`                             | Swagger 2.0 and OpenAPI 3.x binding invoker and interface synthesizer                                    | `npm install @openbindings/openapi`        |
+| `@openbindings/asyncapi`                            | AsyncAPI 3.x binding invoker and interface synthesizer                                                   | `npm install @openbindings/asyncapi`       |
+| `@openbindings/mcp`                                 | MCP binding invoker and interface synthesizer                                                            | `npm install @openbindings/mcp`            |
+| `@openbindings/grpc`                                | gRPC binding invoker and interface synthesizer                                                           | `npm install @openbindings/grpc`           |
+| `@openbindings/connect`                             | Connect binding invoker and interface synthesizer                                                        | `npm install @openbindings/connect`        |
+| `@openbindings/usage`                               | jdx usage binding invoker and interface synthesizer                                                      | `npm install @openbindings/usage`          |
+| `@openbindings/graphql`                             | GraphQL binding invoker and exhaustive root-field interface synthesizer                                  | `npm install @openbindings/graphql`        |
+| `@openbindings/operationgraph`                      | Operation-graph binding invoker (compose operations)                                                     | `npm install @openbindings/operationgraph` |
 
 The SDK is layered along the project's authority graph: `@openbindings/core`
 carries everything `openbindings.md` defines and never requires invocation;
@@ -162,11 +162,13 @@ const requirement = operationRequirement(
   requiredInterface,
   OperationSignatures.createTask,
 );
-const resolution = await resolveOperationRequirement(requirement, [{
-  interface: tasksAPI,
-  invoker: new OperationInvoker([new OpenAPIInvoker()]),
-  label: "tasks-api",
-}]);
+const resolution = await resolveOperationRequirement(requirement, [
+  {
+    interface: tasksAPI,
+    invoker: new OperationInvoker([new OpenAPIInvoker()]),
+    label: "tasks-api",
+  },
+]);
 
 if (resolution.status === "available") {
   const invocation = resolution.match.invoke();
@@ -257,26 +259,37 @@ directly on OpenBindings concepts. See the binding-specification guide's
 
 ```typescript
 const invoker = new OperationInvoker([
-  new OpenAPIInvoker(),    // unreleased openbindings.openapi@1 candidate
-  new AsyncAPIInvoker(),   // openbindings.asyncapi@1
+  new OpenAPIInvoker(), // four exact OpenAPI sibling candidates
+  new AsyncAPIInvoker(), // openbindings.asyncapi@1
 ]);
 ```
 
-| Package | Binding specification | Synthesizes OBIs? |
-|---------|--------------|-------------------|
-| `@openbindings/openapi` | `openbindings.openapi@1` candidate | yes |
-| `@openbindings/asyncapi` | `openbindings.asyncapi@1` | yes |
-| `@openbindings/mcp` | `openbindings.mcp@1` candidate | yes |
-| `@openbindings/grpc` | `openbindings.grpc@1` | yes |
-| `@openbindings/connect` | `openbindings.connect@1` | yes |
-| `@openbindings/usage` | `openbindings.usage@1` | yes |
-| `@openbindings/graphql` | `openbindings.graphql@1` candidate | yes |
-| `@openbindings/operationgraph` | `openbindings.operation-graph@1` | no (graphs are authored, then composed at invoke time) |
+| Package                        | Binding specification              | Synthesizes OBIs?                                      |
+| ------------------------------ | ---------------------------------- | ------------------------------------------------------ |
+| `@openbindings/openapi`        | `openbindings.openapi-2.0@1`       | yes                                                    |
+| `@openbindings/openapi`        | `openbindings.openapi-3.0@1`       | yes                                                    |
+| `@openbindings/openapi`        | `openbindings.openapi-3.1@1`       | yes                                                    |
+| `@openbindings/openapi`        | `openbindings.openapi-3.2@1`       | yes                                                    |
+| `@openbindings/asyncapi`       | `openbindings.asyncapi@1`          | yes                                                    |
+| `@openbindings/mcp`            | `openbindings.mcp@1` candidate     | yes                                                    |
+| `@openbindings/grpc`           | `openbindings.grpc@1`              | yes                                                    |
+| `@openbindings/connect`        | `openbindings.connect@1`           | yes                                                    |
+| `@openbindings/usage`          | `openbindings.usage@1`             | yes                                                    |
+| `@openbindings/graphql`        | `openbindings.graphql@1` candidate | yes                                                    |
+| `@openbindings/operationgraph` | `openbindings.operation-graph@1`   | no (graphs are authored, then composed at invoke time) |
 
 Every listed binding specification is an unreleased first `@1` candidate.
 None has an older published meaning or compatibility revision. Exact opaque
 identifier routing is already exercised during development so the candidate
 implementation and conformance evidence can be qualified before publication.
+
+The four OpenAPI siblings govern Swagger 2.0, OpenAPI 3.0.0–3.0.4,
+3.1.0–3.1.2, and 3.2.0 respectively; one source names exactly one sibling.
+`@openbindings/openapi` adapts the standalone
+[`@openbindings/openapi-client`](https://github.com/openbindings/openapi-client)
+engine to OpenBindings. Synthesis emits ordinary Core JSONata
+`inputTransform` expressions that map operation input to the public
+`{parameters?, body?}` caller envelope.
 
 Invokers implement `BindingInvoker`. Interface synthesizers implement
 `InterfaceSynthesizer`; synthesizers that can return durable, explicitly

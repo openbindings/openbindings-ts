@@ -4,10 +4,7 @@
   "title": "OpenBindings Interface Document (v0.2.0)",
   "description": "Derived JSON Schema for the OpenBindings interface document. Expresses the structural portion of the specification; where prose and schema conflict, the prose governs (see openbindings.md §10).",
   "type": "object",
-  "required": [
-    "openbindings",
-    "operations"
-  ],
+  "required": ["openbindings", "operations"],
   "properties": {
     "openbindings": {
       "type": "string",
@@ -201,18 +198,13 @@
     },
     "Source": {
       "type": "object",
-      "required": [
-        "bindingSpec"
-      ],
-      "anyOf": [
-        { "required": ["location"] },
-        { "required": ["content"] }
-      ],
+      "required": ["bindingSpec"],
+      "anyOf": [{ "required": ["location"] }, { "required": ["content"] }],
       "properties": {
         "bindingSpec": {
           "type": "string",
           "minLength": 1,
-          "description": "Binding specification identifier: exact, opaque, non-empty string denoting the binding specification governing this source and its bindings (e.g., openbindings.openapi@1). Never implicitly dereferenced; no version algebra."
+          "description": "Binding specification identifier: exact, opaque, non-empty string denoting the binding specification governing this source and its bindings (e.g., openbindings.openapi-3.1@1). Never implicitly dereferenced; no version algebra."
         },
         "location": {
           "type": "string",
@@ -231,10 +223,7 @@
     },
     "BindingEntry": {
       "type": "object",
-      "required": [
-        "operation",
-        "source"
-      ],
+      "required": ["operation", "source"],
       "properties": {
         "operation": {
           "type": "string",

@@ -6,26 +6,28 @@ processor, and Operation Graph corpora. The checked-in
 [`reference-sdk-correspondence.json`](../spec/conformance/reference-sdk-correspondence.json)
 also guards the public role and family correspondence.
 
-| Concept | Go | TypeScript |
-|---|---|---|
-| binding implementation | `BindingInvoker` | `BindingInvoker` |
-| supported identifiers | `BindingSpecs()` | `bindingSpecs()` |
-| invoke one binding | `InvokeBinding(...)` | `invokeBinding(...)` |
-| side-effect-free context preflight | `PrepareBinding(...)` | `prepareBinding(...)` |
-| artifact → OBI | `InterfaceSynthesizer.SynthesizeInterface(...)` | `InterfaceSynthesizer.synthesizeInterface(...)` |
+| Concept                                                        | Go                                                         | TypeScript                                                 |
+| -------------------------------------------------------------- | ---------------------------------------------------------- | ---------------------------------------------------------- |
+| binding implementation                                         | `BindingInvoker`                                           | `BindingInvoker`                                           |
+| supported identifiers                                          | `BindingSpecs()`                                           | `bindingSpecs()`                                           |
+| invoke one binding                                             | `InvokeBinding(...)`                                       | `invokeBinding(...)`                                       |
+| side-effect-free context preflight                             | `PrepareBinding(...)`                                      | `prepareBinding(...)`                                      |
+| artifact → OBI                                                 | `InterfaceSynthesizer.SynthesizeInterface(...)`            | `InterfaceSynthesizer.synthesizeInterface(...)`            |
 | artifact → OBI + exhaustiveness-qualified disposition evidence | `CoverageSynthesizer.SynthesizeInterfaceWithCoverage(...)` | `CoverageSynthesizer.synthesizeInterfaceWithCoverage(...)` |
-| inspect bindable targets | `SourceInspector.InspectSource(...)` | `SourceInspector.inspectSource(...)` |
-| source-less scaffold | `SynthesisSkeleton(...)` | `synthesisSkeleton(...)` |
-| shared authoring directives + validation | `FinalizeSynthesis(...)` | `finalizeSynthesis(...)` |
-| one consumed operation contract | `NewOperationRequirement(...)` | `operationRequirement(...)` |
-| per-operation compatibility check | `CheckOperationCompatibility(...)` | `checkOperationCompatibility(...)` |
-| all compatible, invocable matches | `MatchOperationRequirement(...)` | `matchOperationRequirement(...)` |
-| conservative route-to-one resolution | `ResolveOperationRequirement(...)` | `resolveOperationRequirement(...)` |
+| inspect bindable targets                                       | `SourceInspector.InspectSource(...)`                       | `SourceInspector.inspectSource(...)`                       |
+| source-less scaffold                                           | `SynthesisSkeleton(...)`                                   | `synthesisSkeleton(...)`                                   |
+| shared authoring directives + validation                       | `FinalizeSynthesis(...)`                                   | `finalizeSynthesis(...)`                                   |
+| one consumed operation contract                                | `NewOperationRequirement(...)`                             | `operationRequirement(...)`                                |
+| per-operation compatibility check                              | `CheckOperationCompatibility(...)`                         | `checkOperationCompatibility(...)`                         |
+| all compatible, invocable matches                              | `MatchOperationRequirement(...)`                           | `matchOperationRequirement(...)`                           |
+| conservative route-to-one resolution                           | `ResolveOperationRequirement(...)`                         | `resolveOperationRequirement(...)`                         |
 
-All seven first-release artifact/protocol binding candidates implement
-invocation, synthesis, and source inspection in both SDKs: OpenAPI, AsyncAPI,
-MCP, gRPC, Connect, usage, and GraphQL. None of these binding specifications
-has been published yet.
+All seven artifact/protocol families implement invocation, synthesis, and
+source inspection in both SDKs: OpenAPI, AsyncAPI, MCP, gRPC, Connect, usage,
+and GraphQL. The OpenAPI family declares four exact sibling tokens:
+`openbindings.openapi-2.0@1`, `openbindings.openapi-3.0@1`,
+`openbindings.openapi-3.1@1`, and `openbindings.openapi-3.2@1`. They govern
+Swagger 2.0, OpenAPI 3.0.0–3.0.4, 3.1.0–3.1.2, and 3.2.0 respectively.
 
 Parity means the same behavior at the OpenBindings boundary: exact
 `bindingSpec` support, resolution and refusal decisions, input/output values,
@@ -56,21 +58,27 @@ through the package's own artifact, location, and selector lanes. Family authori
 tests then exercise artifact loading, inspection, synthesis, and
 synthesized-document validation. Both SDKs execute the same portable synthesis
 scenarios from `spec/conformance/binding-specs/synthesis/`, comparing exact
-emitted target identities and exhaustive artifact dispositions. They then
-execute the same 109 portable processor scenarios from
-`spec/conformance/binding-specs/processor/`, covering all 52 published P-rules.
-Protocol integration tests exercise actual request framing and response
-decoding. Passing only one boundary is not sufficient release evidence.
+emitted target identities, input transforms, and exhaustive artifact
+dispositions. The current shared battery contains 105 synthesis scenarios,
+529 processor scenarios, and 10 OpenAPI native-fidelity scenarios, all
+executed by both SDKs under the strict verifier. Protocol integration tests
+exercise actual request framing and response decoding. Passing only one
+boundary is not sufficient release evidence.
 
-| Family | Go authoring evidence | TypeScript authoring evidence | Shared synthesis evidence | Shared invocation evidence |
-|---|---|---|---|---|
-| OpenAPI | `formats/openapi/synthesize_test.go`, `list_refs_test.go` | `packages/openapi/src/synthesize.test.ts`, `invoker.test.ts` | `synthesis/openapi.json` | `processor/openapi.json` |
-| AsyncAPI | `formats/asyncapi/synthesize_test.go`, `list_refs_test.go` | `packages/asyncapi/src/invoker.test.ts`, `inspect-source.test.ts` | `synthesis/asyncapi.json` | `processor/asyncapi.json` |
-| MCP | `formats/mcp/synthesize_test.go`, `list_refs_test.go` | `packages/mcp/src/invoker.test.ts` | `synthesis/mcp.json` | `processor/mcp.json` |
-| gRPC | `formats/grpc/synthesize_test.go`, `list_refs_test.go` | `packages/grpc/src/authoring.test.ts` | `synthesis/grpc.json` | `processor/grpc.json` |
-| Connect | `formats/connect/synthesize_test.go`, `list_refs_test.go` | `packages/connect/src/authoring.test.ts` | `synthesis/connect.json` | `processor/connect.json` |
-| usage | `formats/usage/synthesize_interface_test.go`, `list_refs_test.go` | `packages/usage/src/authoring.test.ts` | `synthesis/usage.json` | `processor/usage.json` |
-| GraphQL | `formats/graphql/synthesize_test.go`, `list_refs_test.go` | `packages/graphql/src/synthesize.test.ts`, `invoker.test.ts` | `synthesis/graphql.json` | `processor/graphql.json` |
+| Family   | Go authoring evidence                                             | TypeScript authoring evidence                                     | Shared synthesis evidence | Shared invocation evidence |
+| -------- | ----------------------------------------------------------------- | ----------------------------------------------------------------- | ------------------------- | -------------------------- |
+| OpenAPI  | `formats/openapi/synthesize_test.go`, `list_refs_test.go`         | `packages/openapi/src/synthesize.test.ts`, `invoker.test.ts`      | `synthesis/openapi.json`  | `processor/openapi.json`   |
+| AsyncAPI | `formats/asyncapi/synthesize_test.go`, `list_refs_test.go`        | `packages/asyncapi/src/invoker.test.ts`, `inspect-source.test.ts` | `synthesis/asyncapi.json` | `processor/asyncapi.json`  |
+| MCP      | `formats/mcp/synthesize_test.go`, `list_refs_test.go`             | `packages/mcp/src/invoker.test.ts`                                | `synthesis/mcp.json`      | `processor/mcp.json`       |
+| gRPC     | `formats/grpc/synthesize_test.go`, `list_refs_test.go`            | `packages/grpc/src/authoring.test.ts`                             | `synthesis/grpc.json`     | `processor/grpc.json`      |
+| Connect  | `formats/connect/synthesize_test.go`, `list_refs_test.go`         | `packages/connect/src/authoring.test.ts`                          | `synthesis/connect.json`  | `processor/connect.json`   |
+| usage    | `formats/usage/synthesize_interface_test.go`, `list_refs_test.go` | `packages/usage/src/authoring.test.ts`                            | `synthesis/usage.json`    | `processor/usage.json`     |
+| GraphQL  | `formats/graphql/synthesize_test.go`, `list_refs_test.go`         | `packages/graphql/src/synthesize.test.ts`, `invoker.test.ts`      | `synthesis/graphql.json`  | `processor/graphql.json`   |
+
+Both OpenAPI adapters sit over the standalone OpenAPI client for their
+language. Synthesized bindings expose ordinary Core JSONata `inputTransform`
+expressions that map operation input into the public `{parameters?, body?}`
+caller envelope; engine-private routing does not enter an OBI document.
 
 The authoring invariant is creation-time soundness plus explicit completeness:
 inspection and synthesis apply the same target eligibility used by invocation;
@@ -84,15 +92,15 @@ source or peer will never change after synthesis.
 
 These are specification boundaries, not SDK parity gaps:
 
-| Family | Deliberately outside revision 1 |
-|---|---|
-| OpenAPI | webhooks, callbacks, NDJSON/other streaming framings, and operations whose effective parameter/body alternatives cannot be represented without collision or loss |
+| Family   | Deliberately outside revision 1                                                                                                                                                                                                             |
+| -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| OpenAPI  | webhooks, callbacks, NDJSON/other streaming framings, and operations whose effective parameter/body alternatives cannot be represented without collision or loss                                                                            |
 | AsyncAPI | protocols without a qualified installed driver; MQTT and Kafka cells outside their checked-in authority matrices; standalone HTTP `send`; message-header carriage; and arbitrary byte values without an artifact-declared boundary encoding |
-| MCP | stdio and deprecated HTTP+SSE transports, required task augmentation, and server-initiated subscriptions/sampling/elicitation/roots/log streams |
-| gRPC | schemas outside the canonical ProtoJSON-compatible bound closure; metadata is not promoted into operation values |
-| Connect | binary protobuf, gRPC-Web, GET dispatch, descriptorless streaming, and full-duplex use where the selected transport cannot provide HTTP/2 |
-| usage | includes, mounts, config-file/external-parse lanes, interactive/PTY/streaming commands, and binary output without a configured decoder |
-| GraphQL | batching, multipart incremental delivery, uploads, live queries, GET, persisted-query extensions, multi-root documents, and subscription protocols other than the pinned `graphql-transport-ws` revision |
+| MCP      | stdio and deprecated HTTP+SSE transports, required task augmentation, and server-initiated subscriptions/sampling/elicitation/roots/log streams                                                                                             |
+| gRPC     | schemas outside the canonical ProtoJSON-compatible bound closure; metadata is not promoted into operation values                                                                                                                            |
+| Connect  | binary protobuf, gRPC-Web, GET dispatch, descriptorless streaming, and full-duplex use where the selected transport cannot provide HTTP/2                                                                                                   |
+| usage    | includes, mounts, config-file/external-parse lanes, interactive/PTY/streaming commands, and binary output without a configured decoder                                                                                                      |
+| GraphQL  | batching, multipart incremental delivery, uploads, live queries, GET, persisted-query extensions, multi-root documents, and subscription protocols other than the pinned `graphql-transport-ws` revision                                    |
 
 Within those boundaries, an implementation refuses rather than inventing a
 private approximation. Runtime capability limitations are declared and refuse

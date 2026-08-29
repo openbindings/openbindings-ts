@@ -14,7 +14,7 @@ import {
 const refused: SynthesisScenario = {
   id: "OAPI-SS-99",
   description: "runner refusal seam",
-  source: { bindingSpec: "openbindings.openapi@1", content: {} },
+  source: { bindingSpec: "openbindings.openapi-3.1@1", content: {} },
   expected: {
     outcome: "refused",
     rules: ["OAPI-P-03"],
@@ -23,16 +23,17 @@ const refused: SynthesisScenario = {
 
 describe("portable synthesis scenario outcomes", () => {
   it("accepts a loud failure without comparing language-specific error shape", async () => {
-    await expect(verifySynthesisScenario(refused, async () => {
-      throw new TypeError("incidental implementation prose");
-    })).resolves.toBeUndefined();
+    await expect(
+      verifySynthesisScenario(refused, async () => {
+        throw new TypeError("incidental implementation prose");
+      }),
+    ).resolves.toBeUndefined();
   });
 
   it("does not mistake successful synthesis for the required refusal", async () => {
-    await expect(verifySynthesisScenario(
-      refused,
-      async () => ({}) as SynthesizeResult,
-    )).rejects.toThrow("expected whole-source refusal but synthesis succeeded");
+    await expect(
+      verifySynthesisScenario(refused, async () => ({}) as SynthesizeResult),
+    ).rejects.toThrow("expected whole-source refusal but synthesis succeeded");
   });
 
   it("propagates synthesis failure when the corpus requires success", async () => {
@@ -49,23 +50,27 @@ describe("portable synthesis scenario outcomes", () => {
         },
       },
     };
-    await expect(verifySynthesisScenario(synthesized, async () => {
-      throw new Error("unexpected failure");
-    })).rejects.toThrow("unexpected failure");
+    await expect(
+      verifySynthesisScenario(synthesized, async () => {
+        throw new Error("unexpected failure");
+      }),
+    ).rejects.toThrow("unexpected failure");
   });
 });
 
 describe("portable synthesis corpus revision", () => {
   const wellFormed = {
     format: SYNTHESIS_SCENARIO_FORMAT,
-    bindingSpec: "openbindings.openapi@1",
+    bindingSpec: "openbindings.openapi-3.1@1",
     family: "openapi",
     description: "one scenario",
     scenarios: [refused],
   };
 
   it("accepts the revision this runner implements", () => {
-    expect(parseSynthesisScenarioFile(wellFormed, "openapi").scenarios).toHaveLength(1);
+    expect(
+      parseSynthesisScenarioFile(wellFormed, "openapi").scenarios,
+    ).toHaveLength(1);
   });
 
   it("refuses a revision it does not implement rather than running it silently", () => {
@@ -75,20 +80,23 @@ describe("portable synthesis corpus revision", () => {
       "openbindings.binding-spec-synthesis-scenarios@6",
       undefined,
     ]) {
-      expect(() => parseSynthesisScenarioFile({ ...wellFormed, format }, "openapi"))
-        .toThrow("unsupported synthesis scenario format");
+      expect(() =>
+        parseSynthesisScenarioFile({ ...wellFormed, format }, "openapi"),
+      ).toThrow("unsupported synthesis scenario format");
     }
   });
 
   it("refuses a file whose family does not match the one requested", () => {
-    expect(() => parseSynthesisScenarioFile(wellFormed, "usage"))
-      .toThrow("malformed synthesis family file");
+    expect(() => parseSynthesisScenarioFile(wellFormed, "usage")).toThrow(
+      "malformed synthesis family file",
+    );
   });
 
   it("refuses a file that is not an object at all", () => {
     for (const raw of [null, [], "openapi", 7]) {
-      expect(() => parseSynthesisScenarioFile(raw, "openapi"))
-        .toThrow("malformed synthesis family file");
+      expect(() => parseSynthesisScenarioFile(raw, "openapi")).toThrow(
+        "malformed synthesis family file",
+      );
     }
   });
 });
@@ -103,18 +111,24 @@ describe("companion-resource guard for self-contained families", () => {
   });
 
   it("refuses a scenario declaring companion resources, naming the scenario", () => {
-    expect(() => factory({
-      ...refused,
-      resources: { "https://companion.example/library.yaml": {} },
-    })).toThrow("OAPI-SS-99: declares companion resources, which this family's runner does not serve");
+    expect(() =>
+      factory({
+        ...refused,
+        resources: { "https://companion.example/library.yaml": {} },
+      }),
+    ).toThrow(
+      "OAPI-SS-99: declares companion resources, which this family's runner does not serve",
+    );
   });
 });
 
 describe("portable synthesis scenario assertions", () => {
-  const withAssertion = (assertions: ProcessorAssertion[]): SynthesisScenario => ({
+  const withAssertion = (
+    assertions: ProcessorAssertion[],
+  ): SynthesisScenario => ({
     id: "OAPI-SS-98",
     description: "emitted-document assertion seam",
-    source: { bindingSpec: "openbindings.openapi@1", content: {} },
+    source: { bindingSpec: "openbindings.openapi-3.1@1", content: {} },
     expected: {
       outcome: "synthesized",
       operations: ["probe"],
@@ -127,37 +141,55 @@ describe("portable synthesis scenario assertions", () => {
   const result = {
     interface: {
       openbindings: "0.2.0",
-      operations: { probe: { input: { properties: { issued: { example: "2020-01-01T12:00:00Z" } } } } },
+      operations: {
+        probe: {
+          input: {
+            properties: { issued: { example: "2020-01-01T12:00:00Z" } },
+          },
+        },
+      },
     },
     coverage: { exhaustive: true, fullyRepresented: true, entries: [] },
   } as unknown as SynthesizeResult;
 
   it("passes an assertion the emitted document satisfies", async () => {
-    await expect(verifySynthesisScenario(
-      withAssertion([
-        { path: "/operations/probe/input/properties/issued/example", equals: "2020-01-01T12:00:00Z" },
-      ]),
-      async () => result,
-    )).resolves.toBeUndefined();
+    await expect(
+      verifySynthesisScenario(
+        withAssertion([
+          {
+            path: "/operations/probe/input/properties/issued/example",
+            equals: "2020-01-01T12:00:00Z",
+          },
+        ]),
+        async () => result,
+      ),
+    ).resolves.toBeUndefined();
   });
 
   it("fails an assertion the emitted document violates, naming the pointer", async () => {
-    await expect(verifySynthesisScenario(
-      withAssertion([
-        { path: "/operations/probe/input/properties/issued/example", equals: {} },
-      ]),
-      async () => result,
-    )).rejects.toThrow("emitted-document assertion failed");
+    await expect(
+      verifySynthesisScenario(
+        withAssertion([
+          {
+            path: "/operations/probe/input/properties/issued/example",
+            equals: {},
+          },
+        ]),
+        async () => result,
+      ),
+    ).rejects.toThrow("emitted-document assertion failed");
   });
 
   it("keeps assertions out of the compared identity surface", async () => {
     // The scenario carries an assertion AND declares the identity surface.
     // Only operations, bindings and coverage are diffed, so an assertion list
     // never leaks into the comparison that decides scenario identity.
-    await expect(verifySynthesisScenario(
-      withAssertion([{ path: "/openbindings", equals: "0.2.0" }]),
-      async () => result,
-    )).resolves.toBeUndefined();
+    await expect(
+      verifySynthesisScenario(
+        withAssertion([{ path: "/openbindings", equals: "0.2.0" }]),
+        async () => result,
+      ),
+    ).resolves.toBeUndefined();
   });
 });
 
@@ -166,12 +198,14 @@ describe("portable synthesis identity", () => {
     const scenario: SynthesisScenario = {
       id: "OAPI-SS-97",
       description: "targetless dependency identity seam",
-      source: { bindingSpec: "openbindings.openapi@1", content: {} },
+      source: { bindingSpec: "openbindings.openapi-3.1@1", content: {} },
       expected: {
         outcome: "synthesized",
         operations: ["call"],
         bindings: [],
-        assertions: [{ path: "/operations/receive/input/type", equals: "string" }],
+        assertions: [
+          { path: "/operations/receive/input/type", equals: "string" },
+        ],
         coverage: { exhaustive: true, fullyRepresented: true, entries: [] },
       },
     };
@@ -187,6 +221,8 @@ describe("portable synthesis identity", () => {
       coverage: { exhaustive: true, fullyRepresented: true, entries: [] },
     } as unknown as SynthesizeResult;
 
-    await expect(verifySynthesisScenario(scenario, async () => result)).resolves.toBeUndefined();
+    await expect(
+      verifySynthesisScenario(scenario, async () => result),
+    ).resolves.toBeUndefined();
   });
 });
