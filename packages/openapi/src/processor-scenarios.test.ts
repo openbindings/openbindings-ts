@@ -48,7 +48,7 @@ const corpusEntries = [
       "OAPI20-PS-74", "OAPI20-PS-75", "OAPI20-PS-76", "OAPI20-PS-77", "OAPI20-PS-78",
       "OAPI20-PS-79", "OAPI20-PS-80", "OAPI20-PS-81", "OAPI20-PS-82", "OAPI20-PS-83",
       "OAPI20-PS-84", "OAPI20-PS-85", "OAPI20-PS-86", "OAPI20-PS-87", "OAPI20-PS-88",
-      "OAPI20-PS-89", "OAPI20-PS-90", "OAPI20-PS-91", "OAPI20-PS-92", "OAPI20-PS-93",
+      "OAPI20-PS-89", "OAPI20-PS-90", "OAPI20-PS-91", "OAPI20-PS-92", "OAPI20-PS-93", "OAPI20-PS-94",
     ]),
   },
   { file: "openapi-3.0.json" },
@@ -89,9 +89,9 @@ describe("portable OpenAPI processor scenarios", () => {
   }
 
   afterAll(() => {
-    expect(corpora.map(({ corpus, wanted }) => wanted?.size ?? corpus.scenarios.length)).toEqual([93, 73, 99, 177]);
-    expect(executedByCorpus).toEqual([93, 73, 99, 177]);
-    expect(executed).toBe(442);
+    expect(corpora.map(({ corpus, wanted }) => wanted?.size ?? corpus.scenarios.length)).toEqual([94, 75, 104, 177]);
+    expect(executedByCorpus).toEqual([94, 75, 104, 177]);
+    expect(executed).toBe(450);
   });
 });
 
@@ -387,9 +387,28 @@ function bytesToBase64(bytes: Uint8Array): string {
   return btoa(binary);
 }
 
+/**
+ * Records the OCTETS this substrate would put on the wire, not the JS string
+ * held in the Headers object. A `fetch` header value is a ByteString: each
+ * code unit becomes one octet (isomorphic encode). Reading those octets back
+ * as UTF-8 makes the observation portable against the Go twin, whose header
+ * strings already are their own UTF-8 octets.
+ */
+function wireHeaderValue(value: string): string {
+  const octets = new Uint8Array(value.length);
+  for (let index = 0; index < value.length; index += 1) {
+    const unit = value.charCodeAt(index);
+    // > U+00FF never reaches the wire: the substrate throws on conversion.
+    if (unit > 0xff) return value;
+    octets[index] = unit;
+  }
+  return new TextDecoder("utf-8", { fatal: false }).decode(octets);
+}
+
 function normalizedHeaders(headers: Headers): Record<string, string> {
   const out: Record<string, string> = {};
-  headers.forEach((value, name) => {
+  headers.forEach((rawValue, name) => {
+    const value = wireHeaderValue(rawValue);
     const canonical = name.split("-").map((part: string) => part.charAt(0).toUpperCase() + part.slice(1)).join("-");
     out[name] = value;
     out[canonical] = value;

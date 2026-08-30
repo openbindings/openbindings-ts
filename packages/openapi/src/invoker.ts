@@ -654,8 +654,12 @@ async function loadRuntimeOperationModel(
   if (checkPathTemplateDeclaration(target.path, parameters, bindingSpec)) {
     throw new InvocationError("ERR_REFUSED");
   }
+  // Equivalent-hierarchy path keys are an OAS-forbidden construct in 3.0 and
+  // 3.1 alike, and both siblings exclude every selected operation on a
+  // participating Path Item before any caller value is inspected. 3.2 owns
+  // the same question through its own lane.
   if (
-    bindingSpec === BINDING_SPEC_OPENAPI_31
+    (bindingSpec === BINDING_SPEC_OPENAPI_30 || bindingSpec === BINDING_SPEC_OPENAPI_31)
     && equivalentPathTemplateCollision(document.paths, target.path)
   ) {
     throw new InvocationError("ERR_REFUSED");
