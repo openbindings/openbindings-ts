@@ -263,7 +263,7 @@ flag "--environment" { arg "<environment>" { choices "dev" env="DEPLOY_ENVS" } }
       executor: async () => ({ exitCode: 0, stdout: new Uint8Array([0xff]) }),
     }).invokeBinding({ source: { bindingSpec: BINDING_SPEC, content: "bin \"tool\"" }, selector: "" });
     await invalid.close();
-    await expect(single(invalid.outputs)).rejects.toMatchObject({ code: "ERR_RESPONSE_ERROR" });
+    await expect(single(invalid.outputs)).rejects.toMatchObject({ code: "ERR_EXECUTION_FAILED" });
 
     let dispatched: ProcessRequest | undefined;
     const binary = new UsageInvoker({

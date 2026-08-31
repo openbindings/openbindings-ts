@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { single, ERR_REFUSED, ERR_RESPONSE_ERROR, InvocationError } from "@openbindings/invoke";
+import { single, ERR_REFUSED, ERR_EXECUTION_FAILED, InvocationError } from "@openbindings/invoke";
 import { OpenAPIInvoker, OpenAPISynthesizer } from "./invoker.js";
 import { BINDING_SPEC_OPENAPI_30, BINDING_SPEC_OPENAPI_31 } from "./constants.js";
 
@@ -184,7 +184,7 @@ describe("strict JSON response profile through the adapter", () => {
   it("makes an unpaired surrogate escape a loud protocol error", async () => {
     for (const source of ['{"a":"\\ud800"}', '{"a":"\\udc00"}']) {
       const observed = await readJSON(new TextEncoder().encode(source));
-      expect(observed).toEqual({ outcome: ERR_RESPONSE_ERROR, dispatches: 1 });
+      expect(observed).toEqual({ outcome: ERR_EXECUTION_FAILED, dispatches: 1 });
     }
   });
 

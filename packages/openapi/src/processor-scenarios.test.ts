@@ -12,6 +12,7 @@ import {
 import {
   CONTEXT_REQUIRED,
   ERR_INVALID_SELECTOR,
+  ERR_REFUSED,
   ERR_SELECTOR_NOT_FOUND,
   ERR_SOURCE_LOAD_FAILED,
   OperationInvoker,
@@ -241,7 +242,7 @@ async function runScenario(
         ? { context: terminal.data }
         : {}),
       error: {
-        code: terminal.code,
+        code: portableErrorCode(terminal.code, dispatches.length > 0),
         ...(Object.hasOwn(terminal, "data") ? { data: terminal.data } : {}),
       },
     },
@@ -421,6 +422,28 @@ function normalizedHeaders(headers: Headers): Record<string, string> {
     out[canonical] = value;
   });
   return out;
+}
+
+// portableErrorCode presents an SDK error code in the owned portable
+// vocabulary the corpus asserts (error-code ownership ruling, 2026-08-31):
+// only binding-invoker and operation-invoker codes have portable semantics,
+// and no binding specification defines one. The SDK's granular refusal
+// codes are documented implementation conventions this runner still reads
+// for phase evidence; the portable spelling of every provably-undispatched
+// refusal is ERR_REFUSED, and of every other unsuccessful completion
+// ERR_EXECUTION_FAILED.
+function portableErrorCode(code: string, dispatched: boolean): string {
+  switch (code) {
+    case CONTEXT_REQUIRED: case "ERR_CANCELLED": case "ERR_FRAME_PROTOCOL":
+    case "ERR_TRANSPORT_CLOSED": case ERR_REFUSED: case "ERR_EXECUTION_FAILED":
+    case "ERR_OPERATION_NOT_FOUND": case "ERR_BINDING_NOT_FOUND":
+    case "ERR_BINDING_SELECTION_REQUIRED": case "ERR_UNKNOWN_SOURCE":
+    case "ERR_OPERATION_VALIDATION_FAILED": case "ERR_SCHEMA_UNRESOLVED":
+    case "ERR_TRANSFORM_ERROR":
+      return code;
+    default:
+      return dispatched ? "ERR_EXECUTION_FAILED" : ERR_REFUSED;
+  }
 }
 
 function errorPhase(error: InvocationError, dispatched: boolean, _scenarioId: string): ProcessorObservation["phase"] {

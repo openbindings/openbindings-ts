@@ -8,7 +8,7 @@ import {
   ERR_INVALID_SELECTOR,
   ERR_PROTOCOL,
   ERR_SELECTOR_NOT_FOUND,
-  ERR_RESPONSE_ERROR,
+  ERR_EXECUTION_FAILED,
   ERR_REFUSED,
   ERR_SOURCE_LOAD_FAILED,
   InvocationError,
@@ -715,9 +715,9 @@ describe("invokeBinding — responses", () => {
     );
     const call = new OpenAPIInvoker().invokeBinding({ source: SOURCE, selector: REF_PING, fetch });
     const error = await call.closed.catch((caught: unknown) => caught);
-    expect(error).toMatchObject({ code: ERR_RESPONSE_ERROR });
-    expect((error as Error).message).toBe(ERR_RESPONSE_ERROR);
-    expect(JSON.parse(JSON.stringify(error))).toEqual({ code: ERR_RESPONSE_ERROR });
+    expect(error).toMatchObject({ code: ERR_EXECUTION_FAILED });
+    expect((error as Error).message).toBe(ERR_EXECUTION_FAILED);
+    expect(JSON.parse(JSON.stringify(error))).toEqual({ code: ERR_EXECUTION_FAILED });
   });
 
   it("an undeclared lane decodes as text — the header decides, never the bytes", async () => {
@@ -773,7 +773,7 @@ describe("invokeBinding — responses", () => {
     const { fetch } = mockFetch(() => new Response(stream, { status: 200 }));
     const call = new OpenAPIInvoker().invokeBinding({ source: SOURCE, selector: REF_PING, fetch });
 
-    await expect(call.closed).rejects.toMatchObject({ code: ERR_RESPONSE_ERROR });
+    await expect(call.closed).rejects.toMatchObject({ code: ERR_EXECUTION_FAILED });
     expect(bodyCancelled).toBe(true);
   });
 
@@ -790,7 +790,7 @@ describe("invokeBinding — responses", () => {
       maxDeliveryUnitBytes: 1024,
     });
 
-    await expect(call.closed).rejects.toMatchObject({ code: ERR_RESPONSE_ERROR });
+    await expect(call.closed).rejects.toMatchObject({ code: ERR_EXECUTION_FAILED });
   });
 
   it("aborts the in-flight request and terminates ERR_CANCELLED on cancel", async () => {

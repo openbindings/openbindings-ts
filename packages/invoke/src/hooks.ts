@@ -1,7 +1,6 @@
 import { InvocationError, type Metadata } from "./invocation.js";
 import {
   ERR_EXECUTION_FAILED,
-  ERR_RESPONSE_ERROR,
   ERR_RUNTIME,
 } from "./errcodes.js";
 import { familyName } from "./helpers.js";
@@ -80,7 +79,8 @@ export const USE_DEFAULT: unique symbol = Symbol("openbindings: use default");
  * into an output value. Return USE_DEFAULT to decline. A THROWN error is
  * the invocation's DELIBERATE terminal (data failures are not bugs); throw
  * an InvocationError to choose the code, else the seam wraps it as
- * ERR_RESPONSE_ERROR with tier provenance.
+ * generic unsuccessful completion (ERR_EXECUTION_FAILED) with tier
+ * provenance.
  */
 export type OutputDecoder = (
   site: InvokeSite,
@@ -207,7 +207,10 @@ export class InvokeHooks {
       try {
         v = await fn(site, raw);
       } catch (err) {
-        throw hookTerminal(tier, ERR_RESPONSE_ERROR, err);
+        // A decode failure is a post-dispatch cause refinement; the portable
+        // boundary carries generic unsuccessful completion (error-code
+        // ownership ruling, 2026-08-31). Cause stays on the wrapped error.
+        throw hookTerminal(tier, ERR_EXECUTION_FAILED, err);
       }
       if (v === USE_DEFAULT) continue;
       this.decodeDecided = "hook";

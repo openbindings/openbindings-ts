@@ -23,7 +23,6 @@ import {
   ERR_INVALID_SELECTOR,
   ERR_EXECUTION_FAILED,
   ERR_RUNTIME,
-  ERR_RESPONSE_ERROR,
   ERR_SOURCE_CONFIG_ERROR,
   ERR_SOURCE_LOAD_FAILED,
   ERR_VALIDATION_FAILED,
@@ -249,7 +248,11 @@ export class UsageInvoker implements BindingInvoker {
       if (typeof cfg["decode"] === "string" && !decoder) throw new Error(`unknown decode configuration ${JSON.stringify(cfg["decode"])}`);
       output = decoder ? decoder(bytes) : stripTrailingLineEndings(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
     } catch {
-      invocation.fireError(new InvocationError(ERR_RESPONSE_ERROR));
+      // A decode failure is a post-dispatch cause refinement; the portable
+      // boundary carries generic unsuccessful completion (error-code
+      // ownership ruling, 2026-08-31), mirroring the Go twin's builtin
+      // decode seam.
+      invocation.fireError(new InvocationError(ERR_EXECUTION_FAILED));
       return;
     }
     await invocation.emitOutput(output);
