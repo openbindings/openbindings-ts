@@ -1321,12 +1321,7 @@ function mapSDKError(error: unknown): InvocationError {
   if (error instanceof OpenAPIExecutionError) {
     const authored = sdkInvocationCause(error);
     if (authored) return new InvocationError(authored.code, authored.data);
-    const code = error.code === "SOURCE_LOAD_FAILED" ? "ERR_SOURCE_LOAD_FAILED"
-      : error.code === "INVALID_OPERATION_REF" ? "ERR_INVALID_SELECTOR"
-      : error.code === "OPERATION_NOT_FOUND" ? "ERR_SELECTOR_NOT_FOUND"
-      : error.code === "INVALID_DOCUMENT" ? "ERR_SOURCE_CONFIG_ERROR"
-      : error.code === "RUNTIME_ERROR" || error.code === "EXECUTION_COMPLETED_BEFORE_READY" ? "ERR_RUNTIME"
-      : error.code;
+    const code = normalizedAdapterErrorCode(error.code);
     if (code === "CONTEXT_REQUIRED" && isContextRequiredDetails(error.details)) {
       return new InvocationError(code, error.details);
     }
@@ -1347,6 +1342,39 @@ function sdkInvocationCause(error: unknown): InvocationError | null {
     current = current.cause;
   }
   return null;
+}
+
+
+// normalizedAdapterErrorCode maps the standalone client's native error
+// vocabulary onto this SDK's invocation surface. Post-dispatch cause
+// refinements collapse to generic unsuccessful completion -- codes carry
+// dispatch-state and boundary facts, never cause or protocol category
+// (error-code ownership ruling, 2026-08-31); every standard engine spelling
+// is mapped deliberately, and only authored extension codes pass through.
+function normalizedAdapterErrorCode(code: string): string {
+  switch (code) {
+    case "SOURCE_LOAD_FAILED": case "ERR_SOURCE_LOAD_FAILED": return "ERR_SOURCE_LOAD_FAILED";
+    case "INVALID_OPERATION_REF": case "ERR_INVALID_REF": return "ERR_INVALID_SELECTOR";
+    case "OPERATION_NOT_FOUND": case "ERR_REF_NOT_FOUND": return "ERR_SELECTOR_NOT_FOUND";
+    case "INVALID_DOCUMENT": return "ERR_SOURCE_CONFIG_ERROR";
+    case "RUNTIME_ERROR": case "EXECUTION_COMPLETED_BEFORE_READY": return "ERR_RUNTIME";
+    case "ERR_RESPONSE_ERROR": case "ERR_PROTOCOL": return "ERR_EXECUTION_FAILED";
+    // Owned vocabulary and this SDK's documented conventions pass through.
+    case "CONTEXT_REQUIRED": case "ERR_REFUSED": case "ERR_CANCELLED":
+    case "ERR_EXECUTION_FAILED":
+    case "ERR_SOURCE_CONFIG_ERROR": case "ERR_TIMEOUT": case "ERR_CONNECT_FAILED":
+    case "ERR_STREAM_ERROR": case "ERR_VALIDATION_FAILED": case "ERR_RUNTIME":
+    case "ERR_MISSING_INPUT": case "ERR_INPUT_CLOSED": case "ERR_INVOCATION_CLOSED":
+      return code;
+    default:
+      // Anything outside the standard engine vocabulary enumerated above is
+      // a deliberately authored extension code, which the interfaces
+      // registry licenses; it passes through as implementation behavior,
+      // never as portable contract meaning. Every standard engine spelling
+      // has a deliberate mapping above, so the undecided-passthrough leak
+      // is closed without revoking the extension license.
+      return code;
+  }
 }
 
 function toEngineError(error: unknown): OpenAPIExecutionError {

@@ -4,6 +4,19 @@
 
 ### Changed
 
+- **Post-dispatch decode and response-interpretation failures now surface as
+  generic `ERR_EXECUTION_FAILED`, never `ERR_RESPONSE_ERROR` or
+  `ERR_PROTOCOL`** (breaking; the error-code ownership ruling, 2026-08-31).
+  Codes carry only what their owning interface licenses — dispatch state and
+  boundary facts, never cause or protocol category — so the OpenAPI
+  adapter's engine-error bridge, the invoke decode-hook seam, and the usage
+  format's builtin decode all collapse those cause refinements at the invocation
+  surface. Cause detail stays on the wrapped error and in diagnostics. The
+  bridge now maps every standard engine spelling deliberately; only authored
+  extension codes pass through. Pre-dispatch refusal codes
+  (`ERR_SOURCE_LOAD_FAILED`, `ERR_SELECTOR_NOT_FOUND`, …) are unchanged: they
+  refine `ERR_REFUSED`'s no-side-effect boundary fact, which codes may carry.
+
 - **The OBI binding member `ref` is renamed `selector`, and every public API
   name for the binding-target-selector concept follows** (pre-launch clean
   rename, no aliases). Documents now write `bindings[*].selector`; the

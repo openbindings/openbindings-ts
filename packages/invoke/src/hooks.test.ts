@@ -100,7 +100,7 @@ describe("failure channels", () => {
       {},
     );
     const derr = await hd.decodeOutput(site, raw, null).catch((e: unknown) => e);
-    expect((derr as InvocationError).code).toBe(ERR_RESPONSE_ERROR);
+    expect((derr as InvocationError).code).toBe(ERR_EXECUTION_FAILED);
 
     const hc = new InvokeHooks(
       {

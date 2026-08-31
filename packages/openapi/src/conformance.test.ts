@@ -3,7 +3,7 @@ import {
   single,
   ERR_INVALID_SELECTOR,
   ERR_PROTOCOL,
-  ERR_RESPONSE_ERROR,
+  ERR_EXECUTION_FAILED,
   ERR_REFUSED,
 } from "@openbindings/invoke";
 import { OpenAPIInvoker } from "./test-helpers.js";
@@ -1137,7 +1137,7 @@ describe("OAPI-P-07 — decode", () => {
     });
     await call.close();
     await expect(call.closed).rejects.toMatchObject({
-      code: ERR_RESPONSE_ERROR,
+      code: ERR_EXECUTION_FAILED,
     });
   });
 
@@ -1156,7 +1156,7 @@ describe("OAPI-P-07 — decode", () => {
     });
     await call.close();
     await expect(call.closed).rejects.toMatchObject({
-      code: ERR_RESPONSE_ERROR,
+      code: ERR_EXECUTION_FAILED,
     });
   });
 
