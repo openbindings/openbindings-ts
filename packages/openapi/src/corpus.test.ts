@@ -1,6 +1,7 @@
 // Binding-specification conformance corpus adapter: runs the spec
-// repository's per-sibling OpenAPI fixtures (OAPI-D-01..03) through this
-// package's own offline lanes — content load, location grammar, and selector
+// repository's per-sibling OpenAPI fixtures (OAPI-D-01..03) for EVERY
+// published sibling — 2.0, 3.0, 3.1, 3.2 — through this package's own
+// offline lanes: content load, location grammar, and selector
 // grammar/resolution — under the subcorpus README's verdict semantics:
 // valid:false means a conformant processor for that exact sibling refuses
 // the document's family-scoped material at or before bind time, decidable
@@ -19,15 +20,30 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
+  OpenAPIOperationResolutionError,
+  loadOpenAPIArtifact,
+  loadSwagger20,
+  parseOpenAPI32OperationReference,
+  prepareSwagger20,
+  validateSwagger20Selector,
+  type OpenAPIArtifact,
+  type Swagger20Document,
+} from "@openbindings/openapi-client/engine";
+
+import {
+  BINDING_SPEC_OPENAPI_20,
   BINDING_SPEC_OPENAPI_30,
   BINDING_SPEC_OPENAPI_31,
+  BINDING_SPEC_OPENAPI_32,
   checkAcceptedOpenAPIEdition,
 } from "./constants.js";
 import { loadOpenAPIDocument, parseSelector, validateDocumentAddress, errorMessage } from "./util.js";
 
 const FAMILIES = [
+  { name: "openapi-2.0", bindingSpec: BINDING_SPEC_OPENAPI_20 },
   { name: "openapi-3.0", bindingSpec: BINDING_SPEC_OPENAPI_30 },
   { name: "openapi-3.1", bindingSpec: BINDING_SPEC_OPENAPI_31 },
+  { name: "openapi-3.2", bindingSpec: BINDING_SPEC_OPENAPI_32 },
 ] as const;
 
 function corpusDir(family: string): string | undefined {
@@ -87,13 +103,32 @@ async function judgeDocument(
     // Content lane (OAPI-D-01): a present member — null included — must be
     // the parsed document object or its source text. External refs are
     // disabled, so the load performs no I/O (fixtures are self-contained).
+    // Each sibling loads through its OWN native lane, exactly as the
+    // invoker routes it: 2.0 through the Swagger lane, 3.2 through the
+    // artifact lane, 3.0/3.1 through the whole-document normalizer.
     let parsed: Record<string, unknown> | undefined;
+    let swagger20: Swagger20Document | undefined;
+    let artifact: OpenAPIArtifact | undefined;
     if (src.content !== undefined) {
       try {
-        parsed = await loadOpenAPIDocument(undefined, src.content, {
-          allowExternalRefs: false,
-        });
-        checkAcceptedOpenAPIEdition(bindingSpec, parsed.openapi);
+        if (bindingSpec === BINDING_SPEC_OPENAPI_20) {
+          const client = await loadSwagger20({ content: src.content }, { allowExternalRefs: false });
+          swagger20 = client.document;
+        } else if (bindingSpec === BINDING_SPEC_OPENAPI_32) {
+          artifact = await loadOpenAPIArtifact(
+            { content: src.content },
+            { allowExternalRefs: false },
+          );
+          if (artifact.edition !== "3.2.0") {
+            return `document edition ${JSON.stringify(artifact.edition)} is not admitted by binding specification ${JSON.stringify(bindingSpec)}`;
+          }
+          parsed = artifact.document;
+        } else {
+          parsed = await loadOpenAPIDocument(undefined, src.content, {
+            allowExternalRefs: false,
+          });
+          checkAcceptedOpenAPIEdition(bindingSpec, parsed.openapi);
+        }
       } catch (e: unknown) {
         return errorMessage(e);
       }
@@ -115,9 +150,48 @@ async function judgeDocument(
     // before the lookup, exactly as runBinding does.
     for (const b of Object.values(doc.bindings ?? {})) {
       if (b.source !== name) continue;
+      const selector = b.selector ?? "";
+
+      if (bindingSpec === BINDING_SPEC_OPENAPI_20) {
+        try {
+          validateSwagger20Selector(selector);
+        } catch (e: unknown) {
+          return errorMessage(e);
+        }
+        if (!swagger20) continue; // location-only source: grammar-checked alone
+        try {
+          await prepareSwagger20({ source: { document: swagger20 }, ref: selector });
+        } catch (e: unknown) {
+          return errorMessage(e);
+        }
+        continue;
+      }
+
+      if (bindingSpec === BINDING_SPEC_OPENAPI_32) {
+        try {
+          parseOpenAPI32OperationReference(selector);
+        } catch (e: unknown) {
+          return errorMessage(e);
+        }
+        if (!artifact) continue;
+        try {
+          await artifact.resolveOperation(selector);
+        } catch (e: unknown) {
+          // The D-rule corpus judges selector grammar and structural
+          // resolution in isolation. A structurally resolved target may still
+          // be excluded later by a request-surface P-rule (for example,
+          // path-parameter correspondence), exactly as the 3.0 and 3.1 lanes
+          // below do not apply their parameter gates here.
+          if (!(e instanceof OpenAPIOperationResolutionError) || e.kind !== "excluded") {
+            return errorMessage(e);
+          }
+        }
+        continue;
+      }
+
       let target: { path: string; method: string };
       try {
-        target = parseSelector(b.selector ?? "");
+        target = parseSelector(selector);
       } catch (e: unknown) {
         return errorMessage(e);
       }
