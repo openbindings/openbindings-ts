@@ -146,27 +146,58 @@ export function electSecurityAlternative(
   const requirements = effectiveSecurityRequirements(document, operation);
   if (!requirements || requirements.length === 0) return null;
 
+  const viable = viableSecurityPlans(document, operation, baseURL, parameters, context);
+  const usableIndexes = [...new Set(viable.map((plan) => plan.authoredIndex))];
+
   let authoredIndex = 0;
   const rawSelection = configuration.security;
-  if (requirements.length > 1 && rawSelection == null) {
-    throw new Error(
-      `the effective security list has ${requirements.length} alternatives; configuration.security must select one`,
-    );
-  }
   if (rawSelection != null) {
     const selected = securityConfigurationIndex(rawSelection);
     if (selected === null || selected < 0 || selected >= requirements.length) {
       throw new Error("configuration.security must select an effective alternative by zero-based index");
     }
     authoredIndex = selected;
+  } else if (securityRequirementNamesUndefinedScheme(document, operation, requirements, context)) {
+    // A Security Requirement naming a scheme the document never defines is
+    // an unresolvable reference reached by the selected operation, and it
+    // refuses the target outright -- unlike a PRESENT-but-malformed Security
+    // Scheme Object, which only excludes the alternatives naming it.
+    throw new Error("a security requirement names an undefined Security Scheme Object");
+  } else if (usableIndexes.length === 1) {
+    // The Security Scheme Object exclusion removes every alternative naming
+    // a malformed scheme before any runtime credential is inspected; every
+    // remaining complete alternative survives, and an alternative left sole
+    // selects itself (openbindings.openapi-3.x@1 §11). The explicit-choice
+    // requirement is over the surviving alternatives, not the authored count.
+    authoredIndex = usableIndexes[0]!;
+  } else if (requirements.length > 1) {
+    throw new Error(
+      `the effective security list has ${usableIndexes.length} usable alternatives; configuration.security must select one`,
+    );
   }
 
-  const plans = viableSecurityPlans(document, operation, baseURL, parameters, context)
-    .filter((plan) => plan.authoredIndex === authoredIndex);
+  const plans = viable.filter((plan) => plan.authoredIndex === authoredIndex);
   if (plans.length === 0) {
     throw new Error(`selected security alternative ${authoredIndex} is unusable`);
   }
   return { requirement: requirements[authoredIndex]!, plans, authoredIndex };
+}
+
+
+function securityRequirementNamesUndefinedScheme(
+  document: OpenAPIDocument,
+  operation: OpenAPIOperation,
+  requirements: Array<Record<string, unknown>>,
+  context: Record<string, unknown> | undefined,
+): boolean {
+  for (const rawRequirement of requirements) {
+    const requirement = asRecord(rawRequirement);
+    if (!requirement) continue;
+    for (const name of Object.keys(requirement)) {
+      if (!securitySchemeForOperation(document, operation, name, context)) return true;
+    }
+  }
+  return false;
 }
 
 export function installSelectedSecurityAlternative(
@@ -189,6 +220,8 @@ export function requiredSecuritySelectionContext(
   document: OpenAPIDocument,
   operation: OpenAPIOperation,
   context: Record<string, unknown> | undefined,
+  baseURL: string,
+  parameters: OpenAPIParameter[],
   target: string,
 ): ContextRequiredDetails | null {
   const requirements = effectiveSecurityRequirements(document, operation);
@@ -201,6 +234,13 @@ export function requiredSecuritySelectionContext(
     }
     return null;
   }
+  // A choice is genuinely required only among the alternatives that survive
+  // the Security Scheme Object exclusion; an alternative left sole selects
+  // itself and asks nothing.
+  const usableIndexes = [...new Set(
+    viableSecurityPlans(document, operation, baseURL, parameters, context).map((plan) => plan.authoredIndex),
+  )];
+  if (usableIndexes.length <= 1) return null;
   return {
     target,
     alternatives: [{ requirements: [{
@@ -208,7 +248,7 @@ export function requiredSecuritySelectionContext(
       point: "security",
       path: "/index",
       description: "select one complete effective OpenAPI security alternative",
-      schema: { type: "integer", enum: requirements.map((_, index) => index) },
+      schema: { type: "integer", enum: usableIndexes },
       durable: true,
     }] }],
   };

@@ -73,5 +73,9 @@ function adapterTransportError(error: unknown): unknown {
   if (error.code === "ERR_REFUSED") {
     return new InvocationError(error.code, { message: error.message });
   }
-  return new InvocationError(error.code);
+  // Post-dispatch wire-mechanics failures are cause refinements of generic
+  // unsuccessful completion; the engine's ERR_PROTOCOL / ERR_RESPONSE_ERROR
+  // spellings never cross the invocation surface (error-code ownership
+  // ruling, 2026-08-31).
+  return new InvocationError("ERR_EXECUTION_FAILED");
 }

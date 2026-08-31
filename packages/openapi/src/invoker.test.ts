@@ -6,9 +6,7 @@ import {
   ERR_CONNECT_FAILED,
   ERR_EXECUTION_FAILED,
   ERR_INVALID_SELECTOR,
-  ERR_PROTOCOL,
   ERR_SELECTOR_NOT_FOUND,
-  ERR_EXECUTION_FAILED,
   ERR_REFUSED,
   ERR_SOURCE_LOAD_FAILED,
   InvocationError,
@@ -668,7 +666,7 @@ describe("invokeBinding — responses", () => {
     );
     const call = new OpenAPIInvoker().invokeBinding({ source: SOURCE, selector: REF_PING, fetch });
     const error = await call.closed.catch((caught: unknown) => caught);
-    expect(JSON.parse(JSON.stringify(error))).toEqual({ code: ERR_PROTOCOL });
+    expect(JSON.parse(JSON.stringify(error))).toEqual({ code: ERR_EXECUTION_FAILED });
   });
 
   it("does not compile HTTP 401 and 403 into portable failure codes", async () => {
@@ -890,7 +888,7 @@ describe("invokeBinding — SSE responses", () => {
     const call = new OpenAPIInvoker().invokeBinding({ source: SSE_SOURCE, selector: REF_EVENTS, fetch });
 
     const error = await call.closed.catch((caught: unknown) => caught) as InvocationError;
-    expect(error.code).toBe(ERR_PROTOCOL);
+    expect(error.code).toBe(ERR_EXECUTION_FAILED);
     expect(Object.hasOwn(error, "data")).toBe(false);
   });
 
@@ -903,14 +901,14 @@ describe("invokeBinding — SSE responses", () => {
     expect(events).toEqual([{ pong: true }]);
   });
 
-  it("an UNDECLARED text/event-stream response is ERR_PROTOCOL, never a silent reclassification", async () => {
+  it("an UNDECLARED text/event-stream response is a loud error, never a silent reclassification", async () => {
     // REF_PING declares no text/event-stream success media: not
     // streaming-capable, so an SSE response contradicts the declaration
     // (OAPI-P-06).
     const { fetch } = mockFetch(() => sseResponse(["data: hi\n\n"]));
     const call = new OpenAPIInvoker().invokeBinding({ source: SOURCE, selector: REF_PING, fetch });
 
-    await expect(call.closed).rejects.toMatchObject({ code: ERR_PROTOCOL });
+    await expect(call.closed).rejects.toMatchObject({ code: ERR_EXECUTION_FAILED });
   });
 });
 

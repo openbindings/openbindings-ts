@@ -311,6 +311,8 @@ export class OpenAPIInvoker implements BindingInvoker {
         model.document,
         model.operation,
         args.context,
+        serverBase,
+        model.parameters,
         serverBase || args.source.location || "",
       ));
     } catch {
@@ -988,7 +990,15 @@ function adaptRuntimeFetch(
 
       const rawPartNames = [...new Set(model.plans.flatMap((plan) =>
         (plan as { rawProperties?: string[] }).rawProperties ?? []))];
-      let rewritten = decodeBase64MultipartParts(next.body!, rawPartNames);
+      let rewritten: BodyInit;
+      try {
+        rewritten = decodeBase64MultipartParts(next.body!, rawPartNames);
+      } catch {
+        // A non-canonical Base64 string at the raw-octet caller boundary
+        // refuses the whole invocation before dispatch rather than emitting
+        // a partly-decoded part (openbindings.openapi-3.1@1 SS9.2-9.3).
+        return transportRefusal(model);
+      }
       if (model.bindingSpec !== BINDING_SPEC_OPENAPI_32) {
         const transferEncodings = selectedMultipartPlan(model, contentType)?.transferEncodings ?? {};
         rewritten = applyMultipartTransferEncodings(rewritten, transferEncodings);
