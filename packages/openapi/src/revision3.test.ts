@@ -1083,7 +1083,7 @@ describe("openbindings.openapi-3.1@1 request carriage", () => {
       headers: { "content-type": 'text/plain; charset=""' },
     }));
     expect(result.outputs).toHaveLength(0);
-    expect(result.error?.code).toBe("ERR_PROTOCOL");
+    expect(result.error?.code).toBe("ERR_EXECUTION_FAILED");
   });
 
   it("refuses a folded multiple Content-Type success header", async () => {
@@ -1106,7 +1106,7 @@ describe("openbindings.openapi-3.1@1 request carriage", () => {
       headers: { "content-type": "text/plain, application/json" },
     }));
     expect(result.outputs).toHaveLength(0);
-    expect(result.error?.code).toBe("ERR_PROTOCOL");
+    expect(result.error?.code).toBe("ERR_EXECUTION_FAILED");
   });
 
   it("completes an empty 2xx before applying stray SSE declaration checks", async () => {

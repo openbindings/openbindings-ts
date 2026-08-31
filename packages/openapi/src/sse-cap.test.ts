@@ -35,7 +35,7 @@ describe("unary SSE size cap", () => {
     };
   }
 
-  it("errors a single event larger than the default bound with ERR_RESPONSE_ERROR", async () => {
+  it("errors a single event larger than the default bound", async () => {
     const DEFAULT_MAX = 10 * 1024 * 1024;
     const payload = "x".repeat(DEFAULT_MAX + 16);
 
@@ -58,7 +58,7 @@ describe("unary SSE size cap", () => {
     });
 
     await call.close();
-    await expect(call.closed).rejects.toMatchObject({ code: "ERR_RESPONSE_ERROR" });
+    await expect(call.closed).rejects.toMatchObject({ code: "ERR_EXECUTION_FAILED" });
   });
 
   it("honors a caller-tuned per-event delivery-unit bound (identity unchanged)", async () => {
@@ -88,7 +88,7 @@ describe("unary SSE size cap", () => {
 
     await call.close();
     const error = await call.closed.catch((caught: unknown) => caught) as { code?: string };
-    expect(error.code).toBe("ERR_RESPONSE_ERROR");
+    expect(error.code).toBe("ERR_EXECUTION_FAILED");
     expect(Object.hasOwn(error, "data")).toBe(false);
     expect(Object.hasOwn(error, "diagnostics")).toBe(false);
   });

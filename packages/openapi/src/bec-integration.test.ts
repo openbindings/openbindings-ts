@@ -3,13 +3,13 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import jsonata from "jsonata";
 import { type OBInterface } from "@openbindings/core";
 import {
+  ERR_EXECUTION_FAILED,
   OperationInvoker,
   normalizeEndpoint,
   single,
   operationSignature,
   storeContextResolver,
   CONTEXT_REQUIRED,
-  ERR_PROTOCOL,
   type ContextStore,
   type ContextRequiredDetails,
   type InvocationError,
@@ -265,7 +265,7 @@ describe("BEC Integration (real HTTP)", () => {
     const call = opInvoker.invoke(iface, operationSignature("listItems"));
     await call.close();
     const error = await call.closed.catch((caught: unknown) => caught) as InvocationError;
-    expect(error.code).toBe(ERR_PROTOCOL);
+    expect(error.code).toBe(ERR_EXECUTION_FAILED);
     expect(Object.hasOwn(error, "data")).toBe(false);
     expect(Object.hasOwn(error, "diagnostics")).toBe(false);
   });

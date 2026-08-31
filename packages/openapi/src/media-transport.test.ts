@@ -78,7 +78,7 @@ describe("HTTP media transport governance", () => {
         "Content-Encoding": "first,,second",
         "X-Required": "yes",
       },
-    }), malformedResponse, new Map())).rejects.toMatchObject({ code: "ERR_PROTOCOL" });
+    }), malformedResponse, new Map())).rejects.toMatchObject({ code: "ERR_EXECUTION_FAILED" });
 
     const ungovernedResponse = codingModel();
     const ungovernedHeaders = ungovernedResponse.operation.responses?.["200"]?.headers as
@@ -93,7 +93,7 @@ describe("HTTP media transport governance", () => {
         "X-Required": "yes",
       },
     }), ungovernedResponse, new Map([["first", unwrap("first", [])]]))).rejects.toMatchObject({
-      code: "ERR_PROTOCOL",
+      code: "ERR_EXECUTION_FAILED",
     });
   });
 
@@ -102,7 +102,7 @@ describe("HTTP media transport governance", () => {
     await expect(governResponse(new Response("payload", {
       status: 200,
       headers: { "Content-Type": "text/plain" },
-    }), required, new Map())).rejects.toMatchObject({ code: "ERR_PROTOCOL" });
+    }), required, new Map())).rejects.toMatchObject({ code: "ERR_EXECUTION_FAILED" });
 
     const octets = responseModel("get", {
       "200": {

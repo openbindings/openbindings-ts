@@ -2,7 +2,6 @@ import { describe, it, expect } from "vitest";
 import {
   single,
   ERR_INVALID_SELECTOR,
-  ERR_PROTOCOL,
   ERR_EXECUTION_FAILED,
   ERR_REFUSED,
 } from "@openbindings/invoke";
@@ -1055,7 +1054,7 @@ const REF_DUAL = "#/paths/~1dual/get";
 describe("OAPI-P-06 / §8 — interaction shape", () => {
   // A text/event-stream response on an operation that is NOT
   // streaming-capable is a protocol error, never a silent reclassification.
-  it("treats an undeclared event-stream response as ERR_PROTOCOL", async () => {
+  it("treats an undeclared event-stream response as a loud error", async () => {
     const { fetch } = mockFetch(() => sseResponse(["data: hi\n\n"]));
     const call = new OpenAPIInvoker().invokeBinding({
       source: src(WIDGET_SPEC),
@@ -1063,7 +1062,7 @@ describe("OAPI-P-06 / §8 — interaction shape", () => {
       fetch,
     });
     await call.close();
-    await expect(call.closed).rejects.toMatchObject({ code: ERR_PROTOCOL });
+    await expect(call.closed).rejects.toMatchObject({ code: ERR_EXECUTION_FAILED });
   });
 
   it("delivers an SSE representation as one unary value while JSON remains unary", async () => {
