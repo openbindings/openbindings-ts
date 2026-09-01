@@ -8,6 +8,11 @@
 export interface ProcessorScenarioFile {
   format:
     | "openbindings.binding-spec-processor-scenarios@1"
+    // Revision 3 only ADDS the `notContains` assertion to revision 2, so a
+    // revision-3 reader interprets a revision-2 file exactly as a revision-2
+    // reader would. Accepting both keeps the corpus and the engines free to
+    // merge in either order instead of in lockstep.
+    | "openbindings.binding-spec-processor-scenarios@2"
     | "openbindings.binding-spec-processor-scenarios@3"
     | "openbindings.invocation-fidelity-scenarios@1";
   bindingSpec: string;
