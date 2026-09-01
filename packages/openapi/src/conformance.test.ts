@@ -885,9 +885,15 @@ describe("OAPI-P-04 — request media on the wire", () => {
       },
     };
     const { fetch, requests } = mockFetch(() => jsonResponse({}));
+    // R4 (ratified 2026-09-01): `ids` is an array of integers on the CONTENT
+    // lane, so it rides one field as a whole compound and its item-type
+    // default is text/plain, under which no accepted edition defines an
+    // array's bytes. The `propertyMedia` choice is what makes the operation
+    // dispatchable; without it the invocation refuses before dispatch.
     const call = new OpenAPIInvoker({ parameterConversion: String }).invokeBinding({
       source: src(spec),
       selector: "#/paths/~1form/post",
+      context: { configuration: { propertyMedia: { ids: "application/json" } } },
       fetch,
     });
     await call.write({ name: "a b", ids: [1, 2] });

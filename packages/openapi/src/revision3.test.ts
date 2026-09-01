@@ -1001,7 +1001,22 @@ describe("openbindings.openapi-3.1@1 request carriage", () => {
         },
       },
     });
-    const result = await invoke(spec, { ids: [1, 2], name: "a b" }, undefined, String);
+    // R4 (ratified 2026-09-01): `ids` is an array of integers on the CONTENT
+    // lane, so it rides one field as a whole compound and its item-type
+    // default is text/plain, under which no accepted edition defines an
+    // array's bytes. Without a `propertyMedia` choice the invocation refuses
+    // before dispatch as the context-required species; with one, the chosen
+    // lane decides the bytes.
+    const refused = await invoke(spec, { ids: [1, 2], name: "a b" }, undefined, String);
+    expect(refused.error?.code).toBe("CONTEXT_REQUIRED");
+    expect(refused.requests).toHaveLength(0);
+
+    const result = await invoke(
+      spec,
+      { ids: [1, 2], name: "a b" },
+      { configuration: { propertyMedia: { ids: "application/json" } } },
+      String,
+    );
     expect(result.error).toBeUndefined();
     expect(result.requests[0]?.body).toBe("ids=%5B%221%22%2C%222%22%5D&name=a+b");
   });

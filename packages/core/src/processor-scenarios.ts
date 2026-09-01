@@ -8,6 +8,7 @@
 export interface ProcessorScenarioFile {
   format:
     | "openbindings.binding-spec-processor-scenarios@1"
+    | "openbindings.binding-spec-processor-scenarios@3"
     | "openbindings.invocation-fidelity-scenarios@1";
   bindingSpec: string;
   family: string;
@@ -56,6 +57,11 @@ export interface ProcessorAssertion {
   oneOf?: unknown[];
   setEquals?: unknown[];
   contains?: unknown;
+  /**
+   * Pins the ABSENCE of a substring or member: a header never emitted, a
+   * field never serialized. Corpus revision 3.
+   */
+  notContains?: unknown;
 }
 
 export interface ProcessorObservation {
@@ -139,6 +145,12 @@ export function checkAssertions(root: unknown, assertions: ProcessorAssertion[])
       if (!contains(selected.value, assertion.contains)) {
         throw new Error(
           `${assertion.path} = ${printable(selected.value)}, want to contain ${printable(assertion.contains)}`,
+        );
+      }
+    } else if (Object.prototype.hasOwnProperty.call(assertion, "notContains")) {
+      if (contains(selected.value, assertion.notContains)) {
+        throw new Error(
+          `${assertion.path} = ${printable(selected.value)}, want NOT to contain ${printable(assertion.notContains)}`,
         );
       }
     } else {

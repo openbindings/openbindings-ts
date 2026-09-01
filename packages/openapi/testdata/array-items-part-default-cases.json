@@ -1,5 +1,5 @@
 {
-  "$comment": "Array-items part-default case table shared byte-for-byte by the OpenAPI form engines. Each case is rendered as a whole OpenAPI document and derives an array property’s multipart part type from its resolved items declaration. Multipart rendering is <Content-Type>:<body> joined in element order; urlencoded observations remain explicitly open where identified by each basis. Outcomes distinguish refusal from missing-required-choice. Corrected 2026-08-26: the superseded typeless-items refusal was removed. On the 3.1 line unconstrained items are typeless parts, default to application/octet-stream, and use the canonical-Base64 raw-octet boundary. On the 3.0 line they have no default and require configuration.propertyMedia; this table supplies none, so those cells, their direct write-lane probes, and their non-array probes decide missing-required-choice before inspecting a value. Nested arrays remain refused and all other items-derived defaults remain unchanged.",
+  "$comment": "Array-items part-default case table shared byte-for-byte by the OpenAPI form engines. Each case is rendered as a whole OpenAPI document and derives an array property's emitted media type from its RESOLVED ITEMS DECLARATION on both form lanes. Multipart rendering is <Content-Type>:<body> joined in element order. Outcomes distinguish refusal from missing-required-choice. Corrected 2026-08-26: the superseded typeless-items refusal was removed. Rewritten 2026-09-01 for R4: the urlencoded lane no longer reads application/json off an array CONTAINER. It takes the item-type default the editions' own table names, and where that default defines no serialization for a container -- text/plain for primitive items, application/octet-stream for typeless or artifact-encoded-string items -- the property carries a required `propertyMedia` choice and this table supplies none, so those cells decide missing-required-choice before inspecting a value. Items that resolve to no member at all (a union that does not collapse, a choice supplying no single member) are a different cell that no choice repairs and stay refused. Nested arrays remain refused on multipart, where they have no repeated-part mapping. All other items-derived defaults are unchanged.",
   "cases": [
     {
       "name": "3.0.3|multipart|string",
@@ -179,9 +179,9 @@
         "a",
         "b"
       ],
-      "derivedFrom": "not-consulted",
-      "expect": "admitted;emit=p=%5B%22a%22%2C%22b%22%5D",
-      "basis": "OAS 3.0.0-3.0.3 apply the Encoding Object's serialization defaults to every urlencoded property: `style` follows the Parameter Object's query default `form`, and `explode` 'when style is form, the default value is true'. The content-based interpretation first appears in 3.0.4, so on this edition the property takes the style path and the contentType default table is not consulted at all - which is why the items schema does not change the emission here. LANE, RESTATED 2026-08-17: this edition reaches the CONTENT path, like every other accepted edition. Its own text states no lane-selection rule, and the rule that governs it is its own section 4.1 — \"Tooling which supports OAS 3.0 SHOULD be compatible with all OAS 3.0.* versions. The patch version SHOULD NOT be considered by tooling, making no distinction between 3.0.0 and 3.0.1 for example\" — together with 3.0.4, a 3.0.* version, whose section 4.7.15.1.2 states that with all three RFC6570-style fields absent \"Encoding is to be based on contentType alone\". Until 2026-08-17 a legacyOpenAPIFormEncoding predicate in all three engines put this cell on the RFC6570-style path instead, where the contentType default table was never consulted; this cell's prior expectation recorded that. Ruling: design/openapi-30-urlencoded-default-lane-ruling.md. Specification: the openapi family specifications sections 2 and 9.2."
+      "derivedFrom": "items",
+      "expect": "missing-required-choice",
+      "basis": "R4 (ratified 2026-09-01) reads the edition's default-`contentType` table literally: an array property takes THE ITEM-TYPE DEFAULT, not its container's application/json. On multipart that is invisible, because an array property expands into one part per item and each part already carries the item's own declaration. On the content-based urlencoded lane the whole array rides one field, so the selected media type has to define the bytes of the CONTAINER. The items declare a plain string, so the item-type default is text/plain, under which no accepted edition defines the serialization of an array. The family documents' section 9.3 compound-default rule gives that cell no governed wire form and their section 9.3 `propertyMedia` configuration point supplies the remedy: one concrete media type, absent which the invocation refuses before dispatch as the context-required species. Decision: missing-required-choice."
     },
     {
       "name": "3.0.3|urlencoded|integer",
@@ -196,9 +196,9 @@
         1,
         2
       ],
-      "derivedFrom": "not-consulted",
-      "expect": "admitted;emit=p=%5B1%2C2%5D",
-      "basis": "OAS 3.0.0-3.0.3 apply the Encoding Object's serialization defaults to every urlencoded property: `style` follows the Parameter Object's query default `form`, and `explode` 'when style is form, the default value is true'. The content-based interpretation first appears in 3.0.4, so on this edition the property takes the style path and the contentType default table is not consulted at all - which is why the items schema does not change the emission here. LANE, RESTATED 2026-08-17: this edition reaches the CONTENT path, like every other accepted edition. Its own text states no lane-selection rule, and the rule that governs it is its own section 4.1 — \"Tooling which supports OAS 3.0 SHOULD be compatible with all OAS 3.0.* versions. The patch version SHOULD NOT be considered by tooling, making no distinction between 3.0.0 and 3.0.1 for example\" — together with 3.0.4, a 3.0.* version, whose section 4.7.15.1.2 states that with all three RFC6570-style fields absent \"Encoding is to be based on contentType alone\". Until 2026-08-17 a legacyOpenAPIFormEncoding predicate in all three engines put this cell on the RFC6570-style path instead, where the contentType default table was never consulted; this cell's prior expectation recorded that. Ruling: design/openapi-30-urlencoded-default-lane-ruling.md. Specification: the openapi family specifications sections 2 and 9.2."
+      "derivedFrom": "items",
+      "expect": "missing-required-choice",
+      "basis": "R4 (ratified 2026-09-01) reads the edition's default-`contentType` table literally: an array property takes THE ITEM-TYPE DEFAULT, not its container's application/json. On multipart that is invisible, because an array property expands into one part per item and each part already carries the item's own declaration. On the content-based urlencoded lane the whole array rides one field, so the selected media type has to define the bytes of the CONTAINER. The items declare integer, a primitive, so the item-type default is text/plain, under which no accepted edition defines the serialization of an array. Same cell and same remedy as the string row. Decision: missing-required-choice."
     },
     {
       "name": "3.0.3|urlencoded|object",
@@ -214,9 +214,9 @@
           "k": "v"
         }
       ],
-      "derivedFrom": "not-consulted",
+      "derivedFrom": "items",
       "expect": "admitted;emit=p=%5B%7B%22k%22%3A%22v%22%7D%5D",
-      "basis": "OAS 3.0.0-3.0.3 apply the Encoding Object's serialization defaults to every urlencoded property: `style` follows the Parameter Object's query default `form`, and `explode` 'when style is form, the default value is true'. The content-based interpretation first appears in 3.0.4, so on this edition the property takes the style path and the contentType default table is not consulted at all - which is why the items schema does not change the emission here. RFC 6570 form expansion is defined for a string, a list of strings, and an associative array of strings; a list whose members are themselves composite has no expansion, so the encoder refuses the value. That the media-admission lane still admits this declaration is a separate, filed residue - see corpus-lab/OPENAPI-RUNTIME.md, 'The array-items part default'. LANE, RESTATED 2026-08-17: this edition reaches the CONTENT path, like every other accepted edition. Its own text states no lane-selection rule, and the rule that governs it is its own section 4.1 — \"Tooling which supports OAS 3.0 SHOULD be compatible with all OAS 3.0.* versions. The patch version SHOULD NOT be considered by tooling, making no distinction between 3.0.0 and 3.0.1 for example\" — together with 3.0.4, a 3.0.* version, whose section 4.7.15.1.2 states that with all three RFC6570-style fields absent \"Encoding is to be based on contentType alone\". Until 2026-08-17 a legacyOpenAPIFormEncoding predicate in all three engines put this cell on the RFC6570-style path instead, where the contentType default table was never consulted; this cell's prior expectation recorded that. Ruling: design/openapi-30-urlencoded-default-lane-ruling.md. Specification: the openapi family specifications sections 2 and 9.2."
+      "basis": "R4 (ratified 2026-09-01) reads the edition's default-`contentType` table literally: an array property takes THE ITEM-TYPE DEFAULT, not its container's application/json. On multipart that is invisible, because an array property expands into one part per item and each part already carries the item's own declaration. On the content-based urlencoded lane the whole array rides one field, so the selected media type has to define the bytes of the CONTAINER. The items declare an object, whose default row is application/json, and JSON does define the serialization of an array of objects. The container therefore keeps governed bytes and the emission is unchanged by R4 -- this is the one urlencoded row where the item-derived selection and the superseded container-derived selection coincide."
     },
     {
       "name": "3.0.3|urlencoded|nested-array",
@@ -235,9 +235,9 @@
           "a"
         ]
       ],
-      "derivedFrom": "not-consulted",
-      "expect": "admitted;emit=p=%5B%5B%22a%22%5D%5D",
-      "basis": "OAS 3.0.0-3.0.3 apply the Encoding Object's serialization defaults to every urlencoded property: `style` follows the Parameter Object's query default `form`, and `explode` 'when style is form, the default value is true'. The content-based interpretation first appears in 3.0.4, so on this edition the property takes the style path and the contentType default table is not consulted at all - which is why the items schema does not change the emission here. RFC 6570 form expansion is defined for a string, a list of strings, and an associative array of strings; a list whose members are themselves composite has no expansion, so the encoder refuses the value. That the media-admission lane still admits this declaration is a separate, filed residue - see corpus-lab/OPENAPI-RUNTIME.md, 'The array-items part default'. LANE, RESTATED 2026-08-17: this edition reaches the CONTENT path, like every other accepted edition. Its own text states no lane-selection rule, and the rule that governs it is its own section 4.1 — \"Tooling which supports OAS 3.0 SHOULD be compatible with all OAS 3.0.* versions. The patch version SHOULD NOT be considered by tooling, making no distinction between 3.0.0 and 3.0.1 for example\" — together with 3.0.4, a 3.0.* version, whose section 4.7.15.1.2 states that with all three RFC6570-style fields absent \"Encoding is to be based on contentType alone\". Until 2026-08-17 a legacyOpenAPIFormEncoding predicate in all three engines put this cell on the RFC6570-style path instead, where the contentType default table was never consulted; this cell's prior expectation recorded that. Ruling: design/openapi-30-urlencoded-default-lane-ruling.md. Specification: the openapi family specifications sections 2 and 9.2."
+      "derivedFrom": "items",
+      "expect": "missing-required-choice",
+      "basis": "R4 (ratified 2026-09-01) reads the edition's default-`contentType` table literally: an array property takes THE ITEM-TYPE DEFAULT, not its container's application/json. On multipart that is invisible, because an array property expands into one part per item and each part already carries the item's own declaration. On the content-based urlencoded lane the whole array rides one field, so the selected media type has to define the bytes of the CONTAINER. The items are themselves an array, so the item-type default recurses and bottoms out at the inner primitive's text/plain, under which no accepted edition defines the serialization of an array. Decision: missing-required-choice. The multipart sibling refuses instead, because there the nested array has no declaration-defined repeated-part mapping -- a different cell with no stated remedy."
     },
     {
       "name": "3.0.3|urlencoded|unconstrained",
@@ -250,9 +250,9 @@
         "a",
         1
       ],
-      "derivedFrom": "not-consulted",
-      "expect": "admitted;emit=p=%5B%22a%22%2C1%5D",
-      "basis": "OAS 3.0.0-3.0.3 apply the Encoding Object's serialization defaults to every urlencoded property: `style` follows the Parameter Object's query default `form`, and `explode` 'when style is form, the default value is true'. The content-based interpretation first appears in 3.0.4, so on this edition the property takes the style path and the contentType default table is not consulted at all - which is why the items schema does not change the emission here. LANE, RESTATED 2026-08-17: this edition reaches the CONTENT path, like every other accepted edition. Its own text states no lane-selection rule, and the rule that governs it is its own section 4.1 — \"Tooling which supports OAS 3.0 SHOULD be compatible with all OAS 3.0.* versions. The patch version SHOULD NOT be considered by tooling, making no distinction between 3.0.0 and 3.0.1 for example\" — together with 3.0.4, a 3.0.* version, whose section 4.7.15.1.2 states that with all three RFC6570-style fields absent \"Encoding is to be based on contentType alone\". Until 2026-08-17 a legacyOpenAPIFormEncoding predicate in all three engines put this cell on the RFC6570-style path instead, where the contentType default table was never consulted; this cell's prior expectation recorded that. Ruling: design/openapi-30-urlencoded-default-lane-ruling.md. Specification: the openapi family specifications sections 2 and 9.2."
+      "derivedFrom": "items",
+      "expect": "missing-required-choice",
+      "basis": "R4 (ratified 2026-09-01) reads the edition's default-`contentType` table literally: an array property takes THE ITEM-TYPE DEFAULT, not its container's application/json. On multipart that is invisible, because an array property expands into one part per item and each part already carries the item's own declaration. On the content-based urlencoded lane the whole array rides one field, so the selected media type has to define the bytes of the CONTAINER. The items are typeless. On the 3.1 line a typeless declaration defaults to application/octet-stream, which defines no array serialization; on the 3.0 line a typeless resolved declaration has no default concrete type at all. Both land on the same cell the 3.0 document's section 9.3 configuration point names in one sentence -- required \"on the content-based form-urlencoded path and for a multipart part alike ... whenever the preceding selection yields no single concrete media type\". Decision: missing-required-choice on every accepted edition."
     },
     {
       "name": "3.0.3|urlencoded|string-base64",
@@ -267,9 +267,9 @@
       "value": [
         "QUJD"
       ],
-      "derivedFrom": "not-consulted",
-      "expect": "admitted;emit=p=%5B%22QUJD%22%5D",
-      "basis": "OAS 3.0.0-3.0.3 apply the Encoding Object's serialization defaults to every urlencoded property: `style` follows the Parameter Object's query default `form`, and `explode` 'when style is form, the default value is true'. The content-based interpretation first appears in 3.0.4, so on this edition the property takes the style path and the contentType default table is not consulted at all - which is why the items schema does not change the emission here. LANE, RESTATED 2026-08-17: this edition reaches the CONTENT path, like every other accepted edition. Its own text states no lane-selection rule, and the rule that governs it is its own section 4.1 — \"Tooling which supports OAS 3.0 SHOULD be compatible with all OAS 3.0.* versions. The patch version SHOULD NOT be considered by tooling, making no distinction between 3.0.0 and 3.0.1 for example\" — together with 3.0.4, a 3.0.* version, whose section 4.7.15.1.2 states that with all three RFC6570-style fields absent \"Encoding is to be based on contentType alone\". Until 2026-08-17 a legacyOpenAPIFormEncoding predicate in all three engines put this cell on the RFC6570-style path instead, where the contentType default table was never consulted; this cell's prior expectation recorded that. Ruling: design/openapi-30-urlencoded-default-lane-ruling.md. Specification: the openapi family specifications sections 2 and 9.2."
+      "derivedFrom": "items",
+      "expect": "missing-required-choice",
+      "basis": "R4 (ratified 2026-09-01) reads the edition's default-`contentType` table literally: an array property takes THE ITEM-TYPE DEFAULT, not its container's application/json. On multipart that is invisible, because an array property expands into one part per item and each part already carries the item's own declaration. On the content-based urlencoded lane the whole array rides one field, so the selected media type has to define the bytes of the CONTAINER. The items declare an artifact-encoded string -- `contentEncoding` on the 3.1 line, `format: byte` on the 3.0 line -- whose default row is application/octet-stream, which defines no array serialization. Decision: missing-required-choice."
     },
     {
       "name": "3.0.3|urlencoded|union-type",
@@ -286,9 +286,9 @@
       "value": [
         "a"
       ],
-      "derivedFrom": "not-consulted",
-      "expect": "admitted;emit=p=%5B%22a%22%5D",
-      "basis": "OAS 3.0.0-3.0.3 apply the Encoding Object's serialization defaults to every urlencoded property: `style` follows the Parameter Object's query default `form`, and `explode` 'when style is form, the default value is true'. The content-based interpretation first appears in 3.0.4, so on this edition the property takes the style path and the contentType default table is not consulted at all - which is why the items schema does not change the emission here. LANE, RESTATED 2026-08-17: this edition reaches the CONTENT path, like every other accepted edition. Its own text states no lane-selection rule, and the rule that governs it is its own section 4.1 — \"Tooling which supports OAS 3.0 SHOULD be compatible with all OAS 3.0.* versions. The patch version SHOULD NOT be considered by tooling, making no distinction between 3.0.0 and 3.0.1 for example\" — together with 3.0.4, a 3.0.* version, whose section 4.7.15.1.2 states that with all three RFC6570-style fields absent \"Encoding is to be based on contentType alone\". Until 2026-08-17 a legacyOpenAPIFormEncoding predicate in all three engines put this cell on the RFC6570-style path instead, where the contentType default table was never consulted; this cell's prior expectation recorded that. Ruling: design/openapi-30-urlencoded-default-lane-ruling.md. Specification: the openapi family specifications sections 2 and 9.2."
+      "derivedFrom": "items",
+      "expect": "refused",
+      "basis": "R4 (ratified 2026-09-01) reads the edition's default-`contentType` table literally: an array property takes THE ITEM-TYPE DEFAULT, not its container's application/json. On multipart that is invisible, because an array property expands into one part per item and each part already carries the item's own declaration. On the content-based urlencoded lane the whole array rides one field, so the selected media type has to define the bytes of the CONTAINER. The items declare a union that does not collapse to one non-null type, so no item-type default resolves at all. Section 5.2 leaves the property with no resolved member declaration, which is not the `propertyMedia` cell: no media choice supplies a member the declaration does not have. Decision: refused, matching the multipart sibling."
     },
     {
       "name": "3.0.3|urlencoded|union-choice",
@@ -309,9 +309,9 @@
       "value": [
         "a"
       ],
-      "derivedFrom": "not-consulted",
-      "expect": "admitted;emit=p=%5B%22a%22%5D",
-      "basis": "OAS 3.0.0-3.0.3 apply the Encoding Object's serialization defaults to every urlencoded property: `style` follows the Parameter Object's query default `form`, and `explode` 'when style is form, the default value is true'. The content-based interpretation first appears in 3.0.4, so on this edition the property takes the style path and the contentType default table is not consulted at all - which is why the items schema does not change the emission here. LANE, RESTATED 2026-08-17: this edition reaches the CONTENT path, like every other accepted edition. Its own text states no lane-selection rule, and the rule that governs it is its own section 4.1 — \"Tooling which supports OAS 3.0 SHOULD be compatible with all OAS 3.0.* versions. The patch version SHOULD NOT be considered by tooling, making no distinction between 3.0.0 and 3.0.1 for example\" — together with 3.0.4, a 3.0.* version, whose section 4.7.15.1.2 states that with all three RFC6570-style fields absent \"Encoding is to be based on contentType alone\". Until 2026-08-17 a legacyOpenAPIFormEncoding predicate in all three engines put this cell on the RFC6570-style path instead, where the contentType default table was never consulted; this cell's prior expectation recorded that. Ruling: design/openapi-30-urlencoded-default-lane-ruling.md. Specification: the openapi family specifications sections 2 and 9.2."
+      "derivedFrom": "items",
+      "expect": "refused",
+      "basis": "R4 (ratified 2026-09-01) reads the edition's default-`contentType` table literally: an array property takes THE ITEM-TYPE DEFAULT, not its container's application/json. On multipart that is invisible, because an array property expands into one part per item and each part already carries the item's own declaration. On the content-based urlencoded lane the whole array rides one field, so the selected media type has to define the bytes of the CONTAINER. The items declare a choice applicator supplying no single resolved member, so no item-type default resolves at all. Same ground and same answer as the union-type row. Decision: refused, matching the multipart sibling."
     },
     {
       "name": "3.0.4|multipart|string",
@@ -491,9 +491,9 @@
         "a",
         "b"
       ],
-      "derivedFrom": "array",
-      "expect": "admitted;emit=p=%5B%22a%22%2C%22b%22%5D",
-      "basis": "OPEN. On 3.0.4 and the 3.1 line an urlencoded property with no Encoding Object takes the content path, and there the engines derive the default from the ARRAY (application/json) rather than from the items schema, against the array row quoted in this file's $comment. The emission below is pinned AS OBSERVED so a change must be a deliberate edit of this table; it is not an authority claim. Filed in corpus-lab/OPENAPI-RUNTIME.md under 'The array-items part default', with its measured corpus incidence and with the reason a literal application of the array row costs represented coverage on this lane."
+      "derivedFrom": "items",
+      "expect": "missing-required-choice",
+      "basis": "R4 (ratified 2026-09-01) reads the edition's default-`contentType` table literally: an array property takes THE ITEM-TYPE DEFAULT, not its container's application/json. On multipart that is invisible, because an array property expands into one part per item and each part already carries the item's own declaration. On the content-based urlencoded lane the whole array rides one field, so the selected media type has to define the bytes of the CONTAINER. The items declare a plain string, so the item-type default is text/plain, under which no accepted edition defines the serialization of an array. The family documents' section 9.3 compound-default rule gives that cell no governed wire form and their section 9.3 `propertyMedia` configuration point supplies the remedy: one concrete media type, absent which the invocation refuses before dispatch as the context-required species. Decision: missing-required-choice."
     },
     {
       "name": "3.0.4|urlencoded|integer",
@@ -508,9 +508,9 @@
         1,
         2
       ],
-      "derivedFrom": "array",
-      "expect": "admitted;emit=p=%5B1%2C2%5D",
-      "basis": "OPEN. On 3.0.4 and the 3.1 line an urlencoded property with no Encoding Object takes the content path, and there the engines derive the default from the ARRAY (application/json) rather than from the items schema, against the array row quoted in this file's $comment. The emission below is pinned AS OBSERVED so a change must be a deliberate edit of this table; it is not an authority claim. Filed in corpus-lab/OPENAPI-RUNTIME.md under 'The array-items part default', with its measured corpus incidence and with the reason a literal application of the array row costs represented coverage on this lane."
+      "derivedFrom": "items",
+      "expect": "missing-required-choice",
+      "basis": "R4 (ratified 2026-09-01) reads the edition's default-`contentType` table literally: an array property takes THE ITEM-TYPE DEFAULT, not its container's application/json. On multipart that is invisible, because an array property expands into one part per item and each part already carries the item's own declaration. On the content-based urlencoded lane the whole array rides one field, so the selected media type has to define the bytes of the CONTAINER. The items declare integer, a primitive, so the item-type default is text/plain, under which no accepted edition defines the serialization of an array. Same cell and same remedy as the string row. Decision: missing-required-choice."
     },
     {
       "name": "3.0.4|urlencoded|object",
@@ -526,9 +526,9 @@
           "k": "v"
         }
       ],
-      "derivedFrom": "array",
+      "derivedFrom": "items",
       "expect": "admitted;emit=p=%5B%7B%22k%22%3A%22v%22%7D%5D",
-      "basis": "OPEN. On 3.0.4 and the 3.1 line an urlencoded property with no Encoding Object takes the content path, and there the engines derive the default from the ARRAY (application/json) rather than from the items schema, against the array row quoted in this file's $comment. The emission below is pinned AS OBSERVED so a change must be a deliberate edit of this table; it is not an authority claim. Filed in corpus-lab/OPENAPI-RUNTIME.md under 'The array-items part default', with its measured corpus incidence and with the reason a literal application of the array row costs represented coverage on this lane."
+      "basis": "R4 (ratified 2026-09-01) reads the edition's default-`contentType` table literally: an array property takes THE ITEM-TYPE DEFAULT, not its container's application/json. On multipart that is invisible, because an array property expands into one part per item and each part already carries the item's own declaration. On the content-based urlencoded lane the whole array rides one field, so the selected media type has to define the bytes of the CONTAINER. The items declare an object, whose default row is application/json, and JSON does define the serialization of an array of objects. The container therefore keeps governed bytes and the emission is unchanged by R4 -- this is the one urlencoded row where the item-derived selection and the superseded container-derived selection coincide."
     },
     {
       "name": "3.0.4|urlencoded|nested-array",
@@ -547,9 +547,9 @@
           "a"
         ]
       ],
-      "derivedFrom": "array",
-      "expect": "admitted;emit=p=%5B%5B%22a%22%5D%5D",
-      "basis": "OPEN. On 3.0.4 and the 3.1 line an urlencoded property with no Encoding Object takes the content path, and there the engines derive the default from the ARRAY (application/json) rather than from the items schema, against the array row quoted in this file's $comment. The emission below is pinned AS OBSERVED so a change must be a deliberate edit of this table; it is not an authority claim. Filed in corpus-lab/OPENAPI-RUNTIME.md under 'The array-items part default', with its measured corpus incidence and with the reason a literal application of the array row costs represented coverage on this lane."
+      "derivedFrom": "items",
+      "expect": "missing-required-choice",
+      "basis": "R4 (ratified 2026-09-01) reads the edition's default-`contentType` table literally: an array property takes THE ITEM-TYPE DEFAULT, not its container's application/json. On multipart that is invisible, because an array property expands into one part per item and each part already carries the item's own declaration. On the content-based urlencoded lane the whole array rides one field, so the selected media type has to define the bytes of the CONTAINER. The items are themselves an array, so the item-type default recurses and bottoms out at the inner primitive's text/plain, under which no accepted edition defines the serialization of an array. Decision: missing-required-choice. The multipart sibling refuses instead, because there the nested array has no declaration-defined repeated-part mapping -- a different cell with no stated remedy."
     },
     {
       "name": "3.0.4|urlencoded|unconstrained",
@@ -562,9 +562,9 @@
         "a",
         1
       ],
-      "derivedFrom": "array",
-      "expect": "admitted;emit=p=%5B%22a%22%2C1%5D",
-      "basis": "OPEN. On 3.0.4 and the 3.1 line an urlencoded property with no Encoding Object takes the content path, and there the engines derive the default from the ARRAY (application/json) rather than from the items schema, against the array row quoted in this file's $comment. The emission below is pinned AS OBSERVED so a change must be a deliberate edit of this table; it is not an authority claim. Filed in corpus-lab/OPENAPI-RUNTIME.md under 'The array-items part default', with its measured corpus incidence and with the reason a literal application of the array row costs represented coverage on this lane."
+      "derivedFrom": "items",
+      "expect": "missing-required-choice",
+      "basis": "R4 (ratified 2026-09-01) reads the edition's default-`contentType` table literally: an array property takes THE ITEM-TYPE DEFAULT, not its container's application/json. On multipart that is invisible, because an array property expands into one part per item and each part already carries the item's own declaration. On the content-based urlencoded lane the whole array rides one field, so the selected media type has to define the bytes of the CONTAINER. The items are typeless. On the 3.1 line a typeless declaration defaults to application/octet-stream, which defines no array serialization; on the 3.0 line a typeless resolved declaration has no default concrete type at all. Both land on the same cell the 3.0 document's section 9.3 configuration point names in one sentence -- required \"on the content-based form-urlencoded path and for a multipart part alike ... whenever the preceding selection yields no single concrete media type\". Decision: missing-required-choice on every accepted edition."
     },
     {
       "name": "3.0.4|urlencoded|string-base64",
@@ -579,9 +579,9 @@
       "value": [
         "QUJD"
       ],
-      "derivedFrom": "array",
-      "expect": "admitted;emit=p=%5B%22QUJD%22%5D",
-      "basis": "OPEN. On 3.0.4 and the 3.1 line an urlencoded property with no Encoding Object takes the content path, and there the engines derive the default from the ARRAY (application/json) rather than from the items schema, against the array row quoted in this file's $comment. The emission below is pinned AS OBSERVED so a change must be a deliberate edit of this table; it is not an authority claim. Filed in corpus-lab/OPENAPI-RUNTIME.md under 'The array-items part default', with its measured corpus incidence and with the reason a literal application of the array row costs represented coverage on this lane."
+      "derivedFrom": "items",
+      "expect": "missing-required-choice",
+      "basis": "R4 (ratified 2026-09-01) reads the edition's default-`contentType` table literally: an array property takes THE ITEM-TYPE DEFAULT, not its container's application/json. On multipart that is invisible, because an array property expands into one part per item and each part already carries the item's own declaration. On the content-based urlencoded lane the whole array rides one field, so the selected media type has to define the bytes of the CONTAINER. The items declare an artifact-encoded string -- `contentEncoding` on the 3.1 line, `format: byte` on the 3.0 line -- whose default row is application/octet-stream, which defines no array serialization. Decision: missing-required-choice."
     },
     {
       "name": "3.0.4|urlencoded|union-type",
@@ -598,9 +598,9 @@
       "value": [
         "a"
       ],
-      "derivedFrom": "array",
-      "expect": "admitted;emit=p=%5B%22a%22%5D",
-      "basis": "OPEN. On 3.0.4 and the 3.1 line an urlencoded property with no Encoding Object takes the content path, and there the engines derive the default from the ARRAY (application/json) rather than from the items schema, against the array row quoted in this file's $comment. The emission below is pinned AS OBSERVED so a change must be a deliberate edit of this table; it is not an authority claim. Filed in corpus-lab/OPENAPI-RUNTIME.md under 'The array-items part default', with its measured corpus incidence and with the reason a literal application of the array row costs represented coverage on this lane."
+      "derivedFrom": "items",
+      "expect": "refused",
+      "basis": "R4 (ratified 2026-09-01) reads the edition's default-`contentType` table literally: an array property takes THE ITEM-TYPE DEFAULT, not its container's application/json. On multipart that is invisible, because an array property expands into one part per item and each part already carries the item's own declaration. On the content-based urlencoded lane the whole array rides one field, so the selected media type has to define the bytes of the CONTAINER. The items declare a union that does not collapse to one non-null type, so no item-type default resolves at all. Section 5.2 leaves the property with no resolved member declaration, which is not the `propertyMedia` cell: no media choice supplies a member the declaration does not have. Decision: refused, matching the multipart sibling."
     },
     {
       "name": "3.0.4|urlencoded|union-choice",
@@ -621,9 +621,9 @@
       "value": [
         "a"
       ],
-      "derivedFrom": "array",
-      "expect": "admitted;emit=p=%5B%22a%22%5D",
-      "basis": "OPEN. On 3.0.4 and the 3.1 line an urlencoded property with no Encoding Object takes the content path, and there the engines derive the default from the ARRAY (application/json) rather than from the items schema, against the array row quoted in this file's $comment. The emission below is pinned AS OBSERVED so a change must be a deliberate edit of this table; it is not an authority claim. Filed in corpus-lab/OPENAPI-RUNTIME.md under 'The array-items part default', with its measured corpus incidence and with the reason a literal application of the array row costs represented coverage on this lane."
+      "derivedFrom": "items",
+      "expect": "refused",
+      "basis": "R4 (ratified 2026-09-01) reads the edition's default-`contentType` table literally: an array property takes THE ITEM-TYPE DEFAULT, not its container's application/json. On multipart that is invisible, because an array property expands into one part per item and each part already carries the item's own declaration. On the content-based urlencoded lane the whole array rides one field, so the selected media type has to define the bytes of the CONTAINER. The items declare a choice applicator supplying no single resolved member, so no item-type default resolves at all. Same ground and same answer as the union-type row. Decision: refused, matching the multipart sibling."
     },
     {
       "name": "3.1.1|multipart|string",
@@ -802,9 +802,9 @@
         "a",
         "b"
       ],
-      "derivedFrom": "array",
-      "expect": "admitted;emit=p=%5B%22a%22%2C%22b%22%5D",
-      "basis": "OPEN. On 3.0.4 and the 3.1 line an urlencoded property with no Encoding Object takes the content path, and there the engines derive the default from the ARRAY (application/json) rather than from the items schema, against the array row quoted in this file's $comment. The emission below is pinned AS OBSERVED so a change must be a deliberate edit of this table; it is not an authority claim. Filed in corpus-lab/OPENAPI-RUNTIME.md under 'The array-items part default', with its measured corpus incidence and with the reason a literal application of the array row costs represented coverage on this lane."
+      "derivedFrom": "items",
+      "expect": "missing-required-choice",
+      "basis": "R4 (ratified 2026-09-01) reads the edition's default-`contentType` table literally: an array property takes THE ITEM-TYPE DEFAULT, not its container's application/json. On multipart that is invisible, because an array property expands into one part per item and each part already carries the item's own declaration. On the content-based urlencoded lane the whole array rides one field, so the selected media type has to define the bytes of the CONTAINER. The items declare a plain string, so the item-type default is text/plain, under which no accepted edition defines the serialization of an array. The family documents' section 9.3 compound-default rule gives that cell no governed wire form and their section 9.3 `propertyMedia` configuration point supplies the remedy: one concrete media type, absent which the invocation refuses before dispatch as the context-required species. Decision: missing-required-choice."
     },
     {
       "name": "3.1.1|urlencoded|integer",
@@ -819,9 +819,9 @@
         1,
         2
       ],
-      "derivedFrom": "array",
-      "expect": "admitted;emit=p=%5B1%2C2%5D",
-      "basis": "OPEN. On 3.0.4 and the 3.1 line an urlencoded property with no Encoding Object takes the content path, and there the engines derive the default from the ARRAY (application/json) rather than from the items schema, against the array row quoted in this file's $comment. The emission below is pinned AS OBSERVED so a change must be a deliberate edit of this table; it is not an authority claim. Filed in corpus-lab/OPENAPI-RUNTIME.md under 'The array-items part default', with its measured corpus incidence and with the reason a literal application of the array row costs represented coverage on this lane."
+      "derivedFrom": "items",
+      "expect": "missing-required-choice",
+      "basis": "R4 (ratified 2026-09-01) reads the edition's default-`contentType` table literally: an array property takes THE ITEM-TYPE DEFAULT, not its container's application/json. On multipart that is invisible, because an array property expands into one part per item and each part already carries the item's own declaration. On the content-based urlencoded lane the whole array rides one field, so the selected media type has to define the bytes of the CONTAINER. The items declare integer, a primitive, so the item-type default is text/plain, under which no accepted edition defines the serialization of an array. Same cell and same remedy as the string row. Decision: missing-required-choice."
     },
     {
       "name": "3.1.1|urlencoded|object",
@@ -837,9 +837,9 @@
           "k": "v"
         }
       ],
-      "derivedFrom": "array",
+      "derivedFrom": "items",
       "expect": "admitted;emit=p=%5B%7B%22k%22%3A%22v%22%7D%5D",
-      "basis": "OPEN. On 3.0.4 and the 3.1 line an urlencoded property with no Encoding Object takes the content path, and there the engines derive the default from the ARRAY (application/json) rather than from the items schema, against the array row quoted in this file's $comment. The emission below is pinned AS OBSERVED so a change must be a deliberate edit of this table; it is not an authority claim. Filed in corpus-lab/OPENAPI-RUNTIME.md under 'The array-items part default', with its measured corpus incidence and with the reason a literal application of the array row costs represented coverage on this lane."
+      "basis": "R4 (ratified 2026-09-01) reads the edition's default-`contentType` table literally: an array property takes THE ITEM-TYPE DEFAULT, not its container's application/json. On multipart that is invisible, because an array property expands into one part per item and each part already carries the item's own declaration. On the content-based urlencoded lane the whole array rides one field, so the selected media type has to define the bytes of the CONTAINER. The items declare an object, whose default row is application/json, and JSON does define the serialization of an array of objects. The container therefore keeps governed bytes and the emission is unchanged by R4 -- this is the one urlencoded row where the item-derived selection and the superseded container-derived selection coincide."
     },
     {
       "name": "3.1.1|urlencoded|nested-array",
@@ -858,9 +858,9 @@
           "a"
         ]
       ],
-      "derivedFrom": "array",
-      "expect": "admitted;emit=p=%5B%5B%22a%22%5D%5D",
-      "basis": "OPEN. On 3.0.4 and the 3.1 line an urlencoded property with no Encoding Object takes the content path, and there the engines derive the default from the ARRAY (application/json) rather than from the items schema, against the array row quoted in this file's $comment. The emission below is pinned AS OBSERVED so a change must be a deliberate edit of this table; it is not an authority claim. Filed in corpus-lab/OPENAPI-RUNTIME.md under 'The array-items part default', with its measured corpus incidence and with the reason a literal application of the array row costs represented coverage on this lane."
+      "derivedFrom": "items",
+      "expect": "missing-required-choice",
+      "basis": "R4 (ratified 2026-09-01) reads the edition's default-`contentType` table literally: an array property takes THE ITEM-TYPE DEFAULT, not its container's application/json. On multipart that is invisible, because an array property expands into one part per item and each part already carries the item's own declaration. On the content-based urlencoded lane the whole array rides one field, so the selected media type has to define the bytes of the CONTAINER. The items are themselves an array, so the item-type default recurses and bottoms out at the inner primitive's text/plain, under which no accepted edition defines the serialization of an array. Decision: missing-required-choice. The multipart sibling refuses instead, because there the nested array has no declaration-defined repeated-part mapping -- a different cell with no stated remedy."
     },
     {
       "name": "3.1.1|urlencoded|unconstrained",
@@ -873,9 +873,9 @@
         "a",
         1
       ],
-      "derivedFrom": "array",
-      "expect": "admitted;emit=p=%5B%22a%22%2C1%5D",
-      "basis": "OPEN. On 3.0.4 and the 3.1 line an urlencoded property with no Encoding Object takes the content path, and there the engines derive the default from the ARRAY (application/json) rather than from the items schema, against the array row quoted in this file's $comment. The emission below is pinned AS OBSERVED so a change must be a deliberate edit of this table; it is not an authority claim. Filed in corpus-lab/OPENAPI-RUNTIME.md under 'The array-items part default', with its measured corpus incidence and with the reason a literal application of the array row costs represented coverage on this lane."
+      "derivedFrom": "items",
+      "expect": "missing-required-choice",
+      "basis": "R4 (ratified 2026-09-01) reads the edition's default-`contentType` table literally: an array property takes THE ITEM-TYPE DEFAULT, not its container's application/json. On multipart that is invisible, because an array property expands into one part per item and each part already carries the item's own declaration. On the content-based urlencoded lane the whole array rides one field, so the selected media type has to define the bytes of the CONTAINER. The items are typeless. On the 3.1 line a typeless declaration defaults to application/octet-stream, which defines no array serialization; on the 3.0 line a typeless resolved declaration has no default concrete type at all. Both land on the same cell the 3.0 document's section 9.3 configuration point names in one sentence -- required \"on the content-based form-urlencoded path and for a multipart part alike ... whenever the preceding selection yields no single concrete media type\". Decision: missing-required-choice on every accepted edition."
     },
     {
       "name": "3.1.1|urlencoded|string-base64",
@@ -890,9 +890,9 @@
       "value": [
         "QUJD"
       ],
-      "derivedFrom": "array",
-      "expect": "admitted;emit=p=%5B%22QUJD%22%5D",
-      "basis": "OPEN. On 3.0.4 and the 3.1 line an urlencoded property with no Encoding Object takes the content path, and there the engines derive the default from the ARRAY (application/json) rather than from the items schema, against the array row quoted in this file's $comment. The emission below is pinned AS OBSERVED so a change must be a deliberate edit of this table; it is not an authority claim. Filed in corpus-lab/OPENAPI-RUNTIME.md under 'The array-items part default', with its measured corpus incidence and with the reason a literal application of the array row costs represented coverage on this lane."
+      "derivedFrom": "items",
+      "expect": "missing-required-choice",
+      "basis": "R4 (ratified 2026-09-01) reads the edition's default-`contentType` table literally: an array property takes THE ITEM-TYPE DEFAULT, not its container's application/json. On multipart that is invisible, because an array property expands into one part per item and each part already carries the item's own declaration. On the content-based urlencoded lane the whole array rides one field, so the selected media type has to define the bytes of the CONTAINER. The items declare an artifact-encoded string -- `contentEncoding` on the 3.1 line, `format: byte` on the 3.0 line -- whose default row is application/octet-stream, which defines no array serialization. Decision: missing-required-choice."
     },
     {
       "name": "3.1.1|urlencoded|union-type",
@@ -909,9 +909,9 @@
       "value": [
         "a"
       ],
-      "derivedFrom": "array",
-      "expect": "admitted;emit=p=%5B%22a%22%5D",
-      "basis": "OPEN. On 3.0.4 and the 3.1 line an urlencoded property with no Encoding Object takes the content path, and there the engines derive the default from the ARRAY (application/json) rather than from the items schema, against the array row quoted in this file's $comment. The emission below is pinned AS OBSERVED so a change must be a deliberate edit of this table; it is not an authority claim. Filed in corpus-lab/OPENAPI-RUNTIME.md under 'The array-items part default', with its measured corpus incidence and with the reason a literal application of the array row costs represented coverage on this lane."
+      "derivedFrom": "items",
+      "expect": "refused",
+      "basis": "R4 (ratified 2026-09-01) reads the edition's default-`contentType` table literally: an array property takes THE ITEM-TYPE DEFAULT, not its container's application/json. On multipart that is invisible, because an array property expands into one part per item and each part already carries the item's own declaration. On the content-based urlencoded lane the whole array rides one field, so the selected media type has to define the bytes of the CONTAINER. The items declare a union that does not collapse to one non-null type, so no item-type default resolves at all. Section 5.2 leaves the property with no resolved member declaration, which is not the `propertyMedia` cell: no media choice supplies a member the declaration does not have. Decision: refused, matching the multipart sibling."
     },
     {
       "name": "3.1.1|urlencoded|union-choice",
@@ -932,9 +932,9 @@
       "value": [
         "a"
       ],
-      "derivedFrom": "array",
-      "expect": "admitted;emit=p=%5B%22a%22%5D",
-      "basis": "OPEN. On 3.0.4 and the 3.1 line an urlencoded property with no Encoding Object takes the content path, and there the engines derive the default from the ARRAY (application/json) rather than from the items schema, against the array row quoted in this file's $comment. The emission below is pinned AS OBSERVED so a change must be a deliberate edit of this table; it is not an authority claim. Filed in corpus-lab/OPENAPI-RUNTIME.md under 'The array-items part default', with its measured corpus incidence and with the reason a literal application of the array row costs represented coverage on this lane."
+      "derivedFrom": "items",
+      "expect": "refused",
+      "basis": "R4 (ratified 2026-09-01) reads the edition's default-`contentType` table literally: an array property takes THE ITEM-TYPE DEFAULT, not its container's application/json. On multipart that is invisible, because an array property expands into one part per item and each part already carries the item's own declaration. On the content-based urlencoded lane the whole array rides one field, so the selected media type has to define the bytes of the CONTAINER. The items declare a choice applicator supplying no single resolved member, so no item-type default resolves at all. Same ground and same answer as the union-type row. Decision: refused, matching the multipart sibling."
     }
   ]
 }

@@ -6,6 +6,7 @@ import {
   loadOpenAPIDocument,
   OPENAPI_PROFILE_FULL,
   planRequestBodies,
+  plansRequirePropertyMedia,
 } from "./media.js";
 import type { OpenAPIDocument, OpenAPIMediaType, OpenAPIOperation } from "./types.js";
 
@@ -17,7 +18,7 @@ import type { OpenAPIDocument, OpenAPIMediaType, OpenAPIOperation } from "./type
 // engines. The file is byte-identical to the copies in
 // openbindings-go/formats/openapi/testdata, openapi-client/go/testdata and
 // openapi-client/typescript/src/testdata.
-const CASES_DIGEST = "25b8052eabb45a8934f09ce5c61be95fcaf736a9d4cde6638a8d6bb918d690c0";
+const CASES_DIGEST = "e2e3e7588fb319147e51784215b61487ff121f33bb343d915e409acaa0be71e7";
 
 interface ContentPathCase {
   name: string;
@@ -75,11 +76,17 @@ async function decision(c: ContentPathCase): Promise<string> {
   }
   const op = (doc as unknown as Record<string, any>).paths?.["/form"]?.post as OpenAPIOperation | undefined;
   if (!op) throw new Error(`${c.name}: loaded document has no form operation`);
+  let plans;
   try {
-    planRequestBodies(op, { profile: OPENAPI_PROFILE_FULL, openapiVersion: c.openapi });
+    plans = planRequestBodies(op, { profile: OPENAPI_PROFILE_FULL, openapiVersion: c.openapi });
   } catch {
     return "refused";
   }
+  // R4: a cell whose item-type default defines no serialization for the
+  // container is dispatchable once one `propertyMedia` choice is supplied.
+  // This table supplies none, so the cell is reported as the required choice
+  // rather than collapsed into an undifferentiated build error.
+  if (plansRequirePropertyMedia(plans)) return "missing-required-choice";
   const media = (op.requestBody as any)?.content?.["application/x-www-form-urlencoded"] as
     | OpenAPIMediaType
     | undefined;
