@@ -670,7 +670,16 @@ describe("OAPI-P-03 — flattened-model refusals", () => {
     await single(call.outputs);
     // Declaration order: tags (form explode default), flat, filter.
     expect(requests[0]?.url).toBe(
-      `${BASE}/search?tags=a&tags=b&flat=x,y&filter[kind]=big&filter[size]=2`,
+      // Deep-object brackets are percent-encoded: "For `spaceDelimited`,
+      // `pipeDelimited`, and `deepObject`, the exact bytes are the
+      // corresponding OAS Style Examples: delimiters and deep-object brackets
+      // are percent-encoded" (§8.2 in all three 3.x documents, `[incorporated]`
+      // on the 3.2 line). The Style Examples table PRINTS them literally;
+      // Appendix E requires that they "all MUST be percent-encoded to comply
+      // with [RFC3986]", and the documents state that resolution. Both engines
+      // gated the encoding to the 3.2 line, so this cell rode literal
+      // brackets on 3.0 and 3.1.
+      `${BASE}/search?tags=a&tags=b&flat=x,y&filter%5Bkind%5D=big&filter%5Bsize%5D=2`,
     );
   });
 
