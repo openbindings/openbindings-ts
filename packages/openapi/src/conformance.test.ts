@@ -670,7 +670,16 @@ describe("OAPI-P-03 — flattened-model refusals", () => {
     await single(call.outputs);
     // Declaration order: tags (form explode default), flat, filter.
     expect(requests[0]?.url).toBe(
-      `${BASE}/search?tags=a&tags=b&flat=x,y&filter[kind]=big&filter[size]=2`,
+      // Deep-object brackets are percent-encoded: "For `spaceDelimited`,
+      // `pipeDelimited`, and `deepObject`, the exact bytes are the
+      // corresponding OAS Style Examples: delimiters and deep-object brackets
+      // are percent-encoded" (§8.2 in all three 3.x documents, `[incorporated]`
+      // on the 3.2 line). The Style Examples table PRINTS them literally;
+      // Appendix E requires that they "all MUST be percent-encoded to comply
+      // with [RFC3986]", and the documents state that resolution. Both engines
+      // gated the encoding to the 3.2 line, so this cell rode literal
+      // brackets on 3.0 and 3.1.
+      `${BASE}/search?tags=a&tags=b&flat=x,y&filter%5Bkind%5D=big&filter%5Bsize%5D=2`,
     );
   });
 
@@ -885,9 +894,15 @@ describe("OAPI-P-04 — request media on the wire", () => {
       },
     };
     const { fetch, requests } = mockFetch(() => jsonResponse({}));
+    // R4 (ratified 2026-09-01): `ids` is an array of integers on the CONTENT
+    // lane, so it rides one field as a whole compound and its item-type
+    // default is text/plain, under which no accepted edition defines an
+    // array's bytes. The `propertyMedia` choice is what makes the operation
+    // dispatchable; without it the invocation refuses before dispatch.
     const call = new OpenAPIInvoker({ parameterConversion: String }).invokeBinding({
       source: src(spec),
       selector: "#/paths/~1form/post",
+      context: { configuration: { propertyMedia: { ids: "application/json" } } },
       fetch,
     });
     await call.write({ name: "a b", ids: [1, 2] });

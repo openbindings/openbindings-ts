@@ -21,7 +21,7 @@ import type { OpenAPIDocument, OpenAPIMediaType, OpenAPIOperation } from "./type
 // openbindings-go/formats/openapi/testdata, openapi-client/go/testdata and
 // openapi-client/typescript/src/testdata.
 export const PART_CONTENT_ENCODING_CASES_DIGEST =
-  "7715dd10e63e4fa2865c354325e3d15af7800fb6768fc4d4e9b5d060b46dd030";
+  "0af069f3d6569ebb8750547ac53f07acae305057091a0a5c05a66617e58e2721";
 
 export interface PartContentEncodingCase {
   name: string;
@@ -209,48 +209,14 @@ describe("part content-encoding case table", () => {
     });
   }
 
-  // The predecessor carrier exposes this private map. The adapter deliberately
-  // removes the resulting header because OAS 3.1 contentEncoding annotates the
-  // artifact string; revision3.test.ts pins the production wire boundary.
-  it("identifies the predecessor's static transfer-header candidates", async () => {
-    const doc = await loadOpenAPIDocument(undefined, {
-      openapi: "3.1.1",
-      info: { title: "content transfer encoding", version: "1.0.0" },
-      paths: {
-        "/form": {
-          post: {
-            operationId: "postForm",
-            requestBody: {
-              required: true,
-              content: {
-                "multipart/form-data": {
-                  schema: {
-                    type: "object",
-                    properties: {
-                      text: { type: "string", contentEncoding: "base64" },
-                      count: { type: "integer", contentEncoding: "base64" },
-                      shape: { type: "object", contentEncoding: "base64" },
-                      many: { type: "array", items: { type: "string", contentEncoding: "base64" } },
-                    },
-                  },
-                },
-              },
-            },
-            responses: { "200": { description: "ok" } },
-          },
-        },
-      },
-    }, { allowExternalRefs: false });
-    const op = (doc as unknown as Record<string, any>).paths["/form"].post as OpenAPIOperation;
-    const plans = planRequestBodies(op, { profile: OPENAPI_PROFILE_FULL, openapiVersion: "3.1.1" });
-    const plan = plans.find((candidate) => candidate.mediaType === "multipart/form-data")!;
-    const wire = buildRequestBody(doc, plan, {
-      bodySet: true,
-      bodyValue: undefined,
-      bodyFields: { text: "YWJj", count: 7, shape: { k: "v" }, many: ["YWJj"] },
-    }) as { multipartTransferEncodings?: Record<string, string> };
-    expect(wire.multipartTransferEncodings).toEqual({ text: "base64", many: "base64" });
-  });
+  // R5 (ratified 2026-09-01) removed the predecessor's private
+  // transfer-header map outright: a `contentEncoding` declaration never
+  // produces a Content-Transfer-Encoding field, so there is no longer an
+  // intermediate for this file to describe. The adapter's behavior was already
+  // R5-shaped — it stripped the implicit header — and revision3.test.ts pins
+  // the production wire boundary on both sides of the ruling: no field from
+  // `contentEncoding` on 3.1, and the artifact-declared OAS 3.0 `format: byte`
+  // header still emitted.
 
   it("lets contentEncoding change only the declared-string row", async () => {
     expect(await assertContentEncodingChangesOnlyTheDeclaredStringRow(table)).toEqual({

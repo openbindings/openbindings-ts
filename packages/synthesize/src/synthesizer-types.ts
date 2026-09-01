@@ -204,6 +204,7 @@ export function finalizeSynthesisCoverage(
   }
   const normalizedEntries = entries.map((entry) => ({ ...entry }));
   const seen = new Set<string>();
+  let representedDependencies = 0;
   let fullyRepresented = exhaustive;
 
   for (const [index, entry] of normalizedEntries.entries()) {
@@ -236,10 +237,17 @@ export function finalizeSynthesisCoverage(
       requirements.add(requirement);
     }
 
+    // Scope names what the source unit IS; status names what became of it. A
+    // dependency unit therefore carries any status a target does — it is still
+    // a dependency-kind unit when an exclusion removes it — and only the
+    // REPRESENTED ones answer to the emitted `dependencies` map. The published
+    // interface-synthesizer contract states both rules; the Go twin enforces
+    // the identical pair.
     if (entry.scope === "dependency" && entry.status === "represented") {
-      if (entry.reasonCode) {
-        throw new Error(`represented synthesis coverage entry ${index} must not carry reasonCode`);
+      if (entry.operationKey || entry.bindingKey || entry.bindingSelector !== undefined || entry.sourceKey || entry.reasonCode) {
+        throw new Error(`represented dependency synthesis coverage entry ${index} must not carry operation or binding identity`);
       }
+      representedDependencies += 1;
       continue;
     }
 
@@ -303,6 +311,14 @@ export function finalizeSynthesisCoverage(
     // emitted OBI does not represent (MC5 seal-1 finding F-V3-1: a document
     // whose every target was invalid reported fullyRepresented true).
     fullyRepresented = false;
+  }
+
+  // Every dependency the emitted interface declares answers to exactly one
+  // represented dependency-scope entry. Without this the evidence can claim a
+  // consumption point it never accounted for.
+  const declaredDependencies = Object.keys(iface.dependencies ?? {}).length;
+  if (representedDependencies !== declaredDependencies) {
+    throw new Error(`dependency synthesis coverage represents ${representedDependencies} source interactions for ${declaredDependencies} emitted dependencies`);
   }
 
   return {
