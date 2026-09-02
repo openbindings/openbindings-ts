@@ -206,7 +206,7 @@ describe("OAPI-P-01 / §3 / §6 — loading", () => {
     ];
     for (const content of rejected) {
       await expect(loadOpenAPIDocument(undefined, content)).rejects.toThrow(
-        "OAPI-P-01",
+        /unsupported OpenAPI version|declares no `openapi` field/,
       );
     }
   });

@@ -55,6 +55,30 @@ describe("OpenAPI caller envelope", () => {
     });
   });
 
+  it("builds the routed envelope with the standalone client's own discriminator, as the Go twin does", () => {
+    // Go: input_routes_v2.go builds {profile.InputRouteKey: profile.InputRouteMarker, value, parameters, body}
+    // from the client's default profile — key "$openapi", marker "openapi-client.routed@1". This SDK used to
+    // override the marker with the bindingSpec identifier and hard-code "$openbindings" (filed 2026-08-20 in
+    // binding-fidelity.md as a parity defect). The envelope never enters an OBI, but the two SDKs' engines must
+    // build the same object from the same caller input.
+    const params = [{ name: "q", in: "query" }];
+    const plans = [objectPlan(["name"], true)];
+    const routes = planAbstractInputRoutes(params, plans);
+    const profile = profileForBindingSpec(BINDING_SPEC_OPENAPI_31);
+    expect(profile.inputRouteKey).toBe("$openapi");
+    expect(profile.inputRouteMarker).toBe("openapi-client.routed@1");
+    const routed = engineInputForCallerEnvelope(
+      { parameters: { q: "term" }, body: { name: "Ada" } },
+      params, plans, routes, profile, BINDING_SPEC_OPENAPI_31,
+    ) as Array<Record<string, unknown>>;
+    expect(routed).toHaveLength(1);
+    const item = routed[0];
+    if (item === undefined) throw new Error("routed envelope has no item");
+    expect(item).toMatchObject({ $openapi: "openapi-client.routed@1" });
+    expect(item).not.toHaveProperty("$openbindings");
+    expect(Object.keys(item).sort()).toEqual(["$openapi", "body", "parameters", "value"]);
+  });
+
   it("gives authored names priority and skips authored suffix reservations", () => {
     const routes = planAbstractInputRoutes(
       [{ name: "id", in: "path" }, { name: "id_2", in: "query" }],
