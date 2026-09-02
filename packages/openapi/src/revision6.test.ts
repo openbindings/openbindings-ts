@@ -66,6 +66,15 @@ describe("openbindings.openapi-3.1@1 whole JSON carriage", () => {
       required: ["kind", "payload"],
     });
     expect(iface.bindings?.["createItem.openapi"]?.inputTransform).toContain('$lookup($,"payload")');
+    // No engine-private marker enters an OBI: the emitted transform is the
+    // flat caller envelope, and neither engine's routed-envelope discriminator
+    // (TS/Go standalone: `$openapi`; the OBI SDK's former `$openbindings`) nor
+    // the marker may appear in it. The Go twins (media_v3/v5/v6_test.go) pin the
+    // same absence; the runtime envelope's key parity is pinned in
+    // input-routes-v2.test.ts.
+    for (const forbidden of ["$openbindings", "$openapi", "openapi-client.routed@1"]) {
+      expect(iface.bindings?.["createItem.openapi"]?.inputTransform).not.toContain(forbidden);
+    }
 
     const invoker = new OperationInvoker([new OpenAPIInvoker()], {
       fetch: async (request, init) => {

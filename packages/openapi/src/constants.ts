@@ -1,6 +1,5 @@
 import {
   OPENAPI_PROFILE_FULL,
-  withInputRouteMarker,
   type OpenAPIExecutionProfile,
 } from "@openbindings/openapi-client/engine";
 
@@ -34,10 +33,10 @@ const OPENAPI_BINDING_SPEC_REGISTRY: Readonly<Record<string, OpenAPIBindingSpecR
   });
 
 const PROFILES: Readonly<Record<string, OpenAPIExecutionProfile>> = Object.freeze({
-  [BINDING_SPEC_OPENAPI_20]: withInputRouteMarker(OPENAPI_PROFILE_FULL, BINDING_SPEC_OPENAPI_20),
-  [BINDING_SPEC_OPENAPI_30]: withInputRouteMarker(OPENAPI_PROFILE_FULL, BINDING_SPEC_OPENAPI_30),
-  [BINDING_SPEC_OPENAPI_31]: withInputRouteMarker(OPENAPI_PROFILE_FULL, BINDING_SPEC_OPENAPI_31),
-  [BINDING_SPEC_OPENAPI_32]: withInputRouteMarker(OPENAPI_PROFILE_FULL, BINDING_SPEC_OPENAPI_32),
+  [BINDING_SPEC_OPENAPI_20]: OPENAPI_PROFILE_FULL,
+  [BINDING_SPEC_OPENAPI_30]: OPENAPI_PROFILE_FULL,
+  [BINDING_SPEC_OPENAPI_31]: OPENAPI_PROFILE_FULL,
+  [BINDING_SPEC_OPENAPI_32]: OPENAPI_PROFILE_FULL,
 });
 
 export function isImplementedOpenAPIBindingSpec(bindingSpec: string): boolean {

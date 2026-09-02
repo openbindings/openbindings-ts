@@ -313,7 +313,7 @@ export function engineInputForCallerEnvelope(
   }
 
   return [{
-    $openbindings: profile.inputRouteMarker,
+    [profile.inputRouteKey]: profile.inputRouteMarker,
     value,
     parameters: routes.parameters.map((route) => ({
       in: route.in,
