@@ -1,3 +1,4 @@
+import { prepareSwagger20 } from "@openbindings/openapi-client/engine";
 import { checkBindingSpecs as checkBindingSpecSupport } from "@openbindings/core";
 import { type BindingSpecInfo, type BindingSpecVerdict, type OBInterface, type Source } from "@openbindings/core";
 import {
@@ -143,7 +144,8 @@ import {
   validateSelectedCredentials,
   type SecuritySelection,
 } from "./security.js";
-import { runSwagger20Adapter } from "./swagger20-adapter.js";
+import { bridgeSwagger20Error, runSwagger20Adapter, swagger20Configuration } from "./swagger20-adapter.js";
+import { swagger20ConfigurationRequirements, swagger20SecurityRequirements } from "./swagger20-prepare.js";
 import { synthesizeSwagger20 } from "./swagger20-synthesis.js";
 
 // ---------------------------------------------------------------------------
@@ -243,6 +245,9 @@ export class OpenAPIInvoker implements BindingInvoker {
    * raise the challenge instead.
    */
   async prepareBinding(args: BindingInvocationArgs): Promise<ContextRequiredDetails | null> {
+    if (args.source.bindingSpec === BINDING_SPEC_OPENAPI_20) {
+      return this.prepareSwagger20Binding(args);
+    }
     let profile: OpenAPIExecutionProfile;
     try {
       profile = profileForInvocation(args.source.bindingSpec);
@@ -357,6 +362,48 @@ export class OpenAPIInvoker implements BindingInvoker {
       return security;
     } catch (error: unknown) {
       if (error instanceof InvocationError) throw error;
+      throw new InvocationError("ERR_REFUSED");
+    }
+  }
+
+  /**
+   * The Swagger 2.0 half of the side-effect-free preflight. Inline content is
+   * analyzed with external references disabled; a location-only source remains
+   * unknowable to this surface and is left to the invocation's own challenge,
+   * which the binding-invoker contract makes authoritative in any case.
+   */
+  private async prepareSwagger20Binding(args: BindingInvocationArgs): Promise<ContextRequiredDetails | null> {
+    if (args.source.content === undefined) return null;
+    let configuration: { securityAlternative?: number };
+    try {
+      configuration = swagger20Configuration(args.context);
+    } catch {
+      throw new InvocationError("ERR_REFUSED");
+    }
+    let operation;
+    try {
+      const prepared = await prepareSwagger20({
+        source: { content: args.source.content, ...(args.source.location === undefined ? {} : { location: args.source.location }) },
+        ref: args.selector,
+        context: args.context,
+        allowExternalRefs: false,
+      });
+      operation = await prepared.synthesisOperation();
+    } catch (error: unknown) {
+      throw bridgeSwagger20Error(error);
+    }
+    if (operation.excluded) throw new InvocationError("ERR_REFUSED");
+    const target = args.source.location ?? "";
+    try {
+      return mergeContextRequirements(
+        swagger20ConfigurationRequirements(operation, args.context, {
+          parameterConversion: this.parameterConversion !== undefined,
+          requestContentCodings: (this.requestContentCodings?.size ?? 0) > 0,
+          responseContentCodings: (this.responseContentCodings?.size ?? 0) > 0,
+        }),
+        swagger20SecurityRequirements(operation, configuration.securityAlternative, args.context, target),
+      );
+    } catch {
       throw new InvocationError("ERR_REFUSED");
     }
   }
