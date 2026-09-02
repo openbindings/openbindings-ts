@@ -108,7 +108,10 @@ const prepared = await new OpenAPIEngine().prepare({
       "200": { description: "ok", content: { "application/json": { schema: { type: "object" } } } },
     } } } },
   } },
-  selector: "#/paths/~1ping/get",
+  // The standalone client engine names the selector "ref"; the SDK adapts at
+  // the seam (packages/openapi/src/invoker.ts). This smoke test calls the
+  // engine directly, so it speaks the engine name, not the OBI field name.
+  ref: "#/paths/~1ping/get",
   fetch: async input => {
     if (String(input) !== "https://api.example.test/ping") throw new Error("packed runtime planned the wrong request");
     return new Response('{"ok":true}', { status: 200, headers: { "content-type": "application/json" } });
