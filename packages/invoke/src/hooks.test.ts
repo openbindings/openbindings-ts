@@ -12,7 +12,7 @@ import {
   type RawResult,
 } from "./hooks.js";
 import { InvocationError } from "./invocation.js";
-import { ERR_EXECUTION_FAILED, ERR_RESPONSE_ERROR, ERR_RUNTIME, ERR_STREAM_ERROR } from "./errcodes.js";
+import { ERR_EXECUTION_FAILED, ERR_RUNTIME, ERR_STREAM_ERROR } from "./errcodes.js";
 import { OperationInvoker } from "./operation-invoker.js";
 
 const site: InvokeSite = {
