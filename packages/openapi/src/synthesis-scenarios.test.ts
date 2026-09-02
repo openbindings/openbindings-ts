@@ -64,8 +64,8 @@ describe("portable OpenAPI synthesis scenarios", () => {
   }
 
   afterAll(() => {
-    expect(corpora.map((corpus) => corpus.scenarios.length)).toEqual([10, 15, 32, 8]);
-    expect(executed).toBe(65);
+    expect(corpora.map((corpus) => corpus.scenarios.length)).toEqual([10, 15, 32, 9]);
+    expect(executed).toBe(66);
   });
 
   it("serves only the addresses a scenario declares", async () => {
