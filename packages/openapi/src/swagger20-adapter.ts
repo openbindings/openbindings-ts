@@ -83,7 +83,7 @@ interface Swagger20RuntimeConfiguration {
   propertyMedia?: Record<string, string>;
 }
 
-function swagger20Configuration(context: Record<string, unknown> | undefined): Swagger20RuntimeConfiguration {
+export function swagger20Configuration(context: Record<string, unknown> | undefined): Swagger20RuntimeConfiguration {
   const raw = asRecord(context?.configuration) ?? {};
   const result: Swagger20RuntimeConfiguration = {};
   if (Object.hasOwn(raw, "server")) {
