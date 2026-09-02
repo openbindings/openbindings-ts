@@ -3,7 +3,6 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
   buildMultipartBody,
-  buildRequestBody,
   buildURLEncodedBody,
   loadOpenAPIDocument,
   OPENAPI_PROFILE_FULL,
