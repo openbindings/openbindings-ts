@@ -238,7 +238,7 @@ export function supportedMessageContentType(contentType: string): void {
  */
 export function avroMediaGuard(message: AsyncAPIMessage, effectiveContentType: string): void {
   if (effectiveContentType === "" || isJSONMediaType(normalizeMediaType(effectiveContentType))) return;
-  const payload = message.payload as Record<string, unknown> | undefined;
+  const payload = message.payload;
   const format = payload?.["schemaFormat"];
   if (typeof format !== "string" || format.trim() === "") return;
   let parsed: ParsedMedia;
