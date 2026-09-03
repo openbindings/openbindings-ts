@@ -98,9 +98,9 @@ describe("portable OpenAPI processor scenarios", () => {
   }
 
   afterAll(() => {
-    expect(corpora.map(({ corpus, wanted }) => wanted?.size ?? corpus.scenarios.length)).toEqual([135, 112, 140, 213]);
-    expect(executedByCorpus).toEqual([135, 112, 140, 213]);
-    expect(executed).toBe(600);
+    expect(corpora.map(({ corpus, wanted }) => wanted?.size ?? corpus.scenarios.length)).toEqual([135, 113, 141, 213]);
+    expect(executedByCorpus).toEqual([135, 113, 141, 213]);
+    expect(executed).toBe(602);
   });
 });
 
