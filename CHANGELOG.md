@@ -582,20 +582,6 @@
 
 ### Fixed
 
-- **Coverage validation keys an alternative or projection entry on its
-  operation and binding, not on its source unit alone.** The published
-  interface-synthesizer contract defines a unit as an independently selectable
-  alternative "whose omission would remove a source-permitted invocation
-  path", so one source declaration inherited by several operations (an OAS 2.0
-  root-level `consumes` member; a root-level `servers` or `security` member on
-  any line) is one unit per operation. `finalizeSynthesisCoverage` previously
-  keyed duplicates on `(sourceIndex, scope, sourceRef)` and failed the whole
-  coverage call on any 2.0 document with two body operations inheriting root
-  `consumes`, and on any 3.x document with two operations sharing an unusable
-  root server or security requirement. Target and dependency scopes keep their
-  source-unit key; the adapters' `sourceRef` is unchanged. Pinned by
-  `OAPI20-SS-12` and `OAPI32-SS-12`; the Go SDK enforces the identical key.
-
 - **A lone empty SSE `data:` line now dispatches an event whose value is
   the empty string** (`@openbindings/openapi`, via the standalone engine),
   at its position in the output sequence. The WHATWG dispatch steps check
