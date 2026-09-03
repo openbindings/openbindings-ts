@@ -18,7 +18,7 @@ import type { OpenAPIDocument, OpenAPIMediaType, OpenAPIOperation } from "./type
 // engines. The file is byte-identical to the copies in
 // openbindings-go/formats/openapi/testdata, openapi-client/go/testdata and
 // openapi-client/typescript/src/testdata.
-const CASES_DIGEST = "e2e3e7588fb319147e51784215b61487ff121f33bb343d915e409acaa0be71e7";
+const CASES_DIGEST = "9e7c5b52d2d775b470ea5892da54e31a15ab75434a9d55bc8a53e342138ffb86";
 
 interface ContentPathCase {
   name: string;

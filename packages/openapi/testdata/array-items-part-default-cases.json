@@ -759,10 +759,10 @@
         "a"
       ],
       "derivedFrom": "items",
-      "expect": "refused",
+      "expect": "missing-required-choice",
       "nonArrayValue": "scalar",
-      "nonArrayValueExpect": "refused",
-      "basis": "OAS 3.1.1 Encoding Object, contentType default table: 'array | n/a | according to the type of the items schema'. [JSON Schema 2020-12] §6.1.1 makes an array-valued `type` a union - 'an instance validates successfully if its type matches any of the types indicated by the strings in the array' - and two non-null members declare value-dependent alternatives, which `the openapi family specifications` §9.2 refuses."
+      "nonArrayValueExpect": "missing-required-choice",
+      "basis": "OA-F8 (2026-09-03): the items declare a resolved type set with two non-null members. Every row of the 3.1.1 default-`contentType` table is keyed on ONE `type` (`absent`, `string`, `number, integer, or boolean`, `object`, `array`), so the set matches none and the item-derived default is not determined. openbindings.openapi-3.1@1 Section 9.3 (transcribed from the 3.2 sibling): a multi-type resolved set determines no default; the no-default refusal and the `propertyMedia` requirement extend to it, so the property is a REPRESENTED unit carrying that requirement and refuses before dispatch as the context-required species only when a value reaches it without the choice. This harness supplies no configuration, so the cell reads missing-required-choice; with a concrete choice the whole value rides under the chosen media type (application/json for a container on the urlencoded lane; text/plain per item on multipart). Previously read `refused` under a reading that stopped at the refusal rung; the deference order ranks the exposed choice above it."
     },
     {
       "name": "3.1.1|multipart|union-choice",
@@ -910,8 +910,8 @@
         "a"
       ],
       "derivedFrom": "items",
-      "expect": "refused",
-      "basis": "R4 (ratified 2026-09-01) reads the edition's default-`contentType` table literally: an array property takes THE ITEM-TYPE DEFAULT, not its container's application/json. On multipart that is invisible, because an array property expands into one part per item and each part already carries the item's own declaration. On the content-based urlencoded lane the whole array rides one field, so the selected media type has to define the bytes of the CONTAINER. The items declare a union that does not collapse to one non-null type, so no item-type default resolves at all. Section 5.2 leaves the property with no resolved member declaration, which is not the `propertyMedia` cell: no media choice supplies a member the declaration does not have. Decision: refused, matching the multipart sibling."
+      "expect": "missing-required-choice",
+      "basis": "OA-F8 (2026-09-03): the items declare a resolved type set with two non-null members. Every row of the 3.1.1 default-`contentType` table is keyed on ONE `type` (`absent`, `string`, `number, integer, or boolean`, `object`, `array`), so the set matches none and the item-derived default is not determined. openbindings.openapi-3.1@1 Section 9.3 (transcribed from the 3.2 sibling): a multi-type resolved set determines no default; the no-default refusal and the `propertyMedia` requirement extend to it, so the property is a REPRESENTED unit carrying that requirement and refuses before dispatch as the context-required species only when a value reaches it without the choice. This harness supplies no configuration, so the cell reads missing-required-choice; with a concrete choice the whole value rides under the chosen media type (application/json for a container on the urlencoded lane; text/plain per item on multipart). Previously read `refused` under a reading that stopped at the refusal rung; the deference order ranks the exposed choice above it."
     },
     {
       "name": "3.1.1|urlencoded|union-choice",

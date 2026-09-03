@@ -742,8 +742,15 @@ describe("§9.2 type-absent and nullable-choice parts", () => {
   // deleted the value-keyed convention: no accepted 3.0 edition states a
   // default contentType row that reaches a declaration with no `type`, and
   // this specification now authors none for that residue either.
+  // OA-F8 (2026-09-03): the base planner no longer refuses the part. A
+  // typeless 3.0 declaration reaches no row, and openbindings.openapi-3.0@1
+  // Section 9.3 names propertyMedia as the missing media type, so the part is
+  // ADMITTED as a represented unit carrying that requirement (the resolved
+  // planner reports it; see part-default-type-absent.test.ts and the shared
+  // twin tables) and a value reaching it without the choice refuses as the
+  // context-required species.
   it.each([["3.0.0"], ["3.0.1"], ["3.0.2"], ["3.0.3"], ["3.0.4"]])(
-    "refuses a type-absent part on OAS %s, authoring no row",
+    "admits a type-absent part on OAS %s for the propertyMedia choice, authoring no row",
     (edition) => {
       const media: OpenAPIMediaType = {
         schema: { type: "object", properties: { file: { description: "Profile picture file" } } },
@@ -751,7 +758,7 @@ describe("§9.2 type-absent and nullable-choice parts", () => {
       expect(() => planRequestBody(
         opWithRequestBody({ "multipart/form-data": media }, true),
         { profile: profileForBindingSpec(BINDING_SPEC), openapiVersion: edition },
-      )).toThrow(/no default part Content-Type row on any accepted OAS 3.0 edition/);
+      )).not.toThrow();
     },
   );
 
@@ -848,11 +855,16 @@ describe("§9.2 type-absent and nullable-choice parts", () => {
     const typeAbsent: OpenAPIMediaType = {
       schema: { type: "object", properties: { note: { description: "free-form" } } },
     };
+    // OA-F8 (2026-09-03): on the 3.0 line the typeless field is admitted for
+    // the propertyMedia choice on this lane exactly as on multipart —
+    // Section 9.3 requires the point "on the content-based form-urlencoded
+    // path and for a multipart part alike"; the 3.1 line keeps its refusal on
+    // its own ground (an octet-stream row with no boundary defined here).
     for (const edition of ["3.0.0", "3.0.1", "3.0.2", "3.0.3", "3.0.4"]) {
       expect(() => planRequestBody(
         opWithRequestBody({ "application/x-www-form-urlencoded": typeAbsent }, true),
         { profile: profileForBindingSpec(BINDING_SPEC), openapiVersion: edition },
-      )).toThrow(/no default part Content-Type row on any accepted OAS 3.0 edition/);
+      )).not.toThrow();
     }
     for (const edition of ["3.1.0", "3.1.1", "3.1.2"]) {
       expect(() => planRequestBody(
