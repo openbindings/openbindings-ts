@@ -133,8 +133,8 @@
       "propertyName": "file",
       "propertySchema": {},
       "value": "abc",
-      "expect": "missing-required-choice",
-      "basis": "OA-F8 (2026-09-03): on the 3.0 line no accepted edition states a default contentType row reaching a part declaring no `type` (3.0.0-3.0.3 enumerate string-with-format-binary, other primitive types, object and array with no catch-all; 3.0.4 tabulates the same cases keyed on a declared `type`), and openbindings.openapi-3.0@1 Section 9.3 requires `propertyMedia` for such a declaration \"on the content-based form-urlencoded path and for a multipart part alike\". The engines had honoured that sentence on multipart only; the urlencoded twin now reads the same. This harness supplies no configuration, so the represented alternative reaches missing-required-choice before inspecting the value. Previously read `refused`."
+      "expect": "refused",
+      "basis": "The openapi family specifications §§9.2–9.3 define no raw-octet carriage for a typeless application/x-www-form-urlencoded property. The smallest media alternative is therefore excluded without inspecting the supplied application value."
     },
     {
       "name": "3.0.0|urlencoded|typeless-empty-object-value",
@@ -148,8 +148,8 @@
       "value": {
         "k": "v"
       },
-      "expect": "missing-required-choice",
-      "basis": "OA-F8 (2026-09-03): on the 3.0 line no accepted edition states a default contentType row reaching a part declaring no `type` (3.0.0-3.0.3 enumerate string-with-format-binary, other primitive types, object and array with no catch-all; 3.0.4 tabulates the same cases keyed on a declared `type`), and openbindings.openapi-3.0@1 Section 9.3 requires `propertyMedia` for such a declaration \"on the content-based form-urlencoded path and for a multipart part alike\". The engines had honoured that sentence on multipart only; the urlencoded twin now reads the same. This harness supplies no configuration, so the represented alternative reaches missing-required-choice before inspecting the value. Previously read `refused`."
+      "expect": "refused",
+      "basis": "The openapi family specifications §§9.2–9.3 define no raw-octet carriage for a typeless application/x-www-form-urlencoded property. The smallest media alternative is therefore excluded without inspecting the supplied application value."
     },
     {
       "name": "3.0.0|urlencoded|typeless-description",
@@ -163,8 +163,8 @@
         "description": "a profile picture"
       },
       "value": "abc",
-      "expect": "missing-required-choice",
-      "basis": "OA-F8 (2026-09-03): on the 3.0 line no accepted edition states a default contentType row reaching a part declaring no `type` (3.0.0-3.0.3 enumerate string-with-format-binary, other primitive types, object and array with no catch-all; 3.0.4 tabulates the same cases keyed on a declared `type`), and openbindings.openapi-3.0@1 Section 9.3 requires `propertyMedia` for such a declaration \"on the content-based form-urlencoded path and for a multipart part alike\". The engines had honoured that sentence on multipart only; the urlencoded twin now reads the same. This harness supplies no configuration, so the represented alternative reaches missing-required-choice before inspecting the value. Previously read `refused`."
+      "expect": "refused",
+      "basis": "The openapi family specifications §§9.2–9.3 define no raw-octet carriage for a typeless application/x-www-form-urlencoded property. The smallest media alternative is therefore excluded without inspecting the supplied application value."
     },
     {
       "name": "3.0.0|urlencoded|typeless-format",
@@ -178,8 +178,8 @@
         "format": "uuid"
       },
       "value": "abc",
-      "expect": "missing-required-choice",
-      "basis": "OA-F8 (2026-09-03): on the 3.0 line no accepted edition states a default contentType row reaching a part declaring no `type` (3.0.0-3.0.3 enumerate string-with-format-binary, other primitive types, object and array with no catch-all; 3.0.4 tabulates the same cases keyed on a declared `type`), and openbindings.openapi-3.0@1 Section 9.3 requires `propertyMedia` for such a declaration \"on the content-based form-urlencoded path and for a multipart part alike\". The engines had honoured that sentence on multipart only; the urlencoded twin now reads the same. This harness supplies no configuration, so the represented alternative reaches missing-required-choice before inspecting the value. Previously read `refused`."
+      "expect": "refused",
+      "basis": "The openapi family specifications §§9.2–9.3 define no raw-octet carriage for a typeless application/x-www-form-urlencoded property. The smallest media alternative is therefore excluded without inspecting the supplied application value."
     },
     {
       "name": "3.0.0|urlencoded|typeless-allof",
@@ -197,8 +197,8 @@
         ]
       },
       "value": "abc",
-      "expect": "missing-required-choice",
-      "basis": "OA-F8 (2026-09-03): on the 3.0 line no accepted edition states a default contentType row reaching a part declaring no `type` (3.0.0-3.0.3 enumerate string-with-format-binary, other primitive types, object and array with no catch-all; 3.0.4 tabulates the same cases keyed on a declared `type`), and openbindings.openapi-3.0@1 Section 9.3 requires `propertyMedia` for such a declaration \"on the content-based form-urlencoded path and for a multipart part alike\". The engines had honoured that sentence on multipart only; the urlencoded twin now reads the same. This harness supplies no configuration, so the represented alternative reaches missing-required-choice before inspecting the value. Previously read `refused`."
+      "expect": "refused",
+      "basis": "The openapi family specifications §§9.2–9.3 define no raw-octet carriage for a typeless application/x-www-form-urlencoded property. The smallest media alternative is therefore excluded without inspecting the supplied application value."
     },
     {
       "name": "3.0.0|urlencoded|boolean-literal-true",
@@ -377,8 +377,8 @@
       "propertyName": "file",
       "propertySchema": {},
       "value": "abc",
-      "expect": "missing-required-choice",
-      "basis": "OA-F8 (2026-09-03): on the 3.0 line no accepted edition states a default contentType row reaching a part declaring no `type` (3.0.0-3.0.3 enumerate string-with-format-binary, other primitive types, object and array with no catch-all; 3.0.4 tabulates the same cases keyed on a declared `type`), and openbindings.openapi-3.0@1 Section 9.3 requires `propertyMedia` for such a declaration \"on the content-based form-urlencoded path and for a multipart part alike\". The engines had honoured that sentence on multipart only; the urlencoded twin now reads the same. This harness supplies no configuration, so the represented alternative reaches missing-required-choice before inspecting the value. Previously read `refused`."
+      "expect": "refused",
+      "basis": "The openapi family specifications §§9.2–9.3 define no raw-octet carriage for a typeless application/x-www-form-urlencoded property. The smallest media alternative is therefore excluded without inspecting the supplied application value."
     },
     {
       "name": "3.0.1|urlencoded|typeless-empty-object-value",
@@ -392,8 +392,8 @@
       "value": {
         "k": "v"
       },
-      "expect": "missing-required-choice",
-      "basis": "OA-F8 (2026-09-03): on the 3.0 line no accepted edition states a default contentType row reaching a part declaring no `type` (3.0.0-3.0.3 enumerate string-with-format-binary, other primitive types, object and array with no catch-all; 3.0.4 tabulates the same cases keyed on a declared `type`), and openbindings.openapi-3.0@1 Section 9.3 requires `propertyMedia` for such a declaration \"on the content-based form-urlencoded path and for a multipart part alike\". The engines had honoured that sentence on multipart only; the urlencoded twin now reads the same. This harness supplies no configuration, so the represented alternative reaches missing-required-choice before inspecting the value. Previously read `refused`."
+      "expect": "refused",
+      "basis": "The openapi family specifications §§9.2–9.3 define no raw-octet carriage for a typeless application/x-www-form-urlencoded property. The smallest media alternative is therefore excluded without inspecting the supplied application value."
     },
     {
       "name": "3.0.1|urlencoded|typeless-description",
@@ -407,8 +407,8 @@
         "description": "a profile picture"
       },
       "value": "abc",
-      "expect": "missing-required-choice",
-      "basis": "OA-F8 (2026-09-03): on the 3.0 line no accepted edition states a default contentType row reaching a part declaring no `type` (3.0.0-3.0.3 enumerate string-with-format-binary, other primitive types, object and array with no catch-all; 3.0.4 tabulates the same cases keyed on a declared `type`), and openbindings.openapi-3.0@1 Section 9.3 requires `propertyMedia` for such a declaration \"on the content-based form-urlencoded path and for a multipart part alike\". The engines had honoured that sentence on multipart only; the urlencoded twin now reads the same. This harness supplies no configuration, so the represented alternative reaches missing-required-choice before inspecting the value. Previously read `refused`."
+      "expect": "refused",
+      "basis": "The openapi family specifications §§9.2–9.3 define no raw-octet carriage for a typeless application/x-www-form-urlencoded property. The smallest media alternative is therefore excluded without inspecting the supplied application value."
     },
     {
       "name": "3.0.1|urlencoded|typeless-format",
@@ -422,8 +422,8 @@
         "format": "uuid"
       },
       "value": "abc",
-      "expect": "missing-required-choice",
-      "basis": "OA-F8 (2026-09-03): on the 3.0 line no accepted edition states a default contentType row reaching a part declaring no `type` (3.0.0-3.0.3 enumerate string-with-format-binary, other primitive types, object and array with no catch-all; 3.0.4 tabulates the same cases keyed on a declared `type`), and openbindings.openapi-3.0@1 Section 9.3 requires `propertyMedia` for such a declaration \"on the content-based form-urlencoded path and for a multipart part alike\". The engines had honoured that sentence on multipart only; the urlencoded twin now reads the same. This harness supplies no configuration, so the represented alternative reaches missing-required-choice before inspecting the value. Previously read `refused`."
+      "expect": "refused",
+      "basis": "The openapi family specifications §§9.2–9.3 define no raw-octet carriage for a typeless application/x-www-form-urlencoded property. The smallest media alternative is therefore excluded without inspecting the supplied application value."
     },
     {
       "name": "3.0.1|urlencoded|typeless-allof",
@@ -441,8 +441,8 @@
         ]
       },
       "value": "abc",
-      "expect": "missing-required-choice",
-      "basis": "OA-F8 (2026-09-03): on the 3.0 line no accepted edition states a default contentType row reaching a part declaring no `type` (3.0.0-3.0.3 enumerate string-with-format-binary, other primitive types, object and array with no catch-all; 3.0.4 tabulates the same cases keyed on a declared `type`), and openbindings.openapi-3.0@1 Section 9.3 requires `propertyMedia` for such a declaration \"on the content-based form-urlencoded path and for a multipart part alike\". The engines had honoured that sentence on multipart only; the urlencoded twin now reads the same. This harness supplies no configuration, so the represented alternative reaches missing-required-choice before inspecting the value. Previously read `refused`."
+      "expect": "refused",
+      "basis": "The openapi family specifications §§9.2–9.3 define no raw-octet carriage for a typeless application/x-www-form-urlencoded property. The smallest media alternative is therefore excluded without inspecting the supplied application value."
     },
     {
       "name": "3.0.1|urlencoded|boolean-literal-true",
@@ -621,8 +621,8 @@
       "propertyName": "file",
       "propertySchema": {},
       "value": "abc",
-      "expect": "missing-required-choice",
-      "basis": "OA-F8 (2026-09-03): on the 3.0 line no accepted edition states a default contentType row reaching a part declaring no `type` (3.0.0-3.0.3 enumerate string-with-format-binary, other primitive types, object and array with no catch-all; 3.0.4 tabulates the same cases keyed on a declared `type`), and openbindings.openapi-3.0@1 Section 9.3 requires `propertyMedia` for such a declaration \"on the content-based form-urlencoded path and for a multipart part alike\". The engines had honoured that sentence on multipart only; the urlencoded twin now reads the same. This harness supplies no configuration, so the represented alternative reaches missing-required-choice before inspecting the value. Previously read `refused`."
+      "expect": "refused",
+      "basis": "The openapi family specifications §§9.2–9.3 define no raw-octet carriage for a typeless application/x-www-form-urlencoded property. The smallest media alternative is therefore excluded without inspecting the supplied application value."
     },
     {
       "name": "3.0.2|urlencoded|typeless-empty-object-value",
@@ -636,8 +636,8 @@
       "value": {
         "k": "v"
       },
-      "expect": "missing-required-choice",
-      "basis": "OA-F8 (2026-09-03): on the 3.0 line no accepted edition states a default contentType row reaching a part declaring no `type` (3.0.0-3.0.3 enumerate string-with-format-binary, other primitive types, object and array with no catch-all; 3.0.4 tabulates the same cases keyed on a declared `type`), and openbindings.openapi-3.0@1 Section 9.3 requires `propertyMedia` for such a declaration \"on the content-based form-urlencoded path and for a multipart part alike\". The engines had honoured that sentence on multipart only; the urlencoded twin now reads the same. This harness supplies no configuration, so the represented alternative reaches missing-required-choice before inspecting the value. Previously read `refused`."
+      "expect": "refused",
+      "basis": "The openapi family specifications §§9.2–9.3 define no raw-octet carriage for a typeless application/x-www-form-urlencoded property. The smallest media alternative is therefore excluded without inspecting the supplied application value."
     },
     {
       "name": "3.0.2|urlencoded|typeless-description",
@@ -651,8 +651,8 @@
         "description": "a profile picture"
       },
       "value": "abc",
-      "expect": "missing-required-choice",
-      "basis": "OA-F8 (2026-09-03): on the 3.0 line no accepted edition states a default contentType row reaching a part declaring no `type` (3.0.0-3.0.3 enumerate string-with-format-binary, other primitive types, object and array with no catch-all; 3.0.4 tabulates the same cases keyed on a declared `type`), and openbindings.openapi-3.0@1 Section 9.3 requires `propertyMedia` for such a declaration \"on the content-based form-urlencoded path and for a multipart part alike\". The engines had honoured that sentence on multipart only; the urlencoded twin now reads the same. This harness supplies no configuration, so the represented alternative reaches missing-required-choice before inspecting the value. Previously read `refused`."
+      "expect": "refused",
+      "basis": "The openapi family specifications §§9.2–9.3 define no raw-octet carriage for a typeless application/x-www-form-urlencoded property. The smallest media alternative is therefore excluded without inspecting the supplied application value."
     },
     {
       "name": "3.0.2|urlencoded|typeless-format",
@@ -666,8 +666,8 @@
         "format": "uuid"
       },
       "value": "abc",
-      "expect": "missing-required-choice",
-      "basis": "OA-F8 (2026-09-03): on the 3.0 line no accepted edition states a default contentType row reaching a part declaring no `type` (3.0.0-3.0.3 enumerate string-with-format-binary, other primitive types, object and array with no catch-all; 3.0.4 tabulates the same cases keyed on a declared `type`), and openbindings.openapi-3.0@1 Section 9.3 requires `propertyMedia` for such a declaration \"on the content-based form-urlencoded path and for a multipart part alike\". The engines had honoured that sentence on multipart only; the urlencoded twin now reads the same. This harness supplies no configuration, so the represented alternative reaches missing-required-choice before inspecting the value. Previously read `refused`."
+      "expect": "refused",
+      "basis": "The openapi family specifications §§9.2–9.3 define no raw-octet carriage for a typeless application/x-www-form-urlencoded property. The smallest media alternative is therefore excluded without inspecting the supplied application value."
     },
     {
       "name": "3.0.2|urlencoded|typeless-allof",
@@ -685,8 +685,8 @@
         ]
       },
       "value": "abc",
-      "expect": "missing-required-choice",
-      "basis": "OA-F8 (2026-09-03): on the 3.0 line no accepted edition states a default contentType row reaching a part declaring no `type` (3.0.0-3.0.3 enumerate string-with-format-binary, other primitive types, object and array with no catch-all; 3.0.4 tabulates the same cases keyed on a declared `type`), and openbindings.openapi-3.0@1 Section 9.3 requires `propertyMedia` for such a declaration \"on the content-based form-urlencoded path and for a multipart part alike\". The engines had honoured that sentence on multipart only; the urlencoded twin now reads the same. This harness supplies no configuration, so the represented alternative reaches missing-required-choice before inspecting the value. Previously read `refused`."
+      "expect": "refused",
+      "basis": "The openapi family specifications §§9.2–9.3 define no raw-octet carriage for a typeless application/x-www-form-urlencoded property. The smallest media alternative is therefore excluded without inspecting the supplied application value."
     },
     {
       "name": "3.0.2|urlencoded|boolean-literal-true",
@@ -865,8 +865,8 @@
       "propertyName": "file",
       "propertySchema": {},
       "value": "abc",
-      "expect": "missing-required-choice",
-      "basis": "OA-F8 (2026-09-03): on the 3.0 line no accepted edition states a default contentType row reaching a part declaring no `type` (3.0.0-3.0.3 enumerate string-with-format-binary, other primitive types, object and array with no catch-all; 3.0.4 tabulates the same cases keyed on a declared `type`), and openbindings.openapi-3.0@1 Section 9.3 requires `propertyMedia` for such a declaration \"on the content-based form-urlencoded path and for a multipart part alike\". The engines had honoured that sentence on multipart only; the urlencoded twin now reads the same. This harness supplies no configuration, so the represented alternative reaches missing-required-choice before inspecting the value. Previously read `refused`."
+      "expect": "refused",
+      "basis": "The openapi family specifications §§9.2–9.3 define no raw-octet carriage for a typeless application/x-www-form-urlencoded property. The smallest media alternative is therefore excluded without inspecting the supplied application value."
     },
     {
       "name": "3.0.3|urlencoded|typeless-empty-object-value",
@@ -880,8 +880,8 @@
       "value": {
         "k": "v"
       },
-      "expect": "missing-required-choice",
-      "basis": "OA-F8 (2026-09-03): on the 3.0 line no accepted edition states a default contentType row reaching a part declaring no `type` (3.0.0-3.0.3 enumerate string-with-format-binary, other primitive types, object and array with no catch-all; 3.0.4 tabulates the same cases keyed on a declared `type`), and openbindings.openapi-3.0@1 Section 9.3 requires `propertyMedia` for such a declaration \"on the content-based form-urlencoded path and for a multipart part alike\". The engines had honoured that sentence on multipart only; the urlencoded twin now reads the same. This harness supplies no configuration, so the represented alternative reaches missing-required-choice before inspecting the value. Previously read `refused`."
+      "expect": "refused",
+      "basis": "The openapi family specifications §§9.2–9.3 define no raw-octet carriage for a typeless application/x-www-form-urlencoded property. The smallest media alternative is therefore excluded without inspecting the supplied application value."
     },
     {
       "name": "3.0.3|urlencoded|typeless-description",
@@ -895,8 +895,8 @@
         "description": "a profile picture"
       },
       "value": "abc",
-      "expect": "missing-required-choice",
-      "basis": "OA-F8 (2026-09-03): on the 3.0 line no accepted edition states a default contentType row reaching a part declaring no `type` (3.0.0-3.0.3 enumerate string-with-format-binary, other primitive types, object and array with no catch-all; 3.0.4 tabulates the same cases keyed on a declared `type`), and openbindings.openapi-3.0@1 Section 9.3 requires `propertyMedia` for such a declaration \"on the content-based form-urlencoded path and for a multipart part alike\". The engines had honoured that sentence on multipart only; the urlencoded twin now reads the same. This harness supplies no configuration, so the represented alternative reaches missing-required-choice before inspecting the value. Previously read `refused`."
+      "expect": "refused",
+      "basis": "The openapi family specifications §§9.2–9.3 define no raw-octet carriage for a typeless application/x-www-form-urlencoded property. The smallest media alternative is therefore excluded without inspecting the supplied application value."
     },
     {
       "name": "3.0.3|urlencoded|typeless-format",
@@ -910,8 +910,8 @@
         "format": "uuid"
       },
       "value": "abc",
-      "expect": "missing-required-choice",
-      "basis": "OA-F8 (2026-09-03): on the 3.0 line no accepted edition states a default contentType row reaching a part declaring no `type` (3.0.0-3.0.3 enumerate string-with-format-binary, other primitive types, object and array with no catch-all; 3.0.4 tabulates the same cases keyed on a declared `type`), and openbindings.openapi-3.0@1 Section 9.3 requires `propertyMedia` for such a declaration \"on the content-based form-urlencoded path and for a multipart part alike\". The engines had honoured that sentence on multipart only; the urlencoded twin now reads the same. This harness supplies no configuration, so the represented alternative reaches missing-required-choice before inspecting the value. Previously read `refused`."
+      "expect": "refused",
+      "basis": "The openapi family specifications §§9.2–9.3 define no raw-octet carriage for a typeless application/x-www-form-urlencoded property. The smallest media alternative is therefore excluded without inspecting the supplied application value."
     },
     {
       "name": "3.0.3|urlencoded|typeless-allof",
@@ -929,8 +929,8 @@
         ]
       },
       "value": "abc",
-      "expect": "missing-required-choice",
-      "basis": "OA-F8 (2026-09-03): on the 3.0 line no accepted edition states a default contentType row reaching a part declaring no `type` (3.0.0-3.0.3 enumerate string-with-format-binary, other primitive types, object and array with no catch-all; 3.0.4 tabulates the same cases keyed on a declared `type`), and openbindings.openapi-3.0@1 Section 9.3 requires `propertyMedia` for such a declaration \"on the content-based form-urlencoded path and for a multipart part alike\". The engines had honoured that sentence on multipart only; the urlencoded twin now reads the same. This harness supplies no configuration, so the represented alternative reaches missing-required-choice before inspecting the value. Previously read `refused`."
+      "expect": "refused",
+      "basis": "The openapi family specifications §§9.2–9.3 define no raw-octet carriage for a typeless application/x-www-form-urlencoded property. The smallest media alternative is therefore excluded without inspecting the supplied application value."
     },
     {
       "name": "3.0.3|urlencoded|boolean-literal-true",
@@ -1109,8 +1109,8 @@
       "propertyName": "file",
       "propertySchema": {},
       "value": "abc",
-      "expect": "missing-required-choice",
-      "basis": "OA-F8 (2026-09-03): on the 3.0 line no accepted edition states a default contentType row reaching a part declaring no `type` (3.0.0-3.0.3 enumerate string-with-format-binary, other primitive types, object and array with no catch-all; 3.0.4 tabulates the same cases keyed on a declared `type`), and openbindings.openapi-3.0@1 Section 9.3 requires `propertyMedia` for such a declaration \"on the content-based form-urlencoded path and for a multipart part alike\". The engines had honoured that sentence on multipart only; the urlencoded twin now reads the same. This harness supplies no configuration, so the represented alternative reaches missing-required-choice before inspecting the value. Previously read `refused`."
+      "expect": "refused",
+      "basis": "The openapi family specifications §§9.2–9.3 define no raw-octet carriage for a typeless application/x-www-form-urlencoded property. The smallest media alternative is therefore excluded without inspecting the supplied application value."
     },
     {
       "name": "3.0.4|urlencoded|typeless-empty-object-value",
@@ -1124,8 +1124,8 @@
       "value": {
         "k": "v"
       },
-      "expect": "missing-required-choice",
-      "basis": "OA-F8 (2026-09-03): on the 3.0 line no accepted edition states a default contentType row reaching a part declaring no `type` (3.0.0-3.0.3 enumerate string-with-format-binary, other primitive types, object and array with no catch-all; 3.0.4 tabulates the same cases keyed on a declared `type`), and openbindings.openapi-3.0@1 Section 9.3 requires `propertyMedia` for such a declaration \"on the content-based form-urlencoded path and for a multipart part alike\". The engines had honoured that sentence on multipart only; the urlencoded twin now reads the same. This harness supplies no configuration, so the represented alternative reaches missing-required-choice before inspecting the value. Previously read `refused`."
+      "expect": "refused",
+      "basis": "The openapi family specifications §§9.2–9.3 define no raw-octet carriage for a typeless application/x-www-form-urlencoded property. The smallest media alternative is therefore excluded without inspecting the supplied application value."
     },
     {
       "name": "3.0.4|urlencoded|typeless-description",
@@ -1139,8 +1139,8 @@
         "description": "a profile picture"
       },
       "value": "abc",
-      "expect": "missing-required-choice",
-      "basis": "OA-F8 (2026-09-03): on the 3.0 line no accepted edition states a default contentType row reaching a part declaring no `type` (3.0.0-3.0.3 enumerate string-with-format-binary, other primitive types, object and array with no catch-all; 3.0.4 tabulates the same cases keyed on a declared `type`), and openbindings.openapi-3.0@1 Section 9.3 requires `propertyMedia` for such a declaration \"on the content-based form-urlencoded path and for a multipart part alike\". The engines had honoured that sentence on multipart only; the urlencoded twin now reads the same. This harness supplies no configuration, so the represented alternative reaches missing-required-choice before inspecting the value. Previously read `refused`."
+      "expect": "refused",
+      "basis": "The openapi family specifications §§9.2–9.3 define no raw-octet carriage for a typeless application/x-www-form-urlencoded property. The smallest media alternative is therefore excluded without inspecting the supplied application value."
     },
     {
       "name": "3.0.4|urlencoded|typeless-format",
@@ -1154,8 +1154,8 @@
         "format": "uuid"
       },
       "value": "abc",
-      "expect": "missing-required-choice",
-      "basis": "OA-F8 (2026-09-03): on the 3.0 line no accepted edition states a default contentType row reaching a part declaring no `type` (3.0.0-3.0.3 enumerate string-with-format-binary, other primitive types, object and array with no catch-all; 3.0.4 tabulates the same cases keyed on a declared `type`), and openbindings.openapi-3.0@1 Section 9.3 requires `propertyMedia` for such a declaration \"on the content-based form-urlencoded path and for a multipart part alike\". The engines had honoured that sentence on multipart only; the urlencoded twin now reads the same. This harness supplies no configuration, so the represented alternative reaches missing-required-choice before inspecting the value. Previously read `refused`."
+      "expect": "refused",
+      "basis": "The openapi family specifications §§9.2–9.3 define no raw-octet carriage for a typeless application/x-www-form-urlencoded property. The smallest media alternative is therefore excluded without inspecting the supplied application value."
     },
     {
       "name": "3.0.4|urlencoded|typeless-allof",
@@ -1173,8 +1173,8 @@
         ]
       },
       "value": "abc",
-      "expect": "missing-required-choice",
-      "basis": "OA-F8 (2026-09-03): on the 3.0 line no accepted edition states a default contentType row reaching a part declaring no `type` (3.0.0-3.0.3 enumerate string-with-format-binary, other primitive types, object and array with no catch-all; 3.0.4 tabulates the same cases keyed on a declared `type`), and openbindings.openapi-3.0@1 Section 9.3 requires `propertyMedia` for such a declaration \"on the content-based form-urlencoded path and for a multipart part alike\". The engines had honoured that sentence on multipart only; the urlencoded twin now reads the same. This harness supplies no configuration, so the represented alternative reaches missing-required-choice before inspecting the value. Previously read `refused`."
+      "expect": "refused",
+      "basis": "The openapi family specifications §§9.2–9.3 define no raw-octet carriage for a typeless application/x-www-form-urlencoded property. The smallest media alternative is therefore excluded without inspecting the supplied application value."
     },
     {
       "name": "3.0.4|urlencoded|boolean-literal-true",

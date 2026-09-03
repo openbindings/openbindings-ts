@@ -4,22 +4,6 @@
 
 ### Changed
 
-- **`@openbindings/openapi`: a content-based form or multipart property
-  whose resolved declaration determines no default Encoding `contentType`
-  is a represented unit carrying the `propertyMedia` requirement, on both
-  lanes** (OA-F8, 2026-09-03; the change lives in `@openbindings/openapi-client`
-  and this package inherits it through the client dist). A typeless
-  declaration on the 3.0 line's content-based form-urlencoded path, and a
-  multi-type resolved set (`type: ["string", "integer"]`) on the 3.1 and 3.2
-  lines' multipart and form-urlencoded lanes, now refuse as `CONTEXT_REQUIRED`
-  naming point `propertyMedia`, path `/<property>`, instead of `ERR_REFUSED`;
-  with the choice supplied the value rides the chosen media type. Synthesis
-  accounts such an alternative `represented` with
-  `configuration.propertyMedia` (`OAPI31-SS-20` revised). The portable
-  processor harness pins move 135/109/137/211 → 135/111/140/214 (682 → 690
-  executed as 600 of the wanted set), and the shared twin tables move exactly
-  the cells named in their bases.
-
 - **`@openbindings/openapi`: the methods the WHATWG fetch API cannot carry
   now ride the host HTTP client, or refuse before dispatch.** The platform
   `fetch` forbids `CONNECT`, `TRACE`, and `TRACK` and rewrites non-uppercase

@@ -73,8 +73,7 @@
     "3.1|typeless|contentMediaType|encCT=declared": "3.1 line: a typeless resolved multipart part uses the raw-octet lane and canonical Base64 boundary; the explicit Encoding contentType supplies the part field while the decoded octets remain the body.",
     "3.1|typeless|plain|encCT=absent": "3.1 line: a typeless resolved multipart part uses the raw-octet lane and canonical Base64 boundary, with the application/octet-stream default supplying the part field.",
     "3.1|typeless|plain|encCT=declared": "3.1 line: a typeless resolved multipart part uses the raw-octet lane and canonical Base64 boundary; the explicit Encoding contentType supplies the part field while the decoded octets remain the body.",
-    "r4-urlencoded-array-container": "R4 (ratified 2026-09-01). The property declares type: array with string items and rides the content-based urlencoded lane, where the WHOLE array is one field value. The accepted editions derive an array's default contentType from its ITEMS -- here a plain string, so text/plain -- and no accepted edition states what an array looks like under text/plain. The engines previously returned application/json for any array, reading the default off the CONTAINER and authoring bytes no edition selected. R4 keeps the item-derived default exactly as the editions state it and gives the ungoverned container cell the remedy the family documents' section 9.3 configuration point already carries: one concrete `propertyMedia` choice, absent which the invocation refuses before dispatch as the context-required species. This table supplies no choice, so these cells decide missing-required-choice. Every `contentEncoding` and `contentMediaType` spelling lands on the same answer as its |plain twin, because the cell is decided by the container's missing serialization and not by an annotation on the item. An explicit Encoding contentType (encCT present) is unaffected: the artifact made the choice, so no configuration is required.",
-    "3.0|typeless|urlencoded|encCT=absent|oaf8": "OA-F8 (2026-09-03): on the 3.0 line no accepted edition states a default contentType row reaching a part declaring no `type` (3.0.0-3.0.3 enumerate string-with-format-binary, other primitive types, object and array with no catch-all; 3.0.4 tabulates the same cases keyed on a declared `type`), and openbindings.openapi-3.0@1 Section 9.3 requires `propertyMedia` for such a declaration \"on the content-based form-urlencoded path and for a multipart part alike\". The engines had honoured that sentence on multipart only; the urlencoded twin now reads the same. This harness supplies no configuration, so the represented alternative reaches missing-required-choice before inspecting the value. Previously read `refused`."
+    "r4-urlencoded-array-container": "R4 (ratified 2026-09-01). The property declares type: array with string items and rides the content-based urlencoded lane, where the WHOLE array is one field value. The accepted editions derive an array's default contentType from its ITEMS -- here a plain string, so text/plain -- and no accepted edition states what an array looks like under text/plain. The engines previously returned application/json for any array, reading the default off the CONTAINER and authoring bytes no edition selected. R4 keeps the item-derived default exactly as the editions state it and gives the ungoverned container cell the remedy the family documents' section 9.3 configuration point already carries: one concrete `propertyMedia` choice, absent which the invocation refuses before dispatch as the context-required species. This table supplies no choice, so these cells decide missing-required-choice. Every `contentEncoding` and `contentMediaType` spelling lands on the same answer as its |plain twin, because the cell is decided by the container's missing serialization and not by an annotation on the item. An explicit Encoding contentType (encCT present) is unaffected: the artifact made the choice, so no configuration is required."
   },
   "cases": [
     {
@@ -1775,8 +1774,8 @@
       "propertyName": "p",
       "propertySchema": {},
       "value": "abc",
-      "expect": "missing-required-choice",
-      "basisKey": "3.0|typeless|urlencoded|encCT=absent|oaf8"
+      "expect": "refused",
+      "basisKey": "3.0|typeless|plain|encCT=absent"
     },
     {
       "name": "3.0.0|application/x-www-form-urlencoded|typeless|plain|encCT=text/plain",
@@ -1807,8 +1806,8 @@
         "contentEncoding": "base64"
       },
       "value": "abc",
-      "expect": "missing-required-choice",
-      "basisKey": "3.0|typeless|urlencoded|encCT=absent|oaf8"
+      "expect": "refused",
+      "basisKey": "3.0|typeless|contentEncoding|encCT=absent"
     },
     {
       "name": "3.0.0|application/x-www-form-urlencoded|typeless|contentEncoding|encCT=text/plain",
@@ -1841,8 +1840,8 @@
         "contentMediaType": "application/json"
       },
       "value": "abc",
-      "expect": "missing-required-choice",
-      "basisKey": "3.0|typeless|urlencoded|encCT=absent|oaf8"
+      "expect": "refused",
+      "basisKey": "3.0|typeless|contentMediaType|encCT=absent"
     },
     {
       "name": "3.0.0|application/x-www-form-urlencoded|typeless|contentMediaType|encCT=text/plain",
@@ -1876,8 +1875,8 @@
         "contentMediaType": "application/json"
       },
       "value": "abc",
-      "expect": "missing-required-choice",
-      "basisKey": "3.0|typeless|urlencoded|encCT=absent|oaf8"
+      "expect": "refused",
+      "basisKey": "3.0|typeless|contentEncoding|encCT=absent"
     },
     {
       "name": "3.0.0|application/x-www-form-urlencoded|typeless|both|encCT=text/plain",
@@ -3595,8 +3594,8 @@
       "propertyName": "p",
       "propertySchema": {},
       "value": "abc",
-      "expect": "missing-required-choice",
-      "basisKey": "3.0|typeless|urlencoded|encCT=absent|oaf8"
+      "expect": "refused",
+      "basisKey": "3.0|typeless|plain|encCT=absent"
     },
     {
       "name": "3.0.1|application/x-www-form-urlencoded|typeless|plain|encCT=text/plain",
@@ -3627,8 +3626,8 @@
         "contentEncoding": "base64"
       },
       "value": "abc",
-      "expect": "missing-required-choice",
-      "basisKey": "3.0|typeless|urlencoded|encCT=absent|oaf8"
+      "expect": "refused",
+      "basisKey": "3.0|typeless|contentEncoding|encCT=absent"
     },
     {
       "name": "3.0.1|application/x-www-form-urlencoded|typeless|contentEncoding|encCT=text/plain",
@@ -3661,8 +3660,8 @@
         "contentMediaType": "application/json"
       },
       "value": "abc",
-      "expect": "missing-required-choice",
-      "basisKey": "3.0|typeless|urlencoded|encCT=absent|oaf8"
+      "expect": "refused",
+      "basisKey": "3.0|typeless|contentMediaType|encCT=absent"
     },
     {
       "name": "3.0.1|application/x-www-form-urlencoded|typeless|contentMediaType|encCT=text/plain",
@@ -3696,8 +3695,8 @@
         "contentMediaType": "application/json"
       },
       "value": "abc",
-      "expect": "missing-required-choice",
-      "basisKey": "3.0|typeless|urlencoded|encCT=absent|oaf8"
+      "expect": "refused",
+      "basisKey": "3.0|typeless|contentEncoding|encCT=absent"
     },
     {
       "name": "3.0.1|application/x-www-form-urlencoded|typeless|both|encCT=text/plain",
@@ -5415,8 +5414,8 @@
       "propertyName": "p",
       "propertySchema": {},
       "value": "abc",
-      "expect": "missing-required-choice",
-      "basisKey": "3.0|typeless|urlencoded|encCT=absent|oaf8"
+      "expect": "refused",
+      "basisKey": "3.0|typeless|plain|encCT=absent"
     },
     {
       "name": "3.0.2|application/x-www-form-urlencoded|typeless|plain|encCT=text/plain",
@@ -5447,8 +5446,8 @@
         "contentEncoding": "base64"
       },
       "value": "abc",
-      "expect": "missing-required-choice",
-      "basisKey": "3.0|typeless|urlencoded|encCT=absent|oaf8"
+      "expect": "refused",
+      "basisKey": "3.0|typeless|contentEncoding|encCT=absent"
     },
     {
       "name": "3.0.2|application/x-www-form-urlencoded|typeless|contentEncoding|encCT=text/plain",
@@ -5481,8 +5480,8 @@
         "contentMediaType": "application/json"
       },
       "value": "abc",
-      "expect": "missing-required-choice",
-      "basisKey": "3.0|typeless|urlencoded|encCT=absent|oaf8"
+      "expect": "refused",
+      "basisKey": "3.0|typeless|contentMediaType|encCT=absent"
     },
     {
       "name": "3.0.2|application/x-www-form-urlencoded|typeless|contentMediaType|encCT=text/plain",
@@ -5516,8 +5515,8 @@
         "contentMediaType": "application/json"
       },
       "value": "abc",
-      "expect": "missing-required-choice",
-      "basisKey": "3.0|typeless|urlencoded|encCT=absent|oaf8"
+      "expect": "refused",
+      "basisKey": "3.0|typeless|contentEncoding|encCT=absent"
     },
     {
       "name": "3.0.2|application/x-www-form-urlencoded|typeless|both|encCT=text/plain",
@@ -7235,8 +7234,8 @@
       "propertyName": "p",
       "propertySchema": {},
       "value": "abc",
-      "expect": "missing-required-choice",
-      "basisKey": "3.0|typeless|urlencoded|encCT=absent|oaf8"
+      "expect": "refused",
+      "basisKey": "3.0|typeless|plain|encCT=absent"
     },
     {
       "name": "3.0.3|application/x-www-form-urlencoded|typeless|plain|encCT=text/plain",
@@ -7267,8 +7266,8 @@
         "contentEncoding": "base64"
       },
       "value": "abc",
-      "expect": "missing-required-choice",
-      "basisKey": "3.0|typeless|urlencoded|encCT=absent|oaf8"
+      "expect": "refused",
+      "basisKey": "3.0|typeless|contentEncoding|encCT=absent"
     },
     {
       "name": "3.0.3|application/x-www-form-urlencoded|typeless|contentEncoding|encCT=text/plain",
@@ -7301,8 +7300,8 @@
         "contentMediaType": "application/json"
       },
       "value": "abc",
-      "expect": "missing-required-choice",
-      "basisKey": "3.0|typeless|urlencoded|encCT=absent|oaf8"
+      "expect": "refused",
+      "basisKey": "3.0|typeless|contentMediaType|encCT=absent"
     },
     {
       "name": "3.0.3|application/x-www-form-urlencoded|typeless|contentMediaType|encCT=text/plain",
@@ -7336,8 +7335,8 @@
         "contentMediaType": "application/json"
       },
       "value": "abc",
-      "expect": "missing-required-choice",
-      "basisKey": "3.0|typeless|urlencoded|encCT=absent|oaf8"
+      "expect": "refused",
+      "basisKey": "3.0|typeless|contentEncoding|encCT=absent"
     },
     {
       "name": "3.0.3|application/x-www-form-urlencoded|typeless|both|encCT=text/plain",
@@ -9055,8 +9054,8 @@
       "propertyName": "p",
       "propertySchema": {},
       "value": "abc",
-      "expect": "missing-required-choice",
-      "basisKey": "3.0|typeless|urlencoded|encCT=absent|oaf8"
+      "expect": "refused",
+      "basisKey": "3.0|typeless|plain|encCT=absent"
     },
     {
       "name": "3.0.4|application/x-www-form-urlencoded|typeless|plain|encCT=text/plain",
@@ -9087,8 +9086,8 @@
         "contentEncoding": "base64"
       },
       "value": "abc",
-      "expect": "missing-required-choice",
-      "basisKey": "3.0|typeless|urlencoded|encCT=absent|oaf8"
+      "expect": "refused",
+      "basisKey": "3.0|typeless|contentEncoding|encCT=absent"
     },
     {
       "name": "3.0.4|application/x-www-form-urlencoded|typeless|contentEncoding|encCT=text/plain",
@@ -9121,8 +9120,8 @@
         "contentMediaType": "application/json"
       },
       "value": "abc",
-      "expect": "missing-required-choice",
-      "basisKey": "3.0|typeless|urlencoded|encCT=absent|oaf8"
+      "expect": "refused",
+      "basisKey": "3.0|typeless|contentMediaType|encCT=absent"
     },
     {
       "name": "3.0.4|application/x-www-form-urlencoded|typeless|contentMediaType|encCT=text/plain",
@@ -9156,8 +9155,8 @@
         "contentMediaType": "application/json"
       },
       "value": "abc",
-      "expect": "missing-required-choice",
-      "basisKey": "3.0|typeless|urlencoded|encCT=absent|oaf8"
+      "expect": "refused",
+      "basisKey": "3.0|typeless|contentEncoding|encCT=absent"
     },
     {
       "name": "3.0.4|application/x-www-form-urlencoded|typeless|both|encCT=text/plain",

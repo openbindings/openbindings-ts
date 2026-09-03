@@ -20,7 +20,7 @@ import type { OpenAPIDocument, OpenAPIMediaType, OpenAPIOperation } from "./type
 // openbindings-go/formats/openapi/testdata, openapi-client/go/testdata and
 // openapi-client/typescript/src/testdata.
 export const PART_DEFAULT_TYPE_ABSENT_CASES_DIGEST =
-  "0b7d98d4aaa2372f538b27857619a3b996e2967157ca81fc65816a03ed75a3f2";
+  "c6494b3b833f03d13e1e7e5cb83547f484b0e20f8f77b70f5f893075eb04e46c";
 
 export interface PartDefaultTypeAbsentCase {
   name: string;
@@ -147,12 +147,7 @@ export async function assertCorrectedTypeAbsentPartSplit(
     const correct = c.declaresType
       ? got.startsWith("admitted;")
       : c.media === "application/x-www-form-urlencoded"
-        // OA-F8: the 3.0 line states no row for a typeless declaration on
-        // either content-based lane and its §9.3 requires propertyMedia on
-        // both; the 3.1 line keeps its refusal on this lane on its own ground.
-        ? (c.openapi.startsWith("3.0") && c.kind !== "boolean-literal-true"
-          ? got === "missing-required-choice"
-          : got === "refused")
+        ? got === "refused"
         : c.openapi.startsWith("3.0")
           ? c.kind === "boolean-literal-true"
             ? got === "refused"
