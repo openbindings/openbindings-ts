@@ -4,6 +4,24 @@
 
 ### Changed
 
+- **`@openbindings/openapi`: the methods the WHATWG fetch API cannot carry
+  now ride the host HTTP client, or refuse before dispatch.** The platform
+  `fetch` forbids `CONNECT`, `TRACE`, and `TRACK` and rewrites non-uppercase
+  spellings of six methods, so a `trace` operation on every 3.x line and a
+  3.2 `additionalOperations` `CONNECT` failed as `ERR_CONNECT_FAILED` with
+  nothing dispatched, and an `additionalOperations` `post` was silently sent
+  as `POST`. With no injected `fetch`, the adapter now supplies the standalone
+  engine's host transport (`node:http`/`node:https` under Node), governed the
+  same way as the fetch path, so those methods dispatch with the planned
+  request line, headers, and body identical to Go's; where the host has no
+  such client, or no transport sends the token byte-exactly (`post`), the
+  invocation refuses before dispatch with `ERR_REFUSED` naming the platform
+  limit. An injected `fetch` still receives every planned method as computed.
+  The Go-versus-TypeScript difference is named in `IMPLEMENTATION_PARITY.md`.
+  Portable scenarios OAPI30-PS-165, OAPI31-PS-157, and OAPI32-PS-211 pin a
+  body-free `trace` dispatching as `TRACE` with no body and no `Content-Type`
+  (harness counts 135/109/137/211).
+
 - **Post-dispatch decode and response-interpretation failures now surface as
   generic `ERR_EXECUTION_FAILED`, never `ERR_RESPONSE_ERROR` or
   `ERR_PROTOCOL`** (breaking; the error-code ownership ruling, 2026-08-31).
