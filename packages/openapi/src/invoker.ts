@@ -1,4 +1,4 @@
-import { prepareSwagger20 } from "@openbindings/openapi-client/engine";
+import { hostTransport, prepareSwagger20, type OpenAPIHostTransport } from "@openbindings/openapi-client/engine";
 import { checkBindingSpecs as checkBindingSpecSupport } from "@openbindings/core";
 import { type BindingSpecInfo, type BindingSpecVerdict, type OBInterface, type Source } from "@openbindings/core";
 import {
@@ -408,6 +408,36 @@ export class OpenAPIInvoker implements BindingInvoker {
     }
   }
 
+  /**
+   * The host HTTP client for the methods the platform `fetch` cannot carry
+   * (`CONNECT`, `TRACE`, `TRACK`), wrapped in the same request and response
+   * governance as the fetch path so the two paths differ only in transport.
+   * `null` where the host has no such client: the engine then refuses before
+   * dispatch, naming the platform limit.
+   */
+  private async adaptedHostTransport(model: RuntimeOperationModel): Promise<OpenAPIHostTransport | null> {
+    const host = await hostTransport();
+    if (host === null) return null;
+    const asFetch: typeof globalThis.fetch = (input, init) => host(
+      input instanceof Request ? input.url : String(input),
+      {
+        method: init?.method ?? "GET",
+        headers: new Headers(init?.headers),
+        body: init?.body ?? null,
+        signal: init?.signal ?? null,
+        redirect: init?.redirect,
+      },
+    );
+    const governed = adaptRuntimeFetch(asFetch, model, this.requestContentCodings, this.responseContentCodings);
+    return (url, request) => governed(url, {
+      method: request.method,
+      headers: request.headers,
+      body: request.body ?? null,
+      signal: request.signal ?? undefined,
+      redirect: request.redirect,
+    });
+  }
+
   private async runAdapter<I, O>(
     args: BindingInvocationArgs,
     outer: InvocationImpl<I, O>,
@@ -509,6 +539,14 @@ export class OpenAPIInvoker implements BindingInvoker {
         this.requestContentCodings,
         this.responseContentCodings,
       ),
+      // The adapter wraps the platform `fetch` for its own governance, so the
+      // engine cannot see that the platform default is in use; the adapter
+      // says so by supplying the host transport itself — governed the same
+      // way — or `null` where the host has none. A caller-injected `fetch`
+      // is that caller's transport and receives every planned method.
+      hostTransport: args.fetch
+        ? undefined
+        : await this.adaptedHostTransport(model),
       hooks: adaptHooks(args),
       maxDeliveryUnitBytes: args.maxDeliveryUnitBytes,
       securityHandlers: this.securityHandlers,

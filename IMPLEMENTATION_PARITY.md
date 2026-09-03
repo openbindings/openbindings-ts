@@ -80,6 +80,24 @@ language. Synthesized bindings expose ordinary Core JSONata `inputTransform`
 expressions that map operation input into the public `{parameters?, body?}`
 caller envelope; engine-private routing does not enter an OBI document.
 
+**Named asymmetry (2026-09-02): method carriage on the platform default
+transport.** Go's `net/http` sends every method token verbatim. TypeScript's
+default transport is the platform `fetch`, whose standard forbids `CONNECT`,
+`TRACE`, and `TRACK` and rewrites non-uppercase spellings of `DELETE`, `GET`,
+`HEAD`, `OPTIONS`, `POST`, and `PUT`. On Node the TypeScript adapter routes the
+forbidden methods through `node:http`/`node:https` with the engine-planned
+request line, headers, and body byte-identical to Go's (ambient transport
+headers such as `Host`, `Connection`, and `User-Agent` differ between every
+transport and are not binding bytes); in a browser or Worker it refuses before
+dispatch with the family's plain `ERR_REFUSED`, naming the platform limit. A
+method no available TypeScript transport sends byte-exactly — an OpenAPI 3.2
+`additionalOperations` key such as `post`, since Node's HTTP client uppercases
+method tokens too — refuses before dispatch on every TypeScript host, while Go
+dispatches it as authored. An injected `fetch` is the caller's transport and
+receives the planned method as computed. Synthesis is identical on both sides:
+such targets stay represented, because the limit is host capability at
+invocation, not a synthesis exclusion.
+
 The authoring invariant is creation-time soundness plus explicit completeness:
 inspection and synthesis apply the same target eligibility used by invocation;
 no emitted operation is statically guaranteed to refuse; every observed
