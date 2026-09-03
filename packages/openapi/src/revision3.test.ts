@@ -1018,7 +1018,63 @@ describe("openbindings.openapi-3.1@1 request carriage", () => {
       String,
     );
     expect(result.error).toBeUndefined();
-    expect(result.requests[0]?.body).toBe("ids=%5B%221%22%2C%222%22%5D&name=a+b");
+    // The JSON lane carries the array's JSON image; the configured converter
+    // is never consulted there (Section 8.1 names it only where a property
+    // "must convert a JSON scalar to a string"). Until 2026-09-03 this pinned
+    // `ids=%5B%221%22%2C%222%22%5D` (OA-F9; tools/detectors/oaf9).
+    expect(result.requests[0]?.body).toBe("ids=%5B1%2C2%5D&name=a+b");
+  });
+
+  // The content-lane converter reaches exactly the text/plain lane on the
+  // 3.0 line, and only there. One multipart document carries all three cells:
+  // an integer array and a boolean whose Encoding `contentType` names
+  // `application/json` ride as their JSON images (`1`, `2`, `true`), and an
+  // integer with no Encoding Object takes Section 9.3's text/plain default,
+  // the one site Section 8.1's converter governs -- that part carries the
+  // converter's spelling. The converter is deliberately visible (`n` + the
+  // scalar's own spelling) so a converted scalar cannot be mistaken for a
+  // JSON image. Twin: openbindings-go TestInvoke_ContentLaneConverterReachesOnlyTextPlain.
+  it("runs the 3.0 content-lane converter on the text/plain part only", async () => {
+    const spec = document("3.0.4", {
+      "multipart/form-data": {
+        schema: {
+          type: "object",
+          properties: {
+            ids: { type: "array", items: { type: "integer" } },
+            flag: { type: "boolean" },
+            count: { type: "integer" },
+          },
+        },
+        encoding: {
+          ids: { contentType: "application/json" },
+          flag: { contentType: "application/json" },
+        },
+      },
+    });
+    const result = await invoke(
+      spec,
+      { ids: [1, 2], flag: true, count: 7 },
+      undefined,
+      (value) => "n" + String(value),
+    );
+    expect(result.error).toBeUndefined();
+    const response = new Response(result.requests[0]?.body as BodyInit);
+    const contentType = new Headers(result.requests[0]?.headers).get("content-type")
+      ?? response.headers.get("content-type") ?? "";
+    const boundary = /boundary="?([^";]+)"?/.exec(contentType)?.[1];
+    const parts: Record<string, string[]> = {};
+    for (const chunk of (await response.text()).split(`--${boundary}`)) {
+      if (chunk.trim() === "" || chunk.trim() === "--") continue;
+      const [head, data = ""] = chunk.split("\r\n\r\n", 2);
+      const name = /name="([^"]+)"/.exec(head ?? "")?.[1] ?? "";
+      const type = /content-type:\s*([^\r\n]+)/i.exec(head ?? "")?.[1] ?? "text/plain";
+      (parts[name] ??= []).push(`${type}|${data.replace(/\r\n$/, "")}`);
+    }
+    expect(parts).toEqual({
+      ids: ["application/json|1", "application/json|2"],
+      flag: ["application/json|true"],
+      count: ["text/plain|n7"],
+    });
   });
 
   it("uses RFC6570 percent encoding for explicit urlencoded style fields", async () => {

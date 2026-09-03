@@ -910,7 +910,14 @@ describe("OAPI-P-04 — request media on the wire", () => {
     expect(requests[0]?.headers.get("Content-Type")).toBe(
       "application/x-www-form-urlencoded",
     );
-    expect(requests[0]?.body).toBe("ids=%5B%221%22%2C%222%22%5D&name=a+b");
+    // The chosen lane decides the bytes and the configured converter never
+    // sees them: openbindings.openapi-3.0@1 Section 8.1 names the converter
+    // for a Section 9.3 property only where it "must convert a JSON scalar to
+    // a string", and the JSON lane "serializes the supplied value as strict
+    // JSON". Until 2026-09-03 this pinned `ids=%5B%221%22%2C%222%22%5D`, the
+    // array's items converted by declaration before the lane saw them
+    // (OA-F9; tools/detectors/oaf9).
+    expect(requests[0]?.body).toBe("ids=%5B1%2C2%5D&name=a+b");
   });
 
   // Synthetic body unwrap on the wire: with an array body schema, the
