@@ -12,10 +12,7 @@ import {
  * target's declared configuration and credential needs from the synthesis
  * model — the same model the invocation's own challenge is built from — so the
  * advisory answer and the authoritative one name the same points with the same
- * boundaries. `target` is the client's own asserted scope
- * (`PreparedSwagger20Operation.contextTarget()`): the resolved server base once
- * it resolves, else the source location, the same two scopes the 3.x preflight
- * asserts.
+ * boundaries.
  *
  * `parameterConversion`, `requestContentCodings` and `responseContentCodings`
  * are deliberately absent from the credential/config challenge an INVOCATION
@@ -27,7 +24,6 @@ export function swagger20ConfigurationRequirements(
   operation: Swagger20SynthesisOperation,
   context: Record<string, unknown> | undefined,
   capabilities: { parameterConversion: boolean; requestContentCodings: boolean; responseContentCodings: boolean },
-  target: string,
 ): ContextRequiredDetails | null {
   const configured = contextConfiguration(context) ?? {};
   const requirements: ContextRequirement[] = [];
@@ -63,7 +59,7 @@ export function swagger20ConfigurationRequirements(
     }
     requirements.push(swagger20ConfigurationRequirement(point, ""));
   }
-  return requirements.length === 0 ? null : { target, alternatives: [{ requirements }] };
+  return requirements.length === 0 ? null : { target: "", alternatives: [{ requirements }] };
 }
 
 /**

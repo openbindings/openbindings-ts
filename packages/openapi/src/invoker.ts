@@ -374,39 +374,33 @@ export class OpenAPIInvoker implements BindingInvoker {
    */
   private async prepareSwagger20Binding(args: BindingInvocationArgs): Promise<ContextRequiredDetails | null> {
     if (args.source.content === undefined) return null;
-    let configuration: ReturnType<typeof swagger20Configuration>;
+    let configuration: { securityAlternative?: number };
     try {
       configuration = swagger20Configuration(args.context);
     } catch {
       throw new InvocationError("ERR_REFUSED");
     }
     let operation;
-    let target: string;
     try {
       const prepared = await prepareSwagger20({
         source: { content: args.source.content, ...(args.source.location === undefined ? {} : { location: args.source.location }) },
         ref: args.selector,
         context: args.context,
         allowExternalRefs: false,
-        server: configuration.server,
-        serverSchemeIndex: configuration.serverSchemeIndex,
       });
       operation = await prepared.synthesisOperation();
-      // The asserted scope is the client's own: the resolved server base once
-      // it resolves, else the source location, the same two scopes the 3.x
-      // preflight asserts (`serverBase || args.source.location`).
-      target = prepared.contextTarget();
     } catch (error: unknown) {
       throw bridgeSwagger20Error(error);
     }
     if (operation.excluded) throw new InvocationError("ERR_REFUSED");
+    const target = args.source.location ?? "";
     try {
       return mergeContextRequirements(
         swagger20ConfigurationRequirements(operation, args.context, {
           parameterConversion: this.parameterConversion !== undefined,
           requestContentCodings: (this.requestContentCodings?.size ?? 0) > 0,
           responseContentCodings: (this.responseContentCodings?.size ?? 0) > 0,
-        }, target),
+        }),
         swagger20SecurityRequirements(operation, configuration.securityAlternative, args.context, target),
       );
     } catch {
