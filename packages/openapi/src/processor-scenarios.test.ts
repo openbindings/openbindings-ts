@@ -58,6 +58,8 @@ const corpusEntries = [
       "OAPI20-PS-120", "OAPI20-PS-121", "OAPI20-PS-122", "OAPI20-PS-123", "OAPI20-PS-124",
       "OAPI20-PS-125", "OAPI20-PS-126", "OAPI20-PS-127",
       "OAPI20-PS-128", "OAPI20-PS-129", "OAPI20-PS-130", "OAPI20-PS-131", "OAPI20-PS-132", "OAPI20-PS-133", "OAPI20-PS-134", "OAPI20-PS-135",
+      "OAPI20-PS-136", "OAPI20-PS-137", "OAPI20-PS-138", "OAPI20-PS-139", "OAPI20-PS-140", "OAPI20-PS-141", "OAPI20-PS-142", "OAPI20-PS-143", "OAPI20-PS-144",
+      "OAPI20-PS-145", "OAPI20-PS-146", "OAPI20-PS-147", "OAPI20-PS-148", "OAPI20-PS-149", "OAPI20-PS-150", "OAPI20-PS-151", "OAPI20-PS-152",
     ]),
   },
   { file: "openapi-3.0.json" },
@@ -98,9 +100,9 @@ describe("portable OpenAPI processor scenarios", () => {
   }
 
   afterAll(() => {
-    expect(corpora.map(({ corpus, wanted }) => wanted?.size ?? corpus.scenarios.length)).toEqual([135, 113, 141, 213]);
-    expect(executedByCorpus).toEqual([135, 113, 141, 213]);
-    expect(executed).toBe(602);
+    expect(corpora.map(({ corpus, wanted }) => wanted?.size ?? corpus.scenarios.length)).toEqual([152, 130, 157, 224]);
+    expect(executedByCorpus).toEqual([152, 130, 157, 224]);
+    expect(executed).toBe(663);
   });
 });
 
@@ -172,7 +174,21 @@ async function runScenario(
   const context: Record<string, unknown> = {};
   if (scenario.given.configuration) context.configuration = scenario.given.configuration;
   const credentials = scenario.given.runtime?.credentials;
-  if (credentials && typeof credentials === "object") context.apiKeys = credentials;
+  if (credentials && typeof credentials === "object") {
+    context.apiKeys = credentials;
+    // The corpus spells a basic credential's user-id as `userId` on every
+    // family (OAPI20-PS-65, OAPI31-PS-120); the 3.x engines read the client's
+    // named-credential shape, whose key is `username`.
+    context.credentials = Object.fromEntries(
+      Object.entries(credentials as Record<string, unknown>).map(([name, credential]) => [
+        name,
+        credential !== null && typeof credential === "object" && !Array.isArray(credential)
+          && Object.hasOwn(credential, "userId")
+          ? { ...(credential as Record<string, unknown>), username: (credential as Record<string, unknown>).userId }
+          : credential,
+      ]),
+    );
+  }
 
   const source = scenario.given.source;
   const binding = scenario.given.binding;
