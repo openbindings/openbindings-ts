@@ -95,6 +95,11 @@ describe("Swagger 2.0 refusal species across both surfaces", () => {
       expect(dispatches).toBe(0);
       const challenge = error?.data as ContextRequiredDetails;
       const preflight = await new OpenAPIInvoker().prepareBinding(args(testCase.document, testCase.selector));
+      // Both surfaces assert one scope: the resolved §10 server base (never
+      // the source location once the server resolves), as the 3.x lane's two
+      // surfaces do.
+      expect(challenge.target).toBe("https://api.example");
+      expect(preflight?.target).toBe(challenge.target);
       const fromChallenge = testCase.point ? byPoint(challenge, testCase.point) : byName(challenge, testCase.auth!);
       const fromPreflight = testCase.point ? byPoint(preflight, testCase.point) : byName(preflight, testCase.auth!);
       expect(fromChallenge).toBeDefined();

@@ -4,6 +4,26 @@
 
 ### Changed
 
+- **`@openbindings/openapi`: on the Swagger 2.0 lane every credential
+  requirement is `durable: true`, and every CONTEXT_REQUIRED challenge is
+  scoped to the resolved server base, on both surfaces.** The 2.0 lane of
+  both engines carried an empty `target` for a content-only source and no
+  `durable` flag on any `auth.*` requirement, while the 3.x lane carried the
+  resolved server base and `durable: true` on the same declaration; a runtime
+  keying context by target could name the credential but not say where it
+  applied, nor persist it. `@openbindings/openapi-client` now builds the
+  credential requirement durable (`swagger20CredentialRequirement`, the one
+  builder both surfaces use) and exposes
+  `PreparedSwagger20Operation.contextTarget()`: the resolved `scheme://host/
+  basePath` (or the configured replacement URL, never userinfo) once the server
+  resolves, else the source location, the same two scopes the 3.x lane asserts.
+  The adapter's preflight now asserts that scope on its configuration and
+  credential requirements instead of the source location. Portable scenario
+  OAPI20-PS-136 pins the apiKey challenge's target and durability (harness
+  counts 136/110/138/212, executed 596). The OA-F7 shared table: 14 2.0 cells
+  move per engine (target, durable), 0 admissibility changes, all 24 2.0 cells
+  byte-identical Go-to-TypeScript on both surfaces.
+
 - **`@openbindings/openapi`: the `requestMedia` and `propertyMedia`
   CONTEXT_REQUIRED challenges are the standalone client's own payloads, passed
   through unchanged.** On every 3.x line the adapter re-minted both challenges
