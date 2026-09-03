@@ -31,8 +31,11 @@ import {
   OpenAPIEngine,
   OpenAPIExecutionError,
   OpenAPIOperationResolutionError,
+  configurationPrerequisites,
   loadOpenAPIArtifact,
   openAPIPortableFailureData,
+  propertyMediaPrerequisites,
+  requestMediaPrerequisites,
   type OpenAPIExecution,
   type OpenAPIExecutionProfile,
   type OpenAPIExecutionHooks,
@@ -305,7 +308,7 @@ export class OpenAPIInvoker implements BindingInvoker {
       );
     } catch (error: unknown) {
       if (error instanceof ConfigRequired) {
-        combined = mergeContextRequirements(combined, configRequiredDetails(error, args.source.location ?? ""));
+        combined = mergeContextRequirements(combined, configurationPrerequisites(error, args.source.location ?? ""));
       } else {
         throw new InvocationError("ERR_REFUSED");
       }
@@ -324,10 +327,7 @@ export class OpenAPIInvoker implements BindingInvoker {
       throw new InvocationError("ERR_REFUSED");
     }
     try {
-      const media = requiredMediaContext(model, args.context, profile);
-      if (media && media.target === "") {
-        media.target = serverBase || args.source.location || "";
-      }
+      const media = requiredMediaContext(model, args.context, profile, serverBase || args.source.location || "");
       combined = mergeContextRequirements(combined, media);
     } catch {
       // Invalid request-media configuration keeps this optional historical
@@ -468,7 +468,7 @@ export class OpenAPIInvoker implements BindingInvoker {
       );
     } catch (error: unknown) {
       if (error instanceof ConfigRequired) {
-        throw new InvocationError(CONTEXT_REQUIRED, configRequiredDetails(error, args.source.location ?? ""));
+        throw new InvocationError(CONTEXT_REQUIRED, configurationPrerequisites(error, args.source.location ?? ""));
       }
       throw new InvocationError("ERR_REFUSED");
     }
@@ -507,7 +507,7 @@ export class OpenAPIInvoker implements BindingInvoker {
     installEngineAdapterView(model, engineServerBase, selectedSecurity);
     model.resolvedServerBase = resolvedServerBase;
     model.engineServerBase = engineServerBase;
-    const required = requiredMediaContext(model, args.context, profile);
+    const required = requiredMediaContext(model, args.context, profile, resolvedServerBase);
     if (required) throw new InvocationError(CONTEXT_REQUIRED, required);
     prepareEnginePropertyMediaView(model.plans, args.context);
     const preparedTarget = model.target
@@ -561,6 +561,7 @@ export class OpenAPIInvoker implements BindingInvoker {
         args.context,
         profile,
         model.document.openapi,
+        resolvedServerBase,
         inputHasBody(input),
       );
       for (const plan of selectedPlans) configuredPropertyMedia(plan, args.context);
@@ -830,20 +831,6 @@ async function loadRuntimeOperationModel(
     emptyResponse: false,
     maxDeliveryUnitBytes: args.maxDeliveryUnitBytes,
     preStartBodyGate,
-  };
-}
-
-function configRequiredDetails(required: ConfigRequired, target: string): ContextRequiredDetails {
-  return {
-    target,
-    alternatives: [{ requirements: [{
-      type: "config.value",
-      point: required.point,
-      path: required.path,
-      ...(required.schema ? { schema: required.schema } : {}),
-      ...(required.durable === true ? { durable: true } : {}),
-      ...(required.message ? { description: required.message } : {}),
-    }] }],
   };
 }
 
@@ -1162,6 +1149,7 @@ function configuredRequestPlans(
   context: Record<string, unknown> | undefined,
   profile: OpenAPIExecutionProfile,
   openapiVersion: string | undefined,
+  target: string,
   bodyEmitting = true,
 ): BodyPlan[] {
   if (!bodyEmitting) return plans;
@@ -1171,7 +1159,7 @@ function configuredRequestPlans(
     const sole = soleConcreteRequestPlan(operation, plans);
     if (sole) return [sole];
     if (operation.requestBody?.required === true) {
-      throw new InvocationError(CONTEXT_REQUIRED, configRequirement("requestMedia", ""));
+      throw new InvocationError(CONTEXT_REQUIRED, requestMediaPrerequisites(target));
     }
     // Optional bodies reach this point only after the caller has supplied an
     // input body. A retry challenge would require replaying consumed input, so
@@ -1184,10 +1172,18 @@ function configuredRequestPlans(
   return selected;
 }
 
+/**
+ * The two media configuration points, raised before input and before any
+ * network side effect. Both challenges are the standalone client's own
+ * payloads (target, durable, description) passed through unchanged, scoped
+ * to `target`: the resolved server base the invocation is about to use, the
+ * same scope every credential requirement carries.
+ */
 function requiredMediaContext(
   model: RuntimeOperationModel,
   context: Record<string, unknown> | undefined,
   profile: OpenAPIExecutionProfile,
+  target: string,
 ): ContextRequiredDetails | null {
   if (model.operation.requestBody?.required !== true) return null;
   let selected: BodyPlan[];
@@ -1196,7 +1192,7 @@ function requiredMediaContext(
     const usable = model.plans.filter((plan) => !plan.unsupported);
     if (usable.length === 0) throw new InvocationError("ERR_REFUSED");
     const sole = soleConcreteRequestPlan(model.operation, usable);
-    if (!sole) return configRequirement("requestMedia", "");
+    if (!sole) return requestMediaPrerequisites(target);
     selected = [sole];
   } else {
     if (typeof configuration.requestMedia !== "string") throw new InvocationError("ERR_REFUSED");
@@ -1216,14 +1212,7 @@ function requiredMediaContext(
     }
     return null;
   }
-  return {
-    target: "",
-    alternatives: [{ requirements: missing.map((name) => ({
-      type: "config.value",
-      point: "propertyMedia",
-      path: `/${name.replaceAll("~", "~0").replaceAll("/", "~1")}`,
-    })) }],
-  };
+  return propertyMediaPrerequisites(target, missing);
 }
 
 function soleConcreteRequestPlan(
@@ -1238,13 +1227,6 @@ function soleConcreteRequestPlan(
   if (plan.range || plan.unsupported) return null;
   try { parseMediaType(plan.mediaKey, true); } catch { return null; }
   return plan;
-}
-
-function configRequirement(point: string, path: string): ContextRequiredDetails {
-  return {
-    target: "",
-    alternatives: [{ requirements: [{ type: "config.value", point, path }] }],
-  };
 }
 
 function inputHasBody(value: unknown): boolean {

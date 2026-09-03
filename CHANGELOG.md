@@ -4,6 +4,26 @@
 
 ### Changed
 
+- **`@openbindings/openapi`: the `requestMedia` and `propertyMedia`
+  CONTEXT_REQUIRED challenges are the standalone client's own payloads, passed
+  through unchanged.** On every 3.x line the adapter re-minted both challenges
+  with an empty `target` and no `durable` flag (and, on the invocation surface,
+  no `description`), so a runtime keying context by target could name the
+  point but not say where the choice applied, while the Go engine carried the
+  resolved server base, `durable: true`, and prompt text. The adapter now
+  raises `@openbindings/openapi-client`'s `requestMediaPrerequisites`,
+  `propertyMediaPrerequisites`, and `configurationPrerequisites` from its own
+  election sites, scoped to the same resolved server base every credential
+  requirement uses, on both the invocation and the preflight surface. The two
+  media points and the server point are now byte-identical Go-to-TypeScript
+  on 3.0.4, 3.1.2, and 3.2.0, `description` included (the client's
+  `REQUEST_MEDIA_REQUIREMENT_DESCRIPTION` and
+  `PROPERTY_MEDIA_REQUIREMENT_DESCRIPTION` are the one text per point, and the
+  Go client's server-list message now names `configuration.server` as this
+  package and the 2.0 lane already did). Portable scenarios OAPI30-PS-166,
+  OAPI31-PS-158, and OAPI32-PS-212 pin the `requestMedia` challenge's target
+  and durability (harness counts 135/110/138/212).
+
 - **`@openbindings/openapi`: the methods the WHATWG fetch API cannot carry
   now ride the host HTTP client, or refuse before dispatch.** The platform
   `fetch` forbids `CONNECT`, `TRACE`, and `TRACK` and rewrites non-uppercase
