@@ -128,6 +128,67 @@ describe("shared synthesis behavior", () => {
     expect(result.coverage.fullyRepresented).toBe(false);
   });
 
+  // An alternative is a unit AT ITS OPERATION. The published contract defines a
+  // unit as an independently selectable alternative "whose omission would
+  // remove a source-permitted invocation path", so one source declaration
+  // inherited by two operations (an OAS 2.0 root-level `consumes` member) is
+  // two units with two dispositions, and the duplicate check must key an
+  // alternative on its operation and binding as well as its source unit.
+  // Before this rule both SDKs failed the whole coverage call on any 2.0
+  // document with two body operations inheriting root `consumes`. The Go twin
+  // pins the identical five cases.
+  it("keys alternative units by their operation", () => {
+    const iface: OBInterface = {
+      openbindings: "0.2.0",
+      operations: { a: {}, b: {} },
+      sources: { api: { bindingSpec: "example.spec@1", location: "https://example.com/spec" } },
+      bindings: {
+        "a.api": { operation: "a", source: "api", selector: "#/a" },
+        "b.api": { operation: "b", source: "api", selector: "#/b" },
+      },
+    };
+    const target = (op: string) => ({
+      sourceIndex: 0, sourceRef: `#/${op}`, scope: "target" as const, status: "represented" as const,
+      operationKey: op, bindingSelector: `#/${op}`,
+    });
+    const alternative = (op: string) => ({
+      sourceIndex: 0, sourceRef: "#/consumes/0", scope: "alternative" as const, status: "represented" as const,
+      operationKey: op, bindingKey: `${op}.api`, bindingSelector: `#/${op}`,
+    });
+    const excluded = (op: string) => ({
+      sourceIndex: 0, sourceRef: "#/servers/0", scope: "alternative" as const, status: "excluded" as const,
+      reasonCode: "example.server_url_excluded", rule: "EXAMPLE-P-04", message: "unusable",
+      operationKey: op, bindingSelector: `#/${op}`,
+    });
+    const anonymous = {
+      sourceIndex: 0, sourceRef: "#/servers/0", scope: "alternative" as const, status: "excluded" as const,
+      reasonCode: "example.server_url_excluded", rule: "EXAMPLE-P-04", message: "unusable",
+    };
+
+    const result = finalizeSynthesisCoverage(iface, [target("a"), alternative("a"), target("b"), alternative("b")], true);
+    expect(result.coverage.fullyRepresented).toBe(true);
+    expect(result.coverage.entries).toHaveLength(4);
+
+    // The same alternative at the same operation is still one unit.
+    expect(() => finalizeSynthesisCoverage(iface, [target("a"), alternative("a"), alternative("a"), target("b")], true))
+      .toThrow('duplicate synthesis coverage entry for source 0 alternative "#/consumes/0" at operation "a" binding "a.api"');
+
+    // Excluded alternatives that keep their operation identity are distinct
+    // per operation (the 3.x adapters' shape for a root-level server or
+    // security alternative).
+    expect(() => finalizeSynthesisCoverage(iface, [target("a"), excluded("a"), target("b"), excluded("b")], true)).not.toThrow();
+
+    // Two entries for one source unit with no operation identity remain
+    // indistinguishable, and remain duplicates.
+    expect(() => finalizeSynthesisCoverage(iface, [target("a"), anonymous, target("b"), anonymous], true))
+      .toThrow('duplicate synthesis coverage entry for source 0 alternative "#/servers/0"');
+
+    // A target is identified by its source unit alone: the key extension does
+    // not reach target scope.
+    expect(() => finalizeSynthesisCoverage(iface, [target("a"), target("a"), target("b")], true))
+      .toThrow('duplicate synthesis coverage entry for source 0 target "#/a"');
+  });
+
   it("rejects represented coverage without a matching binding", () => {
     const iface: OBInterface = {
       openbindings: "0.2.0",

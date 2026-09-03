@@ -203,7 +203,6 @@ export function finalizeSynthesisCoverage(
     }
   }
   const normalizedEntries = entries.map((entry) => ({ ...entry }));
-  const seen = new Set<string>();
   let representedDependencies = 0;
   let fullyRepresented = exhaustive;
 
@@ -222,12 +221,6 @@ export function finalizeSynthesisCoverage(
     ) {
       throw new Error(`synthesis coverage entry ${index} has invalid scope`);
     }
-    const key = `${entry.sourceIndex}\0${entry.scope}\0${entry.sourceRef}`;
-    if (seen.has(key)) {
-      throw new Error(`duplicate synthesis coverage entry for source ${entry.sourceIndex} ${entry.scope} ${JSON.stringify(entry.sourceRef)}`);
-    }
-    seen.add(key);
-
     const requirements = new Set<string>();
     for (const requirement of entry.requirements ?? []) {
       if (!requirement) throw new Error(`synthesis coverage entry ${index} has an empty requirement`);
@@ -320,6 +313,7 @@ export function finalizeSynthesisCoverage(
   if (representedDependencies !== declaredDependencies) {
     throw new Error(`dependency synthesis coverage represents ${representedDependencies} source interactions for ${declaredDependencies} emitted dependencies`);
   }
+  rejectDuplicateCoverageUnits(normalizedEntries);
 
   return {
     interface: iface,
@@ -337,6 +331,45 @@ export function finalizeSynthesisCoverage(
  * this as exhaustive evidence only after separately proving that its upstream
  * interaction inventory maps one-to-one to bindings.
  */
+
+/**
+ * Enforces the published interface-synthesizer contract's "one disposition
+ * for every interaction unit" over the normalized entries, keyed by the
+ * identity of the unit each entry is about.
+ *
+ * The contract defines a unit as "an addressable target or an independently
+ * selectable alternative whose omission would remove a source-permitted
+ * invocation path", so an alternative is a unit AT ITS OPERATION: the same
+ * source declaration inherited by several operations (an OAS 2.0 root-level
+ * `consumes` member, a root-level `servers` or `security` member) is one
+ * alternative per invocation path it can be omitted from, and each of those
+ * carries its own disposition. A target or dependency scope is identified by
+ * its source unit alone; an alternative or projection scope is identified by
+ * its source unit together with the operation and binding it is about, so an
+ * inherited root-level alternative appears once per operation. The adapters'
+ * sourceRef stays the source unit ("#/consumes/0"); it is not made
+ * per-operation to satisfy this check. Two entries with the same source unit
+ * and no operation identity are still indistinguishable, and are still
+ * duplicates. The check runs after normalization so an inferred bindingKey
+ * participates. The Go twin enforces the identical key.
+ */
+function rejectDuplicateCoverageUnits(entries: SynthesisCoverageEntry[]): void {
+  const seen = new Set<string>();
+  for (const entry of entries) {
+    let key = `${entry.sourceIndex}\0${entry.scope}\0${entry.sourceRef}`;
+    if (entry.scope === "alternative" || entry.scope === "projection") {
+      key += `\0${entry.operationKey ?? ""}\0${entry.bindingKey ?? ""}`;
+    }
+    if (seen.has(key)) {
+      if (!entry.operationKey && !entry.bindingKey) {
+        throw new Error(`duplicate synthesis coverage entry for source ${entry.sourceIndex} ${entry.scope} ${JSON.stringify(entry.sourceRef)}`);
+      }
+      throw new Error(`duplicate synthesis coverage entry for source ${entry.sourceIndex} ${entry.scope} ${JSON.stringify(entry.sourceRef)} at operation ${JSON.stringify(entry.operationKey ?? "")} binding ${JSON.stringify(entry.bindingKey ?? "")}`);
+    }
+    seen.add(key);
+  }
+}
+
 export function representedCoverageEntries(
   iface: OBInterface,
   sourceIndex: number,
