@@ -2,8 +2,9 @@
 
 TypeScript SDK for the [OpenBindings](https://openbindings.com) specification. Parse, validate, resolve, and invoke OpenBindings interfaces.
 
-This package is a facade: every export re-exports from the layered package
-that owns it — [`@openbindings/core`](https://www.npmjs.com/package/@openbindings/core)
+This package provides an optional protocol-neutral `OpenBindingsRuntime` and
+re-exports the layered packages that own the underlying contracts —
+[`@openbindings/core`](https://www.npmjs.com/package/@openbindings/core)
 (the spec-defined document model),
 [`@openbindings/invoke`](https://www.npmjs.com/package/@openbindings/invoke)
 (the binding-invoker / operation-invoker pattern),
@@ -50,16 +51,13 @@ cross-implementation agreement.
 ## Quick start
 
 ```typescript
-import { OperationInvoker, operationSignature, fetchInterface } from "@openbindings/sdk";
-import { OpenAPIInvoker, OpenAPISynthesizer } from "@openbindings/openapi";
+import { OpenBindingsRuntime } from "@openbindings/sdk";
+import { OpenAPIAdapter } from "@openbindings/openapi";
 
-const invoker = new OperationInvoker([new OpenAPIInvoker()]);
-
-const { iface } = await fetchInterface("https://api.example.com", {
-  synthesizers: [new OpenAPISynthesizer()],
-});
-
-const call = invoker.invoke(iface, operationSignature("listItems"));
+const openapi = new OpenAPIAdapter();
+const runtime = new OpenBindingsRuntime({ providers: [openapi] });
+const { iface } = await runtime.resolve("https://api.example.com");
+const call = runtime.invoke(iface, "listItems");
 await call.write({ limit: 10 });
 for await (const item of call.outputs) {
   console.log(item); // bare output values; terminal failures throw InvocationError

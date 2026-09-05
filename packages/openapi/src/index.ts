@@ -1,5 +1,7 @@
 export { OpenAPIInvoker, OpenAPISynthesizer } from "./invoker.js";
 export type { OpenAPIInvokerOptions } from "./invoker.js";
+export { OpenAPIAdapter } from "./adapter.js";
+export type { OpenAPIAdapterOptions } from "./adapter.js";
 export type {
   OpenAPIContentCodingResult as ContentCodingResult,
   OpenAPIContentCodec as ContentDecoder,

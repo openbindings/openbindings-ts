@@ -20,7 +20,7 @@ OpenBindings is an open standard. **One interface. Any binding.** Describe what 
 | `@openbindings/invoke`                              | Binding-invoker / operation-invoker pattern: invocation handles, context, hooks, operation requirements  | `npm install @openbindings/invoke`         |
 | `@openbindings/synthesize`                          | Interface synthesis, coverage accounting, source inspection, `fetchInterface`                            | `npm install @openbindings/synthesize`     |
 | `@openbindings/compare`                             | Schema comparison under the published OB-2020-12 profile                                                 | `npm install @openbindings/compare`        |
-| `@openbindings/sdk`                                 | Facade re-exporting core + invoke + synthesize + compare                                                 | `npm install @openbindings/sdk`            |
+| `@openbindings/sdk`                                 | Protocol-neutral runtime facade plus re-exports of core + invoke + synthesize + compare                   | `npm install @openbindings/sdk`            |
 | [`@openbindings/openapi-client`](../openapi-client) | Standalone Swagger 2.0 and OpenAPI 3.x document-driven client and execution engine (separate repository) | `npm install @openbindings/openapi-client` |
 | `@openbindings/openapi`                             | Swagger 2.0 and OpenAPI 3.x binding invoker and interface synthesizer                                    | `npm install @openbindings/openapi`        |
 | `@openbindings/asyncapi`                            | AsyncAPI 3.x binding invoker and interface synthesizer                                                   | `npm install @openbindings/asyncapi`       |
@@ -36,9 +36,9 @@ carries everything `openbindings.md` defines and never requires invocation;
 `@openbindings/invoke`, `@openbindings/synthesize`, and `@openbindings/compare`
 realize the published binding-invoker/operation-invoker,
 interface-synthesizer/source-inspector, and schema-comparison interfaces on
-top of it. `@openbindings/sdk` is a facade re-exporting all four, so existing
-consumers keep one import path; new consumers may depend on the specific
-layers they use.
+top of it. `@openbindings/sdk` adds an optional instance-scoped runtime and
+re-exports all four; consumers may instead depend on the specific layers they
+use. The runtime installs no binding implementation implicitly.
 
 For draft development:
 
@@ -105,21 +105,18 @@ for (const [name, op] of Object.entries(iface.operations)) {
 ### Resolve and invoke operations
 
 ```typescript
-import { OperationInvoker, operationSignature } from "@openbindings/invoke";
-import { fetchInterface } from "@openbindings/synthesize";
-import { OpenAPIInvoker, OpenAPISynthesizer } from "@openbindings/openapi";
+import { OpenBindingsRuntime } from "@openbindings/sdk";
+import { OpenAPIAdapter } from "@openbindings/openapi";
 
-// Create an operation invoker with the binding implementation you need
-const invoker = new OperationInvoker([new OpenAPIInvoker()]);
+// One explicit adapter supplies invocation, synthesis, and source inspection.
+const runtime = new OpenBindingsRuntime({ providers: [new OpenAPIAdapter()] });
 
 // Resolve an OBI from a URL (well-known discovery, with synthesis as the
-// fallback when the target only exposes a raw spec such as an OpenAPI doc)
-const { iface } = await fetchInterface("https://api.example.com", {
-  synthesizers: [new OpenAPISynthesizer()],
-});
+// fallback when the target only exposes a raw spec such as an OpenAPI doc).
+const { iface } = await runtime.resolve("https://api.example.com");
 
 // Invoke an operation — one handle shape for every cardinality
-const call = invoker.invoke(iface, operationSignature("listItems"));
+const call = runtime.invoke(iface, "listItems");
 await call.write({ limit: 10 });
 for await (const item of call.outputs) {
   console.log(item);
@@ -129,7 +126,7 @@ for await (const item of call.outputs) {
 For compile-time-typed operations, run `ob codegen <obi> --lang typescript` to generate an `OperationSignatures` namespace, one typed `OperationSignature<I, O>` per operation, that you pass to this same `invoke` for fully-typed input and output:
 
 ```typescript
-const call = invoker.invoke(iface, OperationSignatures.listItems);
+const call = runtime.invoke(iface, OperationSignatures.listItems);
 ```
 
 ### Check compatibility

@@ -98,31 +98,46 @@ try {
   const exports = await import(name);
   if (Object.keys(exports).length === 0) throw new Error(\`\${name} has no ESM exports\`);
 }
-const { OpenAPIEngine } = await import("@openbindings/openapi-client/engine");
-const prepared = await new OpenAPIEngine().prepare({
-  source: { content: {
+const { OpenAPIClient } = await import("@openbindings/openapi-client");
+const client = await OpenAPIClient.load({
     openapi: "3.1.0",
     info: { title: "packed runtime", version: "1" },
     servers: [{ url: "https://api.example.test" }],
     paths: { "/ping": { get: { responses: {
       "200": { description: "ok", content: { "application/json": { schema: { type: "object" } } } },
     } } } },
-  } },
-  // The standalone client engine names the selector "ref"; the SDK adapts at
-  // the seam (packages/openapi/src/invoker.ts). This smoke test calls the
-  // engine directly, so it speaks the engine name, not the OBI field name.
-  ref: "#/paths/~1ping/get",
+  }, {
   fetch: async input => {
     if (String(input) !== "https://api.example.test/ping") throw new Error("packed runtime planned the wrong request");
     return new Response('{"ok":true}', { status: 200, headers: { "content-type": "application/json" } });
   },
 });
-const execution = await prepared.start();
-await execution.finishInput();
-const outputs = [];
-for await (const event of execution.events) outputs.push(event.value);
-await execution.completed;
-if (outputs[0]?.ok !== true) throw new Error("packed engine did not yield the application value");
+const result = await client.call({ ref: "#/paths/~1ping/get" });
+if (!result.ok || result.data?.ok !== true) throw new Error("packed client did not yield the application value");
+
+const { OpenBindingsRuntime, single } = await import("@openbindings/sdk");
+const { OpenAPIAdapter } = await import("@openbindings/openapi");
+const adapterFetch = async input => {
+  if (String(input) !== "https://api.example.test/ping") throw new Error("packed adapter planned the wrong request");
+  return new Response('{"ok":true}', { status: 200, headers: { "content-type": "application/json" } });
+};
+const runtime = new OpenBindingsRuntime({
+  providers: [new OpenAPIAdapter({ fetch: adapterFetch })],
+  fetch: adapterFetch,
+});
+const synthesized = await runtime.synthesizeInterfaceWithCoverage({
+  sources: [{ bindingSpec: "openbindings.openapi-3.1@1", content: {
+    openapi: "3.1.0",
+    info: { title: "packed adapter", version: "1" },
+    servers: [{ url: "https://api.example.test" }],
+    paths: { "/ping": { get: { operationId: "ping", responses: {
+      "200": { description: "ok", content: { "application/json": { schema: { type: "object" } } } },
+    } } } },
+  } }],
+});
+if (!synthesized.coverage.exhaustive) throw new Error("packed adapter coverage was not exhaustive");
+const invocation = runtime.invoke(synthesized.interface, "ping");
+if ((await single(invocation.outputs))?.ok !== true) throw new Error("packed adapter did not yield the application value");
 `,
   );
   writeFileSync(

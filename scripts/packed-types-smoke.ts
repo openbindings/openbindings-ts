@@ -1,7 +1,12 @@
-import type { OBInterface, OperationRequirement } from "@openbindings/sdk";
+import type {
+  BindingProvider,
+  OBInterface,
+  OpenBindingsRuntime,
+  OperationRequirement,
+} from "@openbindings/sdk";
 import type { OpenAPIClient } from "@openbindings/openapi-client";
 import type { AsyncAPIClient } from "@openbindings/asyncapi-client";
-import type { OpenAPIInvoker } from "@openbindings/openapi";
+import type { OpenAPIAdapter, OpenAPIInvoker } from "@openbindings/openapi";
 import type { AsyncAPIInvoker } from "@openbindings/asyncapi";
 import type { MCPInvoker } from "@openbindings/mcp";
 import type { GrpcInvoker } from "@openbindings/grpc";
@@ -12,8 +17,11 @@ import type { OperationGraphInvoker } from "@openbindings/operationgraph";
 
 type PackedSurface = [
   OBInterface,
+  BindingProvider,
+  OpenBindingsRuntime,
   OperationRequirement<unknown, unknown>,
   OpenAPIClient,
+  OpenAPIAdapter,
   AsyncAPIClient,
   OpenAPIInvoker,
   AsyncAPIInvoker,

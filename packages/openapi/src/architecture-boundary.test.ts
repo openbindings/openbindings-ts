@@ -2,6 +2,7 @@ import { readFile, readdir } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 
 const ADAPTER_FILES = new Set([
+  "adapter.ts",
   "constants.ts",
   "index.ts",
   "input-routes-v2.ts",

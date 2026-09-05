@@ -74,6 +74,14 @@ for (const family of matrix.families) {
       "utf8",
     ).catch(() => ""),
     readFile(
+      resolve(root, `packages/${directory}/src/native-invoker.ts`),
+      "utf8",
+    ).catch(() => ""),
+    readFile(
+      resolve(root, `packages/${directory}/src/synthesizer.ts`),
+      "utf8",
+    ).catch(() => ""),
+    readFile(
       resolve(root, `packages/${directory}/src/authoring.ts`),
       "utf8",
     ).catch(() => ""),
@@ -140,6 +148,32 @@ for (const family of matrix.families) {
   }
   expected.delete(family.bindingSpec);
 }
+
+// The OpenAPI family additionally publishes one cohesive registration for
+// the optional SDK runtime. Keep that convenience composite aligned across
+// languages without adding it to Core's independent-contract matrix.
+const [openAPIIndex, openAPIAdapter, goOpenAPIAdapter] = await Promise.all([
+  readFile(resolve(root, "packages/openapi/src/index.ts"), "utf8"),
+  readFile(resolve(root, "packages/openapi/src/adapter.ts"), "utf8"),
+  readFile(resolve(goRoot, "formats/openapi/adapter.go"), "utf8"),
+]);
+if (!openAPIIndex.includes("OpenAPIAdapter") || !openAPIAdapter.includes("export class OpenAPIAdapter")) {
+  throw new Error("TypeScript OpenAPI cohesive adapter is not exported");
+}
+for (const method of ["invokeBinding", "synthesizeInterfaceWithCoverage", "inspectSource"]) {
+  if (!openAPIAdapter.includes(`${method}(`) && !openAPIAdapter.includes(`${method}<`)) {
+    throw new Error(`TypeScript OpenAPI adapter lacks ${method}`);
+  }
+}
+if (!goOpenAPIAdapter.includes("type Adapter struct")) {
+  throw new Error("Go OpenAPI cohesive adapter is not exported");
+}
+for (const method of ["InvokeBinding", "SynthesizeInterfaceWithCoverage", "InspectSource"]) {
+  if (!goOpenAPIAdapter.includes(`) ${method}(`)) {
+    throw new Error(`Go OpenAPI adapter lacks ${method}`);
+  }
+}
+
 if (expected.size)
   throw new Error(`matrix omits ${[...expected.keys()].join(", ")}`);
 console.log(

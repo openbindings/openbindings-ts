@@ -1,5 +1,6 @@
 /**
- * @openbindings/sdk is the facade over the layered OpenBindings packages:
+ * @openbindings/sdk provides an optional protocol-neutral runtime over the
+ * layered OpenBindings packages:
  *
  *   - @openbindings/core — the spec-defined document model (parse, validate,
  *     resolve, verify)
@@ -9,11 +10,18 @@
  *   - @openbindings/compare — schema comparison under the published
  *     schema-comparison profile (OB-2020-12)
  *
- * Every name exported here re-exports from the package that owns it; existing
- * consumers keep importing from "@openbindings/sdk" unchanged. New consumers
- * that want a smaller dependency surface import the layered packages
- * directly.
+ * Contract names re-export from the package that owns them. Consumers that
+ * want a smaller dependency surface import the layered packages directly;
+ * applications wanting one explicitly configured entry point use
+ * OpenBindingsRuntime.
  */
+
+export { OpenBindingsRuntime } from "./runtime.js";
+export type {
+  BindingProvider,
+  OpenBindingsRuntimeOptions,
+  ResolveInterfaceOptions,
+} from "./runtime.js";
 
 // ---------------------------------------------------------------------------
 // @openbindings/core

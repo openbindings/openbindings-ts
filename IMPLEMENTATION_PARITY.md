@@ -21,6 +21,10 @@ also guards the public role and family correspondence.
 | per-operation compatibility check                              | `CheckOperationCompatibility(...)`                         | `checkOperationCompatibility(...)`                         |
 | all compatible, invocable matches                              | `MatchOperationRequirement(...)`                           | `matchOperationRequirement(...)`                           |
 | conservative route-to-one resolution                           | `ResolveOperationRequirement(...)`                         | `resolveOperationRequirement(...)`                         |
+| cohesive binding registration                                  | `openapi.Adapter`                                          | `OpenAPIAdapter`                                           |
+| optional protocol-neutral composition root                     | `sdk.Runtime`                                              | `OpenBindingsRuntime`                                      |
+| dynamic runtime invocation                                     | `Runtime.Invoke(...)`                                      | `runtime.invoke(...)`                                      |
+| typed invocation through the same registry                     | `invoke.Invoke(..., runtime.OperationInvoker(), ...)`      | `runtime.invoke(..., OperationSignature, ...)`             |
 
 All seven artifact/protocol families implement invocation, synthesis, and
 source inspection in both SDKs: OpenAPI, AsyncAPI, MCP, gRPC, Connect, usage,
@@ -48,7 +52,10 @@ advisory context requirements, higher-preference ordering, stable input order
 across equal preferences when returning all matches, and refusal of a
 route-to-one tie as ambiguous. Go cancellation uses `context.Context`;
 TypeScript matching accepts `AbortSignal` and forwards it to preflight.
-Neither SDK owns a registry or infers route-versus-aggregate semantics.
+Neither SDK owns a persistent implementation or delegate registry or infers
+route-versus-aggregate semantics. The optional runtime's explicit,
+process-local provider set is caller-owned composition state and rejects
+duplicate exact identifiers listed by its providers.
 
 ## Implementation proof
 

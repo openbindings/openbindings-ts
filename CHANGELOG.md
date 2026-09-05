@@ -100,10 +100,14 @@
 
 - **The SDK is layered into `@openbindings/core`, `@openbindings/invoke`,
   `@openbindings/synthesize`, and `@openbindings/compare`; `@openbindings/sdk`
-  becomes a facade** (no renames or behavior changes; every existing named
-  export keeps resolving from `@openbindings/sdk`). Placement follows the
-  authority source: what `openbindings.md` defines lives in `core` (document
-  model, validation, operation resolution, boundary schema validation,
+  becomes a facade plus an optional protocol-neutral runtime** (every existing
+  named export keeps resolving from `@openbindings/sdk`). `OpenBindingsRuntime`
+  composes an explicit instance-scoped set of cohesive binding providers for
+  resolution, source inspection, coverage synthesis, preflight, dynamic calls,
+  and generated typed signatures; it installs no binding package or global
+  registry and rejects duplicate listed exact binding-spec registrations.
+  Placement follows the authority source: what `openbindings.md` defines lives
+  in `core` (document model, validation, operation resolution, boundary schema validation,
   versions/constants); the binding-invoker/operation-invoker realization in
   `invoke`; the interface-synthesizer/source-inspector realization — including
   `fetchInterface` and the synthesis-scenarios runner — in `synthesize`;
@@ -115,7 +119,10 @@
   `isInterfaceSynthesizer`'s parameter generalizes from `BindingInvoker` to a
   type parameter. All four packages version in lockstep at 0.2.0. Format
   packages now consume the specific packages (peer dependencies follow); the
-  facade keeps existing consumers unbroken.
+  facade keeps existing consumers unbroken. `@openbindings/openapi` exports
+  `OpenAPIAdapter` as one cohesive invocation/synthesis/inspection provider;
+  its lower-level `OpenAPIInvoker` and `OpenAPISynthesizer` remain independently
+  usable and all OpenAPI mechanics remain in the standalone native client.
 
 - **The portable synthesis corpus runs at
   `openbindings.binding-spec-synthesis-scenarios@4`, and this runner checks the

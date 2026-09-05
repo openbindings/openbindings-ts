@@ -4,12 +4,14 @@ const result = await build({
   stdin: {
     contents: `
       import {
+        OpenBindingsRuntime,
         OperationInvoker,
         operationRequirement,
         operationSignature,
         resolveOperationRequirement,
       } from "@openbindings/sdk";
       import {
+        OpenAPIAdapter,
         OpenAPIInvoker,
         OpenAPISynthesizer,
       } from "@openbindings/openapi";
@@ -26,6 +28,7 @@ const result = await build({
           );
           void requirement;
           void resolveOperationRequirement;
+          void new OpenBindingsRuntime({ providers: [new OpenAPIAdapter()] });
           void new OperationInvoker([new OpenAPIInvoker()]);
           void new OpenAPISynthesizer();
           return new Response("worker-ready");

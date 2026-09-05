@@ -4,7 +4,11 @@ Thin OpenBindings adapter and interface synthesizer over the standalone
 [`@openbindings/openapi-client`](https://github.com/openbindings/openapi-client)
 Swagger 2.0 and OpenAPI 3.x document-driven client and execution engine.
 
-This package enables OpenBindings to invoke operations against OpenAPI specs and synthesize OBI documents from them. It reads Swagger 2.0 and OpenAPI 3.x documents, constructs HTTP requests, applies credentials via security schemes, and delivers results through the SDK's cardinality-agnostic `Invocation` handle.
+This package enables OpenBindings to invoke operations against OpenAPI specs
+and synthesize OBI documents from them. The standalone client reads and plans
+the document, constructs HTTP requests, applies credentials, and interprets
+responses. This package translates those facts into OpenBindings contracts,
+coverage, context, and the cardinality-agnostic `Invocation` lifecycle.
 
 Applications that need faithful OpenAPI artifact invocation without an OBI
 can use `@openbindings/openapi-client` directly. This package owns OBI source,
@@ -20,12 +24,28 @@ See the [spec](https://github.com/openbindings/spec) and the [invocation pattern
 npm install @openbindings/openapi
 ```
 
-Requires [@openbindings/sdk](https://www.npmjs.com/package/@openbindings/sdk)
-(the Core SDK) and uses `@openbindings/openapi-client` as its artifact engine.
+The high-level example uses
+[@openbindings/sdk](https://www.npmjs.com/package/@openbindings/sdk). The
+adapter itself depends only on the published Core invocation and synthesis
+contracts and uses `@openbindings/openapi-client` as its artifact engine.
 
 ## Usage
 
-### Register with OperationInvoker
+### Register with the SDK runtime
+
+One adapter instance supplies invocation, synthesis, and source inspection:
+
+```typescript
+import { OpenBindingsRuntime } from "@openbindings/sdk";
+import { OpenAPIAdapter } from "@openbindings/openapi";
+
+const runtime = new OpenBindingsRuntime({ providers: [new OpenAPIAdapter()] });
+const { iface, coverage } = await runtime.resolve("https://api.example.com/openapi.json");
+const call = runtime.invoke(iface, "listItems");
+```
+
+The independently published contracts remain available for lower-level
+composition:
 
 ```typescript
 import { OperationInvoker } from "@openbindings/sdk";
