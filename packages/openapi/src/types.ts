@@ -1,1 +1,1 @@
-export type * from "@openbindings/openapi-client/analysis";
+export type * from "@openbindings/openapi-client/provider";

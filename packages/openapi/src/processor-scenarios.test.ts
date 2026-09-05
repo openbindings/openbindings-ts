@@ -20,46 +20,14 @@ import {
   type InvocationError,
 } from "@openbindings/invoke";
 import { OpenAPIInvoker, OpenAPISynthesizer } from "./invoker.js";
-import { Swagger20Number } from "@openbindings/openapi-client/engine";
+import { Swagger20Number } from "@openbindings/openapi-client/provider";
 
 if (process.env.OB_CORPUS_REQUIRED === "1" && !process.env.OB_SPEC_CORPUS) {
   throw new Error("OB_CORPUS_REQUIRED=1 requires OB_SPEC_CORPUS");
 }
 const corpusRoot = process.env.OB_SPEC_CORPUS ?? resolve(dirname(fileURLToPath(import.meta.url)), "../../../../spec/conformance");
-const corpusEntries = [
-  {
-    file: "openapi-2.0.json",
-    wanted: new Set([
-      "OAPI20-PS-01",
-      "OAPI20-PS-02", "OAPI20-PS-03", "OAPI20-PS-04", "OAPI20-PS-05", "OAPI20-PS-06",
-      "OAPI20-PS-07", "OAPI20-PS-08", "OAPI20-PS-09", "OAPI20-PS-10", "OAPI20-PS-11",
-      "OAPI20-PS-12", "OAPI20-PS-13", "OAPI20-PS-14", "OAPI20-PS-15", "OAPI20-PS-16",
-      "OAPI20-PS-17", "OAPI20-PS-18", "OAPI20-PS-19", "OAPI20-PS-20", "OAPI20-PS-21",
-      "OAPI20-PS-22", "OAPI20-PS-23", "OAPI20-PS-24", "OAPI20-PS-25", "OAPI20-PS-26",
-      "OAPI20-PS-27", "OAPI20-PS-28", "OAPI20-PS-29", "OAPI20-PS-30", "OAPI20-PS-31",
-      "OAPI20-PS-32", "OAPI20-PS-33", "OAPI20-PS-34", "OAPI20-PS-35", "OAPI20-PS-36",
-      "OAPI20-PS-37", "OAPI20-PS-38", "OAPI20-PS-39", "OAPI20-PS-40", "OAPI20-PS-41",
-      "OAPI20-PS-42", "OAPI20-PS-43", "OAPI20-PS-44", "OAPI20-PS-45", "OAPI20-PS-46",
-      "OAPI20-PS-47", "OAPI20-PS-48", "OAPI20-PS-49", "OAPI20-PS-50", "OAPI20-PS-51",
-      "OAPI20-PS-52", "OAPI20-PS-53",
-      "OAPI20-PS-54", "OAPI20-PS-55", "OAPI20-PS-56", "OAPI20-PS-57", "OAPI20-PS-58",
-      "OAPI20-PS-59", "OAPI20-PS-60", "OAPI20-PS-61", "OAPI20-PS-62", "OAPI20-PS-63",
-      "OAPI20-PS-64", "OAPI20-PS-65", "OAPI20-PS-66", "OAPI20-PS-67", "OAPI20-PS-68",
-      "OAPI20-PS-69", "OAPI20-PS-70", "OAPI20-PS-71", "OAPI20-PS-72", "OAPI20-PS-73",
-      "OAPI20-PS-74", "OAPI20-PS-75", "OAPI20-PS-76", "OAPI20-PS-77", "OAPI20-PS-78",
-      "OAPI20-PS-79", "OAPI20-PS-80", "OAPI20-PS-81", "OAPI20-PS-82", "OAPI20-PS-83",
-      "OAPI20-PS-84", "OAPI20-PS-85", "OAPI20-PS-86", "OAPI20-PS-87", "OAPI20-PS-88",
-      "OAPI20-PS-89", "OAPI20-PS-90", "OAPI20-PS-91", "OAPI20-PS-92", "OAPI20-PS-93", "OAPI20-PS-94",
-      "OAPI20-PS-95", "OAPI20-PS-96", "OAPI20-PS-97", "OAPI20-PS-98", "OAPI20-PS-99",
-      "OAPI20-PS-100", "OAPI20-PS-101", "OAPI20-PS-102", "OAPI20-PS-103", "OAPI20-PS-104",
-      "OAPI20-PS-105", "OAPI20-PS-106", "OAPI20-PS-107", "OAPI20-PS-108", "OAPI20-PS-109",
-      "OAPI20-PS-110", "OAPI20-PS-111", "OAPI20-PS-112", "OAPI20-PS-113", "OAPI20-PS-114",
-      "OAPI20-PS-115", "OAPI20-PS-116", "OAPI20-PS-117", "OAPI20-PS-118", "OAPI20-PS-119",
-      "OAPI20-PS-120", "OAPI20-PS-121", "OAPI20-PS-122", "OAPI20-PS-123", "OAPI20-PS-124",
-      "OAPI20-PS-125", "OAPI20-PS-126", "OAPI20-PS-127",
-      "OAPI20-PS-128", "OAPI20-PS-129", "OAPI20-PS-130", "OAPI20-PS-131", "OAPI20-PS-132", "OAPI20-PS-133", "OAPI20-PS-134", "OAPI20-PS-135", "OAPI20-PS-137", "OAPI20-PS-138", "OAPI20-PS-139",
-    ]),
-  },
+const corpusEntries: ReadonlyArray<{ file: string; wanted?: ReadonlySet<string> }> = [
+  { file: "openapi-2.0.json" },
   { file: "openapi-3.0.json" },
   { file: "openapi-3.1.json" },
   { file: "openapi-3.2.json" },
@@ -84,7 +52,7 @@ describe("portable OpenAPI processor scenarios", () => {
       it(scenario.id, async () => {
         const observation = await runScenario(scenario, corpus);
         try {
-          matchProcessorObservation(scenario, observation);
+          matchProcessorObservation(scenario, observation, { family: corpus.family });
         } catch (error: unknown) {
           throw new Error(
             `${error instanceof Error ? error.message : String(error)}\nobservation: ${JSON.stringify(observation)}`,
@@ -98,9 +66,9 @@ describe("portable OpenAPI processor scenarios", () => {
   }
 
   afterAll(() => {
-    expect(corpora.map(({ corpus, wanted }) => wanted?.size ?? corpus.scenarios.length)).toEqual([138, 116, 141, 213]);
-    expect(executedByCorpus).toEqual([138, 116, 141, 213]);
-    expect(executed).toBe(608);
+    expect(corpora.map(({ corpus, wanted }) => wanted?.size ?? corpus.scenarios.length)).toEqual([186, 195, 218, 297]);
+    expect(executedByCorpus).toEqual([186, 195, 218, 297]);
+    expect(executed).toBe(896);
   });
 });
 
@@ -110,7 +78,7 @@ describe("OpenAPI invocation-fidelity scenarios", () => {
       it(scenario.id, async () => {
         const observation = await runScenario(scenario, corpus);
         try {
-          matchProcessorObservation(scenario, observation);
+          matchProcessorObservation(scenario, observation, { family: corpus.family });
         } catch (error: unknown) {
           throw new Error(
             `${error instanceof Error ? error.message : String(error)}\nobservation: ${JSON.stringify(observation)}`,
@@ -154,18 +122,21 @@ async function runScenario(
     }
     dispatches.push(dispatch);
 
-    const status = typeof peer.status === "number" ? peer.status : 599;
-    const rawBody = typeof peer.bodyBase64 === "string"
-      ? base64ToBytes(peer.bodyBase64)
-      : typeof peer.body === "string"
-        ? peer.body
+    const response = Array.isArray(peer.responses)
+      ? (peer.responses[dispatches.length - 1] ?? {})
+      : peer;
+    const status = typeof response.status === "number" ? response.status : 599;
+    const rawBody = typeof response.bodyBase64 === "string"
+      ? base64ToBytes(response.bodyBase64)
+      : typeof response.body === "string"
+        ? response.body
         : "";
     const responseBody = rawBody === "" && (status === 204 || status === 205 || status === 304)
       ? null
       : rawBody;
     return new Response(responseBody, {
       status,
-      headers: (peer.headers ?? {}) as Record<string, string>,
+      headers: (response.headers ?? {}) as Record<string, string>,
     });
   };
 
@@ -197,6 +168,9 @@ async function runScenario(
       parameterConversion: scenarioParameterConversion(scenario),
       requestContentCodings: scenarioRequestContentCodings(scenario.given.runtime),
       responseContentCodings: scenarioResponseContentCodings(scenario.given.runtime),
+      requestCharacterEncodings: scenarioRequestCharacterEncodings(scenario.given.runtime),
+      responseCharacterEncodings: scenarioResponseCharacterEncodings(scenario.given.runtime),
+      ...(scenario.given.runtime?.redirectPolicy === "follow" ? { redirect: "follow" as const } : {}),
     }).invokeBinding({
       source: invocationSource,
       selector: typeof binding.selector === "string" ? binding.selector : "",
@@ -208,7 +182,7 @@ async function runScenario(
     });
 
   if (scenario.given.invocation.inputPresent === true) {
-    await call.write(scenario.given.invocation.input).catch(() => {});
+    await call.write(materializedScenarioInput(scenario)).catch(() => {});
   } else {
     await call.close();
   }
@@ -248,6 +222,44 @@ async function runScenario(
       },
     },
   };
+}
+
+function materializedScenarioInput(scenario: ProcessorScenario): unknown {
+  const input = structuredClone(scenario.given.invocation.input);
+  const materializations = scenario.given.invocation.inputMaterializations;
+  if (!Array.isArray(materializations)) return input;
+  for (const raw of materializations) {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+      throw new Error(`${scenario.id}: invalid input materialization`);
+    }
+    const item = raw as Record<string, unknown>;
+    if (
+      item.kind !== "unpaired-utf16-code-units"
+      || typeof item.path !== "string"
+      || !Array.isArray(item.codeUnits)
+      || !item.codeUnits.every((unit) => Number.isInteger(unit) && Number(unit) >= 0 && Number(unit) <= 0xffff)
+    ) {
+      throw new Error(`${scenario.id}: invalid UTF-16 input materialization`);
+    }
+    setScenarioPointer(
+      input,
+      item.path,
+      String.fromCharCode(...item.codeUnits.map(Number)),
+    );
+  }
+  return input;
+}
+
+function setScenarioPointer(root: unknown, pointer: string, replacement: unknown): void {
+  if (!pointer.startsWith("/")) throw new Error(`invalid materialization pointer ${JSON.stringify(pointer)}`);
+  const tokens = pointer.slice(1).split("/").map((raw) => raw.replaceAll("~1", "/").replaceAll("~0", "~"));
+  let current: unknown = root;
+  for (const token of tokens.slice(0, -1)) {
+    if (current === null || typeof current !== "object") throw new Error(`materialization pointer ${pointer} does not resolve`);
+    current = (current as Record<string, unknown>)[token];
+  }
+  if (current === null || typeof current !== "object") throw new Error(`materialization pointer ${pointer} does not resolve`);
+  (current as Record<string, unknown>)[tokens.at(-1)!] = replacement;
 }
 
 function scenarioRequestContentCodings(
@@ -294,7 +306,48 @@ function scenarioResponseContentCodings(
       };
       continue;
     }
+    if (implementation === "identity") {
+      result[name] = (body) => Uint8Array.from(body);
+      continue;
+    }
+    if (implementation === "fail") {
+      result[name] = () => { throw new Error(`scenario ${JSON.stringify(name)} decoder sentinel`); };
+      continue;
+    }
     throw new Error(`unknown scenario response content-coding implementation ${JSON.stringify(implementation)}`);
+  }
+  return result;
+}
+
+function scenarioRequestCharacterEncodings(
+  runtime: Record<string, unknown> | undefined,
+): Record<string, (value: string) => Uint8Array> | undefined {
+  const declarations = runtime?.requestCharacterEncodings;
+  if (declarations === undefined) return undefined;
+  if (declarations === null || typeof declarations !== "object" || Array.isArray(declarations)) {
+    throw new Error("scenario runtime.requestCharacterEncodings must be an object");
+  }
+  const result: Record<string, (value: string) => Uint8Array> = {};
+  for (const [name, implementation] of Object.entries(declarations)) {
+    if (implementation === "unavailable") continue;
+    if (implementation !== "identity") throw new Error(`unknown scenario request character encoding ${JSON.stringify(implementation)}`);
+    result[name] = (value) => new TextEncoder().encode(value);
+  }
+  return result;
+}
+
+function scenarioResponseCharacterEncodings(
+  runtime: Record<string, unknown> | undefined,
+): Record<string, (body: Uint8Array) => string> | undefined {
+  const declarations = runtime?.responseCharacterEncodings;
+  if (declarations === undefined) return undefined;
+  if (declarations === null || typeof declarations !== "object" || Array.isArray(declarations)) {
+    throw new Error("scenario runtime.responseCharacterEncodings must be an object");
+  }
+  const result: Record<string, (body: Uint8Array) => string> = {};
+  for (const [name, implementation] of Object.entries(declarations)) {
+    if (implementation !== "fail") throw new Error(`unknown scenario response character encoding ${JSON.stringify(implementation)}`);
+    result[name] = () => { throw new Error(`scenario ${JSON.stringify(name)} character decoder sentinel`); };
   }
   return result;
 }

@@ -257,9 +257,11 @@ describe("OpenAPI native-client differential", () => {
     expect(input.required?.sort()).toEqual(["file", "fileName", "transaction"]);
 
     const observed: Record<string, FormDataEntryValue> = {};
+    let wireBody = new Uint8Array();
     const fetch = async (requestInput: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
       const request = new Request(requestInput, init);
       expect(request.headers.get("content-type")).toMatch(/^multipart\/form-data; boundary=/);
+      wireBody = new Uint8Array(await request.clone().arrayBuffer());
       const form = await request.formData();
       form.forEach((value, name) => { observed[name] = value; });
       return new Response(null, { status: 204 });
@@ -281,8 +283,9 @@ describe("OpenAPI native-client differential", () => {
     expect(observed.transaction).toBe("tx-1");
     expect(observed.fileName).toBe("a.bin");
     expect(observed).not.toHaveProperty("body");
-    expect(observed.file).toBeInstanceOf(File);
-    expect(Array.from(new Uint8Array(await (observed.file as File).arrayBuffer()))).toEqual([1, 2, 3]);
+    expect(observed.file).toBe("\u0001\u0002\u0003");
+    const wireText = String.fromCharCode(...wireBody);
+    expect(wireText).toContain('Content-Disposition: form-data; name="file"\r\nContent-Type: application/octet-stream\r\n\r\n\u0001\u0002\u0003\r\n');
   });
 });
 

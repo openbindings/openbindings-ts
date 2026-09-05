@@ -13,11 +13,11 @@ import {
   type SynthesisCoverageEntry,
 } from "@openbindings/synthesize";
 import {
-  loadSwagger20,
+  analyzeOpenAPIProjection,
   type Swagger20SynthesisAlternative,
   type Swagger20SynthesisDocument,
   type Swagger20SynthesisOperation,
-} from "@openbindings/openapi-client/engine";
+} from "@openbindings/openapi-client/provider";
 import { BINDING_SPEC_OPENAPI_20, DEFAULT_SOURCE_NAME } from "./constants.js";
 import { normalizeAuthoringLocation, readAuthoringArtifact } from "./platform.js";
 import { sanitizeKey, uniqueKey } from "./util.js";
@@ -49,11 +49,12 @@ export async function synthesizeSwagger20(
   if (artifactContent === undefined && source.embed && location) {
     artifactContent = await readAuthoringArtifact(location, options?.signal, fetchFn);
   }
-  const client = await loadSwagger20(
+  const analysis = await analyzeOpenAPIProjection(
     { ...(location ? { location } : {}), ...(artifactContent === undefined ? {} : { content: artifactContent }) },
-    { fetch: fetchFn, signal: options?.signal },
+    { documentFetch: fetchFn, documentSignal: options?.signal },
   );
-  const model = await client.synthesisModel();
+  const model = analysis.swagger20;
+  if (!model) throw new Error("native OpenAPI provider returned no Swagger 2.0 projection");
   const iface: OBInterface = {
     openbindings: MAX_TESTED_VERSION,
     ...(model.name ? { name: model.name } : {}),
@@ -174,7 +175,8 @@ function projectOperation(operation: Swagger20SynthesisOperation): {
     };
   }
   for (const response of operation.responses) {
-    if (!response.canSucceed || !response.usable || !response.schemaPresent || !response.schema) continue;
+    if (!response.canSucceed || !response.usable || !response.schemaPresent || !response.schema
+      || ["204", "205", "304"].includes(response.key) || operation.method === "head") continue;
     const projected = projectSchema(response.schema, false, `${response.sourceRef}/schema`);
     losses.push(...projected.losses);
     if (result.output === undefined) result.output = projected.schema;
@@ -278,13 +280,21 @@ function alternativeCoverage(
   bindingKey: string,
 ): SynthesisCoverageEntry[] {
   const result: SynthesisCoverageEntry[] = [];
+  const serverAlternatives = operation.alternatives.filter((alternative) => alternative.kind === "server");
+  const hasInvalidServer = serverAlternatives.some((alternative) => alternative.disposition === "invalid");
+  const hasUsableServer = serverAlternatives.some((alternative) => alternative.usable);
   for (const alternative of operation.alternatives) {
-    if (alternative.kind === "security" || (alternative.kind === "server" && alternative.usable)) continue;
+    if (alternative.kind === "security") continue;
+    if (alternative.kind === "server") {
+      if (alternative.usable && !hasInvalidServer) continue;
+      if (!alternative.usable && alternative.disposition !== "invalid" && !hasUsableServer) continue;
+    }
     result.push(alternativeEntry(operation, alternative, operationKey, bindingKey));
   }
   for (const security of operation.security) if (!security.usable) result.push({
     sourceIndex: 0, sourceRef: security.sourceRef, scope: "alternative", status: "excluded",
-    reasonCode: "openapi20.security_alternative_excluded", rule: "OAPI20-P-04",
+    reasonCode: "openapi20.security_alternative_excluded",
+    rule: security.sourceRef.startsWith("#/security/") ? "OAPI20-P-04" : security.rule ?? "OAPI20-P-04",
     message: security.reason ?? "security alternative is unusable", requirements: [],
   });
   for (const response of operation.responses) for (const header of response.headers) {
@@ -293,9 +303,25 @@ function alternativeCoverage(
       operationKey, bindingKey, bindingSelector: operation.ref, requirements: [],
     });
     else result.push({
-      sourceIndex: 0, sourceRef: header.sourceRef, scope: "projection", status: "excluded",
-      reasonCode: "openapi20.response_header_excluded", rule: "OAPI20-P-03",
+      sourceIndex: 0, sourceRef: header.sourceRef, scope: "projection",
+      status: header.reason?.includes("not admitted") || header.reason?.includes("not an object") ? "invalid" : "excluded",
+      reasonCode: "openapi20.response_header_excluded",
+      ...(header.reason?.includes("field name") ? { rule: "OAPI20-S-04" } : {}),
       message: header.reason ?? "response header is unusable", requirements: [],
+    });
+  }
+  for (const fact of operation.coverage) {
+    result.push({
+      sourceIndex: 0,
+      sourceRef: fact.sourceRef,
+      scope: fact.scope,
+      status: fact.status,
+      ...(fact.status === "represented" ? { operationKey, bindingKey, bindingSelector: operation.ref } : {
+        reasonCode: `openapi20.${fact.status}_declaration`,
+        message: fact.reason ?? `${fact.status} OpenAPI declaration`,
+      }),
+      ...(fact.rule ? { rule: fact.rule } : {}),
+      requirements: sortedUnique(fact.requirements),
     });
   }
   return result;
@@ -313,22 +339,22 @@ function alternativeEntry(
     requirements: sortedUnique(alternative.requirements),
   };
   return {
-    sourceIndex: 0, sourceRef: alternative.sourceRef, scope: "alternative", status: "excluded",
-    reasonCode: `openapi20.${alternative.kind}_excluded`,
-    rule: alternative.kind === "server" || alternative.kind === "security" ? "OAPI20-P-04" : "OAPI20-P-03",
+    sourceIndex: 0, sourceRef: alternative.sourceRef, scope: "alternative",
+    status: alternative.disposition ?? "excluded",
+    reasonCode: `openapi20.${alternative.kind === "requestMedia" ? "request_media" : alternative.kind}_excluded`,
+    rule: alternative.rule ?? (alternative.reason?.includes("multipart form parameter name") ? "OAPI20-P-25"
+      : alternative.kind === "server" || alternative.kind === "security" ? "OAPI20-P-04" : "OAPI20-P-03"),
     message: alternative.reason ?? `${alternative.kind} alternative is unusable`, requirements: [],
   };
 }
 
 function excludedTarget(operation: Swagger20SynthesisOperation): SynthesisCoverageEntry {
   const reason = operation.reason ?? "target is unusable";
-  const lower = reason.toLowerCase();
-  const rule = /response|consumes|produces|payload/u.test(lower) ? "OAPI20-P-03"
-    : /security|scheme|host|server/u.test(lower) ? "OAPI20-P-04"
-      : /parameter|path template/u.test(lower) ? "OAPI20-P-02" : "OAPI20-P-01";
+  const invalid = operation.disposition === "invalid";
   return {
-    sourceIndex: 0, sourceRef: operation.ref, scope: "target", status: "excluded",
-    reasonCode: "openapi20.target_excluded", rule, message: reason, requirements: [],
+    sourceIndex: 0, sourceRef: operation.ref, scope: "target", status: operation.disposition ?? (invalid ? "invalid" : "excluded"),
+    reasonCode: invalid ? "openapi20.target_invalid" : "openapi20.target_excluded",
+    ...(operation.rule ? { rule: operation.rule } : {}), message: reason, requirements: [],
   };
 }
 

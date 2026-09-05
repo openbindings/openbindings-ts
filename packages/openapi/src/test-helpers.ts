@@ -2,7 +2,6 @@ import {
   BINDING_SPEC_OPENAPI_30,
   BINDING_SPEC_OPENAPI_31,
 } from "./constants.js";
-import { convertToInterface as convertProductionInterface } from "./synthesize.js";
 import {
   OpenAPIInvoker as ProductionOpenAPIInvoker,
   OpenAPISynthesizer as ProductionOpenAPISynthesizer,
@@ -39,20 +38,24 @@ export function bindingSpecForTestDocument(content: unknown): string {
     : BINDING_SPEC_OPENAPI_31;
 }
 
-type ConvertArgs = Parameters<typeof convertProductionInterface>;
-
 /** Keeps older test call sites terse while supplying an exact fixture-derived token. */
-export function convertToInterface(...args: ConvertArgs): ReturnType<typeof convertProductionInterface> {
-  return convertProductionInterface(
-    args[0],
-    args[1],
-    args[2],
-    args[3],
-    args[4],
-    args[5],
-    bindingSpecForTestDocument(args[1]),
-    args[7],
-  );
+export function convertToInterface(
+  location?: string,
+  content?: unknown,
+  options?: { signal?: AbortSignal; fetch?: typeof globalThis.fetch },
+  onWarning?: SynthesizeInput["onWarning"],
+  _onDocument?: unknown,
+  _onUnrealizable?: unknown,
+  bindingSpec?: string,
+): Promise<OBInterface> {
+  return new ProductionOpenAPISynthesizer({ fetch: options?.fetch }).synthesizeInterface({
+    sources: [{
+      bindingSpec: bindingSpec ?? bindingSpecForTestDocument(content),
+      ...(location ? { location } : {}),
+      ...(content !== undefined ? { content } : {}),
+    }],
+    ...(onWarning ? { onWarning } : {}),
+  }, { signal: options?.signal });
 }
 
 function exactTestSource<T extends { content?: unknown; bindingSpec: string }>(source: T): T {

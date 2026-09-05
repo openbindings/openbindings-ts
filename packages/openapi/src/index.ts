@@ -1,7 +1,11 @@
 export { OpenAPIInvoker, OpenAPISynthesizer } from "./invoker.js";
 export type { OpenAPIInvokerOptions } from "./invoker.js";
-export type { ContentCodingResult, ContentDecoder, ContentEncoder } from "./media-transport.js";
-export type { ParameterConversion } from "./parameter-semantics.js";
+export type {
+  OpenAPIContentCodingResult as ContentCodingResult,
+  OpenAPIContentCodec as ContentDecoder,
+  OpenAPIContentCodec as ContentEncoder,
+} from "@openbindings/openapi-client";
+export type { OpenAPIParameterConverter as ParameterConversion } from "@openbindings/openapi-client";
 export {
   BINDING_SPEC_OPENAPI_20,
   BINDING_SPEC_OPENAPI_30,

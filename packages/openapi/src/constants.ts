@@ -1,8 +1,3 @@
-import {
-  OPENAPI_PROFILE_FULL,
-  type OpenAPIExecutionProfile,
-} from "@openbindings/openapi-client/engine";
-
 /** Exact registered OpenAPI-family tokens (core §6). */
 export const BINDING_SPEC_OPENAPI_20 = "openbindings.openapi-2.0@1";
 export const BINDING_SPEC_OPENAPI_30 = "openbindings.openapi-3.0@1";
@@ -32,13 +27,6 @@ const OPENAPI_BINDING_SPEC_REGISTRY: Readonly<Record<string, OpenAPIBindingSpecR
     },
   });
 
-const PROFILES: Readonly<Record<string, OpenAPIExecutionProfile>> = Object.freeze({
-  [BINDING_SPEC_OPENAPI_20]: OPENAPI_PROFILE_FULL,
-  [BINDING_SPEC_OPENAPI_30]: OPENAPI_PROFILE_FULL,
-  [BINDING_SPEC_OPENAPI_31]: OPENAPI_PROFILE_FULL,
-  [BINDING_SPEC_OPENAPI_32]: OPENAPI_PROFILE_FULL,
-});
-
 export function isImplementedOpenAPIBindingSpec(bindingSpec: string): boolean {
   return OPENAPI_BINDING_SPEC_REGISTRY[bindingSpec] !== undefined;
 }
@@ -51,10 +39,10 @@ export function unsupportedBindingSpecMessage(bindingSpec: string): string {
 }
 
 /** Maps an exact implemented token to artifact-engine capabilities. */
-export function profileForBindingSpec(bindingSpec: string): OpenAPIExecutionProfile {
-  const profile = PROFILES[bindingSpec];
-  if (!profile) throw new Error(unsupportedBindingSpecMessage(bindingSpec));
-  return profile;
+export function assertImplementedBindingSpec(bindingSpec: string): void {
+  if (!isImplementedOpenAPIBindingSpec(bindingSpec)) {
+    throw new Error(unsupportedBindingSpecMessage(bindingSpec));
+  }
 }
 
 export function checkAcceptedOpenAPIEdition(bindingSpec: string, edition: unknown): void {
@@ -109,8 +97,6 @@ export function hasWholeJSONCarriage(bindingSpec: string): boolean {
 export function hasSchemaOmittedOAS30ByteCarriage(bindingSpec: string): boolean {
   return isImplementedOpenAPIBindingSpec(bindingSpec);
 }
-
-export { VALID_METHODS } from "@openbindings/openapi-client/analysis";
 
 /** Default source name used when registering an OpenAPI source in an OBInterface. */
 export const DEFAULT_SOURCE_NAME = "openapi";

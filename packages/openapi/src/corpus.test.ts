@@ -17,13 +17,14 @@ import { describe, it, expect } from "vitest";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { OpenAPIClient } from "@openbindings/openapi-client";
 
 import {
   BINDING_SPEC_OPENAPI_30,
   BINDING_SPEC_OPENAPI_31,
   checkAcceptedOpenAPIEdition,
 } from "./constants.js";
-import { loadOpenAPIDocument, parseSelector, validateDocumentAddress, errorMessage } from "./util.js";
+import { validateDocumentAddress, errorMessage } from "./util.js";
 
 const FAMILIES = [
   { name: "openapi-3.0", bindingSpec: BINDING_SPEC_OPENAPI_30 },
@@ -87,13 +88,11 @@ async function judgeDocument(
     // Content lane (OAPI-D-01): a present member — null included — must be
     // the parsed document object or its source text. External refs are
     // disabled, so the load performs no I/O (fixtures are self-contained).
-    let parsed: Record<string, unknown> | undefined;
+    let client: OpenAPIClient | undefined;
     if (src.content !== undefined) {
       try {
-        parsed = await loadOpenAPIDocument(undefined, src.content, {
-          allowExternalRefs: false,
-        });
-        checkAcceptedOpenAPIEdition(bindingSpec, parsed.openapi);
+        client = await OpenAPIClient.load({ content: src.content });
+        checkAcceptedOpenAPIEdition(bindingSpec, client.edition);
       } catch (e: unknown) {
         return errorMessage(e);
       }
@@ -115,18 +114,10 @@ async function judgeDocument(
     // before the lookup, exactly as runBinding does.
     for (const b of Object.values(doc.bindings ?? {})) {
       if (b.source !== name) continue;
-      let target: { path: string; method: string };
       try {
-        target = parseSelector(b.selector ?? "");
+        if (client) client.operation({ ref: b.selector ?? "" });
       } catch (e: unknown) {
         return errorMessage(e);
-      }
-      if (!parsed) continue; // location-only source: grammar-checked alone
-      const paths = parsed.paths as Record<string, Record<string, unknown>> | undefined;
-      const pathItem = paths?.[target.path];
-      if (!pathItem) return `path "${target.path}" not in OpenAPI doc`;
-      if (pathItem[target.method] == null) {
-        return `method "${target.method}" not in path "${target.path}"`;
       }
     }
   }

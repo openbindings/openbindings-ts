@@ -73,7 +73,7 @@ describe("per-operation tolerant coverage synthesis", () => {
     const conditional = byRef.get("#/paths/~1conditional/post");
     expect(conditional?.status).toBe("excluded");
     expect(conditional?.reasonCode).toMatch(/^openapi\.(unresolvable_request_body|media_schema_mismatch)$/);
-    expect(conditional?.rule).toBe("OAPI30-P-03");
+    expect(conditional?.rule).toBe("OAPI30-S-22");
     expect(conditional?.message).toBeTruthy();
 
     const collide = byRef.get("#/paths/~1collide/get");

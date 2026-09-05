@@ -820,7 +820,7 @@ describe("synthesis coverage disposition identity", () => {
       sourceRef: "#/paths/~1jobs/post/requestBody/content/application~1x-custom",
       status: "excluded",
       reasonCode: "openapi.request_media_excluded",
-      rule: "OAPI31-P-03",
+      rule: "OAPI31-S-21",
     }));
   });
 });

@@ -130,7 +130,8 @@ export interface NormalizedSynthesisCoverageEntry {
   status: SynthesisCoverageEntry["status"];
   operationKey?: string;
   bindingSelector?: string;
-  reasonCode?: string;
+  /** Local diagnostics are deliberately outside portable comparison. */
+  reasonCode?: never;
   rule?: string;
   requirements: string[];
 }
@@ -210,7 +211,7 @@ function normalizeExpected(expected: NormalizedSynthesis): NormalizedSynthesis {
     coverage: {
       exhaustive: expected.coverage.exhaustive,
       fullyRepresented: expected.coverage.fullyRepresented,
-      entries: expected.coverage.entries.map((entry) => ({
+      entries: expected.coverage.entries.map(({ reasonCode: _diagnostic, ...entry }) => ({
         ...entry,
         requirements: [...entry.requirements].sort(codePointCompare),
       })).sort(compareCoverage),
@@ -237,7 +238,6 @@ function normalizeCoverageEntry(entry: SynthesisCoverageEntry): NormalizedSynthe
   };
   if (entry.operationKey !== undefined) normalized.operationKey = entry.operationKey;
   if (entry.bindingSelector !== undefined) normalized.bindingSelector = entry.bindingSelector;
-  if (entry.reasonCode !== undefined) normalized.reasonCode = entry.reasonCode;
   if (entry.rule !== undefined) normalized.rule = entry.rule;
   return normalized;
 }

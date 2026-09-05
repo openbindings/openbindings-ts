@@ -92,7 +92,7 @@ export interface SynthesizerWarning {
 }
 
 /** Granularity of one synthesis coverage entry. */
-export type SynthesisCoverageScope = "target" | "alternative" | "projection" | "dependency";
+export type SynthesisCoverageScope = "source" | "target" | "alternative" | "projection" | "dependency";
 
 /** Durable disposition of one source interaction unit. */
 export type SynthesisCoverageStatus =
@@ -215,7 +215,8 @@ export function finalizeSynthesisCoverage(
       throw new Error(`synthesis coverage entry ${index} has empty sourceRef`);
     }
     if (
-      entry.scope !== "target"
+      entry.scope !== "source"
+      && entry.scope !== "target"
       && entry.scope !== "alternative"
       && entry.scope !== "projection"
       && entry.scope !== "dependency"

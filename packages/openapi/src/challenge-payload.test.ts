@@ -10,7 +10,7 @@ import { InvocationError } from "@openbindings/invoke";
 import {
   PROPERTY_MEDIA_REQUIREMENT_DESCRIPTION,
   REQUEST_MEDIA_REQUIREMENT_DESCRIPTION,
-} from "@openbindings/openapi-client/engine";
+} from "@openbindings/openapi-client/provider";
 import { OpenAPIInvoker } from "./invoker.js";
 
 const LINES: Array<[string, string]> = [
