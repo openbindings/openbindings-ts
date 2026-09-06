@@ -43,7 +43,7 @@
               "send.local": {
                 "operation": "send",
                 "source": "local",
-                "ref": "send"
+                "selector": "send"
               }
             }
           }
@@ -161,8 +161,8 @@
               }
             },
             "bindings": {
-              "deliver.a": { "operation": "deliver", "source": "local", "ref": "a" },
-              "deliver.b": { "operation": "deliver", "source": "local", "ref": "b" }
+              "deliver.a": { "operation": "deliver", "source": "local", "selector": "a" },
+              "deliver.b": { "operation": "deliver", "source": "local", "selector": "b" }
             }
           }
         }

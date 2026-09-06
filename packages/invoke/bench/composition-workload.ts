@@ -132,16 +132,16 @@ export function createCompositionWorkload(
 
     for (let bindingIndex = 0; bindingIndex < bindingsPerOperation; bindingIndex++) {
       const bindingKey = `binding.${suffix}.${padded(bindingIndex)}`;
-      const ref = `handler.${suffix}.${padded(bindingIndex)}`;
+      const selector = `handler.${suffix}.${padded(bindingIndex)}`;
       bindings[bindingKey] = {
         operation: providerOperationKey,
         source: "local",
-        ref,
+        selector,
       };
       bindingKeys.push(bindingKey);
       bindingInvoker.register<BenchmarkInput, BenchmarkOutput>({
         location: BENCHMARK_LOCATION,
-        ref,
+        selector,
         handler,
       });
     }

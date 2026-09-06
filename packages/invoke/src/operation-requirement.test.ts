@@ -186,7 +186,7 @@ describe("resolveOperationRequirement", () => {
         get: {
           operation: "example.patterned.get",
           source: "local",
-          ref: "#/get",
+          selector: "#/get",
         },
       },
     };

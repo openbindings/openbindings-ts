@@ -22,7 +22,7 @@ const IFACE: OBInterface = {
     unsupported: { bindingSpec: "example.other@1", location: "app://other" },
   },
   bindings: {
-    local: { operation: "deliver", source: "local", ref: "deliver" },
+    local: { operation: "deliver", source: "local", selector: "deliver" },
     unsupported: { operation: "deliver", source: "unsupported" },
   },
 };
@@ -67,7 +67,7 @@ describe("PreparedProvider", () => {
       bindingKey: "local",
       sourceKey: "local",
       bindingSpec: "example.local@1",
-      ref: "deliver",
+      selector: "deliver",
     });
   });
 
@@ -97,7 +97,7 @@ describe("PreparedProvider", () => {
     const binding = new HandlerBindingInvoker({ bindingSpec: "example.local@1" });
     binding.register({
       location: "app://delivery",
-      ref: "deliver",
+      selector: "deliver",
       handler: () => undefined,
     });
     const provider = await prepareProvider({

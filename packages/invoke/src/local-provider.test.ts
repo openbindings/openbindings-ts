@@ -36,7 +36,7 @@ const IFACE: OBInterface = {
     local: { bindingSpec: "example.local@1", location: "app://tasks" },
   },
   bindings: {
-    createLocal: { operation: "create", source: "local", ref: "create" },
+    createLocal: { operation: "create", source: "local", selector: "create" },
   },
 };
 
@@ -133,7 +133,7 @@ describe("prepareLocalProvider", () => {
     document.bindings!.other = {
       operation: "create",
       source: "local",
-      ref: "other",
+      selector: "other",
     };
     const provider = await prepareLocalProvider({
       key: "partial",

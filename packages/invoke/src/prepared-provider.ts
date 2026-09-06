@@ -46,7 +46,7 @@ export interface PreparedRealizationDescriptor {
   readonly bindingKey: string;
   readonly sourceKey: string;
   readonly bindingSpec: string;
-  readonly ref: string;
+  readonly selector: string;
   readonly supported: boolean;
   readonly binding: PreparedBindingDescriptor;
 }
@@ -80,7 +80,7 @@ export class PreparedRealization<I = unknown, O = unknown> {
   readonly bindingKey: string;
   readonly sourceKey: string;
   readonly bindingSpec: string;
-  readonly ref: string;
+  readonly selector: string;
 
   private constructor(
     provider: PreparedProvider,
@@ -95,7 +95,7 @@ export class PreparedRealization<I = unknown, O = unknown> {
     this.bindingKey = descriptor.bindingKey;
     this.sourceKey = descriptor.sourceKey;
     this.bindingSpec = descriptor.bindingSpec;
-    this.ref = descriptor.ref;
+    this.selector = descriptor.selector;
     Object.freeze(this);
   }
 
@@ -237,7 +237,7 @@ export class PreparedProvider {
         bindingKey,
         sourceKey: binding.binding.source,
         bindingSpec: binding.bindingSpec,
-        ref: binding.binding.ref ?? "",
+        selector: binding.binding.selector ?? "",
         supported: supportedSpecs.has(binding.bindingSpec) &&
           (options.runtime.supportsBinding?.(binding) ?? true),
         binding,

@@ -1,5 +1,6 @@
-import type { BindingSpecInfo } from "@openbindings/core";
-import { ERR_REF_NOT_FOUND, ERR_RUNTIME, ERR_SOURCE_CONFIG_ERROR } from "./errcodes.js";
+import { checkBindingSpecs as supportVerdicts } from "@openbindings/core";
+import type { BindingSpecInfo, BindingSpecVerdict } from "@openbindings/core";
+import { ERR_SELECTOR_NOT_FOUND, ERR_RUNTIME, ERR_SOURCE_CONFIG_ERROR } from "./errcodes.js";
 import {
   contextRequiredError,
   InvocationError,
@@ -29,7 +30,7 @@ export type BindingHandlerPreparer = (
 
 export interface HandlerBindingRegistration<I = unknown, O = unknown> {
   readonly location: string;
-  readonly ref: string;
+  readonly selector: string;
   readonly handler: BindingHandler<I, O>;
   readonly prepare?: BindingHandlerPreparer;
 }
@@ -62,7 +63,7 @@ function terminalError(error: unknown): InvocationError {
  * Experimental adapter from ordinary application handlers to BindingInvoker.
  *
  * The application owns the binding-specification token, registry lifetime,
- * and concrete `(source.location, binding.ref)` address space. Registration
+ * and concrete `(source.location, binding.selector)` address space. Registration
  * is exact, duplicate-safe, and reversible. Invocation creation remains
  * inert: the handler starts in a later microtask and owns the ordinary
  * BindingHandle lifecycle.
@@ -87,6 +88,10 @@ export class HandlerBindingInvoker implements BindingInvoker {
     return [{ ...this.#info }];
   }
 
+  checkBindingSpecs(bindingSpecs: readonly string[]): BindingSpecVerdict[] {
+    return supportVerdicts(bindingSpecs, this.bindingSpecs());
+  }
+
   /**
    * Registers one exact concrete implementation. The returned function only
    * removes this registration, so a stale cleanup cannot remove a later one.
@@ -98,22 +103,22 @@ export class HandlerBindingInvoker implements BindingInvoker {
     const refs =
       this.#registrations.get(registration.location) ??
       new Map<string, ErasedRegistration>();
-    if (refs.has(registration.ref)) {
+    if (refs.has(registration.selector)) {
       throw new TypeError(
-        `openbindings: handler binding already registered: ${registration.location} ${JSON.stringify(registration.ref)}`,
+        `openbindings: handler binding already registered: ${registration.location} ${JSON.stringify(registration.selector)}`,
       );
     }
     const erased: ErasedRegistration = {
       handler: registration.handler as BindingHandler,
       ...(registration.prepare === undefined ? {} : { prepare: registration.prepare }),
     };
-    refs.set(registration.ref, erased);
+    refs.set(registration.selector, erased);
     this.#registrations.set(registration.location, refs);
 
     return () => {
       const current = this.#registrations.get(registration.location);
-      if (current?.get(registration.ref) !== erased) return;
-      current.delete(registration.ref);
+      if (current?.get(registration.selector) !== erased) return;
+      current.delete(registration.selector);
       if (current.size === 0) this.#registrations.delete(registration.location);
     };
   }
@@ -211,8 +216,8 @@ export class HandlerBindingInvoker implements BindingInvoker {
   #lookup(args: BindingInvocationArgs): ErasedRegistration {
     const location = args.source.location;
     if (!location) throw new InvocationError(ERR_SOURCE_CONFIG_ERROR);
-    const registration = this.#registrations.get(location)?.get(args.ref);
-    if (!registration) throw new InvocationError(ERR_REF_NOT_FOUND);
+    const registration = this.#registrations.get(location)?.get(args.selector);
+    if (!registration) throw new InvocationError(ERR_SELECTOR_NOT_FOUND);
     return registration;
   }
 }

@@ -622,7 +622,7 @@ function validateBindingShape(
   }
   requiredString(binding, "operation", `${path}/operation`, problem, value => OBI_IDENTIFIER.test(value));
   requiredString(binding, "source", `${path}/source`, problem, value => OBI_IDENTIFIER.test(value));
-  optionalTyped(binding, "ref", `${path}/ref`, "string", problem);
+  optionalTyped(binding, "selector", `${path}/selector`, "string", problem);
   optionalTyped(binding, "description", `${path}/description`, "string", problem);
   optionalTyped(binding, "deprecated", `${path}/deprecated`, "boolean", problem);
   if (present(binding, "preference")) {

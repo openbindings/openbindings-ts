@@ -1180,7 +1180,7 @@ describe("prepareOperationHandle", () => {
     expect(prepared.bindingKey).toBe("getUser.main");
 
     // None of these mutations may retarget or redefine the prepared call.
-    iface.bindings!["getUser.main"]!.ref = "badUser";
+    iface.bindings!["getUser.main"]!.selector = "badUser";
     iface.sources!["mock"]!.bindingSpec = "exotic@9";
     iface.operations.getUser.output = { type: "integer" };
 

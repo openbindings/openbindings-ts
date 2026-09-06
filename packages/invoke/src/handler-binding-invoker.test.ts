@@ -7,7 +7,7 @@ describe("HandlerBindingInvoker deterministic closure", () => {
     const invoker = new HandlerBindingInvoker({ bindingSpec: "example.local@1" });
     const remove = invoker.register<string, string>({
       location: "app://handlers",
-      ref: "echo",
+      selector: "echo",
       async handler(handle) {
         for await (const input of handle.inputs()) {
           await handle.closeInput();
@@ -19,7 +19,7 @@ describe("HandlerBindingInvoker deterministic closure", () => {
     });
     const args = {
       source: { bindingSpec: "example.local@1", location: "app://handlers" },
-      ref: "echo",
+      selector: "echo",
     };
     const compiled = invoker.compileBinding(args);
     remove();
@@ -29,6 +29,6 @@ describe("HandlerBindingInvoker deterministic closure", () => {
     await expect(single(invocation.outputs)).resolves.toBe("native");
 
     const dynamic = invoker.invokeBinding<string, string>(args);
-    await expect(single(dynamic.outputs)).rejects.toMatchObject({ code: "ERR_REF_NOT_FOUND" });
+    await expect(single(dynamic.outputs)).rejects.toMatchObject({ code: "ERR_SELECTOR_NOT_FOUND" });
   });
 });

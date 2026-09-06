@@ -446,7 +446,7 @@ export class OperationInvoker {
     if ((resolved.binding.inputTransform || resolved.binding.outputTransform) && !this.transformEvaluator) {
       throw new InvocationError(ERR_TRANSFORM_ERROR);
     }
-    if (!this.availableBindingSpecs().has(resolved.source.bindingSpec)) {
+    if (!this.availableBindingSpecs(iface, resolved.opKey).has(resolved.source.bindingSpec)) {
       throw new NoInvokerError(resolved.source.bindingSpec);
     }
 
@@ -485,7 +485,7 @@ export class OperationInvoker {
             ? { content: resolved.source.content }
             : {}),
         },
-        ref: resolved.binding.ref ?? "",
+        selector: resolved.binding.selector ?? "",
         binding: resolved.binding,
         inputSchema: resolved.op.input ?? undefined,
         interface: iface,
@@ -552,7 +552,7 @@ export class OperationInvoker {
           ? { content: prepared.source.content }
           : {}),
       },
-      ref: prepared.binding.ref ?? "",
+      selector: prepared.binding.selector ?? "",
       binding: prepared.binding,
       inputSchema: prepared.op.input ?? undefined,
       interface: prepared.iface,
@@ -579,7 +579,7 @@ export class OperationInvoker {
       invokedAs: prepared.signature.key,
       bindingKey: prepared.bindingKey,
       bindingSpec: prepared.source.bindingSpec,
-      ref: prepared.binding.ref ?? "",
+      selector: prepared.binding.selector ?? "",
       target: "",
     };
 
@@ -646,7 +646,7 @@ export class OperationInvoker {
           ? { content: prepared.source.content }
           : {}),
       },
-      ref: prepared.binding.ref ?? "",
+      selector: prepared.binding.selector ?? "",
       binding: prepared.binding,
       inputSchema: prepared.op.input ?? undefined,
       interface: prepared.iface,

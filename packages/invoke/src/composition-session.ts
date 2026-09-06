@@ -56,7 +56,7 @@ export interface InspectedRealization {
   readonly bindingKey: string;
   readonly sourceKey: string;
   readonly bindingSpec: string;
-  readonly ref: string;
+  readonly selector: string;
   readonly evidence: ContractEvidence;
 }
 
@@ -213,7 +213,7 @@ function inspected(eligible: EligibleRealization): InspectedRealization {
     bindingKey: eligible.descriptor.bindingKey,
     sourceKey: eligible.descriptor.sourceKey,
     bindingSpec: eligible.descriptor.bindingSpec,
-    ref: eligible.descriptor.ref,
+    selector: eligible.descriptor.selector,
     evidence: eligible.evidence,
   });
 }

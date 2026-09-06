@@ -1,10 +1,10 @@
-import type { BindingSpecInfo, OBInterface } from "@openbindings/core";
-import { DependencyNotFoundError } from "@openbindings/core";
+import type { BindingSpecInfo, BindingSpecVerdict, OBInterface } from "@openbindings/core";
+import { checkBindingSpecs, DependencyNotFoundError } from "@openbindings/core";
 import { describe, expect, it } from "vitest";
 import {
   CONTEXT_REQUIRED,
   ERR_CANCELLED,
-  ERR_REF_NOT_FOUND,
+  ERR_SELECTOR_NOT_FOUND,
   ERR_RUNTIME,
 } from "./errcodes.js";
 import { HandlerBindingInvoker } from "./handler-binding-invoker.js";
@@ -67,8 +67,8 @@ const CREATION = unsafeDependencySignature<CreateInput, CreateOutput>("creation"
 
 function providerInterface(
   bindingSpec: string,
-  bindings: Record<string, { source: string; ref: string }> = {
-    primary: { source: "service", ref: "create" },
+  bindings: Record<string, { source: string; selector: string }> = {
+    primary: { source: "service", selector: "create" },
   },
 ): OBInterface {
   return {
@@ -109,7 +109,7 @@ function localProvider(
   const binding = new HandlerBindingInvoker({ bindingSpec: LOCAL_SPEC });
   binding.register<CreateInput, CreateOutput>({
     location: LOCAL_LOCATION,
-    ref: "create",
+    selector: "create",
     prepare: () => options?.requirements ?? null,
     handler: async handle => {
       for await (const input of handle.inputs()) {
@@ -135,6 +135,10 @@ class TransportLikeInvoker implements BindingInvoker {
 
   bindingSpecs(): BindingSpecInfo[] {
     return [{ bindingSpec: REMOTE_SPEC }];
+  }
+
+  checkBindingSpecs(bindingSpecs: readonly string[]): BindingSpecVerdict[] {
+    return checkBindingSpecs(bindingSpecs, this.bindingSpecs());
   }
 
   invokeBinding<I = unknown, O = unknown>(
@@ -217,9 +221,9 @@ describe("dependency matching", () => {
 
   it("filters each concrete binding by the dependency and installed invokers", async () => {
     const iface = providerInterface(LOCAL_SPEC, {
-      allowed: { source: "service", ref: "create" },
-      unsupported: { source: "remote", ref: "create" },
-      disallowed: { source: "other", ref: "create" },
+      allowed: { source: "service", selector: "create" },
+      unsupported: { source: "remote", selector: "create" },
+      disallowed: { source: "other", selector: "create" },
     });
     iface.sources!.remote = {
       bindingSpec: REMOTE_SPEC,
@@ -232,7 +236,7 @@ describe("dependency matching", () => {
     const handler = new HandlerBindingInvoker({ bindingSpec: LOCAL_SPEC });
     handler.register({
       location: LOCAL_LOCATION,
-      ref: "create",
+      selector: "create",
       handler: handle => handle.closeOutput(),
     });
 
@@ -260,7 +264,7 @@ describe("dependency matching", () => {
     const handler = new HandlerBindingInvoker({ bindingSpec: LOCAL_SPEC });
     handler.register({
       location: LOCAL_LOCATION,
-      ref: "create",
+      selector: "create",
       handler: handle => handle.closeOutput(),
     });
 
@@ -278,18 +282,18 @@ describe("dependency matching", () => {
 
   it("returns one match per concrete binding and treats an equal top rank as ambiguous", async () => {
     const iface = providerInterface(LOCAL_SPEC, {
-      first: { source: "service", ref: "first" },
-      second: { source: "service", ref: "second" },
+      first: { source: "service", selector: "first" },
+      second: { source: "service", selector: "second" },
     });
     const handler = new HandlerBindingInvoker({ bindingSpec: LOCAL_SPEC });
-    for (const ref of ["first", "second"]) {
+    for (const selector of ["first", "second"]) {
       handler.register<CreateInput, CreateOutput>({
         location: LOCAL_LOCATION,
-        ref,
+        selector,
         handler: async handle => {
           for await (const input of handle.inputs()) {
             await handle.closeInput();
-            await handle.emitOutput({ id: `${ref}:${input.title}` });
+            await handle.emitOutput({ id: `${selector}:${input.title}` });
             handle.closeOutput();
             return;
           }
@@ -346,7 +350,7 @@ describe("dependency matching", () => {
     expect(result.status).toBe("available");
     if (result.status !== "available") return;
 
-    provider.interface.bindings!["primary"]!.ref = "missing";
+    provider.interface.bindings!["primary"]!.selector = "missing";
     provider.interface.sources!["service"]!.bindingSpec = "example.changed@9";
     provider.interface.operations.createTask!.output = { type: "integer" };
 
@@ -368,7 +372,7 @@ describe("dependency matching", () => {
     expect(result.assessments).toContainEqual(expect.objectContaining({
       code: "preparation_failed",
       bindingKey: "primary",
-      failure: { code: ERR_REF_NOT_FOUND },
+      failure: { code: ERR_SELECTOR_NOT_FOUND },
     }));
   });
 
@@ -376,7 +380,7 @@ describe("dependency matching", () => {
     const handler = new HandlerBindingInvoker({ bindingSpec: LOCAL_SPEC });
     handler.register({
       location: LOCAL_LOCATION,
-      ref: "create",
+      selector: "create",
       prepare: () => ({ target: LOCAL_LOCATION, alternatives: [] }),
       handler: handle => handle.closeOutput(),
     });
@@ -446,21 +450,21 @@ describe("in-process proof", () => {
     const handler = new HandlerBindingInvoker({ bindingSpec: LOCAL_SPEC });
     const unregister = handler.register({
       location: LOCAL_LOCATION,
-      ref: "create",
+      selector: "create",
       handler: handle => handle.closeOutput(),
     });
     expect(() => handler.register({
       location: LOCAL_LOCATION,
-      ref: "create",
+      selector: "create",
       handler: handle => handle.closeOutput(),
     })).toThrow(/already registered/);
 
     unregister();
     const invocation = handler.invokeBinding({
       source: { bindingSpec: LOCAL_SPEC, location: LOCAL_LOCATION },
-      ref: "create",
+      selector: "create",
     });
-    await expect(invocation.closed).rejects.toMatchObject({ code: ERR_REF_NOT_FOUND });
+    await expect(invocation.closed).rejects.toMatchObject({ code: ERR_SELECTOR_NOT_FOUND });
   });
 
   it("maps synchronous handler failures and does not start an already-cancelled handler", async () => {
@@ -468,7 +472,7 @@ describe("in-process proof", () => {
     const handler = new HandlerBindingInvoker({ bindingSpec: LOCAL_SPEC });
     handler.register({
       location: LOCAL_LOCATION,
-      ref: "throws",
+      selector: "throws",
       handler: () => {
         starts += 1;
         throw new Error("private implementation detail");
@@ -476,7 +480,7 @@ describe("in-process proof", () => {
     });
     const failed = handler.invokeBinding({
       source: { bindingSpec: LOCAL_SPEC, location: LOCAL_LOCATION },
-      ref: "throws",
+      selector: "throws",
     });
     await expect(failed.closed).rejects.toMatchObject({ code: ERR_RUNTIME });
 
@@ -484,7 +488,7 @@ describe("in-process proof", () => {
     controller.abort();
     const cancelled = handler.invokeBinding({
       source: { bindingSpec: LOCAL_SPEC, location: LOCAL_LOCATION },
-      ref: "throws",
+      selector: "throws",
       signal: controller.signal,
     });
     await expect(cancelled.closed).rejects.toMatchObject({ code: "ERR_CANCELLED" });
@@ -500,7 +504,7 @@ describe("in-process proof", () => {
     const handler = new HandlerBindingInvoker({ bindingSpec: LOCAL_SPEC });
     handler.register({
       location: LOCAL_LOCATION,
-      ref: "gated",
+      selector: "gated",
       prepare: args => args.context?.tenant ? null : requirements,
       handler: handle => {
         starts++;
@@ -510,7 +514,7 @@ describe("in-process proof", () => {
 
     const blocked = handler.invokeBinding({
       source: { bindingSpec: LOCAL_SPEC, location: LOCAL_LOCATION },
-      ref: "gated",
+      selector: "gated",
     });
     await expect(blocked.closed).rejects.toMatchObject({
       code: CONTEXT_REQUIRED,
@@ -520,7 +524,7 @@ describe("in-process proof", () => {
 
     const allowed = handler.invokeBinding({
       source: { bindingSpec: LOCAL_SPEC, location: LOCAL_LOCATION },
-      ref: "gated",
+      selector: "gated",
       context: { tenant: "acme" },
     });
     await expect(allowed.closed).resolves.toBeUndefined();
@@ -536,7 +540,7 @@ describe("in-process proof", () => {
     const handler = new HandlerBindingInvoker({ bindingSpec: LOCAL_SPEC });
     handler.register<CreateInput, CreateOutput>({
       location: LOCAL_LOCATION,
-      ref: "create",
+      selector: "create",
       prepare: args => args.context?.bearerToken ? null : requirements,
       handler: async handle => {
         starts++;
@@ -571,7 +575,7 @@ describe("in-process proof", () => {
     const handler = new HandlerBindingInvoker({ bindingSpec: LOCAL_SPEC });
     handler.register({
       location: LOCAL_LOCATION,
-      ref: "slow",
+      selector: "slow",
       prepare: () => pending,
       handler: handle => {
         starts++;
@@ -581,7 +585,7 @@ describe("in-process proof", () => {
     const controller = new AbortController();
     const invocation = handler.invokeBinding({
       source: { bindingSpec: LOCAL_SPEC, location: LOCAL_LOCATION },
-      ref: "slow",
+      selector: "slow",
       signal: controller.signal,
     });
 

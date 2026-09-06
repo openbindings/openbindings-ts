@@ -30,7 +30,7 @@ const BASE: Record<string, unknown> = {
     binding: {
       operation: "op",
       source: "remote",
-      ref: "target",
+      selector: "target",
       preference: 1,
       description: "binding",
       deprecated: false,
@@ -89,7 +89,7 @@ const cases: [string, unknown, boolean][] = [
   ["present null content", changed(value => { (value.sources as Record<string, unknown>).remote = { bindingSpec: "x", content: null }; }), true],
   ["binding operation required", changed(value => { delete ((value.bindings as Record<string, unknown>).binding as Record<string, unknown>).operation; }), false],
   ["binding source pattern", changed(value => { ((value.bindings as Record<string, unknown>).binding as Record<string, unknown>).source = "bad key"; }), false],
-  ["binding ref type", changed(value => { ((value.bindings as Record<string, unknown>).binding as Record<string, unknown>).ref = 1; }), false],
+  ["binding selector type", changed(value => { ((value.bindings as Record<string, unknown>).binding as Record<string, unknown>).selector = 1; }), false],
   ["binding preference integer", changed(value => { ((value.bindings as Record<string, unknown>).binding as Record<string, unknown>).preference = 1.5; }), false],
   ["binding preference safe", changed(value => { ((value.bindings as Record<string, unknown>).binding as Record<string, unknown>).preference = Number.MAX_SAFE_INTEGER + 1; }), false],
   ["binding transform reference", changed(value => { ((value.bindings as Record<string, unknown>).binding as Record<string, unknown>).inputTransform = { $ref: "elsewhere" }; }), false],

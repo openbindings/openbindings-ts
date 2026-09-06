@@ -55,7 +55,7 @@ export class LocalBindingImplementation {
     }
     return invoker.register({
       location,
-      ref: binding.binding.ref ?? "",
+      selector: binding.binding.selector ?? "",
       handler: implementation.#handler,
       ...(implementation.#prepare === undefined
         ? {}

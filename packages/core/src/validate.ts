@@ -30,7 +30,6 @@ const KNOWN_BINDING_FIELDS = new Set([
   "operation", "source", "selector", "preference", "description", "deprecated",
   "inputTransform", "outputTransform",
 ]);
-const KNOWN_DEPENDENCY_FIELDS = new Set(["operation", "bindingSpecs"]);
 const KNOWN_EXAMPLE_FIELDS = new Set(["description", "input", "output"]);
 
 // OBI-D-03 identifier pattern: every map key and operation alias must match.

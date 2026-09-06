@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import jsonata from "jsonata";
 import { prepareInterface, type OBInterface } from "@openbindings/core";
 import {
   CompositionSession,
@@ -86,7 +87,7 @@ async function createTask(
     providers: [{ provider }],
   }).resolve(CREATION);
   if (resolution.status !== "available") {
-    throw new Error(`creation dependency is ${resolution.status}`);
+    throw new Error(`creation dependency is ${resolution.status}: ${JSON.stringify(resolution)}`);
   }
   const invocation = resolution.route.invoke();
   await invocation.write(input);
@@ -114,10 +115,13 @@ describe("runtime composition — OpenAPI and local substitution", () => {
         content: OPENAPI,
       }],
     });
-		const openAPIProvider = await prepareProvider({
-			key: "tasks-api",
+    const openAPIProvider = await prepareProvider({
+      key: "tasks-api",
       interface: candidate,
-      runtime: new OperationInvoker([new OpenAPIInvoker()], { fetch }),
+      runtime: new OperationInvoker([new OpenAPIInvoker()], {
+        fetch,
+        transformEvaluator: { evaluate: (expression, data) => jsonata(expression).evaluate(data) },
+      }),
     });
     const localDocument: OBInterface = {
       openbindings: "0.2.0",
