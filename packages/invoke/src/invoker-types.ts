@@ -1,5 +1,6 @@
 import type { OBInterface, BindingEntry, JSONSchema } from "@openbindings/core";
 import type { InvokeHooks, InvokeSite, OutputDecoder, ResultClassifier, FieldRouter } from "./hooks.js";
+import type { DiagnosticCollector } from "./diagnostics.js";
 
 /** Identifies the binding source for invocation. */
 export interface InvocationSource {
@@ -103,4 +104,6 @@ export interface InvokeOptions {
   outputDecoder?: OutputDecoder;
   resultClassifier?: ResultClassifier;
   fieldRouter?: FieldRouter;
+  /** Bounded process-local validation evidence; never part of the portable terminal error. */
+  diagnostics?: DiagnosticCollector;
 }

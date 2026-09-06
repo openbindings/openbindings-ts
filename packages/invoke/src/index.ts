@@ -28,6 +28,13 @@ export {
   resolveDeliveryUnitLimit,
 } from "./invoker-types.js";
 
+export { DiagnosticCollector } from "./diagnostics.js";
+export type {
+  InvocationDiagnostic,
+  InvocationDiagnosticSnapshot,
+  ValidationPhase,
+} from "./diagnostics.js";
+
 export type {
   ContextStore,
   PlatformCallbacks,

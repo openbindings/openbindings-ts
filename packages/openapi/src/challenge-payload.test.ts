@@ -81,6 +81,27 @@ function serverChoiceDocument(openapi: string): string {
   return JSON.stringify(content);
 }
 
+function securityChoiceDocument(openapi: string): string {
+  return document(openapi, {
+    "/secured": {
+      get: {
+        security: [{ oauth: [] }, { bearer: [] }],
+        responses: { "204": { description: "ok" } },
+      },
+    },
+  }, {
+    components: {
+      securitySchemes: {
+        oauth: {
+          type: "oauth2",
+          flows: { clientCredentials: { tokenUrl: "https://auth.example/token", scopes: {} } },
+        },
+        bearer: { type: "http", scheme: "bearer" },
+      },
+    },
+  });
+}
+
 async function challenge(bindingSpec: string, content: string, selector: string, input: unknown): Promise<unknown> {
   let dispatched = false;
   const call = new OpenAPIInvoker().invokeBinding({
@@ -172,5 +193,24 @@ describe.each(LINES)("challenge payload on OpenAPI %s", (openapi, bindingSpec) =
     };
     await expect(challenge(bindingSpec, content, "#/paths/~1ping/get", undefined)).resolves.toEqual(expected);
     await expect(preflight(bindingSpec, content, "#/paths/~1ping/get")).resolves.toEqual(expected);
+  });
+
+  it("maps the client's security choice to configuration.security/index", async () => {
+    const content = securityChoiceDocument(openapi);
+    const expected = {
+      target: SERVER,
+      alternatives: [{
+        requirements: [{
+          type: "config.value",
+          point: "security",
+          path: "/index",
+          description: "select one complete declared security alternative",
+          schema: { enum: [0, 1] },
+          durable: true,
+        }],
+      }],
+    };
+    await expect(challenge(bindingSpec, content, "#/paths/~1secured/get", undefined)).resolves.toEqual(expected);
+    await expect(preflight(bindingSpec, content, "#/paths/~1secured/get")).resolves.toEqual(expected);
   });
 });

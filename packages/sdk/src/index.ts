@@ -192,9 +192,13 @@ export type {
   RawResult,
   ResultClassifier,
   InvocationErrorCode,
+  InvocationDiagnostic,
+  InvocationDiagnosticSnapshot,
+  ValidationPhase,
 } from "@openbindings/invoke";
 export {
   InvocationError,
+  DiagnosticCollector,
   InvocationImpl,
   single,
   contextRequiredError,

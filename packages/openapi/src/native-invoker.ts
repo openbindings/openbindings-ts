@@ -1,4 +1,4 @@
-import { checkBindingSpecs as checkBindingSpecSupport, type BindingSpecInfo, type BindingSpecVerdict } from "@openbindings/core";
+import { canonicalize, checkBindingSpecs as checkBindingSpecSupport, type BindingSpecInfo, type BindingSpecVerdict } from "@openbindings/core";
 import {
   CONTEXT_REQUIRED,
   InvocationError,
@@ -56,8 +56,9 @@ export interface OpenAPIInvokerOptions {
  * context requirements, lifecycle, hooks, and portable failure data.
  */
 export class OpenAPIInvoker implements BindingInvoker {
+  private static readonly MAX_SOURCE_CLIENTS = 64;
   private readonly options: Readonly<OpenAPIInvokerOptions>;
-  private readonly locationClients = new Map<string, Promise<OpenAPIClient>>();
+  private readonly sourceClients = new Map<string, Promise<OpenAPIClient>>();
 
   constructor(options: OpenAPIInvokerOptions = {}) {
     this.options = {
@@ -170,26 +171,45 @@ export class OpenAPIInvoker implements BindingInvoker {
     }
   }
 
-  private clientForPrepare(args: BindingInvocationArgs): Promise<OpenAPIClient> | undefined {
-    const key = locationClientKey(args);
+  private async clientForPrepare(args: BindingInvocationArgs): Promise<OpenAPIClient | undefined> {
+    const key = await sourceClientKey(args);
     if (key) {
-      const cached = this.locationClients.get(key);
+      const cached = this.cachedSourceClient(args, key);
       if (cached) return cached;
     }
     return Object.hasOwn(args.source, "content") ? loadClient(args, false) : undefined;
   }
 
-  private clientForRun(args: BindingInvocationArgs): Promise<OpenAPIClient> {
-    const key = locationClientKey(args);
+  private async clientForRun(args: BindingInvocationArgs): Promise<OpenAPIClient> {
+    const key = await sourceClientKey(args);
     if (!key) return loadClient(args);
-    const present = this.locationClients.get(key);
+    const present = this.cachedSourceClient(args, key);
     if (present) return present;
     const pending = loadClient(args, true);
-    this.locationClients.set(key, pending);
+    this.sourceClients.set(key, pending);
+    if (this.sourceClients.size > OpenAPIInvoker.MAX_SOURCE_CLIENTS) {
+      const oldest = this.sourceClients.keys().next().value;
+      if (oldest !== undefined && oldest !== key) this.sourceClients.delete(oldest);
+    }
     pending.catch(() => {
-      if (this.locationClients.get(key) === pending) this.locationClients.delete(key);
+      if (this.sourceClients.get(key) === pending) this.sourceClients.delete(key);
     });
     return pending;
+  }
+
+  private cachedSourceClient(
+    args: BindingInvocationArgs,
+    key: string,
+  ): Promise<OpenAPIClient> | undefined {
+    const exact = this.sourceClients.get(key);
+    if (Object.hasOwn(args.source, "content") || !args.source.location) return exact;
+    const prefix = sourceLocationClientPrefix(args);
+    const keys = [...this.sourceClients.keys()];
+    for (let index = keys.length - 1; index >= 0; index--) {
+      const candidate = keys[index]!;
+      if (candidate.startsWith(prefix)) return this.sourceClients.get(candidate);
+    }
+    return undefined;
   }
 }
 
@@ -215,10 +235,27 @@ async function loadClient(args: BindingInvocationArgs, allowDocumentFetch = true
   });
 }
 
-function locationClientKey(args: BindingInvocationArgs): string | undefined {
+async function sourceClientKey(args: BindingInvocationArgs): Promise<string | undefined> {
+  if (Object.hasOwn(args.source, "content")) {
+    const content = canonicalize(args.source.content);
+    return content === undefined
+      ? undefined
+      : `${sourceLocationClientPrefix(args)}${await sha256(content)}`;
+  }
   return args.source.location
-    ? `${args.source.bindingSpec}\u0000${args.source.location}`
+    ? `${sourceLocationClientPrefix(args)}location-only`
     : undefined;
+}
+
+async function sha256(value: string): Promise<string> {
+  const subtle = globalThis.crypto?.subtle;
+  if (!subtle) throw new Error("OpenAPI source caching requires Web Crypto SHA-256");
+  const digest = await subtle.digest("SHA-256", new TextEncoder().encode(value));
+  return [...new Uint8Array(digest)].map(byte => byte.toString(16).padStart(2, "0")).join("");
+}
+
+function sourceLocationClientPrefix(args: BindingInvocationArgs): string {
+  return `${args.source.bindingSpec}\u0000location\u0000${args.source.location ?? ""}\u0000content\u0000`;
 }
 
 function assertRegisteredBindingSpec(bindingSpec: string): void {
@@ -522,10 +559,13 @@ function contextRequirement(requirement: OpenAPIConfigurationRequirement): Conte
     : requirement.name === "securityAlternative" ? "security"
       : requirement.name === "parameterConverter" ? "parameterConversion"
         : requirement.name;
+  const path = requirement.kind === "option" && requirement.name === "securityAlternative"
+    ? "/index"
+    : requirement.path;
   return {
     type: "config.value",
     point,
-    path: requirement.path,
+    path,
     durable: true,
     ...(requirement.allowedValues ? { schema: { enum: [...requirement.allowedValues] } } : {}),
     ...(requirement.description ? { description: requirement.description } : {}),

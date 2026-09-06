@@ -61,6 +61,9 @@ the staged `0.2.0` versions are registry-visible before the release.
 - **Exhaustiveness-qualified synthesis accounting** through `CoverageSynthesizer`, pairing a creation-time-sound OBI with durable dispositions and an explicit claim about whether the upstream interaction inventory is complete
 - **`OperationInvoker`** for routing operations to binding invokers by binding-spec identifier, with transform support
 - **Explicit provider composition** for resolving named OBI dependencies through a versioned policy into retained, SDK-identified routes
+- **Bounded process-local validation diagnostics** that identify contract
+  locations without placing rejected values, credentials, transport evidence,
+  or validator prose in portable invocation errors
 - **Context contracts** for caller-supplied or resolved invocation context, with requirement-scoped provisioning and no assumption that non-credential fields are public
 
 The SDK defines the contracts that binding invokers implement but does not contain any binding-spec-specific logic itself. Binding support is added by installing binding packages.
@@ -124,6 +127,18 @@ for await (const item of call.outputs) {
   console.log(item);
 }
 ```
+
+Repeated provider use should prepare one immutable interface revision and let
+the SDK index exact realization routes once. `runtime.prepareProvider(...)`
+accepts either an interface document or an already prepared interface and uses
+the same cohesive provider registry; binding identifiers remain exact opaque
+capability tokens.
+
+Interactive hosts can attach a `DiagnosticCollector` through the invocation's
+`diagnostics` option when explaining `ERR_OPERATION_VALIDATION_FAILED`. The
+bounded snapshot contains phase and contract-location evidence only. It never
+changes the portable `InvocationError`, and rejected values, credentials,
+transport facts, and validator prose do not cross that boundary.
 
 For compile-time-typed operations, run `ob codegen <obi> --lang typescript` to generate an `OperationSignatures` namespace, one typed `OperationSignature<I, O>` per operation, that you pass to this same `invoke` for fully-typed input and output:
 

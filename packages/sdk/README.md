@@ -64,6 +64,12 @@ for await (const item of call.outputs) {
 }
 ```
 
+`runtime.prepareProvider(key, interfaceOrPreparedInterface)` indexes one
+immutable provider revision through the same registered provider set. For
+human-facing validation explanations, pass a `DiagnosticCollector` in invoke
+options; its bounded phase/pointer/keyword records stay process-local and never
+enter portable `InvocationError.data`.
+
 For compile-time-typed operations, run `ob codegen <obi> --lang typescript` to generate an `OperationSignatures` namespace, one typed `OperationSignature<I, O>` per operation, that you pass to this same `invoke` for fully-typed input and output. (`ob` is the OpenBindings CLI, shipped separately: `brew install --cask openbindings/tap/ob` or `go install github.com/openbindings/ob/cmd/ob@latest`. The dynamic `operationSignature("...")` path needs no codegen.)
 
 See the [monorepo README](https://github.com/openbindings/openbindings-ts#readme) for full documentation.

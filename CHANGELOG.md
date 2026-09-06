@@ -4,6 +4,18 @@
 
 ### Changed
 
+- **The SDK can now prepare immutable provider revisions and expose bounded,
+  process-local operation-validation diagnostics.** Runtime capability checks
+  compare exact opaque binding identifiers, while optional collectors identify
+  only validation phase and safe contract locations. Portable errors remain
+  unchanged and rejected values, protocol facts, credentials, and validator
+  prose never enter the diagnostic records.
+
+- **`@openbindings/openapi` now reuses bounded, content-addressed native client
+  revisions.** Identical content shares one executable analysis, changed inline
+  content at one location creates a new revision, and advisory no-fetch clients
+  never poison the executable cache.
+
 - **`@openbindings/openapi`: the `requestMedia` and `propertyMedia`
   CONTEXT_REQUIRED challenges are the standalone client's own payloads, passed
   through unchanged.** On every 3.x line the adapter re-minted both challenges
