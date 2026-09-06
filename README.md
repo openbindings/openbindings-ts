@@ -61,6 +61,9 @@ the staged `0.2.0` versions are registry-visible before the release.
 - **Exhaustiveness-qualified synthesis accounting** through `CoverageSynthesizer`, pairing a creation-time-sound OBI with durable dispositions and an explicit claim about whether the upstream interaction inventory is complete
 - **`OperationInvoker`** for routing operations to binding invokers by binding-spec identifier, with transform support
 - **Explicit provider composition** for resolving named OBI dependencies through a versioned policy into retained, SDK-identified routes
+- **Bounded process-local validation diagnostics** that identify contract
+  locations without placing rejected values, credentials, transport evidence,
+  or validator prose in portable invocation errors
 - **Context contracts** for caller-supplied or resolved invocation context, with requirement-scoped provisioning and no assumption that non-credential fields are public
 
 The SDK defines the contracts that binding invokers implement but does not contain any binding-spec-specific logic itself. Binding support is added by installing binding packages.
@@ -106,17 +109,29 @@ for (const [name, op] of Object.entries(iface.operations)) {
 
 ### Resolve and invoke operations
 
+```sh
+npm install @openbindings/sdk @openbindings/openapi jsonata@2.1.1
+```
+
 ```typescript
+import jsonata from "jsonata";
 import { OpenBindingsRuntime } from "@openbindings/sdk";
-import { OpenAPIAdapter } from "@openbindings/openapi";
+import { OpenAPIAdapter, decimalParameterConversion } from "@openbindings/openapi";
 
 // One explicit adapter supplies invocation, synthesis, and source inspection.
-const runtime = new OpenBindingsRuntime({ providers: [new OpenAPIAdapter()] });
+const runtime = new OpenBindingsRuntime({
+  providers: [new OpenAPIAdapter({ parameterConversion: decimalParameterConversion })],
+  // Evaluate the parameter/body mappings produced by synthesis.
+  transformEvaluator: {
+    evaluate: (expression, data) => jsonata(expression).evaluate(data),
+  },
+});
 
 // Resolve an OBI from a URL (well-known discovery, with synthesis as the
 // fallback when the target only exposes a raw spec such as an OpenAPI doc).
 const { iface } = await runtime.resolve("https://api.example.com");
 
+// Numeric query values use the decimal conversion policy selected above.
 // Invoke an operation — one handle shape for every cardinality
 const call = runtime.invoke(iface, "listItems");
 await call.write({ limit: 10 });
@@ -124,6 +139,18 @@ for await (const item of call.outputs) {
   console.log(item);
 }
 ```
+
+Repeated provider use should prepare one immutable interface revision and let
+the SDK index exact realization routes once. `runtime.prepareProvider(...)`
+accepts either an interface document or an already prepared interface and uses
+the same cohesive provider registry; binding identifiers remain exact opaque
+capability tokens.
+
+Interactive hosts can attach a `DiagnosticCollector` through the invocation's
+`diagnostics` option when explaining `ERR_OPERATION_VALIDATION_FAILED`. The
+bounded snapshot contains phase and contract-location evidence only. It never
+changes the portable `InvocationError`, and rejected values, credentials,
+transport facts, and validator prose do not cross that boundary.
 
 For compile-time-typed operations, run `ob codegen <obi> --lang typescript` to generate an `OperationSignatures` namespace, one typed `OperationSignature<I, O>` per operation, that you pass to this same `invoke` for fully-typed input and output:
 

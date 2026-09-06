@@ -8,6 +8,7 @@ const ADAPTER_FILES = new Set([
   "input-routes-v2.ts",
   "invoker.ts",
   "native-invoker.ts",
+  "parameter-policy.ts", // opt-in scalar policy, not another wire serializer
   "platform.ts",
   "swagger20-synthesis.ts",
   "synthesizer.ts",

@@ -71,6 +71,8 @@ describe("OpenBindingsRuntime", () => {
   it("composes invocation, synthesis, coverage, and inspection from one provider", async () => {
     const runtime = new OpenBindingsRuntime({ providers: [new TestProvider()] });
     expect(runtime.bindingSpecs()).toEqual([{ bindingSpec, description: "test" }]);
+    expect(runtime.supportsBindingSpec(bindingSpec)).toBe(true);
+    expect(runtime.supportsBindingSpec("example.other@1")).toBe(false);
     await expect(runtime.inspectSource({ bindingSpec })).resolves.toEqual({
       targets: [{ selector: "target", operationKey: "ping" }],
       exhaustive: true,
@@ -81,6 +83,12 @@ describe("OpenBindingsRuntime", () => {
     await expect(runtime.prepareOperation(iface(), "ping")).resolves.toBeNull();
     expect(await single(runtime.invoke(iface(), "ping").outputs)).toEqual({ ok: true });
     expect(await single(runtime.invoke(iface(), { key: "ping" }).outputs)).toEqual({ ok: true });
+
+    const provider = await runtime.prepareProvider("fixture", iface());
+    expect(provider.realizationsForOperation("ping")).toMatchObject([
+      { bindingKey: "ping.binding", supported: true },
+    ]);
+    expect(await single(provider.closeRealization("ping.binding").invoke().outputs)).toEqual({ ok: true });
   });
 
   it("resolves a non-OBI target through the same registered provider", async () => {

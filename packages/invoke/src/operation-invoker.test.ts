@@ -36,6 +36,7 @@ import {
   ERR_TRANSFORM_ERROR,
   ERR_OPERATION_VALIDATION_FAILED,
 } from "./errcodes.js";
+import { DiagnosticCollector } from "./diagnostics.js";
 
 // ---------------------------------------------------------------------------
 // Mock binding invoker (the design doc's reference mock, selector-dispatched)
@@ -558,6 +559,49 @@ describe("cardinalities", () => {
 // ---------------------------------------------------------------------------
 
 describe("OBI-T-07 — input validation", () => {
+
+  it("redacts data-derived member names from diagnostic pointers", () => {
+    const diagnostics = new DiagnosticCollector();
+    diagnostics.recordValidation("input", "create", "create.binding", [{
+      path: "/orders/17/customer-secret",
+      schemaPath: "/$defs/list/properties/orders/items/patternProperties/^.+$/type",
+      message: "validator prose containing a rejected value",
+    }]);
+    expect(diagnostics.snapshot().records).toEqual([
+      expect.objectContaining({ instancePointer: "/orders/*/*" }),
+    ]);
+    expect(JSON.stringify(diagnostics.snapshot())).not.toContain("customer-secret");
+    expect(JSON.stringify(diagnostics.snapshot())).not.toContain("rejected value");
+  });
+
+  it("collects bounded process-local evidence while keeping the terminal code-only", async () => {
+    const diagnostics = new DiagnosticCollector({ limit: 1 });
+    const call = makeInvoker().invoke(
+      testInterface(),
+      operationSignature<Record<string, unknown>, unknown>("getUser"),
+      { diagnostics },
+    );
+
+    let error: unknown;
+    try {
+      await call.write({});
+    } catch (caught) {
+      error = caught;
+    }
+    expect(error).toMatchObject({ code: ERR_OPERATION_VALIDATION_FAILED });
+    expect((error as InvocationError).data).toBeUndefined();
+    expect(diagnostics.snapshot()).toMatchObject({
+      truncated: false,
+      records: [{
+        phase: "input",
+        operationKey: "getUser",
+        bindingKey: "getUser.main",
+        instancePointer: "",
+        schemaPointer: "/schemas/UserInput/required",
+        keyword: "required",
+      }],
+    });
+  });
   it("an invalid write rejects AND terminates; the binding never sees the message", async () => {
     const mock = new MockBindingInvoker();
     const op = makeInvoker(mock);
@@ -647,6 +691,27 @@ describe("OBI-T-07 — input validation", () => {
 // ---------------------------------------------------------------------------
 
 describe("OBI-T-08 — output validation", () => {
+
+  it("collects output evidence without exposing the rejected value", async () => {
+    const diagnostics = new DiagnosticCollector();
+    const call = makeInvoker().invoke(
+      testInterface(),
+      operationSignature<unknown, unknown>("watchTyped"),
+      { diagnostics },
+    );
+    const caught = await collect(call.outputs).catch(error => error);
+    expect(caught).toMatchObject({ code: ERR_OPERATION_VALIDATION_FAILED });
+    expect((caught as InvocationError).data).toBeUndefined();
+    const snapshot = diagnostics.snapshot();
+    expect(snapshot.records).toEqual([
+      expect.objectContaining({
+        phase: "output",
+        operationKey: "watchTyped",
+        bindingKey: "watchTyped.main",
+      }),
+    ]);
+    expect(JSON.stringify(snapshot)).not.toContain("not-a-number");
+  });
   it("an invalid output is NOT emitted; the invocation terminates", async () => {
     const op = makeInvoker();
     const call = op.invoke(testInterface(), operationSignature("getUser"), {

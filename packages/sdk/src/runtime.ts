@@ -1,6 +1,7 @@
-import type { BindingSpecInfo, BindingSpecVerdict, OBInterface, Source } from "@openbindings/core";
+import type { BindingSpecInfo, BindingSpecVerdict, OBInterface, PreparedInterface, Source } from "@openbindings/core";
 import {
   OperationInvoker,
+  prepareProvider,
   operationSignature,
   type BindingInvoker,
   type ContextRequiredDetails,
@@ -8,6 +9,7 @@ import {
   type InvokeOptions,
   type OperationInvokerOptions,
   type OperationSignature,
+  type PreparedProvider,
 } from "@openbindings/invoke";
 import {
   combineSourceInspectors,
@@ -66,6 +68,28 @@ export class OpenBindingsRuntime {
   /** Authoritatively check exact identifiers against the provider set. */
   checkBindingSpecs(bindingSpecs: readonly string[]): BindingSpecVerdict[] {
     return this.operationInvoker.checkBindingSpecs(bindingSpecs);
+  }
+
+  /** Exact, opaque capability check; no identifier syntax is interpreted. */
+  supportsBindingSpec(bindingSpec: string): boolean {
+    return this.checkBindingSpecs([bindingSpec])[0]?.supported === true;
+  }
+
+  /**
+   * Prepare one immutable provider revision using this runtime's exact
+   * registered capabilities. Realizations remain lazy until selected.
+   */
+  prepareProvider(
+    key: string,
+    iface: OBInterface | PreparedInterface,
+    options?: { readonly label?: string },
+  ): Promise<PreparedProvider> {
+    return prepareProvider({
+      key,
+      interface: iface,
+      runtime: this.operationInvoker,
+      ...(options?.label !== undefined ? { label: options.label } : {}),
+    });
   }
 
   /** Resolve an OBI directly, through discovery, or through synthesis. */

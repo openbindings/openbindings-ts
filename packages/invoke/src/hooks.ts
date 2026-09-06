@@ -3,7 +3,6 @@ import {
   ERR_EXECUTION_FAILED,
   ERR_RUNTIME,
 } from "./errcodes.js";
-import { familyName } from "./helpers.js";
 import type { JSONSchema } from "@openbindings/core";
 
 // The consumer hook surface: specification + configuration = complete
@@ -16,7 +15,7 @@ import type { JSONSchema } from "@openbindings/core";
 // questions identically.
 //
 // Generic SHAPE, protocol-specific HANDLING: one set of signatures serves
-// every format; the callback body switches on the site (siteFamilyName,
+// every format; the callback body switches on the site (exact bindingSpec,
 // operation, target). Hooks are process-local — they never ride documents,
 // context, or the wire; each hop of a multi-hop composition configures
 // itself.
@@ -38,16 +37,6 @@ export interface InvokeSite {
   bindingSpec: string;
   selector: string;
   target: string;
-}
-
-/**
- * Bare family name of a site's binding specification
- * ("openbindings.openapi-3.1@1" → "openapi"; a pre-promotion draft token like
- * "graphql" passes through), so hook bodies never string-match
- * identifiers. Mirrors the Go SDK's InvokeSite.FamilyName.
- */
-export function siteFamilyName(site: InvokeSite): string {
-  return familyName(site.bindingSpec);
 }
 
 /**

@@ -355,6 +355,20 @@ export class CompositionSession {
         providerKey: provider.providerKey,
         preference: provider.preference,
       })));
+      if (!providerSelection || !["selected", "ambiguous", "unavailable"].includes(providerSelection.status)) {
+        throw new Error("composition policy returned an invalid provider selection status");
+      }
+      if (providerSelection.status === "selected" && !eligible.some(candidate => candidate.providerKey === providerSelection.provider?.providerKey)) {
+        throw new Error("composition policy selected an unknown provider");
+      }
+      if (providerSelection.status === "ambiguous") {
+        const choices = providerSelection.providers;
+        if (!Array.isArray(choices) || choices.length < 2
+          || new Set(choices.map((choice: { providerKey?: string } | null) => choice?.providerKey)).size !== choices.length
+          || choices.some((choice: { providerKey?: string } | null) => !eligible.some(candidate => candidate.providerKey === choice?.providerKey))) {
+          throw new Error("composition policy returned invalid provider ambiguity");
+        }
+      }
       if (providerSelection.status === "unavailable") continue;
       if (providerSelection.status === "ambiguous") {
         const providerKeys = providerSelection.providers.map(provider => provider.providerKey);
@@ -382,6 +396,20 @@ export class CompositionSession {
       descriptors,
       selectedProvider.provider.selectRealization,
     );
+    if (!realizationSelection || !["selected", "ambiguous", "unavailable"].includes(realizationSelection.status)) {
+      throw new Error("composition policy returned an invalid realization selection status");
+    }
+    if (realizationSelection.status === "selected" && !selectedProvider.realizations.some(candidate => candidate.descriptor.bindingKey === realizationSelection.realization?.bindingKey)) {
+      throw new Error("composition policy selected an unknown realization");
+    }
+    if (realizationSelection.status === "ambiguous") {
+      const choices = realizationSelection.realizations;
+      if (!Array.isArray(choices) || choices.length < 2
+        || new Set(choices.map((choice: { bindingKey?: string } | null) => choice?.bindingKey)).size !== choices.length
+        || choices.some((choice: { bindingKey?: string } | null) => !selectedProvider.realizations.some(candidate => candidate.descriptor.bindingKey === choice?.bindingKey))) {
+        throw new Error("composition policy returned invalid realization ambiguity");
+      }
+    }
     if (realizationSelection.status === "ambiguous") {
       const keys = new Set(realizationSelection.realizations.map(item => item.bindingKey));
       return Object.freeze({

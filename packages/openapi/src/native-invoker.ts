@@ -1,4 +1,4 @@
-import { checkBindingSpecs as checkBindingSpecSupport, type BindingSpecInfo, type BindingSpecVerdict } from "@openbindings/core";
+import { canonicalize, checkBindingSpecs as checkBindingSpecSupport, type BindingSpecInfo, type BindingSpecVerdict } from "@openbindings/core";
 import {
   CONTEXT_REQUIRED,
   InvocationError,
@@ -56,8 +56,9 @@ export interface OpenAPIInvokerOptions {
  * context requirements, lifecycle, hooks, and portable failure data.
  */
 export class OpenAPIInvoker implements BindingInvoker {
+  private static readonly MAX_SOURCE_CLIENTS = 64;
   private readonly options: Readonly<OpenAPIInvokerOptions>;
-  private readonly locationClients = new Map<string, Promise<OpenAPIClient>>();
+  private readonly sourceClients = new Map<string, Promise<OpenAPIClient>>();
 
   constructor(options: OpenAPIInvokerOptions = {}) {
     this.options = {
@@ -92,7 +93,7 @@ export class OpenAPIInvoker implements BindingInvoker {
       const client = await this.clientForPrepare(args);
       if (!client) return null;
       assertEdition(args.source.bindingSpec, client.edition);
-      const base = callOptions(args, this.options);
+      const base = await callOptions(args, this.options, client);
       const input = configuredInput(args.context);
       const credentials = await selectedCredentials(client, args.selector, input, base);
       const options = { ...base, auth: { ...(base.auth ?? {}), ...authFromContext(args.context, credentials) } };
@@ -111,7 +112,7 @@ export class OpenAPIInvoker implements BindingInvoker {
     assertRegisteredBindingSpec(args.source.bindingSpec);
     const client = await this.clientForRun(args);
     assertEdition(args.source.bindingSpec, client.edition);
-    const base = { ...callOptions(args, this.options), signal: outer.signal };
+    const base = { ...await callOptions(args, this.options, client), signal: outer.signal };
     const configured = configuredInput(args.context);
     const credentials = await selectedCredentials(client, args.selector, configured, base);
     const options = { ...base, auth: { ...(base.auth ?? {}), ...authFromContext(args.context, credentials) } };
@@ -170,26 +171,37 @@ export class OpenAPIInvoker implements BindingInvoker {
     }
   }
 
-  private clientForPrepare(args: BindingInvocationArgs): Promise<OpenAPIClient> | undefined {
-    const key = locationClientKey(args);
+  private async clientForPrepare(args: BindingInvocationArgs): Promise<OpenAPIClient | undefined> {
+    const key = await sourceClientKey(args);
     if (key) {
-      const cached = this.locationClients.get(key);
+      const cached = this.cachedSourceClient(args, key);
       if (cached) return cached;
     }
     return Object.hasOwn(args.source, "content") ? loadClient(args, false) : undefined;
   }
 
-  private clientForRun(args: BindingInvocationArgs): Promise<OpenAPIClient> {
-    const key = locationClientKey(args);
+  private async clientForRun(args: BindingInvocationArgs): Promise<OpenAPIClient> {
+    const key = await sourceClientKey(args);
     if (!key) return loadClient(args);
-    const present = this.locationClients.get(key);
+    const present = this.cachedSourceClient(args, key);
     if (present) return present;
     const pending = loadClient(args, true);
-    this.locationClients.set(key, pending);
+    this.sourceClients.set(key, pending);
+    if (this.sourceClients.size > OpenAPIInvoker.MAX_SOURCE_CLIENTS) {
+      const oldest = this.sourceClients.keys().next().value;
+      if (oldest !== undefined && oldest !== key) this.sourceClients.delete(oldest);
+    }
     pending.catch(() => {
-      if (this.locationClients.get(key) === pending) this.locationClients.delete(key);
+      if (this.sourceClients.get(key) === pending) this.sourceClients.delete(key);
     });
     return pending;
+  }
+
+  private cachedSourceClient(
+    _args: BindingInvocationArgs,
+    key: string,
+  ): Promise<OpenAPIClient> | undefined {
+    return this.sourceClients.get(key);
   }
 }
 
@@ -215,10 +227,58 @@ async function loadClient(args: BindingInvocationArgs, allowDocumentFetch = true
   });
 }
 
-function locationClientKey(args: BindingInvocationArgs): string | undefined {
-  return args.source.location
-    ? `${args.source.bindingSpec}\u0000${args.source.location}`
-    : undefined;
+async function sourceClientKey(args: BindingInvocationArgs): Promise<string | undefined> {
+  if (Object.hasOwn(args.source, "content")) {
+    if (!selfContainedCacheSource(args.source.content)) return undefined;
+    const content = canonicalize(args.source.content);
+    if (content === undefined) return undefined;
+    const digest = await sha256(content);
+    return digest === undefined
+      ? undefined
+      : `${sourceLocationClientPrefix(args)}${digest}`;
+  }
+  return undefined;
+}
+
+// Cache only entry documents whose complete resolution scope is covered by
+// the digest. This conservative optimization does not parse YAML or resolve
+// references; the native loader remains the authority for both.
+function selfContainedCacheSource(content: unknown): boolean {
+  let document = content;
+  if (typeof document === "string") {
+    try { document = JSON.parse(document) as unknown; } catch { return false; }
+  }
+  if (!record(document)) return false;
+  const seen = new Set<object>();
+  const pending: unknown[] = [document];
+  while (pending.length > 0) {
+    const value = pending.pop();
+    if (value === null || typeof value !== "object") continue;
+    if (seen.has(value)) return false;
+    seen.add(value);
+    for (const [key, member] of Object.entries(value)) {
+      if (key === "$id" || key === "$self") return false;
+      if ((key === "$ref" || key === "$dynamicRef")
+        && (typeof member !== "string" || !member.startsWith("#"))) return false;
+      pending.push(member);
+    }
+  }
+  return true;
+}
+
+async function sha256(value: string): Promise<string | undefined> {
+  const subtle = globalThis.crypto?.subtle;
+  if (!subtle) return undefined;
+  try {
+    const digest = await subtle.digest("SHA-256", new TextEncoder().encode(value));
+    return [...new Uint8Array(digest)].map(byte => byte.toString(16).padStart(2, "0")).join("");
+  } catch {
+    return undefined;
+  }
+}
+
+function sourceLocationClientPrefix(args: BindingInvocationArgs): string {
+  return `${args.source.bindingSpec}\u0000location\u0000${args.source.location ?? ""}\u0000content\u0000`;
 }
 
 function assertRegisteredBindingSpec(bindingSpec: string): void {
@@ -338,9 +398,13 @@ function base64(bytes: Uint8Array): string {
   return btoa(binary);
 }
 
-function callOptions(args: BindingInvocationArgs, configured: Readonly<OpenAPIInvokerOptions>): OpenAPICallOptions {
+async function callOptions(
+  args: BindingInvocationArgs,
+  configured: Readonly<OpenAPIInvokerOptions>,
+  client: OpenAPIClient,
+): Promise<OpenAPICallOptions> {
   const configuration = contextConfiguration(args.context);
-  const server = serverSelection(configuration.server);
+  const server = await serverSelection(configuration.server, client, args.selector);
   if (Object.hasOwn(configuration, "server") && server === undefined) throw new InvocationError("ERR_REFUSED");
   const selectedSecurity = securityAlternative(configuration.security);
   if (Object.hasOwn(configuration, "security") && selectedSecurity === undefined) throw new InvocationError("ERR_REFUSED");
@@ -375,21 +439,50 @@ function callOptions(args: BindingInvocationArgs, configured: Readonly<OpenAPIIn
   };
 }
 
-function serverSelection(value: unknown): OpenAPIServerSelection | undefined {
+async function serverSelection(
+  value: unknown,
+  client: OpenAPIClient,
+  selector: string,
+): Promise<OpenAPIServerSelection | undefined> {
   if (typeof value === "string") return { url: value };
   const source = record(value);
   if (!source) return undefined;
-  if (typeof source.baseUrl === "string") return { url: source.baseUrl };
-  const variables = stringRecord(source.variables);
-  if (Number.isSafeInteger(source.index)) {
+  const keys = Object.keys(source);
+  const variablesPresent = Object.hasOwn(source, "variables");
+  const variables = variablesPresent ? stringRecord(source.variables) : undefined;
+  if (variablesPresent && variables === undefined) return undefined;
+  if (typeof source.baseUrl === "string" && source.baseUrl !== "") {
+    return keys.length === 1 ? { url: source.baseUrl } : undefined;
+  }
+  if (typeof source.url === "string" && source.url !== "") {
+    if (keys.length > 2 || (keys.length === 2 && !variablesPresent)) return undefined;
+    let operation: Readonly<OpenAPIOperationAnalysis>;
+    try {
+      operation = await client.analyzeOperation({ ref: selector });
+    } catch {
+      return undefined;
+    }
+    const selected = operation.servers.find(server => server.usable && server.url === source.url);
+    return selected
+      ? { index: selected.index, ...(variables ? { variables } : {}) }
+      : undefined;
+  }
+  if (Number.isSafeInteger(source.index) && (source.index as number) >= 0) {
+    if (keys.length > 2 || (keys.length === 2 && !variablesPresent)) return undefined;
     return { index: source.index as number, ...(variables ? { variables } : {}) };
   }
-  return variables ? { variables } : undefined;
+  return variables && keys.length === 1 ? { variables } : undefined;
 }
 
 function securityAlternative(value: unknown): number | undefined {
   const source = record(value);
-  return source && Number.isSafeInteger(source.index) ? source.index as number : undefined;
+  return source
+    && Object.keys(source).length === 1
+    && Object.hasOwn(source, "index")
+    && Number.isSafeInteger(source.index)
+    && (source.index as number) >= 0
+    ? source.index as number
+    : undefined;
 }
 
 async function selectedCredentials(
@@ -522,10 +615,13 @@ function contextRequirement(requirement: OpenAPIConfigurationRequirement): Conte
     : requirement.name === "securityAlternative" ? "security"
       : requirement.name === "parameterConverter" ? "parameterConversion"
         : requirement.name;
+  const path = requirement.kind === "option" && requirement.name === "securityAlternative"
+    ? "/index"
+    : requirement.path;
   return {
     type: "config.value",
     point,
-    path: requirement.path,
+    path,
     durable: true,
     ...(requirement.allowedValues ? { schema: { enum: [...requirement.allowedValues] } } : {}),
     ...(requirement.description ? { description: requirement.description } : {}),

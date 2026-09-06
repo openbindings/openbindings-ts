@@ -3,7 +3,7 @@ import type { OBInterface } from "@openbindings/core";
 import { prepareInterface } from "@openbindings/core";
 import { InvocationImpl } from "./invocation.js";
 import { CompositionSession } from "./composition-session.js";
-import { referenceCompositionPolicy } from "./composition-policy.js";
+import { referenceCompositionPolicy, type CompositionPolicy } from "./composition-policy.js";
 import { prepareProvider, type ProviderRuntime } from "./prepared-provider.js";
 
 const SPEC = "example.local@1";
@@ -49,6 +49,23 @@ function testRuntime(options?: { failClosure?: boolean }) {
 }
 
 describe("CompositionSession", () => {
+  it.each([
+    undefined,
+    { status: "selected" },
+    { status: "selected", realization: { bindingKey: "unknown" } },
+    { status: "invented" },
+    { status: "ambiguous", realizations: [{ bindingKey: "unknown" }] },
+  ])("rejects a malformed custom realization election %#", async result => {
+    const engine = testRuntime();
+    const provider = await prepareProvider({ key: "provider", interface: providerDocument(), runtime: engine.runtime });
+    const policy = {
+      ...referenceCompositionPolicy,
+      selectRealization: () => result,
+    } as unknown as CompositionPolicy;
+    const session = new CompositionSession({ consumer: await prepareInterface(consumer()), providers: [{ provider }], policy });
+    await expect(session.resolve("delivery")).rejects.toThrow(/composition policy/);
+    expect(engine.compiled).not.toHaveBeenCalled();
+  });
   it("resolves a verified route without performing live preflight", async () => {
     const required = await prepareInterface(consumer());
     const engine = testRuntime();

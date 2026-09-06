@@ -20,6 +20,15 @@ See the [spec](https://github.com/openbindings/spec) and the [invocation pattern
 
 ## Install
 
+Non-string parameter conversion remains an explicit host policy. To opt in,
+construct `new OpenAPIInvoker({ parameterConversion: decimalParameterConversion })`
+using the helper exported by this package. It emits lowercase booleans and
+finite, non-exponent decimal numbers within the JavaScript-safe integer range,
+normalizing negative zero. Strings are unchanged; null, compound values,
+non-finite and out-of-range numbers refuse. Default adapters and native clients
+do not select this policy implicitly. The Go adapter's
+`DecimalParameterConversion` is checked against the same shared-JSON vectors.
+
 ```
 npm install @openbindings/openapi
 ```
@@ -35,11 +44,23 @@ contracts and uses `@openbindings/openapi-client` as its artifact engine.
 
 One adapter instance supplies invocation, synthesis, and source inspection:
 
-```typescript
-import { OpenBindingsRuntime } from "@openbindings/sdk";
-import { OpenAPIAdapter } from "@openbindings/openapi";
+```sh
+npm install @openbindings/sdk @openbindings/openapi jsonata@2.1.1
+```
 
-const runtime = new OpenBindingsRuntime({ providers: [new OpenAPIAdapter()] });
+```typescript
+import jsonata from "jsonata";
+import { OpenBindingsRuntime } from "@openbindings/sdk";
+import { OpenAPIAdapter, decimalParameterConversion } from "@openbindings/openapi";
+
+const runtime = new OpenBindingsRuntime({
+  // Explicit consumer policy for numeric and boolean parameter text.
+  providers: [new OpenAPIAdapter({ parameterConversion: decimalParameterConversion })],
+  // Synthesis expresses parameter/body mappings as Core transforms.
+  transformEvaluator: {
+    evaluate: (expression, data) => jsonata(expression).evaluate(data),
+  },
+});
 const { iface, coverage } = await runtime.resolve("https://api.example.com/openapi.json");
 const call = runtime.invoke(iface, "listItems");
 ```
@@ -110,7 +131,8 @@ lacks, the invocation terminates with `CONTEXT_REQUIRED` before any request
 is dispatched; the error's data carry the requirement alternatives derived
 from the spec's `securitySchemes`. `prepareBinding(args)` runs the same
 derivation as a side-effect-free preflight (it never fetches the source
-document; it uses inline content or a previously cached document).
+document; it analyzes supplied inline content, while a location-only source
+remains unknown until invocation retrieves it).
 
 ### Synthesize an interface from an OpenAPI spec
 
@@ -139,9 +161,13 @@ result as `content`, while browsers and Workers keep the same package graph.
 
 ### Execution flow
 
-1. Loads and caches the OpenAPI document (JSON or YAML, from embedded content
+1. Loads the OpenAPI document (JSON or YAML, from embedded content
    or an absolute URI), checking Swagger 2.0, OpenAPI 3.0.0–3.0.4,
    3.1.0–3.1.2, or 3.2.0 against the exact sibling named by the source
+   A bounded cache reuses self-contained embedded JSON revisions. URL sources,
+   YAML, and documents with external references or resource identifiers load
+   afresh, so an entry digest never stands in for an unobserved external
+   revision. Missing Web Crypto simply disables this optional cache.
 2. Parses the ref as a JSON Pointer (`#/paths/~1users/get` -> path `/users`, method `get`); the method is lowercase exactly as the artifact spells it — an uppercase method is refused, never case-folded (OAPI-D-03)
 3. Resolves the server (the OAS effective list + variables + the `server` configuration point, OAPI-P-05)
 4. Derives auth requirements from the operation's (or document's) `security` and challenges `CONTEXT_REQUIRED` when the context can't satisfy them — before any request is dispatched

@@ -53,6 +53,7 @@ import {
   type ResultClassifier,
   newInvokeHooks,
 } from "./hooks.js";
+import type { DiagnosticCollector } from "./diagnostics.js";
 
 /**
  * Maximum CONTEXT_REQUIRED resolve-and-retry rounds per invocation. A
@@ -86,7 +87,7 @@ export interface OperationInvokerOptions {
    * Invoker-level consumer hooks (specification + configuration = complete
    * invocation): consulted after any per-invocation hook declines, before
    * the format built-in. Site-guard your hook bodies (site.operation,
-   * siteFamilyName) when the invoker serves multiple interfaces.
+   * exact bindingSpec) when the invoker serves multiple interfaces.
    */
   outputDecoder?: OutputDecoder;
   resultClassifier?: ResultClassifier;
@@ -345,7 +346,7 @@ export class OperationInvoker {
 
     const callerInv = new InvocationImpl<I, O>({
       signal: opts?.signal,
-      validateInput: makeInputValidator(op, obi, opKey),
+      validateInput: makeInputValidator(op, obi, opKey, bindingKey, opts?.diagnostics),
     });
 
     // Both hook tiers snapshot at invoke entry ("resolved once" = immunity
@@ -362,7 +363,7 @@ export class OperationInvoker {
     };
 
     queueMicrotask(() => {
-      this.run(callerInv, obi, op, binding, bindingKey, source, opts?.context, hooks, site).catch((err) => {
+      this.run(callerInv, obi, op, binding, bindingKey, source, opts?.context, hooks, site, undefined, false, undefined, opts?.diagnostics).catch((err) => {
         callerInv.fireError(asInvocationError(err));
       });
     });
@@ -567,7 +568,12 @@ export class OperationInvoker {
   ): Invocation<I, O> {
     const callerInv = new InvocationImpl<I, O>({
       signal: opts?.signal,
-      validateInput: validatorHook(prepared.inputValidator),
+      validateInput: validatorHook(
+        prepared.inputValidator,
+        prepared.opKey,
+        prepared.bindingKey,
+        opts?.diagnostics,
+      ),
     });
     const hooks = this.snapshotHooks(
       opts?.outputDecoder,
@@ -598,6 +604,7 @@ export class OperationInvoker {
       const handle = this.operationBoundaryHandle(
         callerInv,
         prepared,
+        opts?.diagnostics,
       );
       queueMicrotask(() => {
         this.runDirectPreparedBinding(
@@ -625,6 +632,7 @@ export class OperationInvoker {
         prepared.outputValidator,
         true,
         prepared.compiledBinding,
+        opts?.diagnostics,
       ).catch((err) => callerInv.fireError(asInvocationError(err)));
     });
     return callerInv;
@@ -694,6 +702,7 @@ export class OperationInvoker {
   private operationBoundaryHandle<I, O>(
     callerInv: InvocationImpl<I, O>,
     prepared: PreparedOperationState<I, O>,
+    diagnostics?: DiagnosticCollector,
   ): BindingHandle<unknown, unknown> {
     const evaluator = this.transformEvaluator;
     const inputTransform = prepared.binding.inputTransform;
@@ -756,10 +765,19 @@ export class OperationInvoker {
             throw error;
           }
         }
-        if (outputValidator && !safeValidate(outputValidator, output).valid) {
-          const error = new InvocationError(ERR_OPERATION_VALIDATION_FAILED);
-          callerInv.fireError(error);
-          throw error;
+        if (outputValidator) {
+          const result = safeValidate(outputValidator, output);
+          if (!result.valid) {
+            diagnostics?.recordValidation(
+              "output",
+              prepared.opKey,
+              prepared.bindingKey,
+              result.failures,
+            );
+            const error = new InvocationError(ERR_OPERATION_VALIDATION_FAILED);
+            callerInv.fireError(error);
+            throw error;
+          }
         }
         await callerInv.emitOutput(output as O);
       },
@@ -865,6 +883,7 @@ export class OperationInvoker {
     preparedOutputValidator?: CompiledSchema,
     outputAlreadyCompiled = false,
     compiledBinding?: CompiledBindingInvoker,
+    diagnostics?: DiagnosticCollector,
   ): Promise<void> {
     const evaluator = this.transformEvaluator;
     if ((binding.inputTransform || binding.outputTransform) && !evaluator) {
@@ -1114,6 +1133,12 @@ export class OperationInvoker {
             const r = safeValidate(outputValidator, data);
             if (!r.valid) {
               await inner.cancel();
+              diagnostics?.recordValidation(
+                "output",
+                binding.operation,
+                bindingKey,
+                r.failures,
+              );
               surface = new InvocationError(ERR_OPERATION_VALIDATION_FAILED);
               break;
             }
@@ -1199,6 +1224,8 @@ function makeInputValidator(
   op: Operation,
   iface: OBInterface,
   operationName: string,
+  bindingKey: string,
+  diagnostics?: DiagnosticCollector,
 ): ((input: unknown) => InvocationError | null) | undefined {
   if (op.input == null) return undefined;
   let validator: CompiledSchema | undefined;
@@ -1216,6 +1243,7 @@ function makeInputValidator(
     if (compileError) return compileError;
     const r = safeValidate(validator!, input);
     if (!r.valid) {
+      diagnostics?.recordValidation("input", operationName, bindingKey, r.failures);
       return new InvocationError(ERR_OPERATION_VALIDATION_FAILED);
     }
     return null;
@@ -1224,10 +1252,16 @@ function makeInputValidator(
 
 function validatorHook(
   validator: CompiledSchema | undefined,
+  operationName: string,
+  bindingKey: string,
+  diagnostics?: DiagnosticCollector,
 ): ((input: unknown) => InvocationError | null) | undefined {
   if (!validator) return undefined;
   return (input: unknown): InvocationError | null => {
     const result = safeValidate(validator, input);
+    if (!result.valid) {
+      diagnostics?.recordValidation("input", operationName, bindingKey, result.failures);
+    }
     return result.valid
       ? null
       : new InvocationError(ERR_OPERATION_VALIDATION_FAILED);

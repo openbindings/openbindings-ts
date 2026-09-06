@@ -28,6 +28,13 @@ export {
   resolveDeliveryUnitLimit,
 } from "./invoker-types.js";
 
+export { DiagnosticCollector } from "./diagnostics.js";
+export type {
+  InvocationDiagnostic,
+  InvocationDiagnosticSnapshot,
+  ValidationPhase,
+} from "./diagnostics.js";
+
 export type {
   ContextStore,
   PlatformCallbacks,
@@ -199,7 +206,7 @@ export {
   EmptyTransformExpressionError,
 } from "./errors.js";
 
-export { familyName, isJSONContentType } from "./helpers.js";
+export { isJSONContentType } from "./helpers.js";
 
 export {
   InvokeHooks,
@@ -210,7 +217,6 @@ export {
   floorStamped,
   newInvokeHooks,
   nonDiscriminatingOutput,
-  siteFamilyName,
 } from "./hooks.js";
 export type {
   FieldRouter,
