@@ -14,6 +14,18 @@ import type { ConnectInvoker } from "@openbindings/connect";
 import type { UsageInvoker } from "@openbindings/usage";
 import type { GraphQLInvoker } from "@openbindings/graphql";
 import type { OperationGraphInvoker } from "@openbindings/operationgraph";
+import { OpenBindingsRuntime as Runtime } from "@openbindings/sdk";
+import { OpenAPIAdapter as Adapter, decimalParameterConversion } from "@openbindings/openapi";
+import jsonata from "jsonata";
+
+// Type-check the explicit evaluator setup shown in the SDK quick start.
+const runtime = new Runtime({
+  providers: [new Adapter({ parameterConversion: decimalParameterConversion })],
+  transformEvaluator: {
+    evaluate: (expression, data) => jsonata(expression).evaluate(data),
+  },
+});
+void runtime;
 
 type PackedSurface = [
   OBInterface,

@@ -44,11 +44,23 @@ contracts and uses `@openbindings/openapi-client` as its artifact engine.
 
 One adapter instance supplies invocation, synthesis, and source inspection:
 
-```typescript
-import { OpenBindingsRuntime } from "@openbindings/sdk";
-import { OpenAPIAdapter } from "@openbindings/openapi";
+```sh
+npm install @openbindings/sdk @openbindings/openapi jsonata@2.1.1
+```
 
-const runtime = new OpenBindingsRuntime({ providers: [new OpenAPIAdapter()] });
+```typescript
+import jsonata from "jsonata";
+import { OpenBindingsRuntime } from "@openbindings/sdk";
+import { OpenAPIAdapter, decimalParameterConversion } from "@openbindings/openapi";
+
+const runtime = new OpenBindingsRuntime({
+  // Explicit consumer policy for numeric and boolean parameter text.
+  providers: [new OpenAPIAdapter({ parameterConversion: decimalParameterConversion })],
+  // Synthesis expresses parameter/body mappings as Core transforms.
+  transformEvaluator: {
+    evaluate: (expression, data) => jsonata(expression).evaluate(data),
+  },
+});
 const { iface, coverage } = await runtime.resolve("https://api.example.com/openapi.json");
 const call = runtime.invoke(iface, "listItems");
 ```

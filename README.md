@@ -109,17 +109,29 @@ for (const [name, op] of Object.entries(iface.operations)) {
 
 ### Resolve and invoke operations
 
+```sh
+npm install @openbindings/sdk @openbindings/openapi jsonata@2.1.1
+```
+
 ```typescript
+import jsonata from "jsonata";
 import { OpenBindingsRuntime } from "@openbindings/sdk";
-import { OpenAPIAdapter } from "@openbindings/openapi";
+import { OpenAPIAdapter, decimalParameterConversion } from "@openbindings/openapi";
 
 // One explicit adapter supplies invocation, synthesis, and source inspection.
-const runtime = new OpenBindingsRuntime({ providers: [new OpenAPIAdapter()] });
+const runtime = new OpenBindingsRuntime({
+  providers: [new OpenAPIAdapter({ parameterConversion: decimalParameterConversion })],
+  // Evaluate the parameter/body mappings produced by synthesis.
+  transformEvaluator: {
+    evaluate: (expression, data) => jsonata(expression).evaluate(data),
+  },
+});
 
 // Resolve an OBI from a URL (well-known discovery, with synthesis as the
 // fallback when the target only exposes a raw spec such as an OpenAPI doc).
 const { iface } = await runtime.resolve("https://api.example.com");
 
+// Numeric query values use the decimal conversion policy selected above.
 // Invoke an operation — one handle shape for every cardinality
 const call = runtime.invoke(iface, "listItems");
 await call.write({ limit: 10 });

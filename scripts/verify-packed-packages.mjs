@@ -116,28 +116,54 @@ const result = await client.call({ ref: "#/paths/~1ping/get" });
 if (!result.ok || result.data?.ok !== true) throw new Error("packed client did not yield the application value");
 
 const { OpenBindingsRuntime, single } = await import("@openbindings/sdk");
-const { OpenAPIAdapter } = await import("@openbindings/openapi");
+const { OpenAPIAdapter, decimalParameterConversion } = await import("@openbindings/openapi");
+const { default: jsonata } = await import("jsonata");
+const adapterRequests = [];
 const adapterFetch = async input => {
-  if (String(input) !== "https://api.example.test/ping") throw new Error("packed adapter planned the wrong request");
+  const url = String(input);
+  if (!["https://api.example.test/ping", "https://api.example.test/list?limit=10"].includes(url)) {
+    throw new Error("packed adapter planned the wrong request: " + url);
+  }
+  adapterRequests.push(url);
   return new Response('{"ok":true}', { status: 200, headers: { "content-type": "application/json" } });
 };
 const runtime = new OpenBindingsRuntime({
-  providers: [new OpenAPIAdapter({ fetch: adapterFetch })],
+  providers: [new OpenAPIAdapter({ fetch: adapterFetch, parameterConversion: decimalParameterConversion })],
   fetch: adapterFetch,
+  transformEvaluator: {
+    evaluate: (expression, data) => jsonata(expression).evaluate(data),
+  },
 });
 const synthesized = await runtime.synthesizeInterfaceWithCoverage({
   sources: [{ bindingSpec: "openbindings.openapi-3.1@1", content: {
     openapi: "3.1.0",
     info: { title: "packed adapter", version: "1" },
     servers: [{ url: "https://api.example.test" }],
-    paths: { "/ping": { get: { operationId: "ping", responses: {
-      "200": { description: "ok", content: { "application/json": { schema: { type: "object" } } } },
-    } } } },
+    paths: {
+      "/ping": { get: { operationId: "ping", responses: {
+        "200": { description: "ok", content: { "application/json": { schema: { type: "object" } } } },
+      } } },
+      "/list": { get: { operationId: "listItems",
+        parameters: [{ name: "limit", in: "query", schema: { type: "integer" } }],
+        responses: {
+          "200": { description: "ok", content: { "application/json": { schema: { type: "object" } } } },
+        },
+      } },
+    },
   } }],
 });
 if (!synthesized.coverage.exhaustive) throw new Error("packed adapter coverage was not exhaustive");
 const invocation = runtime.invoke(synthesized.interface, "ping");
 if ((await single(invocation.outputs))?.ok !== true) throw new Error("packed adapter did not yield the application value");
+const listBinding = Object.values(synthesized.interface.bindings).find(binding => binding.operation === "listItems");
+if (!listBinding?.inputTransform) throw new Error("parameterized consumer did not exercise a synthesized transform");
+const listInvocation = runtime.invoke(synthesized.interface, "listItems");
+await listInvocation.write({ limit: 10 });
+if ((await single(listInvocation.outputs))?.ok !== true) throw new Error("parameterized packed adapter lost the output");
+if (adapterRequests.filter(url => url === "https://api.example.test/list?limit=10").length !== 1) {
+  throw new Error("parameterized packed adapter did not dispatch exactly one transformed request");
+}
+console.log("packed parameterized SDK invocation verified with explicit JSONata evaluator");
 `,
   );
   writeFileSync(
@@ -158,7 +184,7 @@ if ((await single(invocation.outputs))?.ok !== true) throw new Error("packed ada
   // not-yet-published sibling package from the registry while constructing a
   // single multi-tarball add transaction.
   run("pnpm", ["add", openAPIClientTarball, asyncAPIClientTarball, tarballs[0]], temporary);
-  run("pnpm", ["add", ...tarballs.slice(1)], temporary);
+  run("pnpm", ["add", ...tarballs.slice(1), "jsonata@2.1.1"], temporary);
   run(process.execPath, ["import-smoke.mjs"], temporary);
   run(process.execPath, ["require-smoke.cjs"], temporary);
   run(

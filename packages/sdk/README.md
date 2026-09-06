@@ -50,12 +50,28 @@ cross-implementation agreement.
 
 ## Quick start
 
-```typescript
-import { OpenBindingsRuntime } from "@openbindings/sdk";
-import { OpenAPIAdapter } from "@openbindings/openapi";
+Install the OpenAPI adapter and the JSONata evaluator used by this example:
 
-const openapi = new OpenAPIAdapter();
-const runtime = new OpenBindingsRuntime({ providers: [openapi] });
+```sh
+npm install @openbindings/sdk @openbindings/openapi jsonata@2.1.1
+```
+
+Synthesized parameter and body mappings use transforms. Register their
+evaluator explicitly when constructing the runtime. This example also opts
+into decimal conversion for its numeric query parameter:
+
+```typescript
+import jsonata from "jsonata";
+import { OpenBindingsRuntime } from "@openbindings/sdk";
+import { OpenAPIAdapter, decimalParameterConversion } from "@openbindings/openapi";
+
+const openapi = new OpenAPIAdapter({ parameterConversion: decimalParameterConversion });
+const runtime = new OpenBindingsRuntime({
+  providers: [openapi],
+  transformEvaluator: {
+    evaluate: (expression, data) => jsonata(expression).evaluate(data),
+  },
+});
 const { iface } = await runtime.resolve("https://api.example.com");
 const call = runtime.invoke(iface, "listItems");
 await call.write({ limit: 10 });
@@ -302,7 +318,7 @@ model.
 
 ## Transforms (invoking tools only)
 
-OpenBindings 0.2.0 mandates JSONata 2.1 as the transform language for tools that evaluate `inputTransform`/`outputTransform` (OBI-T-10). Document validation bundles the pinned `jsonata` 2.1 library to parse-check every transform expression for syntactic validity (OBI-D-18) — a validate-time check only. The SDK does **not** configure a transform *evaluation* path for you: to actually evaluate a transform when invoking, pass an adapter implementing the `TransformEvaluator` interface (the bundled `jsonata` serves both roles here — it parse-checks during validation, and you wire it to evaluate):
+OpenBindings 0.2.0 mandates JSONata 2.1 as the transform language for tools that evaluate `inputTransform`/`outputTransform` (OBI-T-10). Document validation bundles the pinned `jsonata` 2.1 library to parse-check every transform expression for syntactic validity (OBI-D-18). Invocation requires an explicitly configured `TransformEvaluator`. Install `jsonata@2.1.1` as an application dependency and register it for evaluation:
 
 ```typescript
 import jsonata from "jsonata";
@@ -315,7 +331,7 @@ const transformEvaluator: TransformEvaluator = {
 const invoker = new OperationInvoker([/* invokers */], { transformEvaluator });
 ```
 
-OBIs that declare no transforms require no runtime; calls to operations whose bindings carry transforms will surface `NoTransformEvaluatorError` if no evaluator is configured.
+OBIs that declare no transforms require no evaluator. Invoking a binding that carries transforms without an evaluator throws `InvocationError` with code `ERR_TRANSFORM_ERROR`.
 
 ## License
 
