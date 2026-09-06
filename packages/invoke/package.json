@@ -1,7 +1,7 @@
 {
   "name": "@openbindings/invoke",
   "version": "0.2.0",
-  "description": "OpenBindings invocation layer: the binding-invoker and operation-invoker pattern — invocation handles, context, hooks, and operation requirements.",
+  "description": "OpenBindings invocation layer: invocation handles, context, hooks, named dependencies, and provider composition.",
   "type": "module",
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
@@ -29,7 +29,8 @@
     "build": "tsup",
     "prepack": "tsup",
     "test": "vitest run",
-    "lint": "tsc --noEmit && tsc -p tsconfig.test.json && eslint ."
+    "bench:composition": "node --expose-gc --import tsx bench/composition.ts",
+    "lint": "tsc --noEmit && tsc -p tsconfig.test.json && tsc -p tsconfig.bench.json && eslint ."
   },
   "keywords": [
     "openbindings",

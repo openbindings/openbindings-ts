@@ -78,6 +78,24 @@
   `openbindings.binding-spec-synthesis-scenarios@4` (`bindingRef` →
   `bindingSelector` in scenario expectations; `sourceRef` unchanged), and
   `SYNTHESIS_SCENARIO_FORMAT` moves to `@4` with it.
+- **Named OBI dependencies now have a prepared composition runtime.**
+  `PreparedInterface` creates a validated, content-addressed semantic snapshot;
+  `PreparedProvider` pairs that snapshot with behavior-only runtime capability;
+  the explicit, versioned `referenceCompositionPolicy` preserves tri-state
+  compatibility evidence and separates provider from realization selection;
+  and `CompositionSession` resolves retained `PreparedDependencyRoute` values
+  without live preflight. Deterministic binding compilation pins local handlers
+  and removes binding-spec registry lookup from prepared calls.
+  `prepareLocalProvider`, `localUnary`, and `localStream` provide binding-key
+  native DX with no serialization. The first-proof dependency and operation-
+  requirement APIs remain transitional during the 0.2 draft.
+
+- **Core OBI structural validation now uses a schema-equivalent single-pass
+  evaluator.** A constraint-matrix test checks every derived-schema property
+  against `openbindings.schema.json` through the generic reference validator.
+  User-authored JSON Schemas still receive the full 2020-12 meta-schema walk.
+  Prepared pointer-only operation graphs compile from their reachable closure,
+  so first-route cost no longer scales with unrelated operations.
 
 - **A `config.value` context requirement may carry an engine-asserted
   `schema` (JSON Schema) for the value at (point, path); the `choices` member

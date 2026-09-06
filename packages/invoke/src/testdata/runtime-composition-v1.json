@@ -1,0 +1,387 @@
+{
+  "formatVersion": "1.0.0",
+  "policyId": "openbindings.reference-composition@1",
+  "cases": [
+    {
+      "id": "SCOMP-F01-exact-available",
+      "consumer": {
+        "openbindings": "0.2.0",
+        "operations": {
+          "deliver": {
+            "input": { "type": "string", "pattern": "^[a-z]+$" },
+            "output": { "type": "string" }
+          }
+        },
+        "dependencies": {
+          "delivery": {
+            "operation": "deliver",
+            "bindingSpecs": ["example.local@1"]
+          }
+        }
+      },
+      "providers": [
+        {
+          "key": "primary",
+          "preference": 0,
+          "runtimeBindingSpecs": ["example.local@1"],
+          "interface": {
+            "openbindings": "0.2.0",
+            "operations": {
+              "send": {
+                "aliases": ["deliver"],
+                "input": { "pattern": "^[a-z]+$", "type": "string" },
+                "output": { "type": "string" }
+              }
+            },
+            "sources": {
+              "local": {
+                "bindingSpec": "example.local@1",
+                "content": { "handler": "send" }
+              }
+            },
+            "bindings": {
+              "send.local": {
+                "operation": "send",
+                "source": "local",
+                "ref": "send"
+              }
+            }
+          }
+        }
+      ],
+      "dependency": "delivery",
+      "invocation": { "input": "hello", "output": "hello" },
+      "expected": {
+        "status": "available",
+        "providerKey": "primary",
+        "bindingKey": "send.local",
+        "assessmentCodes": []
+      }
+    },
+    {
+      "id": "SCOMP-F02-provider-ambiguity",
+      "consumer": {
+        "openbindings": "0.2.0",
+        "operations": {
+          "deliver": {
+            "input": { "type": "string" },
+            "output": { "type": "string" }
+          }
+        },
+        "dependencies": {
+          "delivery": { "operation": "deliver" }
+        }
+      },
+      "providers": [
+        {
+          "key": "alpha",
+          "preference": 0,
+          "runtimeBindingSpecs": ["example.local@1"],
+          "interface": {
+            "openbindings": "0.2.0",
+            "operations": {
+              "deliver": {
+                "input": { "type": "string" },
+                "output": { "type": "string" }
+              }
+            },
+            "sources": {
+              "local": {
+                "bindingSpec": "example.local@1",
+                "content": { "handler": "deliver" }
+              }
+            },
+            "bindings": {
+              "deliver.local": { "operation": "deliver", "source": "local" }
+            }
+          }
+        },
+        {
+          "key": "beta",
+          "preference": 0,
+          "runtimeBindingSpecs": ["example.local@1"],
+          "interface": {
+            "openbindings": "0.2.0",
+            "operations": {
+              "deliver": {
+                "input": { "type": "string" },
+                "output": { "type": "string" }
+              }
+            },
+            "sources": {
+              "local": {
+                "bindingSpec": "example.local@1",
+                "content": { "handler": "deliver" }
+              }
+            },
+            "bindings": {
+              "deliver.local": { "operation": "deliver", "source": "local" }
+            }
+          }
+        }
+      ],
+      "dependency": "delivery",
+      "expected": {
+        "status": "ambiguous",
+        "ambiguityStage": "provider",
+        "assessmentCodes": []
+      }
+    },
+    {
+      "id": "SCOMP-F03-realization-ambiguity",
+      "consumer": {
+        "openbindings": "0.2.0",
+        "operations": {
+          "deliver": {
+            "input": { "type": "string" },
+            "output": { "type": "string" }
+          }
+        },
+        "dependencies": {
+          "delivery": { "operation": "deliver" }
+        }
+      },
+      "providers": [
+        {
+          "key": "multiple",
+          "preference": 0,
+          "runtimeBindingSpecs": ["example.local@1"],
+          "interface": {
+            "openbindings": "0.2.0",
+            "operations": {
+              "deliver": {
+                "input": { "type": "string" },
+                "output": { "type": "string" }
+              }
+            },
+            "sources": {
+              "local": {
+                "bindingSpec": "example.local@1",
+                "content": { "handler": "deliver" }
+              }
+            },
+            "bindings": {
+              "deliver.a": { "operation": "deliver", "source": "local", "ref": "a" },
+              "deliver.b": { "operation": "deliver", "source": "local", "ref": "b" }
+            }
+          }
+        }
+      ],
+      "dependency": "delivery",
+      "expected": {
+        "status": "ambiguous",
+        "ambiguityStage": "realization",
+        "assessmentCodes": []
+      }
+    },
+    {
+      "id": "SCOMP-F04-indeterminate-keyword",
+      "consumer": {
+        "openbindings": "0.2.0",
+        "operations": {
+          "deliver": {
+            "input": { "type": "string", "pattern": "^[a-z]+$" },
+            "output": { "type": "string" }
+          }
+        },
+        "dependencies": {
+          "delivery": { "operation": "deliver" }
+        }
+      },
+      "providers": [
+        {
+          "key": "pattern",
+          "preference": 0,
+          "runtimeBindingSpecs": ["example.local@1"],
+          "interface": {
+            "openbindings": "0.2.0",
+            "operations": {
+              "deliver": {
+                "input": { "type": "string", "pattern": "^[A-Z]+$" },
+                "output": { "type": "string" }
+              }
+            },
+            "sources": {
+              "local": {
+                "bindingSpec": "example.local@1",
+                "content": { "handler": "deliver" }
+              }
+            },
+            "bindings": {
+              "deliver.local": { "operation": "deliver", "source": "local" }
+            }
+          }
+        }
+      ],
+      "dependency": "delivery",
+      "expected": {
+        "status": "unavailable",
+        "assessmentCodes": ["contract_indeterminate"]
+      }
+    },
+    {
+      "id": "SCOMP-F05-incompatible-contract",
+      "consumer": {
+        "openbindings": "0.2.0",
+        "operations": {
+          "deliver": {
+            "input": { "type": "string" },
+            "output": { "type": "string" }
+          }
+        },
+        "dependencies": {
+          "delivery": { "operation": "deliver" }
+        }
+      },
+      "providers": [
+        {
+          "key": "number",
+          "preference": 0,
+          "runtimeBindingSpecs": ["example.local@1"],
+          "interface": {
+            "openbindings": "0.2.0",
+            "operations": {
+              "deliver": {
+                "input": { "type": "number" },
+                "output": { "type": "string" }
+              }
+            },
+            "sources": {
+              "local": {
+                "bindingSpec": "example.local@1",
+                "content": { "handler": "deliver" }
+              }
+            },
+            "bindings": {
+              "deliver.local": { "operation": "deliver", "source": "local" }
+            }
+          }
+        }
+      ],
+      "dependency": "delivery",
+      "expected": {
+        "status": "unavailable",
+        "assessmentCodes": ["contract_incompatible"]
+      }
+    },
+    {
+      "id": "SCOMP-F06-binding-spec-disallowed",
+      "consumer": {
+        "openbindings": "0.2.0",
+        "operations": {
+          "deliver": {
+            "input": { "type": "string" },
+            "output": { "type": "string" }
+          }
+        },
+        "dependencies": {
+          "delivery": {
+            "operation": "deliver",
+            "bindingSpecs": ["example.allowed@1"]
+          }
+        }
+      },
+      "providers": [
+        {
+          "key": "other",
+          "preference": 0,
+          "runtimeBindingSpecs": ["example.other@1"],
+          "interface": {
+            "openbindings": "0.2.0",
+            "operations": {
+              "deliver": {
+                "input": { "type": "string" },
+                "output": { "type": "string" }
+              }
+            },
+            "sources": {
+              "other": {
+                "bindingSpec": "example.other@1",
+                "content": { "handler": "deliver" }
+              }
+            },
+            "bindings": {
+              "deliver.other": { "operation": "deliver", "source": "other" }
+            }
+          }
+        }
+      ],
+      "dependency": "delivery",
+      "expected": {
+        "status": "unavailable",
+        "assessmentCodes": ["binding_spec_disallowed"]
+      }
+    },
+    {
+      "id": "SCOMP-F07-unique-preference",
+      "consumer": {
+        "openbindings": "0.2.0",
+        "operations": {
+          "deliver": {
+            "input": { "type": "string" },
+            "output": { "type": "string" }
+          }
+        },
+        "dependencies": {
+          "delivery": { "operation": "deliver" }
+        }
+      },
+      "providers": [
+        {
+          "key": "low",
+          "preference": 0,
+          "runtimeBindingSpecs": ["example.local@1"],
+          "interface": {
+            "openbindings": "0.2.0",
+            "operations": {
+              "deliver": {
+                "input": { "type": "string" },
+                "output": { "type": "string" }
+              }
+            },
+            "sources": {
+              "local": {
+                "bindingSpec": "example.local@1",
+                "content": { "handler": "deliver" }
+              }
+            },
+            "bindings": {
+              "deliver.local": { "operation": "deliver", "source": "local" }
+            }
+          }
+        },
+        {
+          "key": "high",
+          "preference": 10,
+          "runtimeBindingSpecs": ["example.local@1"],
+          "interface": {
+            "openbindings": "0.2.0",
+            "operations": {
+              "deliver": {
+                "input": { "type": "string" },
+                "output": { "type": "string" }
+              }
+            },
+            "sources": {
+              "local": {
+                "bindingSpec": "example.local@1",
+                "content": { "handler": "deliver" }
+              }
+            },
+            "bindings": {
+              "deliver.local": { "operation": "deliver", "source": "local" }
+            }
+          }
+        }
+      ],
+      "dependency": "delivery",
+      "invocation": { "input": "preferred", "output": "preferred" },
+      "expected": {
+        "status": "available",
+        "providerKey": "high",
+        "bindingKey": "deliver.local",
+        "assessmentCodes": []
+      }
+    }
+  ]
+}

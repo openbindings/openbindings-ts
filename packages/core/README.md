@@ -10,6 +10,20 @@ invocation.
 import { parseDocument, validateInterface, resolveOperation } from "@openbindings/core";
 ```
 
+`prepareInterface` creates the reusable semantic form used by composition and
+invocation. It validates a private RFC 8785 snapshot, assigns a SHA-256 content
+revision, builds canonical operation/dependency/binding indexes, memoizes exact
+boundary-contract identities, and shares compiled operation schemas:
+
+```ts
+const prepared = await prepareInterface(iface);
+const dependency = prepared.dependency("delivery");
+console.log(prepared.revision, dependency?.operation.canonicalKey);
+```
+
+Preparation never mutates or retains caller-owned objects and never fetches
+external schema resources implicitly.
+
 The layered packages build on it:
 
 - [`@openbindings/invoke`](https://www.npmjs.com/package/@openbindings/invoke) — the binding-invoker / operation-invoker pattern

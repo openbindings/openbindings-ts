@@ -10,6 +10,18 @@ export class OperationNotFoundError extends Error {
   }
 }
 
+/** Thrown when a named dependency is absent or cannot resolve its local operation. */
+export class DependencyNotFoundError extends Error {
+  constructor(dependency: string, available?: string[]) {
+    const detail =
+      available && available.length > 0
+        ? `; available dependency keys: [${available.join(", ")}]`
+        : "";
+    super(`openbindings: dependency not found or invalid: ${dependency}${detail}`);
+    this.name = "DependencyNotFoundError";
+  }
+}
+
 /** Thrown when an interface fails structural validation, carrying the list of problems found. */
 export class ValidationError extends Error {
   problems: string[];

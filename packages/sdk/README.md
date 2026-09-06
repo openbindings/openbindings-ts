@@ -68,7 +68,80 @@ For compile-time-typed operations, run `ob codegen <obi> --lang typescript` to g
 
 See the [monorepo README](https://github.com/openbindings/openbindings-ts#readme) for full documentation.
 
-## Consuming operations without choosing an implementation
+## Satisfying named interface dependencies
+
+An OBI's `dependencies` map names its consumption slots. Prepare the consumer
+and each actionable provider once, then resolve a generated dependency
+signature through an application-scoped composition session:
+
+```typescript
+import {
+  CompositionSession,
+  OperationInvoker,
+  prepareInterface,
+  prepareProvider,
+  single,
+} from "@openbindings/sdk";
+import { OpenAPIInvoker } from "@openbindings/openapi";
+import { DependencySignatures } from "./component.generated.js";
+
+const consumer = await prepareInterface(componentInterface);
+const provider = await prepareProvider({
+  key: "tasks-api",
+  interface: tasksAPI,
+  runtime: new OperationInvoker([new OpenAPIInvoker()]),
+});
+const session = new CompositionSession({
+  consumer,
+  providers: [{ provider, preference: 10 }],
+});
+const resolution = await session.resolve(DependencySignatures.creation);
+
+if (resolution.status === "available") {
+  const invocation = resolution.route.invoke();
+  await invocation.write({ title: "Ship it" });
+  const task = await single(invocation.outputs);
+}
+```
+
+The generated signature derives its I/O types from the operation referenced by
+the dependency, so the safe path cannot assert an unrelated contract. Dynamic
+lookup returns `unknown`; the separately named unsafe constructor is the only
+manual generic assertion. Resolution distinguishes provider ambiguity from
+within-provider realization ambiguity, returns serializable refusal evidence,
+and never performs live network or credential preflight. Call
+`route.preflight()` explicitly when current context matters.
+
+For in-process implementations, `prepareLocalProvider` maps native handlers by
+exact OBI binding key. It uses the same prepared provider, policy, validation,
+transform, and invocation path as a protocol provider; generic JSON-domain
+values are passed by reference without serialization:
+
+```typescript
+const local = await prepareLocalProvider({
+  key: "local-tasks",
+  interface: tasksAPI,
+  implementations: {
+    "tasks.create.local": localUnary(input => repository.create(input)),
+  },
+});
+```
+
+For repeated calls that do not involve dependency matching, prepare the same
+immutable executable artifact directly:
+
+```typescript
+const prepared = invoker.compileOperationHandle(
+  await prepareInterface(iface),
+  OperationSignatures.createTask,
+  { bindingKey: "createTask.primary" },
+);
+
+const invocation = prepared.invoke({ context: requestContext });
+await invocation.write({ title: "Ship it" });
+```
+
+## Transitional operation requirements
 
 An operation requirement pairs one typed signature with the ordinary,
 typically unbound OBI contract a consumer expects. Candidate implementations
@@ -112,6 +185,10 @@ common route-to-one case, an equal tie is `ambiguous`, and no match is
 `unavailable`. For aggregate, fan-out, race, or fallback behavior,
 `matchOperationRequirement` returns every compatible, invocable match in
 preference order and selects nothing.
+
+This older surface remains available while the named-dependency model is
+proved in Go and adopted downstream. New work should prefer dependencies
+declared by the consumer OBI.
 
 `knownContextRequirements` on a match is advisory preflight. A null value
 means no requirement was knowable at resolution time; live

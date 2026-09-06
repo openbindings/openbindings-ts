@@ -1,11 +1,11 @@
 import {
-  resolveOperationRequirement,
+  CompositionSession,
+  type DependencyRouteResolution,
+  type DependencySignature,
   type Invocation,
   type InvokeOptions,
-  type OperationImplementation,
-  type OperationMatch,
-  type OperationRequirement,
-  type OperationRequirementResolution,
+  type PreparedDependencyRoute,
+  type ProviderRegistration,
 } from "@openbindings/sdk";
 import {
   createContext,
@@ -16,51 +16,52 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { TASK_CONSUMER } from "./contracts.js";
 
 type Available<I, O> = {
   status: "available";
-  match: OperationMatch<I, O>;
+  route: PreparedDependencyRoute<I, O>;
   invoke(options?: InvokeOptions): Invocation<I, O>;
 };
 
 export type ReactiveOperationState<I, O> =
   | { status: "resolving" }
   | Available<I, O>
-  | Extract<OperationRequirementResolution<I, O>, { status: "ambiguous" }>
-  | Extract<OperationRequirementResolution<I, O>, { status: "unavailable" }>
+  | Extract<DependencyRouteResolution<I, O>, { status: "ambiguous" }>
+  | Extract<DependencyRouteResolution<I, O>, { status: "unavailable" }>
   | { status: "failed"; error: Error };
 
-const OperationImplementationsContext =
-  createContext<readonly OperationImplementation[] | null>(null);
+const ProviderRegistrationsContext =
+  createContext<readonly ProviderRegistration[] | null>(null);
 
 export function OperationProvider({
-  implementations,
+  providers,
   children,
 }: {
-  implementations: readonly OperationImplementation[];
+  providers: readonly ProviderRegistration[];
   children: ReactNode;
 }) {
   return (
-    <OperationImplementationsContext.Provider value={implementations}>
+    <ProviderRegistrationsContext.Provider value={providers}>
       {children}
-    </OperationImplementationsContext.Provider>
+    </ProviderRegistrationsContext.Provider>
   );
 }
 
 export function useOperation<I, O>(
-  requirement: OperationRequirement<I, O>,
+  dependency: DependencySignature<I, O>,
 ): ReactiveOperationState<I, O> {
-  const implementations = useContext(OperationImplementationsContext);
-  if (implementations === null) {
+  const providers = useContext(ProviderRegistrationsContext);
+  if (providers === null) {
     throw new Error("useOperation must be rendered under OperationProvider");
   }
 
   const [resolution, setResolution] =
-    useState<OperationRequirementResolution<I, O> | null>(null);
+    useState<DependencyRouteResolution<I, O> | null>(null);
   const [failure, setFailure] = useState<Error | null>(null);
   const activeInvocations = useRef(new Set<Invocation<I, O>>());
   const resolutionRef =
-    useRef<OperationRequirementResolution<I, O> | null>(null);
+    useRef<DependencyRouteResolution<I, O> | null>(null);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -69,9 +70,8 @@ export function useOperation<I, O>(
     resolutionRef.current = null;
     setFailure(null);
 
-    void resolveOperationRequirement(requirement, implementations, {
-      signal: controller.signal,
-    }).then(
+    const session = new CompositionSession({ consumer: TASK_CONSUMER, providers });
+    void session.resolve(dependency, { signal: controller.signal }).then(
       next => {
         if (!current) return;
         resolutionRef.current = next;
@@ -85,9 +85,11 @@ export function useOperation<I, O>(
 
     return () => {
       current = false;
-      controller.abort(new DOMException("operation candidates changed", "AbortError"));
+      controller.abort(new DOMException("providers changed", "AbortError"));
+      for (const invocation of activeInvocations.current) void invocation.cancel();
+      activeInvocations.current.clear();
     };
-  }, [implementations, requirement]);
+  }, [dependency, providers]);
 
   useEffect(() => {
     const active = activeInvocations.current;
@@ -102,7 +104,7 @@ export function useOperation<I, O>(
     if (current?.status !== "available") {
       throw new Error("operation is not available");
     }
-    const invocation = current.match.invoke(options);
+    const invocation = current.route.invoke(options);
     activeInvocations.current.add(invocation);
     const forget = () => activeInvocations.current.delete(invocation);
     void invocation.closed.then(forget, forget);

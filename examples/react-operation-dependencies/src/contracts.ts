@@ -1,6 +1,7 @@
 import {
-  operationRequirement,
+  dependencySignatureFromOperation,
   operationSignature,
+  prepareInterface,
   type OBInterface,
 } from "@openbindings/sdk";
 
@@ -43,19 +44,26 @@ export const TASK_REQUIREMENTS: OBInterface = {
       },
     },
   },
+  dependencies: {
+    tasksList: { operation: "example.tasks.list" },
+    tasksCreate: { operation: "example.tasks.create" },
+    activityWatch: { operation: "example.activity.watch" },
+  },
 };
 
-export const listTasksRequirement = operationRequirement(
-  TASK_REQUIREMENTS,
+export const TASK_CONSUMER = await prepareInterface(TASK_REQUIREMENTS);
+
+export const listTasksDependency = dependencySignatureFromOperation(
+  "tasksList",
   operationSignature<never, Task[]>("example.tasks.list"),
 );
 
-export const createTaskRequirement = operationRequirement(
-  TASK_REQUIREMENTS,
+export const createTaskDependency = dependencySignatureFromOperation(
+  "tasksCreate",
   operationSignature<CreateTaskInput, Task>("example.tasks.create"),
 );
 
-export const watchActivityRequirement = operationRequirement(
-  TASK_REQUIREMENTS,
+export const watchActivityDependency = dependencySignatureFromOperation(
+  "activityWatch",
   operationSignature<never, Activity>("example.activity.watch"),
 );

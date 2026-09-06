@@ -36,7 +36,7 @@
     },
     "operations": {
       "type": "object",
-      "description": "Operation registry keyed by operation name.",
+      "description": "Protocol-independent operation contract registry keyed by operation name. Presence alone does not assert that a realization is available.",
       "propertyNames": {
         "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.-]*$"
       },
@@ -237,7 +237,7 @@
         },
         "selector": {
           "type": "string",
-          "description": "Selector into the source's artifact identifying the specific target. Syntax and meaning are the governing binding specification's concern."
+          "description": "Selector identifying a specific target within the governed source, whether an artifact entry, live-surface member, or another target form. Syntax and meaning are the governing binding specification's concern."
         },
         "preference": {
           "type": "integer",

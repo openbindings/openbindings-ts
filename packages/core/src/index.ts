@@ -25,7 +25,7 @@ export {
   type CompiledSchema,
 } from "./schema-validation.js";
 
-export { OperationNotFoundError, ValidationError } from "./errors.js";
+export { DependencyNotFoundError, OperationNotFoundError, ValidationError } from "./errors.js";
 
 export {
   MIN_SUPPORTED_VERSION,
@@ -44,6 +44,19 @@ export { canonicalizeLocation, resolveRef, unknownFields } from "./uri.js";
 
 export { resolveOperation, allOperationIdentifiers } from "./resolve-operation.js";
 export type { ResolvedOperation } from "./resolve-operation.js";
+
+export { lookupDependency } from "./lookup-dependency.js";
+export type { ResolvedDependency } from "./lookup-dependency.js";
+
+export { PreparedInterface, prepareInterface } from "./prepared-interface.js";
+export type {
+  OperationSchemaPosition,
+  PrepareInterfaceOptions,
+  PreparedBindingDescriptor,
+  PreparedBoundaryContract,
+  PreparedDependencyDescriptor,
+  PreparedOperationDescriptor,
+} from "./prepared-interface.js";
 
 export { concludeVerification } from "./verification.js";
 export type {

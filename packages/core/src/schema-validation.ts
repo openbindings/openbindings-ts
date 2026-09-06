@@ -19,7 +19,7 @@
  */
 import { compileSchema, draft2020 } from "json-schema-library";
 import type { OBInterface } from "./types.js";
-import obiSchema from "./openbindings.schema.json" with { type: "json" };
+import { isValidSemver } from "./version.js";
 import metaSchema from "./metaschema-2020-12/schema.json" with { type: "json" };
 import metaCore from "./metaschema-2020-12/meta-core.json" with { type: "json" };
 import metaApplicator from "./metaschema-2020-12/meta-applicator.json" with { type: "json" };
@@ -120,16 +120,6 @@ export function validateSchemaWellFormedness(
     return;
   }
   errs.push(`${prefix}: a schema is a JSON Schema 2020-12 object or boolean; got ${jsonTypeName(schema)} (OBI-D-17)`);
-}
-
-let _documentValidator: CompiledSchema | null = null;
-
-function documentValidator(): CompiledSchema {
-  if (_documentValidator) return _documentValidator;
-  _documentValidator = wrapNode(
-    compileSchema(obiSchema, { drafts: [OBI_BOUNDARY_DRAFT] }),
-  );
-  return _documentValidator;
 }
 
 let _metaValidator: CompiledSchema | null = null;
@@ -315,19 +305,344 @@ export function validateAgainstOBISchema(
   errs: string[],
   iface: unknown,
 ): void {
-  let result;
-  try {
-    result = documentValidator().validate(iface);
-  } catch (err) {
-    errs.push(
-      `schema validation: ${(err as Error).message ?? "validator error"} (OBI-D-02)`,
-    );
+  validateOBIStructure(errs, iface);
+}
+
+/**
+ * Single-pass evaluator for openbindings.schema.json.
+ *
+ * The OBI schema is intentionally a shallow typed-document schema; recursive
+ * JSON Schema correctness is the separate OBI-D-17 meta-schema walk below.
+ * Evaluating its fixed constraints directly avoids a generic validator
+ * recompiling the same Operation/Dependency/Binding subschema thousands of
+ * times while preserving the exact acceptance language. Keep this function
+ * synchronized with openbindings.schema.json; the constraint matrix tests
+ * cover every property in the derived schema.
+ */
+function validateOBIStructure(errs: string[], value: unknown): void {
+  const problem = (path: string, message: string): void => {
+    errs.push(`schema validation: ${path ? path + ": " : ""}${message} (OBI-D-02)`);
+  };
+  const object = plainJSONObject(value);
+  if (!object) {
+    problem("", "must be object");
     return;
   }
-  if (result.valid) return;
-  for (const f of result.failures) {
-    const msg = `${f.path ? f.path + ": " : ""}${f.message}`;
-    errs.push(`schema validation: ${msg} (OBI-D-02)`);
+
+  requiredString(object, "openbindings", "/openbindings", problem, isValidSemver);
+  optionalString(object, "name", "/name", problem);
+  optionalString(object, "version", "/version", problem, string => string.length > 0);
+  optionalString(object, "description", "/description", problem);
+
+  const schemas = optionalMap(object, "schemas", "/schemas", problem);
+  if (schemas) {
+    for (const [key, schema] of Object.entries(schemas)) {
+      if (!OBI_IDENTIFIER.test(key)) problem(`/schemas/${pointerToken(key)}`, "property name does not match identifier pattern");
+      validateJSONSchemaMember(schema, `/schemas/${pointerToken(key)}`, problem);
+    }
+  }
+
+  const operations = requiredMap(object, "operations", "/operations", problem);
+  if (operations) {
+    for (const [key, operation] of Object.entries(operations)) {
+      const path = `/operations/${pointerToken(key)}`;
+      if (!OBI_IDENTIFIER.test(key)) problem(path, "property name does not match identifier pattern");
+      validateOperationShape(operation, path, problem);
+    }
+  }
+
+  const dependencies = optionalMap(object, "dependencies", "/dependencies", problem);
+  if (dependencies) {
+    for (const [key, dependency] of Object.entries(dependencies)) {
+      const path = `/dependencies/${pointerToken(key)}`;
+      if (!OBI_IDENTIFIER.test(key)) problem(path, "property name does not match identifier pattern");
+      validateDependencyShape(dependency, path, problem);
+    }
+  }
+
+  const sources = optionalMap(object, "sources", "/sources", problem);
+  if (sources) {
+    for (const [key, source] of Object.entries(sources)) {
+      const path = `/sources/${pointerToken(key)}`;
+      if (!OBI_IDENTIFIER.test(key)) problem(path, "property name does not match identifier pattern");
+      validateSourceShape(source, path, problem);
+    }
+  }
+
+  const bindings = optionalMap(object, "bindings", "/bindings", problem);
+  if (bindings) {
+    for (const [key, binding] of Object.entries(bindings)) {
+      const path = `/bindings/${pointerToken(key)}`;
+      if (!OBI_IDENTIFIER.test(key)) problem(path, "property name does not match identifier pattern");
+      validateBindingShape(binding, path, problem);
+    }
+  }
+
+  const transforms = optionalMap(object, "transforms", "/transforms", problem);
+  if (transforms) {
+    for (const [key, transform] of Object.entries(transforms)) {
+      const path = `/transforms/${pointerToken(key)}`;
+      if (!OBI_IDENTIFIER.test(key)) problem(path, "property name does not match identifier pattern");
+      if (typeof transform !== "string") problem(path, "must be string");
+    }
+  }
+}
+
+type StructuralProblem = (path: string, message: string) => void;
+
+const OBI_IDENTIFIER = /^[A-Za-z0-9_][A-Za-z0-9_.-]*$/;
+
+function plainJSONObject(value: unknown): Record<string, unknown> | undefined {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : undefined;
+}
+
+function pointerToken(value: string): string {
+  return value.replaceAll("~", "~0").replaceAll("/", "~1");
+}
+
+/**
+ * json-schema-library treats an own property whose JavaScript value is
+ * `undefined` as absent. Synthesizers commonly construct typed objects with
+ * optional fields present as `undefined`, so the specialized evaluator must
+ * preserve that established boundary behavior even though `undefined` is not
+ * itself a JSON value.
+ */
+function present(object: Record<string, unknown>, key: string): boolean {
+  return Object.hasOwn(object, key) && object[key] !== undefined;
+}
+
+function requiredString(
+  object: Record<string, unknown>,
+  key: string,
+  path: string,
+  problem: StructuralProblem,
+  predicate?: (value: string) => boolean,
+): void {
+  if (!present(object, key)) {
+    problem(path, "is required");
+    return;
+  }
+  const value = object[key];
+  if (typeof value !== "string") problem(path, "must be string");
+  else if (predicate && !predicate(value)) problem(path, "does not satisfy its schema constraint");
+}
+
+function optionalString(
+  object: Record<string, unknown>,
+  key: string,
+  path: string,
+  problem: StructuralProblem,
+  predicate?: (value: string) => boolean,
+): void {
+  if (!present(object, key)) return;
+  const value = object[key];
+  if (typeof value !== "string") problem(path, "must be string");
+  else if (predicate && !predicate(value)) problem(path, "does not satisfy its schema constraint");
+}
+
+function requiredMap(
+  object: Record<string, unknown>,
+  key: string,
+  path: string,
+  problem: StructuralProblem,
+): Record<string, unknown> | undefined {
+  if (!present(object, key)) {
+    problem(path, "is required");
+    return undefined;
+  }
+  const map = plainJSONObject(object[key]);
+  if (!map) problem(path, "must be object");
+  return map;
+}
+
+function optionalMap(
+  object: Record<string, unknown>,
+  key: string,
+  path: string,
+  problem: StructuralProblem,
+): Record<string, unknown> | undefined {
+  if (!present(object, key)) return undefined;
+  const map = plainJSONObject(object[key]);
+  if (!map) problem(path, "must be object");
+  return map;
+}
+
+function optionalTyped(
+  object: Record<string, unknown>,
+  key: string,
+  path: string,
+  expected: "string" | "boolean",
+  problem: StructuralProblem,
+): void {
+  if (present(object, key) && typeof object[key] !== expected) {
+    problem(path, `must be ${expected}`);
+  }
+}
+
+function validateJSONSchemaMember(
+  schema: unknown,
+  path: string,
+  problem: StructuralProblem,
+): void {
+  if (typeof schema === "boolean") return;
+  const object = plainJSONObject(schema);
+  if (!object) {
+    problem(path, "must be a JSON Schema object or boolean");
+    return;
+  }
+  if (present(object, "$schema") && object.$schema !== "https://json-schema.org/draft/2020-12/schema") {
+    problem(`${path}/$schema`, "must equal the JSON Schema 2020-12 dialect URI");
+  }
+  if (present(object, "$vocabulary")) {
+    problem(`${path}/$vocabulary`, "is forbidden");
+  }
+}
+
+function validateOperationShape(
+  value: unknown,
+  path: string,
+  problem: StructuralProblem,
+): void {
+  const operation = plainJSONObject(value);
+  if (!operation) {
+    problem(path, "must be object");
+    return;
+  }
+  optionalTyped(operation, "description", `${path}/description`, "string", problem);
+  optionalTyped(operation, "deprecated", `${path}/deprecated`, "boolean", problem);
+  optionalTyped(operation, "idempotent", `${path}/idempotent`, "boolean", problem);
+  if (present(operation, "tags")) {
+    validateStringArray(operation.tags, `${path}/tags`, problem, false, false);
+  }
+  if (present(operation, "aliases")) {
+    validateStringArray(operation.aliases, `${path}/aliases`, problem, true, true);
+  }
+  for (const member of ["input", "output"] as const) {
+    if (present(operation, member)) {
+      validateJSONSchemaMember(operation[member], `${path}/${member}`, problem);
+    }
+  }
+  const examples = optionalMap(operation, "examples", `${path}/examples`, problem);
+  if (examples) {
+    for (const [key, value] of Object.entries(examples)) {
+      const examplePath = `${path}/examples/${pointerToken(key)}`;
+      if (!OBI_IDENTIFIER.test(key)) problem(examplePath, "property name does not match identifier pattern");
+      const example = plainJSONObject(value);
+      if (!example) problem(examplePath, "must be object");
+      else optionalTyped(example, "description", `${examplePath}/description`, "string", problem);
+    }
+  }
+}
+
+function validateStringArray(
+  value: unknown,
+  path: string,
+  problem: StructuralProblem,
+  unique: boolean,
+  identifiers: boolean,
+): void {
+  if (!Array.isArray(value)) {
+    problem(path, "must be array");
+    return;
+  }
+  const seen = new Set<string>();
+  for (let index = 0; index < value.length; index++) {
+    if (!(index in value) || typeof value[index] !== "string") {
+      problem(`${path}/${index}`, "must be string");
+      continue;
+    }
+    const member = value[index] as string;
+    if (identifiers && !OBI_IDENTIFIER.test(member)) problem(`${path}/${index}`, "does not match identifier pattern");
+    if (unique && seen.has(member)) problem(path, "must contain unique items");
+    seen.add(member);
+  }
+}
+
+function validateDependencyShape(
+  value: unknown,
+  path: string,
+  problem: StructuralProblem,
+): void {
+  const dependency = plainJSONObject(value);
+  if (!dependency) {
+    problem(path, "must be object");
+    return;
+  }
+  requiredString(dependency, "operation", `${path}/operation`, problem, value => OBI_IDENTIFIER.test(value));
+  if (present(dependency, "bindingSpecs")) {
+    const specs = dependency.bindingSpecs;
+    if (!Array.isArray(specs)) {
+      problem(`${path}/bindingSpecs`, "must be array");
+    } else {
+      const values = specs as unknown[];
+      if (values.length < 1) problem(`${path}/bindingSpecs`, "must contain at least one item");
+      const seen = new Set<string>();
+      for (let index = 0; index < values.length; index++) {
+        const spec = values[index];
+        if (typeof spec !== "string" || spec.length === 0) {
+          problem(`${path}/bindingSpecs/${index}`, "must be a non-empty string");
+        } else if (seen.has(spec)) {
+          problem(`${path}/bindingSpecs`, "must contain unique items");
+        }
+        if (typeof spec === "string") seen.add(spec);
+      }
+    }
+  }
+}
+
+function validateSourceShape(
+  value: unknown,
+  path: string,
+  problem: StructuralProblem,
+): void {
+  const source = plainJSONObject(value);
+  if (!source) {
+    problem(path, "must be object");
+    return;
+  }
+  requiredString(source, "bindingSpec", `${path}/bindingSpec`, problem, value => value.length > 0);
+  optionalString(source, "location", `${path}/location`, problem, value => value.length > 0);
+  optionalTyped(source, "description", `${path}/description`, "string", problem);
+  if (!present(source, "location") && !present(source, "content")) {
+    problem(path, "must contain location or content");
+  }
+}
+
+function validateBindingShape(
+  value: unknown,
+  path: string,
+  problem: StructuralProblem,
+): void {
+  const binding = plainJSONObject(value);
+  if (!binding) {
+    problem(path, "must be object");
+    return;
+  }
+  requiredString(binding, "operation", `${path}/operation`, problem, value => OBI_IDENTIFIER.test(value));
+  requiredString(binding, "source", `${path}/source`, problem, value => OBI_IDENTIFIER.test(value));
+  optionalTyped(binding, "ref", `${path}/ref`, "string", problem);
+  optionalTyped(binding, "description", `${path}/description`, "string", problem);
+  optionalTyped(binding, "deprecated", `${path}/deprecated`, "boolean", problem);
+  if (present(binding, "preference")) {
+    const preference = binding.preference;
+    if (typeof preference !== "number" || !Number.isSafeInteger(preference)) {
+      problem(`${path}/preference`, "must be a safe integer");
+    }
+  }
+  for (const member of ["inputTransform", "outputTransform"] as const) {
+    if (!present(binding, member)) continue;
+    const transform = binding[member];
+    if (typeof transform === "string") continue;
+    const reference = plainJSONObject(transform);
+    if (
+      !reference ||
+      typeof reference.$ref !== "string" ||
+      !/^#\/transforms\/[A-Za-z0-9_][A-Za-z0-9_.-]*$/.test(reference.$ref)
+    ) {
+      problem(`${path}/${member}`, "must be a transform string or valid transform reference");
+    }
   }
 }
 
@@ -470,7 +785,8 @@ export function compileOperationSchema(
   const cached = compiledOperationSchemaCache.get(iface)?.get(cacheKey);
   if (cached) return cached;
 
-  const document = structuredClone(iface) as Record<string, unknown>;
+  const closure = operationSchemaClosure(iface, operationName, position);
+  const document: Record<string, unknown> = closure ?? structuredClone(iface);
   // The OBI root is a resolution container, not itself a JSON Schema. Ignore
   // every root field that happens to spell a JSON Schema keyword; Core says
   // unknown OBI fields are ignored, so (for example) an unknown root `type`
@@ -490,6 +806,102 @@ export function compileOperationSchema(
   }
   entries.set(cacheKey, compiled);
   return compiled;
+}
+
+/**
+ * Builds the smallest complete same-document pointer closure for the common
+ * resource-free case. A schema with `$id`/anchors or a non-fragment reference
+ * falls back to the full-document path above because its base-resource rules
+ * need the complete resource index. Ordinary `#/...` graphs — including
+ * cycles and cross-operation pointers — compile in work proportional to the
+ * reachable contract instead of total OBI size.
+ */
+function operationSchemaClosure(
+  iface: OBInterface,
+  operationName: string,
+  position: OperationSchemaPosition,
+): Record<string, unknown> | undefined {
+  const rootSchema = iface.operations[operationName]?.[position];
+  if (rootSchema == null || hasResourceControl(rootSchema)) return undefined;
+
+  const document: Record<string, unknown> = {
+    operations: {
+      [operationName]: {
+        [position]: structuredClone(rootSchema),
+      },
+    },
+  };
+  const visitedReferences = new Set<string>();
+  const visitedValues = new WeakSet<object>();
+  const pending: unknown[] = [rootSchema];
+
+  while (pending.length > 0) {
+    const value = pending.pop();
+    if (typeof value !== "object" || value === null || visitedValues.has(value)) continue;
+    visitedValues.add(value);
+    if (Array.isArray(value)) {
+      for (const child of value) pending.push(child);
+      continue;
+    }
+    const object = value as Record<string, unknown>;
+    if (hasResourceControl(object)) return undefined;
+    for (const keyword of ["$ref", "$dynamicRef"] as const) {
+      const reference = object[keyword];
+      if (typeof reference !== "string" || visitedReferences.has(reference)) continue;
+      visitedReferences.add(reference);
+      if (reference === "#") continue;
+      if (!reference.startsWith("#/")) return undefined;
+      const target = resolveDocumentPointer(iface, reference.slice(1));
+      if (target === undefined) return undefined;
+      if (hasResourceControl(target)) return undefined;
+      setDocumentPointer(document, reference.slice(1), structuredClone(target));
+      pending.push(target);
+    }
+    for (const child of Object.values(object)) pending.push(child);
+  }
+  return document;
+}
+
+function hasResourceControl(value: unknown): boolean {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const object = value as Record<string, unknown>;
+  return typeof object.$id === "string" ||
+    typeof object.$anchor === "string" ||
+    typeof object.$dynamicAnchor === "string";
+}
+
+function resolveDocumentPointer(root: unknown, pointer: string): unknown {
+  let value = root;
+  for (const token of pointer.split("/").slice(1)) {
+    if (typeof value !== "object" || value === null) return undefined;
+    const key = token.replaceAll("~1", "/").replaceAll("~0", "~");
+    if (!Object.hasOwn(value, key)) return undefined;
+    value = (value as Record<string, unknown>)[key];
+  }
+  return value;
+}
+
+function setDocumentPointer(
+  root: Record<string, unknown>,
+  pointer: string,
+  target: unknown,
+): void {
+  const tokens = pointer.split("/").slice(1)
+    .map(token => token.replaceAll("~1", "/").replaceAll("~0", "~"));
+  let value = root;
+  for (let index = 0; index < tokens.length - 1; index++) {
+    const token = tokens[index]!;
+    const current = value[token];
+    if (typeof current === "object" && current !== null && !Array.isArray(current)) {
+      value = current as Record<string, unknown>;
+    } else {
+      const child: Record<string, unknown> = {};
+      value[token] = child;
+      value = child;
+    }
+  }
+  const last = tokens.at(-1);
+  if (last !== undefined) value[last] = target;
 }
 
 function stripDocumentRootSchemaKeywords(document: Record<string, unknown>): void {

@@ -131,6 +131,7 @@ function implementation(
   bindingSpec: string,
   prefix: string,
   options?: {
+    interface?: OBInterface;
     preference?: number;
     outputSchema?: Record<string, unknown>;
     requirements?: ContextRequiredDetails | null;
@@ -142,7 +143,7 @@ function implementation(
     options?.requirements,
   );
   return {
-    interface: candidateInterface(bindingSpec, options?.outputSchema),
+    interface: options?.interface ?? candidateInterface(bindingSpec, options?.outputSchema),
     invoker: new OperationInvoker([binding]),
     label: prefix,
     ...(options?.preference !== undefined ? { preference: options.preference } : {}),
@@ -164,6 +165,40 @@ describe("operationRequirement", () => {
 });
 
 describe("resolveOperationRequirement", () => {
+  it("accepts a requirement taken from the implementation's exact interface outside the comparison profile", async () => {
+    const iface: OBInterface = {
+      openbindings: "0.2.0",
+      operations: {
+        "example.patterned.get": {
+          input: {
+            type: "object",
+            additionalProperties: false,
+            required: ["id"],
+            properties: { id: { type: "string", pattern: "^item_.+$" } },
+          },
+          output: { type: "null" },
+        },
+      },
+      sources: {
+        local: { bindingSpec: "example.local@1", content: {} },
+      },
+      bindings: {
+        get: {
+          operation: "example.patterned.get",
+          source: "local",
+          ref: "#/get",
+        },
+      },
+    };
+    const candidate = implementation("example.local@1", "local", { interface: iface });
+    const resolution = await resolveOperationRequirement(
+      operationRequirement(iface, operationSignature("example.patterned.get")),
+      [candidate],
+    );
+
+    expect(resolution.status).toBe("available");
+  });
+
   it("uses only the requested operation and preserves each complete schema graph", async () => {
     const resolution = await resolveOperationRequirement(
       operationRequirement(REQUIRED, CREATE),

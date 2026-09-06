@@ -1,12 +1,13 @@
 import {
   single,
-  type OperationImplementation,
+  type PreparedProvider,
+  type ProviderRegistration,
 } from "@openbindings/sdk";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import {
-  createTaskRequirement,
-  listTasksRequirement,
-  watchActivityRequirement,
+  createTaskDependency,
+  listTasksDependency,
+  watchActivityDependency,
   type Activity,
   type Task,
 } from "./contracts.js";
@@ -32,9 +33,9 @@ function Status({
 }
 
 function Dashboard() {
-  const list = useOperation(listTasksRequirement);
-  const create = useOperation(createTaskRequirement);
-  const activity = useOperation(watchActivityRequirement);
+  const list = useOperation(listTasksDependency);
+  const create = useOperation(createTaskDependency);
+  const activity = useOperation(watchActivityDependency);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [title, setTitle] = useState("");
   const [message, setMessage] = useState("Ready");
@@ -116,7 +117,7 @@ function Dashboard() {
 
         {list.status === "ambiguous" && (
           <p className="notice" data-testid="ambiguity">
-            The application must choose between {list.matches.length} equally
+            The application must resolve the {list.ambiguity.stage} tie between {list.ambiguity.providers.length} equally
             preferred task implementations.
           </p>
         )}
@@ -180,21 +181,41 @@ function Dashboard() {
 }
 
 export default function App() {
-  const [primary, setPrimary] = useState<OperationImplementation | null>(null);
+  const [catalog, setCatalog] = useState<{
+    primary: PreparedProvider;
+    mirror: PreparedProvider;
+    activity: PreparedProvider;
+    slow: PreparedProvider;
+  } | null>(null);
   const [mode, setMode] = useState<CandidateMode>("primary");
   const [mounted, setMounted] = useState(true);
   const [cancelledStreams, setCancelledStreams] = useState(0);
-  const activity = useMemo(
-    () => activityImplementation(() => setCancelledStreams(count => count + 1)),
-    [],
-  );
 
   useEffect(() => {
     const controller = new AbortController();
-    void tasksImplementation().then(implementation => {
-      if (!controller.signal.aborted) setPrimary(implementation);
+    let owned: PreparedProvider[] | undefined;
+    void Promise.all([
+      tasksImplementation("primary-api"),
+      tasksImplementation("mirror-api"),
+      activityImplementation(() => setCancelledStreams(count => count + 1)),
+      slowImplementation(),
+    ]).then(providers => {
+      owned = providers;
+      if (controller.signal.aborted) {
+        void Promise.all(providers.map(provider => provider.dispose()));
+        return;
+      }
+      setCatalog({
+        primary: providers[0],
+        mirror: providers[1],
+        activity: providers[2],
+        slow: providers[3],
+      });
     });
-    return () => controller.abort();
+    return () => {
+      controller.abort();
+      if (owned) void Promise.all(owned.map(provider => provider.dispose()));
+    };
   }, []);
 
   useEffect(() => {
@@ -203,27 +224,24 @@ export default function App() {
     return () => clearTimeout(timer);
   }, [mode]);
 
-  const implementations = useMemo(() => {
-    const taskImplementations: OperationImplementation[] = [];
-    if (mode === "slow") {
-      taskImplementations.push(slowImplementation());
-    } else if (primary && mode !== "none") {
-      taskImplementations.push(
-        mode === "preferred" ? { ...primary, preference: 10 } : primary,
-      );
+  const providers = useMemo(() => {
+    if (!catalog) return [];
+    const taskProviders: ProviderRegistration[] = [];
+    if (mode === "slow") taskProviders.push({ provider: catalog.slow });
+    else if (mode !== "none") {
+      taskProviders.push({
+        provider: catalog.primary,
+        preference: mode === "preferred" ? 10 : 0,
+      });
       if (mode === "ambiguous" || mode === "preferred") {
-        taskImplementations.push({
-          ...primary,
-          label: "mirror-api",
-          preference: mode === "preferred" ? 0 : primary.preference,
-        });
+        taskProviders.push({ provider: catalog.mirror, preference: 0 });
       }
     }
-    return [...taskImplementations, activity];
-  }, [activity, mode, primary]);
+    return [...taskProviders, { provider: catalog.activity }];
+  }, [catalog, mode]);
 
   return (
-    <OperationProvider implementations={implementations}>
+    <OperationProvider providers={providers}>
       <header className="controls">
         <strong>Application composition</strong>
         <div>

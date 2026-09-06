@@ -1,13 +1,14 @@
 import {
   InvocationImpl,
   OperationInvoker,
-  checkBindingSpecs,
+	checkBindingSpecs,
+	prepareProvider,
   type BindingInvocationArgs,
   type BindingInvoker,
   type BindingSpecInfo,
   type Invocation,
   type OBInterface,
-  type OperationImplementation,
+  type PreparedProvider,
 } from "@openbindings/sdk";
 import { OpenAPIInvoker, OpenAPISynthesizer } from "@openbindings/openapi";
 import { TASK_REQUIREMENTS, type Activity } from "./contracts.js";
@@ -16,9 +17,8 @@ const LOCAL_ACTIVITY_BINDING = "example.local-activity@1";
 const SLOW_BINDING = "example.slow-preflight@1";
 
 export async function tasksImplementation(
-  label = "primary-api",
-  preference = 0,
-): Promise<OperationImplementation> {
+  key = "primary-api",
+): Promise<PreparedProvider> {
   const artifact = {
     openapi: "3.1.0",
     info: { title: "Task fixture", version: "1.0.0" },
@@ -74,12 +74,12 @@ export async function tasksImplementation(
       },
     ],
   });
-  return {
+  return prepareProvider({
+    key,
     interface: iface,
-    invoker: new OperationInvoker([new OpenAPIInvoker()]),
-    label,
-    preference,
-  };
+    runtime: new OperationInvoker([new OpenAPIInvoker()]),
+    label: key,
+  });
 }
 
 class ActivityBinding implements BindingInvoker {
@@ -132,9 +132,9 @@ class ActivityBinding implements BindingInvoker {
   }
 }
 
-export function activityImplementation(
+export async function activityImplementation(
   onCancelled: () => void,
-): OperationImplementation {
+): Promise<PreparedProvider> {
   const iface: OBInterface = {
     openbindings: "0.2.0",
     operations: {
@@ -153,11 +153,12 @@ export function activityImplementation(
       },
     },
   };
-  return {
+  return prepareProvider({
+    key: "local-activity",
     interface: iface,
-    invoker: new OperationInvoker([new ActivityBinding(onCancelled)]),
+    runtime: new OperationInvoker([new ActivityBinding(onCancelled)]),
     label: "local-activity",
-  };
+  });
 }
 
 class SlowPreflightBinding implements BindingInvoker {
@@ -192,7 +193,7 @@ class SlowPreflightBinding implements BindingInvoker {
   }
 }
 
-export function slowImplementation(): OperationImplementation {
+export async function slowImplementation(): Promise<PreparedProvider> {
   const iface: OBInterface = {
     openbindings: "0.2.0",
     operations: {
@@ -214,9 +215,10 @@ export function slowImplementation(): OperationImplementation {
       create: { operation: "slowCreate", source: "slow" },
     },
   };
-  return {
+  return prepareProvider({
+    key: "slow-candidate",
     interface: iface,
-    invoker: new OperationInvoker([new SlowPreflightBinding()]),
+    runtime: new OperationInvoker([new SlowPreflightBinding()]),
     label: "slow-candidate",
-  };
+  });
 }

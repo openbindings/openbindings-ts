@@ -15,13 +15,20 @@ import type { OBInterface } from "@openbindings/core";
  * This type adds no consumer fields or optionality semantics to that document;
  * it merely pairs the existing runtime contract with the signature application
  * code already invokes through.
+ *
+ * @deprecated Use an OBI `dependencies` entry, `PreparedInterface`, and
+ * `CompositionSession`. This compatibility family remains available during
+ * the 0.2 migration but receives no new features.
  */
 export interface OperationRequirement<I = unknown, O = unknown> {
   readonly interface: OBInterface;
   readonly signature: OperationSignature<I, O>;
 }
 
-/** Pairs a required interface with one operation it carries. */
+/**
+ * Pairs a required interface with one operation it carries.
+ * @deprecated Use a generated dependency signature and `CompositionSession`.
+ */
 export function operationRequirement<I = unknown, O = unknown>(
   iface: OBInterface,
   signature: OperationSignature<I, O>,
@@ -39,6 +46,8 @@ export function operationRequirement<I = unknown, O = unknown>(
  * all application-owned runtime state. The SDK stores no registry. `label` is
  * diagnostic only and never becomes interface identity. Higher preference
  * wins; equal highest preferences remain ambiguous.
+ *
+ * @deprecated Use `PreparedProvider` and `ProviderRegistration`.
  */
 export interface OperationImplementation {
   readonly interface: OBInterface;
@@ -184,6 +193,8 @@ function makeMatch<I, O>(
  * The function owns no registry and performs no invocation. Applications call
  * it again whenever their interface/delegate state changes; a UI adapter can
  * render its own transient `resolving` state while this promise is pending.
+ *
+ * @deprecated Use `CompositionSession.inspect` or `CompositionSession.explain`.
  */
 export async function matchOperationRequirement<I = unknown, O = unknown>(
   requirement: OperationRequirement<I, O>,
@@ -231,11 +242,19 @@ export async function matchOperationRequirement<I = unknown, O = unknown>(
       continue;
     }
 
-    const issues = await checkOperationCompatibility(
-      requirement.interface,
-      requirement.signature.key,
-      implementation.interface,
-    );
+    // A requirement taken directly from the implementation's own interface is
+    // definitionally the same operation contract. Running the conservative
+    // cross-document comparison profile in this identity case can only lose
+    // information: the profile intentionally declines schema keywords it
+    // cannot prove across independently authored documents (for example,
+    // `pattern`), even though no comparison is needed here.
+    const issues = requirement.interface === implementation.interface
+      ? []
+      : await checkOperationCompatibility(
+          requirement.interface,
+          requirement.signature.key,
+          implementation.interface,
+        );
     throwIfAborted(options?.signal);
     if (issues.length > 0) {
       assessments.push({ implementation, issues });
@@ -298,6 +317,8 @@ export async function matchOperationRequirement<I = unknown, O = unknown>(
  * invoker registration order as a hidden election. Applications with
  * aggregate/fan-out/race/fallback semantics use
  * {@link matchOperationRequirement} directly.
+ *
+ * @deprecated Use `CompositionSession.resolve`.
  */
 export async function resolveOperationRequirement<I = unknown, O = unknown>(
   requirement: OperationRequirement<I, O>,

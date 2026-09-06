@@ -1155,3 +1155,69 @@ describe("prepareOperation", () => {
     expect(() => op.prepareOperation(testInterface(), "nope")).toThrow();
   });
 });
+
+describe("prepareOperationHandle", () => {
+  it("pins an immutable executable snapshot across repeated invocations", async () => {
+    const iface = testInterface();
+    const mock = new MockBindingInvoker();
+    let selections = 0;
+    const op = makeInvoker(mock, {
+      bindingSelector(candidate, operation) {
+        selections++;
+        const binding = candidate.bindings?.[`${operation}.main`];
+        if (!binding) throw new BindingNotFoundError(operation);
+        return { key: `${operation}.main`, binding };
+      },
+    });
+
+    const prepared = await op.prepareOperationHandle(
+      iface,
+      operationSignature("getUser"),
+    );
+
+    expect(Object.isFrozen(prepared)).toBe(true);
+    expect(Object.isFrozen(prepared.interfaceSnapshot)).toBe(true);
+    expect(prepared.bindingKey).toBe("getUser.main");
+
+    // None of these mutations may retarget or redefine the prepared call.
+    iface.bindings!["getUser.main"]!.ref = "badUser";
+    iface.sources!["mock"]!.bindingSpec = "exotic@9";
+    iface.operations.getUser.output = { type: "integer" };
+
+    for (const id of ["u1", "u2"]) {
+      const call = prepared.invoke();
+      await call.write({ id });
+      await expect(single(call.outputs)).resolves.toEqual({ id, name: "Ada" });
+    }
+
+    expect(selections).toBe(1);
+    expect(mock.attempts).toBe(2);
+  });
+
+  it("does not accept a per-invocation binding retarget", async () => {
+    const prepared = await makeInvoker().prepareOperationHandle(
+      testInterface(),
+      operationSignature("getUser"),
+      { bindingKey: "getUser.main" },
+    );
+
+    // An untyped JavaScript caller can still pass an extra property. Runtime
+    // behavior must ignore it instead of silently weakening the prepared pin.
+    const call = prepared.invoke({ bindingKey: "getUser.bad" } as never);
+    await call.write({ id: "u1" });
+    await expect(single(call.outputs)).resolves.toEqual({ id: "u1", name: "Ada" });
+  });
+
+  it("fails preparation when a governing schema cannot be compiled", async () => {
+    const iface = testInterface();
+    iface.operations.getUser.input = { $ref: "#/schemas/Missing" };
+
+    await expect(
+      makeInvoker().prepareOperationHandle(
+        iface,
+        operationSignature("getUser"),
+        { bindingKey: "getUser.main" },
+      ),
+    ).rejects.toMatchObject({ code: ERR_SCHEMA_UNRESOLVED });
+  });
+});

@@ -61,21 +61,115 @@ export {
 
 export type {
   BindingInvoker,
+  BindingCompiler,
+  CompiledBindingInvoker,
   TransformEvaluator,
   TransformEvaluatorWithBindings,
   BindingSelector,
   ContextResolver,
 } from "./invokers.js";
-export { isTransformEvaluatorWithBindings } from "./invokers.js";
+export { isBindingCompiler, isTransformEvaluatorWithBindings } from "./invokers.js";
 
 export {
   OperationInvoker,
   defaultBindingSelector,
 } from "./operation-invoker.js";
-export type { OperationInvokerOptions } from "./operation-invoker.js";
+export type {
+  OperationInvokerOptions,
+  CompiledOperation,
+  PreparedInvokeOptions,
+  PreparedPreflightOptions,
+  PreparedOperation,
+} from "./operation-invoker.js";
+
+export { HandlerBindingInvoker } from "./handler-binding-invoker.js";
+export type {
+  BindingHandler,
+  BindingHandlerPreparer,
+  HandlerBindingRegistration,
+  HandlerBindingInvokerOptions,
+} from "./handler-binding-invoker.js";
 
 export { operationSignature } from "./operation-signature.js";
 export type { OperationSignature } from "./operation-signature.js";
+
+export {
+  dependencySignature,
+  dependencySignatureFromOperation,
+  unsafeDependencySignature,
+  matchDependency,
+  resolveDependency,
+} from "./dependency.js";
+
+export {
+  REFERENCE_COMPOSITION_POLICY_ID,
+  referenceCompositionPolicy,
+} from "./composition-policy.js";
+
+export {
+  PreparedProvider,
+  PreparedRealization,
+  ProviderDisposedError,
+  RealizationNotFoundError,
+  prepareProvider,
+} from "./prepared-provider.js";
+
+export {
+  CompositionSession,
+  PreparedDependencyRoute,
+} from "./composition-session.js";
+
+export {
+  LocalBindingImplementation,
+  localStream,
+  localUnary,
+  prepareLocalProvider,
+} from "./local-provider.js";
+export type {
+  LocalStreamHandler,
+  LocalUnaryHandler,
+  PrepareLocalProviderOptions,
+} from "./local-provider.js";
+export type {
+  CompositionAmbiguity,
+  CompositionAssessment,
+  CompositionSessionOptions,
+  DependencyInspection,
+  DependencyRouteResolution,
+  InspectedProvider,
+  InspectedRealization,
+  ProviderRegistration,
+} from "./composition-session.js";
+export type {
+  CompiledRealizationBehavior,
+  PreparedProviderOptions,
+  PreparedRealizationDescriptor,
+  ProviderRuntime,
+} from "./prepared-provider.js";
+export type {
+  CompositionPolicy,
+  ContractEvidence,
+  ContractEvidenceVerdict,
+  OperationCorrespondence,
+  ProviderPolicyCandidate,
+  ProviderPolicySelection,
+  RealizationPolicyCandidate,
+  RealizationPolicySelection,
+  RealizationSelector,
+} from "./composition-policy.js";
+export type {
+  DependencySignature,
+  InterfaceProvider,
+  InterfaceProviderInvoker,
+  DependencyAssessmentCode,
+  DependencyAssessmentFailure,
+  DependencyAssessment,
+  DependencyInvokeOptions,
+  DependencyMatch,
+  DependencyMatches,
+  DependencyMatchOptions,
+  DependencyResolution,
+} from "./dependency.js";
 
 export {
   operationRequirement,

@@ -27,6 +27,7 @@ export default tseslint.config(
         project: [
           "packages/*/tsconfig.json",
           "packages/*/tsconfig.test.json",
+          "packages/*/tsconfig.bench.json",
           "examples/react-operation-dependencies/tsconfig.json",
         ],
         tsconfigRootDir: import.meta.dirname,
@@ -84,7 +85,7 @@ export default tseslint.config(
       "scripts/**/*.ts",
       "scripts/**/*.mjs",
       "packages/*/*.ts",
-      "packages/*/scripts/**/*.ts",
+          "packages/*/scripts/**/*.ts",
       "examples/*/scripts/**/*.mjs",
     ],
     extends: [tseslint.configs.disableTypeChecked],

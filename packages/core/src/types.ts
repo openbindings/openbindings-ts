@@ -107,12 +107,12 @@ export interface BindingEntry {
   [key: string]: unknown;
 }
 
-/** A named consumption point for an operation contract. */
+/** A named consumption point for an operation contract in the same document. */
 export interface DependencyEntry {
-  /** Same-document operation key. Aliases are deliberately not accepted. */
-  operation: string;
-  /** Optional any-of constraint over exact, opaque binding-spec identifiers. */
-  bindingSpecs?: string[];
+	/** Same-document operation key. Aliases are deliberately not accepted. */
+	operation: string;
+	/** Optional any-of constraint over exact, opaque binding-spec identifiers. */
+	bindingSpecs?: string[];
   [key: string]: unknown;
 }
 

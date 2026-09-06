@@ -9,6 +9,7 @@
     "release:verify": "node scripts/verify-release-tag.mjs",
     "test:release": "node --test scripts/verify-release-tag.test.mjs",
     "test": "vitest run packages && node scripts/verify-verbal-identity.mjs",
+    "bench:composition": "pnpm --filter @openbindings/invoke bench:composition",
     "conformance": "pnpm --filter @openbindings/core conformance",
     "correspondence": "node scripts/verify-reference-correspondence.mjs",
     "lint": "pnpm -r --filter './packages/*' run lint && eslint . --ignore-pattern 'packages/**'"

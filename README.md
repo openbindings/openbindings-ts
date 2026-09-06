@@ -17,7 +17,7 @@ OpenBindings is an open standard. **One interface. Any binding.** Describe what 
 | Package                                             | Description                                                                                              | Install                                    |
 | --------------------------------------------------- | -------------------------------------------------------------------------------------------------------- | ------------------------------------------ |
 | `@openbindings/core`                                | The spec-defined core: document model, parse, validate, resolve, verify                                  | `npm install @openbindings/core`           |
-| `@openbindings/invoke`                              | Binding-invoker / operation-invoker pattern: invocation handles, context, hooks, operation requirements  | `npm install @openbindings/invoke`         |
+| `@openbindings/invoke`                              | Invocation and composition: prepared providers, dependency routes, context, hooks, and binding runtimes | `npm install @openbindings/invoke`         |
 | `@openbindings/synthesize`                          | Interface synthesis, coverage accounting, source inspection, `fetchInterface`                            | `npm install @openbindings/synthesize`     |
 | `@openbindings/compare`                             | Schema comparison under the published OB-2020-12 profile                                                 | `npm install @openbindings/compare`        |
 | `@openbindings/sdk`                                 | Protocol-neutral runtime facade plus re-exports of core + invoke + synthesize + compare                   | `npm install @openbindings/sdk`            |
@@ -53,12 +53,14 @@ the staged `0.2.0` versions are registry-visible before the release.
 
 ## What the SDK does
 
-- **Core types** for the OpenBindings interface document: operations, bindings, sources, transforms, schemas
+- **Core types** for the OpenBindings interface document: operations, dependencies, bindings, sources, transforms, schemas
+- **Prepared semantic interfaces** with content revisions, immutable indexes, exact boundary identities, and shared schema compilation
 - **Validation** with shape-level checks, strict mode for unknown fields, and exact binding-specification identifier validation
 - **Schema compatibility** checking under the OpenBindings Schema Compatibility Profile v0.1 (covariant outputs, contravariant inputs) with diagnostic reasons
 - **`fetchInterface`** for resolving OBIs from URLs: well-known discovery, then synthesis from raw OpenAPI / AsyncAPI / etc. via supplied synthesizers
 - **Exhaustiveness-qualified synthesis accounting** through `CoverageSynthesizer`, pairing a creation-time-sound OBI with durable dispositions and an explicit claim about whether the upstream interaction inventory is complete
 - **`OperationInvoker`** for routing operations to binding invokers by binding-spec identifier, with transform support
+- **Explicit provider composition** for resolving named OBI dependencies through a versioned policy into retained, SDK-identified routes
 - **Context contracts** for caller-supplied or resolved invocation context, with requirement-scoped provisioning and no assumption that non-credential fields are public
 
 The SDK defines the contracts that binding invokers implement but does not contain any binding-spec-specific logic itself. Binding support is added by installing binding packages.
@@ -140,7 +142,96 @@ for (const issue of issues) {
 }
 ```
 
-### Consume an operation contract
+### Satisfy a named interface dependency
+
+In the 0.2 draft, a consumer OBI can name a dependency whose `operation`
+points to one of that same document's operation contracts. The application
+prepares the consumer and each actionable provider once, then creates an
+application-scoped composition session with an explicit provider set:
+
+```typescript
+import {
+  CompositionSession,
+  localUnary,
+  prepareLocalProvider,
+  prepareProvider,
+  single,
+} from "@openbindings/invoke";
+import { prepareInterface } from "@openbindings/core";
+import { DependencySignatures } from "./component.generated.js";
+
+const consumer = await prepareInterface(componentInterface);
+const provider = await prepareProvider({
+  key: "tasks-api",
+  interface: tasksAPI,
+  runtime: tasksInvoker,
+  label: "tasks-api",
+});
+const session = new CompositionSession({
+  consumer,
+  providers: [{ provider, preference: 10 }],
+});
+const resolution = await session.resolve(DependencySignatures.creation);
+
+if (resolution.status === "available") {
+  const invocation = resolution.route.invoke();
+  await invocation.write({ title: "Ship it" });
+  const task = await single(invocation.outputs);
+}
+```
+
+The versioned reference policy applies exact dependency lookup, key/alias
+correspondence, exact boundary identity followed by directional profile
+compatibility, the dependency's hard unordered `bindingSpecs` allow-list,
+caller-owned provider preference, and a separate per-provider realization
+choice. Compatibility evidence is `compatible`, `incompatible`, or
+`indeterminate`; route resolution is conservatively `available`, `ambiguous`,
+or `unavailable`. Static closure compiles deterministic artifacts, while live
+credentials and reachability remain explicit `route.preflight()` or invocation
+concerns. The reference policy inspects provider preference tiers from highest
+to lowest and stops after the first eligible tier; `session.inspect(...)`
+remains the deliberate exhaustive diagnostics path. Custom policies expose
+that staging through `providerInspectionGroups`. Diagnostics carry stable IDs
+and codes, never raw provider objects.
+
+For in-process providers, `prepareLocalProvider` maps native implementations by
+OBI binding key, so application code does not repeat source locations or refs.
+`localUnary` covers the common one-input/one-output case and `localStream`
+retains the general cardinality-neutral handle. Local values remain native
+references, and compiled routes pin the handler rather than consulting a
+mutable registry on every call.
+
+```typescript
+const local = await prepareLocalProvider({
+  key: "local-tasks",
+  interface: tasksAPI,
+  implementations: {
+    "createTask.local": localUnary(input => repository.create(input)),
+  },
+});
+```
+
+`matchDependency`, `resolveDependency`, `PreparedOperation`,
+`HandlerBindingInvoker`, and operation requirements remain transitional
+compatibility/proving surfaces. New 0.2 wiring should use the prepared
+composition API above.
+
+The same static closure primitive is available without dependency composition
+when application wiring already knows one exact provider binding:
+
+```typescript
+const providerInterface = await prepareInterface(tasksAPI);
+const prepared = tasksInvoker.compileOperationHandle(
+  providerInterface,
+  OperationSignatures.createTask,
+  { bindingKey: "createTask.primary" },
+);
+
+const invocation = prepared.invoke({ context: requestContext });
+await invocation.write({ title: "Ship it" });
+```
+
+### Transitional operation requirements
 
 An operation requirement is one typed signature paired with the ordinary,
 typically unbound OBI contract a consumer expects. The application supplies
@@ -180,6 +271,10 @@ resolution uses only caller-owned preference and refuses an equal tie as
 `ambiguous`. `matchOperationRequirement` returns every match without imposing
 route, aggregate, race, fan-out, or fallback semantics. The SDK owns no
 registry; applications retain and refresh their own interface/delegate state.
+
+This API remains available while named dependencies are proven across both
+TypeScript and Go and downstream examples migrate. New dependency-model work
+should use the consumer OBI's `dependencies` map as its authority.
 
 The SDK packages import no binding package. An OpenAPI-only application ships
 only the SDK layers it uses (or the `@openbindings/sdk` facade) and

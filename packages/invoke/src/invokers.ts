@@ -5,7 +5,7 @@ import type {
   BindingSpecVerdict,
 } from "@openbindings/core";
 import type { BindingInvocationArgs } from "./invoker-types.js";
-import type { ContextRequiredDetails, Invocation } from "./invocation.js";
+import type { BindingHandle, ContextRequiredDetails, Invocation } from "./invocation.js";
 
 /**
  * Invokes bindings whose sources are governed by specific binding
@@ -35,6 +35,48 @@ export interface BindingInvoker {
   prepareBinding?(
     args: BindingInvocationArgs,
   ): Promise<ContextRequiredDetails | null>;
+}
+
+/**
+ * One statically selected binding-runtime route. Its implementation may pin a
+ * parsed protocol operation or an in-process handler; repeated invocation
+ * performs no binding-spec registry lookup.
+ */
+export interface CompiledBindingInvoker {
+  invokeBinding<I = unknown, O = unknown>(args: BindingInvocationArgs): Invocation<I, O>;
+  prepareBinding(args: BindingInvocationArgs): Promise<ContextRequiredDetails | null>;
+  /**
+   * Optional two-handle execution entry after the operation layer has already
+   * evaluated `prepareBinding` for this invocation. It prevents a compiled
+   * adapter from redundantly evaluating the same prerequisite callback.
+   */
+  invokeBindingAfterPreflight?<I = unknown, O = unknown>(
+    args: BindingInvocationArgs,
+  ): Invocation<I, O>;
+  /**
+   * Optional zero-bridge execution seam for an exact compiled binding.
+   *
+   * The operation layer supplies its own binding-facing handle after applying
+   * the ordinary operation validation/transform boundary. Implementations
+   * MUST NOT repeat `prepareBinding`: the operation layer evaluates it once
+   * before entering this method. This capability is only used when reactive
+   * context retry is not installed; other compiled bindings retain the
+   * cardinality-neutral two-handle adapter.
+   */
+  invokeBindingHandle?<I = unknown, O = unknown>(
+    handle: BindingHandle<I, O>,
+    args: BindingInvocationArgs,
+  ): Promise<void>;
+}
+
+/** Optional deterministic-closure capability of a binding invoker. */
+export interface BindingCompiler {
+  compileBinding(args: BindingInvocationArgs): CompiledBindingInvoker;
+}
+
+export function isBindingCompiler(value: BindingInvoker): value is BindingInvoker & BindingCompiler {
+  return "compileBinding" in value &&
+    typeof (value as unknown as Record<string, unknown>)["compileBinding"] === "function";
 }
 
 /** Evaluates a transform expression (e.g., JSONata) against input data. */

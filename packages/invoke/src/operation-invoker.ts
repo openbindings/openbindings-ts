@@ -1,5 +1,5 @@
 import type { OBInterface, BindingEntry, Operation, Source, Transform, TransformOrRef, BindingSpecInfo, BindingSpecVerdict } from "@openbindings/core";
-import { resolveTransform } from "@openbindings/core";
+import { PreparedInterface, prepareInterface, resolveTransform } from "@openbindings/core";
 import type {
   BindingInvocationArgs,
   InvokeOptions,
@@ -9,10 +9,12 @@ import type {
   BindingInvoker,
   BindingSelector,
   ContextResolver,
+  CompiledBindingInvoker,
   TransformEvaluator,
 } from "./invokers.js";
 import {
   type ContextRequiredDetails,
+  type BindingHandle,
   type Invocation,
   InvocationError,
   InvocationImpl,
@@ -20,12 +22,13 @@ import {
   isContextRequired,
   isContextRequiredDetails,
 } from "./invocation.js";
-import { OperationNotFoundError } from "@openbindings/core";
+import { OperationNotFoundError, ValidationError } from "@openbindings/core";
 import {
   BindingNotFoundError,
   BindingSelectionRequiredError,
   EmptyTransformExpressionError,
   MissingInterfaceError,
+  NoInvokerError,
   TransformRefNotFoundError,
   UnknownSourceError,
 } from "./errors.js";
@@ -37,6 +40,7 @@ import {
   ERR_SCHEMA_UNRESOLVED,
   ERR_INPUT_CLOSED,
   ERR_RUNTIME,
+  ERR_TOO_MANY_INPUTS,
   ERR_TRANSFORM_ERROR,
   ERR_OPERATION_VALIDATION_FAILED,
 } from "./errcodes.js";
@@ -87,6 +91,60 @@ export interface OperationInvokerOptions {
   outputDecoder?: OutputDecoder;
   resultClassifier?: ResultClassifier;
   fieldRouter?: FieldRouter;
+}
+
+/** Per-call options for an operation whose exact binding is already prepared. */
+export type PreparedInvokeOptions = Omit<InvokeOptions, "bindingKey">;
+/** Live preflight inputs; invocation-only output hooks cannot be supplied. */
+export type PreparedPreflightOptions = Pick<InvokeOptions, "context" | "signal">;
+
+/**
+ * An immutable, executable snapshot of one exact operation binding.
+ *
+ * Preparation resolves the operation and binding, deep-snapshots the OBI,
+ * compiles both operation schemas, and performs side-effect-free preflight.
+ * Repeated invocation therefore performs no document cloning, binding
+ * selection, or schema compilation and cannot drift when the caller later
+ * mutates its original OBI object.
+ */
+export interface PreparedOperation<I = unknown, O = unknown> {
+  readonly interfaceSnapshot: OBInterface;
+  readonly signature: OperationSignature<I, O>;
+  readonly canonicalOperation: string;
+  readonly bindingKey: string;
+  readonly bindingSpec: string;
+  readonly knownContextRequirements: ContextRequiredDetails | null;
+  invoke(options?: PreparedInvokeOptions): Invocation<I, O>;
+  prepare(options?: PreparedPreflightOptions): Promise<ContextRequiredDetails | null>;
+}
+
+/**
+ * A statically closed operation realization. Unlike the transitional
+ * PreparedOperation, it carries no timeless claim about live context: callers
+ * preflight explicitly when they need a current answer.
+ */
+export interface CompiledOperation<I = unknown, O = unknown> {
+  readonly preparedInterface: PreparedInterface;
+  readonly signature: OperationSignature<I, O>;
+  readonly canonicalOperation: string;
+  readonly bindingKey: string;
+  readonly bindingSpec: string;
+  invoke(options?: PreparedInvokeOptions): Invocation<I, O>;
+  preflight(options?: PreparedPreflightOptions): Promise<ContextRequiredDetails | null>;
+}
+
+interface PreparedOperationState<I, O> {
+  readonly preparedInterface: PreparedInterface;
+  readonly iface: OBInterface;
+  readonly signature: OperationSignature<I, O>;
+  readonly op: Operation;
+  readonly opKey: string;
+  readonly bindingKey: string;
+  readonly binding: BindingEntry;
+  readonly source: Source;
+  readonly inputValidator?: CompiledSchema;
+  readonly outputValidator?: CompiledSchema;
+  readonly compiledBinding: CompiledBindingInvoker;
 }
 
 /**
@@ -313,6 +371,142 @@ export class OperationInvoker {
   }
 
   /**
+   * Resolves and freezes one exact executable operation realization.
+   *
+   * Unlike {@link prepareOperation}, this returns a reusable handle rather
+   * than only context requirements. The caller's OBI is cloned, never frozen
+   * in place. Schema compilation and binding selection happen here, making a
+   * prepared handle the safe application-wiring artifact for repeated calls.
+   */
+  async prepareOperationHandle<I = unknown, O = unknown>(
+    obi: OBInterface | PreparedInterface,
+    signature: OperationSignature<I, O>,
+    opts?: InvokeOptions,
+  ): Promise<PreparedOperation<I, O>> {
+    let preparedInterface: PreparedInterface;
+    try {
+      preparedInterface = await prepareInterface(obi);
+    } catch (error: unknown) {
+      // Preserve the transitional API's invocation-layer classification for
+      // a governing graph that cannot be established. Direct
+      // prepareInterface callers retain the richer Core validation failure.
+      if (
+        error instanceof ValidationError &&
+        error.problems.some(problem => problem.includes("(OBI-D-16)") || problem.includes("(OBI-D-17)"))
+      ) {
+        throw new InvocationError(ERR_SCHEMA_UNRESOLVED);
+      }
+      throw error;
+    }
+    const compiled = this.compileOperationHandle(preparedInterface, signature, opts);
+    const known = await compiled.preflight(opts);
+    if (known !== null && !isContextRequiredDetails(known)) {
+      throw new InvocationError(ERR_RUNTIME);
+    }
+    const knownContextRequirements = known === null
+      ? null
+      : immutableValueSnapshot(known);
+
+    return Object.freeze({
+      interfaceSnapshot: preparedInterface.interfaceSnapshot,
+      signature: compiled.signature,
+      canonicalOperation: compiled.canonicalOperation,
+      bindingKey: compiled.bindingKey,
+      bindingSpec: compiled.bindingSpec,
+      knownContextRequirements,
+      invoke: (options?: PreparedInvokeOptions): Invocation<I, O> =>
+        compiled.invoke(options),
+      prepare: (options?: PreparedPreflightOptions): Promise<ContextRequiredDetails | null> =>
+        compiled.preflight(options),
+    });
+  }
+
+  /**
+   * Closes one exact operation/binding realization against an already
+   * prepared interface. This performs every deterministic check once and no
+   * live preflight. The returned closure shares the interface snapshot and
+   * compiled validators with every other realization from that preparation.
+   */
+  compileOperationHandle<I = unknown, O = unknown>(
+    preparedInterface: PreparedInterface,
+    signature: OperationSignature<I, O>,
+    opts?: InvokeOptions,
+  ): CompiledOperation<I, O> {
+    if (!(preparedInterface instanceof PreparedInterface)) {
+      throw new TypeError("openbindings: a PreparedInterface is required");
+    }
+    const iface = preparedInterface.interfaceSnapshot;
+    const resolved = this.resolveBinding(
+      iface,
+      signature.key,
+      opts?.bindingKey,
+      opts?.context,
+    );
+
+    if ((resolved.binding.inputTransform || resolved.binding.outputTransform) && !this.transformEvaluator) {
+      throw new InvocationError(ERR_TRANSFORM_ERROR);
+    }
+    if (!this.availableBindingSpecs().has(resolved.source.bindingSpec)) {
+      throw new NoInvokerError(resolved.source.bindingSpec);
+    }
+
+    let inputValidator: CompiledSchema | undefined;
+    let outputValidator: CompiledSchema | undefined;
+    try {
+      if (resolved.op.input != null) {
+        inputValidator = preparedInterface.schemaValidator(resolved.opKey, "input");
+      }
+      if (resolved.op.output != null) {
+        outputValidator = preparedInterface.schemaValidator(resolved.opKey, "output");
+      }
+    } catch {
+      throw new InvocationError(ERR_SCHEMA_UNRESOLVED);
+    }
+
+    const preparedSignature: OperationSignature<I, O> = Object.freeze({
+      key: signature.key,
+    });
+    const state: PreparedOperationState<I, O> = {
+      preparedInterface,
+      iface,
+      signature: preparedSignature,
+      op: resolved.op,
+      opKey: resolved.opKey,
+      bindingKey: resolved.bindingKey,
+      binding: resolved.binding,
+      source: resolved.source,
+      inputValidator,
+      outputValidator,
+      compiledBinding: this.invoker.compileBinding(this.withFetch({
+        source: {
+          bindingSpec: resolved.source.bindingSpec,
+          location: resolved.source.location,
+          ...(resolved.source.content !== undefined
+            ? { content: resolved.source.content }
+            : {}),
+        },
+        ref: resolved.binding.ref ?? "",
+        binding: resolved.binding,
+        inputSchema: resolved.op.input ?? undefined,
+        interface: iface,
+        context: opts?.context,
+        signal: opts?.signal,
+      })),
+    };
+    return Object.freeze({
+      preparedInterface,
+      signature: state.signature,
+      canonicalOperation: state.opKey,
+      bindingKey: state.bindingKey,
+      bindingSpec: state.source.bindingSpec,
+      invoke: (options?: PreparedInvokeOptions): Invocation<I, O> =>
+        this.invokePreparedOperation(state, options),
+      preflight: (options?: PreparedPreflightOptions): Promise<ContextRequiredDetails | null> =>
+        this.prepareResolvedOperation(state, options),
+    });
+  }
+
+  /**
    * Operation-layer side-effect-free preflight (the operation-invoker interface
    * `prepareOperation`), the by-reference counterpart to `prepareBinding`. It
    * resolves `operation` on `obi` to a concrete binding (OBI-T-12 resolution +
@@ -344,6 +538,237 @@ export class OperationInvoker {
       context: opts?.context,
       signal: opts?.signal,
     });
+  }
+
+  private prepareResolvedOperation<I, O>(
+    prepared: PreparedOperationState<I, O>,
+    opts?: PreparedPreflightOptions,
+  ): Promise<ContextRequiredDetails | null> {
+    return this.prepareBinding({
+      source: {
+        bindingSpec: prepared.source.bindingSpec,
+        location: prepared.source.location,
+        ...(prepared.source.content !== undefined
+          ? { content: prepared.source.content }
+          : {}),
+      },
+      ref: prepared.binding.ref ?? "",
+      binding: prepared.binding,
+      inputSchema: prepared.op.input ?? undefined,
+      interface: prepared.iface,
+      context: opts?.context,
+      signal: opts?.signal,
+    });
+  }
+
+  private invokePreparedOperation<I, O>(
+    prepared: PreparedOperationState<I, O>,
+    opts?: PreparedInvokeOptions,
+  ): Invocation<I, O> {
+    const callerInv = new InvocationImpl<I, O>({
+      signal: opts?.signal,
+      validateInput: validatorHook(prepared.inputValidator),
+    });
+    const hooks = this.snapshotHooks(
+      opts?.outputDecoder,
+      opts?.resultClassifier,
+      opts?.fieldRouter,
+    );
+    const site: InvokeSite = {
+      operation: prepared.opKey,
+      invokedAs: prepared.signature.key,
+      bindingKey: prepared.bindingKey,
+      bindingSpec: prepared.source.bindingSpec,
+      ref: prepared.binding.ref ?? "",
+      target: "",
+    };
+
+    const directBinding = prepared.compiledBinding.invokeBindingHandle === undefined
+      ? undefined
+      : (handle: BindingHandle<unknown, unknown>, args: BindingInvocationArgs) =>
+        prepared.compiledBinding.invokeBindingHandle!(handle, args);
+    if (directBinding && !this.contextResolver) {
+      const args = this.preparedBindingArgs(
+        prepared,
+        opts?.context,
+        callerInv.signal,
+        hooks,
+        site,
+      );
+      const handle = this.operationBoundaryHandle(
+        callerInv,
+        prepared,
+      );
+      queueMicrotask(() => {
+        this.runDirectPreparedBinding(
+          callerInv,
+          handle,
+          prepared.compiledBinding,
+          directBinding,
+          args,
+        ).catch(error => callerInv.fireError(asInvocationError(error)));
+      });
+      return callerInv;
+    }
+
+    queueMicrotask(() => {
+      this.run(
+        callerInv,
+        prepared.iface,
+        prepared.op,
+        prepared.binding,
+        prepared.bindingKey,
+        prepared.source,
+        opts?.context,
+        hooks,
+        site,
+        prepared.outputValidator,
+        true,
+        prepared.compiledBinding,
+      ).catch((err) => callerInv.fireError(asInvocationError(err)));
+    });
+    return callerInv;
+  }
+
+  /** Builds the immutable/static and per-call/dynamic binding arguments once. */
+  private preparedBindingArgs<I, O>(
+    prepared: PreparedOperationState<I, O>,
+    context: Record<string, unknown> | undefined,
+    signal: AbortSignal,
+    hooks: InvokeHooks | null,
+    site: InvokeSite,
+  ): BindingInvocationArgs {
+    return this.withFetch({
+      source: {
+        bindingSpec: prepared.source.bindingSpec,
+        location: prepared.source.location,
+        ...(prepared.source.content !== undefined
+          ? { content: prepared.source.content }
+          : {}),
+      },
+      ref: prepared.binding.ref ?? "",
+      binding: prepared.binding,
+      inputSchema: prepared.op.input ?? undefined,
+      interface: prepared.iface,
+      context,
+      signal,
+      hooks,
+      site,
+    });
+  }
+
+  /**
+   * Runs a captured in-process binding against the caller's invocation
+   * channel directly. Deterministic preflight remains once per attempt; no
+   * registry lookup, second InvocationImpl, pump, replay log, or JSON bridge
+   * exists on this path.
+   */
+  private async runDirectPreparedBinding<I, O>(
+    callerInv: InvocationImpl<I, O>,
+    handle: BindingHandle<unknown, unknown>,
+    compiledBinding: CompiledBindingInvoker,
+    invokeBindingHandle: NonNullable<CompiledBindingInvoker["invokeBindingHandle"]>,
+    args: BindingInvocationArgs,
+  ): Promise<void> {
+    if (callerInv.signal.aborted) return;
+    let details: ContextRequiredDetails | null;
+    try {
+      details = await compiledBinding.prepareBinding(args);
+    } catch (error: unknown) {
+      callerInv.fireError(wireError(error));
+      return;
+    }
+    if (details !== null) {
+      callerInv.fireError(
+        isContextRequiredDetails(details)
+          ? contextRequiredError(details)
+          : new InvocationError(ERR_RUNTIME),
+      );
+      return;
+    }
+    if (callerInv.signal.aborted) return;
+    await invokeBindingHandle(handle, args);
+  }
+
+  /** Applies operation transforms/output validation around one native handle. */
+  private operationBoundaryHandle<I, O>(
+    callerInv: InvocationImpl<I, O>,
+    prepared: PreparedOperationState<I, O>,
+  ): BindingHandle<unknown, unknown> {
+    const evaluator = this.transformEvaluator;
+    const inputTransform = prepared.binding.inputTransform;
+    const outputTransform = prepared.binding.outputTransform;
+    const outputValidator = prepared.outputValidator;
+
+    if (!inputTransform && !outputTransform && !outputValidator) {
+      return callerInv;
+    }
+
+    return {
+      inputs: (): AsyncIterable<unknown> => {
+        const source = callerInv.inputs();
+        if (!inputTransform) return source;
+        return {
+          [Symbol.asyncIterator](): AsyncIterator<unknown> {
+            const iterator = source[Symbol.asyncIterator]();
+            return {
+              async next(): Promise<IteratorResult<unknown, void>> {
+                const item = await iterator.next();
+                if (item.done) return item;
+                try {
+                  const value = await applyTransformRef(
+                    evaluator!,
+                    prepared.iface.transforms,
+                    inputTransform,
+                    item.value,
+                  );
+                  return { value, done: false };
+                } catch {
+                  const error = new InvocationError(ERR_TRANSFORM_ERROR);
+                  callerInv.fireError(error);
+                  throw error;
+                }
+              },
+              ...(iterator.return === undefined
+                ? {}
+                : { return: (value?: void) => iterator.return!(value) }),
+              ...(iterator.throw === undefined
+                ? {}
+                : { throw: (error?: unknown) => iterator.throw!(error) }),
+            };
+          },
+        };
+      },
+      closeInput: () => callerInv.closeInput(),
+      emitOutput: async (raw: unknown): Promise<void> => {
+        let output = raw;
+        if (outputTransform) {
+          try {
+            output = await applyTransformRef(
+              evaluator!,
+              prepared.iface.transforms,
+              outputTransform,
+              output,
+            );
+          } catch {
+            const error = new InvocationError(ERR_TRANSFORM_ERROR);
+            callerInv.fireError(error);
+            throw error;
+          }
+        }
+        if (outputValidator && !safeValidate(outputValidator, output).valid) {
+          const error = new InvocationError(ERR_OPERATION_VALIDATION_FAILED);
+          callerInv.fireError(error);
+          throw error;
+        }
+        await callerInv.emitOutput(output as O);
+      },
+      closeOutput: () => callerInv.closeOutput(),
+      fireError: error => callerInv.fireError(error),
+      get signal(): AbortSignal {
+        return callerInv.signal;
+      },
+    };
   }
 
   /**
@@ -437,6 +862,9 @@ export class OperationInvoker {
     initialContext: Record<string, unknown> | undefined,
     hooks: InvokeHooks | null = null,
     site?: InvokeSite,
+    preparedOutputValidator?: CompiledSchema,
+    outputAlreadyCompiled = false,
+    compiledBinding?: CompiledBindingInvoker,
   ): Promise<void> {
     const evaluator = this.transformEvaluator;
     if ((binding.inputTransform || binding.outputTransform) && !evaluator) {
@@ -451,8 +879,8 @@ export class OperationInvoker {
     // schema graph. A graph that cannot be established is ERR_SCHEMA_UNRESOLVED —
     // the claim could not be evaluated — never partial validation
     // (OBI-T-16).
-    let outputValidator: CompiledSchema | undefined;
-    if (op.output != null) {
+    let outputValidator = preparedOutputValidator;
+    if (!outputAlreadyCompiled && op.output != null) {
       try {
         outputValidator = compileOperationSchema(iface, binding.operation, "output");
       } catch {
@@ -518,7 +946,7 @@ export class OperationInvoker {
     // knowable-upfront context challenges into the clean
     // no-input-consumed case before anything is forwarded.
     try {
-      const details = await this.invoker.prepareBinding(bindingArgs());
+      const details = await (compiledBinding ?? this.invoker).prepareBinding(bindingArgs());
       if (details) {
         if (!isContextRequiredDetails(details)) {
           callerInv.fireError(new InvocationError(ERR_RUNTIME));
@@ -573,6 +1001,7 @@ export class OperationInvoker {
     let replayLog: unknown[] = [];
     let retryEligible = true;
     let attemptGen = 0;
+    let inputSurface: InvocationError | undefined;
 
     const pumpInputs = async (inner: Invocation<unknown, unknown>): Promise<void> => {
       const myGen = attemptGen;
@@ -591,6 +1020,7 @@ export class OperationInvoker {
             // reading; further caller writes must reject rather than be
             // silently accepted into a buffer nobody drains.
             void callerInv.closeInput();
+            inputSurface ??= new InvocationError(ERR_TOO_MANY_INPUTS);
           }
           return; // inner terminal or input-closed; the output loop owns reporting
         }
@@ -626,6 +1056,10 @@ export class OperationInvoker {
               // unary / read-enough): propagate so further caller writes
               // reject, and stop forwarding. Outputs continue to flow.
               void callerInv.closeInput();
+              // The caller-side value was already accepted before the inner
+              // binding's early close reached this pump. Surface the excess
+              // instead of completing successfully after silently dropping it.
+              inputSurface ??= new InvocationError(ERR_TOO_MANY_INPUTS);
               return;
             }
             // Inner terminal: if a retry follows, v is in the replay log.
@@ -644,7 +1078,10 @@ export class OperationInvoker {
     for (;;) {
       let inner: Invocation<unknown, unknown>;
       try {
-        inner = this.invoker.invokeBinding(bindingArgs());
+        const args = bindingArgs();
+        inner = compiledBinding?.invokeBindingAfterPreflight
+          ? compiledBinding.invokeBindingAfterPreflight(args)
+          : (compiledBinding ?? this.invoker).invokeBinding(args);
       } catch (err) {
         callerInv.fireError(wireError(err));
         return;
@@ -717,6 +1154,8 @@ export class OperationInvoker {
       wake();
       await pump;
 
+      if (!retry && !surface && inputSurface) surface = inputSurface;
+
       if (retry) {
         rounds++;
         continue;
@@ -781,6 +1220,40 @@ function makeInputValidator(
     }
     return null;
   };
+}
+
+function validatorHook(
+  validator: CompiledSchema | undefined,
+): ((input: unknown) => InvocationError | null) | undefined {
+  if (!validator) return undefined;
+  return (input: unknown): InvocationError | null => {
+    const result = safeValidate(validator, input);
+    return result.valid
+      ? null
+      : new InvocationError(ERR_OPERATION_VALIDATION_FAILED);
+  };
+}
+
+function immutableValueSnapshot<T>(value: T): T {
+  return deepFreeze(structuredClone(value));
+}
+
+const immutableInterfaceSnapshots = new WeakSet<object>();
+
+/** Creates a deep, immutable OBI snapshot without mutating the caller's value. */
+export function snapshotInterface(iface: OBInterface): OBInterface {
+  if (!iface) throw new MissingInterfaceError();
+  if (immutableInterfaceSnapshots.has(iface)) return iface;
+  const snapshot = immutableValueSnapshot(iface);
+  immutableInterfaceSnapshots.add(snapshot);
+  return snapshot;
+}
+
+function deepFreeze<T>(value: T, seen = new WeakSet<object>()): T {
+  if (typeof value !== "object" || value === null || seen.has(value)) return value;
+  seen.add(value);
+  for (const child of Object.values(value)) deepFreeze(child, seen);
+  return Object.freeze(value);
 }
 
 function asInvocationError(err: unknown): InvocationError {

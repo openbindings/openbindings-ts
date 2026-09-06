@@ -7,8 +7,8 @@ const compiled = compile(source, {
   generate: "client",
 });
 
-if (!compiled.js.code.includes("resolveOperationRequirement")) {
-  throw new Error("Svelte adapter did not retain operation resolution");
+if (!compiled.js.code.includes("CompositionSession")) {
+  throw new Error("Svelte adapter did not retain dependency composition");
 }
 if (compiled.js.code.includes("node:")) {
   throw new Error("Svelte adapter compiled with a Node dependency");

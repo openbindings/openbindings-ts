@@ -3,53 +3,65 @@
   generics="I = unknown, O = unknown"
 >
   import {
-    resolveOperationRequirement,
+    CompositionSession,
+    prepareInterface,
+    type DependencyRouteResolution,
+    type DependencySignature,
     type Invocation,
     type InvokeOptions,
-    type OperationImplementation,
-    type OperationMatch,
-    type OperationRequirement,
-    type OperationRequirementResolution,
+    type PreparedDependencyRoute,
+    type PreparedInterface,
+    type OBInterface,
+    type ProviderRegistration,
   } from "@openbindings/sdk";
   import { onDestroy, type Snippet } from "svelte";
 
   type Available = {
     status: "available";
-    match: OperationMatch<I, O>;
+    route: PreparedDependencyRoute<I, O>;
     invoke(options?: InvokeOptions): Invocation<I, O>;
   };
 
   type State =
     | { status: "resolving" }
     | Available
-    | Extract<OperationRequirementResolution<I, O>, { status: "ambiguous" }>
-    | Extract<OperationRequirementResolution<I, O>, { status: "unavailable" }>
+    | Extract<DependencyRouteResolution<I, O>, { status: "ambiguous" }>
+    | Extract<DependencyRouteResolution<I, O>, { status: "unavailable" }>
     | { status: "failed"; error: Error };
 
   let {
-    requirement,
-    implementations,
+    consumer,
+    dependency,
+    providers,
     children,
   }: {
-    requirement: OperationRequirement<I, O>;
-    implementations: readonly OperationImplementation[];
+    consumer: OBInterface | PreparedInterface;
+    dependency: DependencySignature<I, O>;
+    providers: readonly ProviderRegistration[];
     children: Snippet<[State]>;
   } = $props();
 
   let state = $state<State>({ status: "resolving" });
-  let current: OperationRequirementResolution<I, O> | null = null;
+  let current: DependencyRouteResolution<I, O> | null = null;
   let generation = 0;
   const active = new Set<Invocation<I, O>>();
 
   $effect(() => {
-    const candidates = implementations;
+    const candidates = providers;
     const controller = new AbortController();
     const thisGeneration = ++generation;
     current = null;
     state = { status: "resolving" };
 
-    void resolveOperationRequirement(requirement, candidates, {
-      signal: controller.signal,
+    void prepareInterface(consumer).then(prepared => {
+      if (controller.signal.aborted) {
+        throw controller.signal.reason;
+      }
+      const session = new CompositionSession({
+        consumer: prepared,
+        providers: candidates,
+      });
+      return session.resolve(dependency, { signal: controller.signal });
     }).then(
       next => {
         if (controller.signal.aborted || generation !== thisGeneration) return;
@@ -69,8 +81,10 @@
 
     return () => {
       controller.abort(
-        new DOMException("operation candidates changed", "AbortError"),
+        new DOMException("providers changed", "AbortError"),
       );
+      for (const invocation of active) void invocation.cancel();
+      active.clear();
     };
   });
 
@@ -83,7 +97,7 @@
     if (current?.status !== "available") {
       throw new Error("operation is not available");
     }
-    const invocation = current.match.invoke(options);
+    const invocation = current.route.invoke(options);
     active.add(invocation);
     const forget = () => active.delete(invocation);
     void invocation.closed.then(forget, forget);
