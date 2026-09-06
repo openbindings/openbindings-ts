@@ -63,7 +63,7 @@ describe("native OpenAPI source cache", () => {
     expect(fetch).toHaveBeenCalledTimes(2);
   });
 
-  it("makes location-only advisory reuse follow the newest content revision", async () => {
+  it("keeps a location-only revision distinct from co-present embedded content", async () => {
     const loaded = vi.spyOn(OpenAPIClient, "load");
     const documentURL = "https://documents.example.test/openapi.json";
     const dispatched: string[] = [];
@@ -99,11 +99,87 @@ describe("native OpenAPI source cache", () => {
       await call.closed;
     }
 
-    expect(loaded).toHaveBeenCalledTimes(2);
+    expect(loaded).toHaveBeenCalledTimes(3);
     expect(dispatched).toEqual([
       "https://first.example.test/ping",
       "https://second.example.test/ping",
-      "https://second.example.test/ping",
+      "https://first.example.test/ping",
     ]);
+  });
+
+  it("loads uncached when Web Crypto hashing is unavailable", async () => {
+    const load = vi.spyOn(OpenAPIClient, "load");
+    const savedCrypto = Object.getOwnPropertyDescriptor(globalThis, "crypto");
+    Object.defineProperty(globalThis, "crypto", { configurable: true, value: undefined });
+    try {
+      const fetch = vi.fn(async () => new Response(null, { status: 204 })) as typeof globalThis.fetch;
+      const invoker = new OpenAPIInvoker();
+      for (let index = 0; index < 2; index++) {
+        const call = invoker.invokeBinding({
+          source: { bindingSpec: "openbindings.openapi-3.1@1", content: DOCUMENT },
+          selector: "#/paths/~1ping/get",
+          fetch,
+        });
+        await call.close();
+        for await (const _ of call.outputs) void _;
+        await call.closed;
+      }
+      expect(load).toHaveBeenCalledTimes(2);
+      expect(fetch).toHaveBeenCalledTimes(2);
+    } finally {
+      if (savedCrypto) Object.defineProperty(globalThis, "crypto", savedCrypto);
+      else delete (globalThis as { crypto?: Crypto }).crypto;
+    }
+  });
+
+  it("retrieves a changed location document on each invocation", async () => {
+    let revision = 0;
+    const destinations: string[] = [];
+    const fetch = vi.fn(async (input: string | URL | Request) => {
+      const url = input instanceof Request ? input.url : String(input);
+      if (url === "https://documents.example.test/openapi.json") {
+        return Response.json({ ...DOCUMENT, servers: [{ url: `https://revision${++revision}.example.test` }] });
+      }
+      destinations.push(url);
+      return new Response(null, { status: 204 });
+    });
+    const invoker = new OpenAPIInvoker();
+    for (let index = 0; index < 2; index++) {
+      const call = invoker.invokeBinding({
+        source: { bindingSpec: "openbindings.openapi-3.1@1", location: "https://documents.example.test/openapi.json" },
+        selector: "#/paths/~1ping/get", fetch,
+      });
+      await call.close();
+      for await (const _ of call.outputs) void _;
+      await call.closed;
+    }
+    expect(destinations).toEqual(["https://revision1.example.test/ping", "https://revision2.example.test/ping"]);
+  });
+
+  it("does not reuse external references across invocation fetch contexts", async () => {
+    const invoker = new OpenAPIInvoker();
+    const content = { ...DOCUMENT, paths: { "/ping": { $ref: "https://documents.example.test/path.json" } } };
+    const destinations: string[] = [];
+    for (const revision of [1, 2]) {
+      const fetch = vi.fn(async (input: string | URL | Request) => {
+        const url = input instanceof Request ? input.url : String(input);
+        if (url === "https://documents.example.test/path.json") {
+          return Response.json({
+            servers: [{ url: `https://revision${revision}.example.test` }],
+            get: DOCUMENT.paths["/ping"].get,
+          });
+        }
+        destinations.push(url);
+        return new Response(null, { status: 204 });
+      });
+      const call = invoker.invokeBinding({
+        source: { bindingSpec: "openbindings.openapi-3.1@1", content },
+        selector: "#/paths/~1ping/get", fetch,
+      });
+      await call.close();
+      for await (const _ of call.outputs) void _;
+      await call.closed;
+    }
+    expect(destinations).toEqual(["https://revision1.example.test/ping", "https://revision2.example.test/ping"]);
   });
 });

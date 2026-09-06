@@ -87,7 +87,7 @@ export interface OperationInvokerOptions {
    * Invoker-level consumer hooks (specification + configuration = complete
    * invocation): consulted after any per-invocation hook declines, before
    * the format built-in. Site-guard your hook bodies (site.operation,
-   * siteFamilyName) when the invoker serves multiple interfaces.
+   * exact bindingSpec) when the invoker serves multiple interfaces.
    */
   outputDecoder?: OutputDecoder;
   resultClassifier?: ResultClassifier;

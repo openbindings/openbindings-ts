@@ -291,7 +291,7 @@ describe("BEC Integration (real HTTP)", () => {
     await expect(call2.closed).rejects.toMatchObject({ code: CONTEXT_REQUIRED });
   });
 
-  it("prepareBinding reports the challenge once the document is cached", async () => {
+  it("location-only prepareBinding stays unknown after an earlier invocation", async () => {
     const invoker = new OpenAPIInvoker();
     const opInvoker = new OperationInvoker([invoker]);
     const iface = await fetchIface();
@@ -304,13 +304,10 @@ describe("BEC Integration (real HTTP)", () => {
     // Nothing cached yet: preflight declines rather than fetching.
     await expect(invoker.prepareBinding(args)).resolves.toBeNull();
 
-    // A (challenged) invocation loads and caches the document.
+    // A challenged invocation cannot establish a later retrieval's revision.
     await opInvoker.invoke(iface, operationSignature("listItems")).closed.catch(() => {});
 
-    await expect(invoker.prepareBinding(args)).resolves.toMatchObject({
-      target: targetURL(),
-      alternatives: [{ requirements: [{ type: "auth.bearer" }] }],
-    });
+    await expect(invoker.prepareBinding(args)).resolves.toBeNull();
 
     await expect(
       invoker.prepareBinding({ ...args, context: { bearerToken: SECRET } }),

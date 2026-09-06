@@ -7,7 +7,7 @@ import {
 } from "@openbindings/core";
 import { CompositionSession } from "./composition-session.js";
 import { REFERENCE_COMPOSITION_POLICY_ID } from "./composition-policy.js";
-import { InvocationImpl } from "./invocation.js";
+import { InvocationImpl, single } from "./invocation.js";
 import {
   prepareProvider,
   type CompiledRealizationBehavior,
@@ -109,10 +109,8 @@ describe("portable runtime composition corpus", () => {
         if (scenario.invocation) {
           const call = result.route.invoke();
           await call.write(scenario.invocation.input);
-          await expect(call.outputs[Symbol.asyncIterator]().next()).resolves.toEqual({
-            done: false,
-            value: scenario.invocation.output,
-          });
+          await expect(single(call.outputs)).resolves.toEqual(scenario.invocation.output);
+          await call.closed;
         }
       } else if (result.status === "ambiguous") {
         expect(result.ambiguity.stage).toBe(scenario.expected.ambiguityStage);

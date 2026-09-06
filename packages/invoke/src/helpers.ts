@@ -1,20 +1,4 @@
 /**
- * Extracts the lowercase family name from a binding-specification
- * identifier ("openbindings.openapi-3.1@1" → "openapi"). Identifiers
- * themselves stay exact and opaque for matching (core §6); this is a
- * display/dispatch convenience only. A pre-promotion draft token
- * ("graphql") passes through.
- */
-export function familyName(identifier: string): string {
-  let name = identifier.trim();
-  const at = name.lastIndexOf("@");
-  if (at > 0) name = name.slice(0, at);
-  if (name.startsWith("openbindings."))
-    name = name.slice("openbindings.".length);
-  return name.toLowerCase();
-}
-
-/**
  * Reports whether a Content-Type header declares a JSON body:
  * application/json or any +json structured-suffix type. Absent or
  * unparseable → NOT JSON. This is wire framing (the header decides the

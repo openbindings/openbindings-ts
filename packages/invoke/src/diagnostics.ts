@@ -52,7 +52,12 @@ export class DiagnosticCollector {
     bindingKey: string,
     failures: readonly ValidationFailure[],
   ): void {
-    const normalized = failures.map(failure => {
+    const remaining = this.limit - this.#records.length;
+    if (remaining <= 0) {
+      this.#truncated = true;
+      return;
+    }
+    const normalized = failures.slice(0, remaining).map(failure => {
       const schemaPointer = failure.schemaPath;
       const tokens = schemaPointer?.split("/").filter(Boolean) ?? [];
       const keyword = tokens.at(-1);
@@ -69,13 +74,9 @@ export class DiagnosticCollector {
       compareStrings(left.schemaPointer ?? "", right.schemaPointer ?? "") ||
       compareStrings(left.keyword ?? "", right.keyword ?? "")
     );
-    const remaining = this.limit - this.#records.length;
-    if (remaining <= 0) {
-      this.#truncated = true;
-      return;
-    }
-    this.#records.push(...normalized.slice(0, remaining));
-    if (normalized.length > remaining) this.#truncated = true;
+
+    this.#records.push(...normalized);
+    if (failures.length > remaining) this.#truncated = true;
   }
 }
 

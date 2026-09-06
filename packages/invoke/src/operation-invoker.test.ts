@@ -597,6 +597,8 @@ describe("OBI-T-07 — input validation", () => {
         operationKey: "getUser",
         bindingKey: "getUser.main",
         instancePointer: "",
+        schemaPointer: "/schemas/UserInput/required",
+        keyword: "required",
       }],
     });
   });

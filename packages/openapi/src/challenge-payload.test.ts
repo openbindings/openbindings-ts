@@ -5,7 +5,7 @@
 // surface. Before this test the adapter re-minted both payloads with an
 // empty target and no durable flag, so a runtime keying context by target
 // could name the point but not say where the choice applied.
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { InvocationError } from "@openbindings/invoke";
 import {
   PROPERTY_MEDIA_REQUIREMENT_DESCRIPTION,
@@ -130,6 +130,31 @@ function preflight(bindingSpec: string, content: string, selector: string): Prom
   return new OpenAPIInvoker().prepareBinding({ source: { bindingSpec, content }, selector });
 }
 
+async function terminalError(
+  bindingSpec: string,
+  content: string,
+  selector: string,
+  context: Record<string, unknown>,
+): Promise<InvocationError> {
+  const call = new OpenAPIInvoker().invokeBinding({
+    source: { bindingSpec, content },
+    selector,
+    context,
+    fetch: async () => {
+      throw new Error("a refused invocation must not dispatch");
+    },
+  });
+  try {
+    await call.close();
+    for await (const _ of call.outputs) void _;
+    await call.closed;
+  } catch (error) {
+    if (error instanceof InvocationError) return error;
+    throw error;
+  }
+  throw new Error("expected an invocation error");
+}
+
 const requestMediaChallenge = {
   target: SERVER,
   alternatives: [{
@@ -195,6 +220,25 @@ describe.each(LINES)("challenge payload on OpenAPI %s", (openapi, bindingSpec) =
     await expect(preflight(bindingSpec, content, "#/paths/~1ping/get")).resolves.toEqual(expected);
   });
 
+  it("consumes the server challenge's canonical /url selection", async () => {
+    const content = serverChoiceDocument(openapi);
+    const fetch = vi.fn(async (_input: string | URL | Request) => new Response(null, { status: 204 }));
+    const args = {
+      source: { bindingSpec, content },
+      selector: "#/paths/~1ping/get",
+      context: { configuration: { server: { url: "https://b.example" } } },
+      fetch,
+    };
+    await expect(new OpenAPIInvoker().prepareBinding(args)).resolves.toBeNull();
+    const call = new OpenAPIInvoker().invokeBinding(args);
+    await call.close();
+    for await (const _ of call.outputs) void _;
+    await call.closed;
+    expect(fetch).toHaveBeenCalledTimes(1);
+    const request = fetch.mock.calls[0]?.[0];
+    expect(request instanceof Request ? request.url : String(request)).toBe("https://b.example/ping");
+  });
+
   it("maps the client's security choice to configuration.security/index", async () => {
     const content = securityChoiceDocument(openapi);
     const expected = {
@@ -212,5 +256,34 @@ describe.each(LINES)("challenge payload on OpenAPI %s", (openapi, bindingSpec) =
     };
     await expect(challenge(bindingSpec, content, "#/paths/~1secured/get", undefined)).resolves.toEqual(expected);
     await expect(preflight(bindingSpec, content, "#/paths/~1secured/get")).resolves.toEqual(expected);
+  });
+
+  it.each([
+    null,
+    [],
+    {},
+    "0",
+    { index: "0" },
+    { index: -1 },
+    { index: 0, ignored: true },
+  ])("refuses malformed security selection %#", async (security) => {
+    const error = await terminalError(
+      bindingSpec,
+      securityChoiceDocument(openapi),
+      "#/paths/~1secured/get",
+      { configuration: { security } },
+    );
+    expect(error.code).toBe("ERR_REFUSED");
+  });
+
+  it.each([
+    { url: "https://unlisted.example" },
+    { url: "https://b.example", ignored: true },
+    { index: 0, variables: null },
+    { index: 0, ignored: true },
+    { baseUrl: "https://b.example", variables: {} },
+  ])("refuses malformed or unlisted server selection %#", async server => {
+    const error = await terminalError(bindingSpec, serverChoiceDocument(openapi), "#/paths/~1ping/get", { configuration: { server } });
+    expect(error.code).toBe("ERR_REFUSED");
   });
 });

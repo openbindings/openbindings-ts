@@ -59,17 +59,92 @@ function normalizePointer(pointer: string | undefined): string {
   return pointer.startsWith("#") ? pointer.slice(1) : pointer;
 }
 
-type JslError = { message?: string; data?: { pointer?: string } };
+type JslError = {
+  code?: unknown;
+  message?: string;
+  data?: { pointer?: string; schema?: unknown };
+};
+
+const VALIDATION_KEYWORD_BY_CODE: Readonly<Record<string, string>> = Object.freeze({
+  "additional-items-error": "items",
+  "additional-properties-error": "additionalProperties",
+  "all-of-error": "allOf",
+  "any-of-error": "anyOf",
+  "const-error": "const",
+  "contains-any-error": "contains",
+  "contains-array-error": "contains",
+  "contains-error": "contains",
+  "contains-min-error": "minContains",
+  "contains-max-error": "maxContains",
+  "enum-error": "enum",
+  "exclusive-maximum-error": "exclusiveMaximum",
+  "exclusive-minimum-error": "exclusiveMinimum",
+  "forbidden-property-error": "properties",
+  "maximum-error": "maximum",
+  "max-items-error": "maxItems",
+  "max-length-error": "maxLength",
+  "max-properties-error": "maxProperties",
+  "minimum-error": "minimum",
+  "min-items-error": "minItems",
+  "min-items-one-error": "minItems",
+  "min-length-error": "minLength",
+  "min-length-one-error": "minLength",
+  "min-properties-error": "minProperties",
+  "missing-array-item-error": "prefixItems",
+  "missing-dependency-error": "dependentRequired",
+  "multiple-of-error": "multipleOf",
+  "no-additional-properties-error": "additionalProperties",
+  "not-error": "not",
+  "one-of-error": "oneOf",
+  "pattern-error": "pattern",
+  "pattern-properties-error": "patternProperties",
+  "ref-error": "$ref",
+  "required-property-error": "required",
+  "type-error": "type",
+  "unevaluated-property-error": "unevaluatedProperties",
+  "unevaluated-items-error": "unevaluatedItems",
+  "unique-items-error": "uniqueItems",
+});
+
+function validationSchemaPaths(node: ReturnType<typeof compileSchema>): WeakMap<object, string> {
+  const paths = new WeakMap<object, string>();
+  const pending: Array<{ value: unknown; pointer: string }> = [{ value: node.schema, pointer: "" }];
+  while (pending.length > 0) {
+    const { value, pointer } = pending.pop()!;
+    if (typeof value !== "object" || value === null || paths.has(value)) continue;
+    paths.set(value, pointer);
+    for (const [key, child] of Object.entries(value)) {
+      pending.push({ value: child, pointer: `${pointer}/${escapePointerToken(key)}` });
+    }
+  }
+  return paths;
+}
+
+function validationSchemaPath(error: JslError, paths: WeakMap<object, string>): string | undefined {
+  const schema = error.data?.schema;
+  if (typeof schema !== "object" || schema === null) return undefined;
+  const base = paths.get(schema);
+  if (base === undefined) return undefined;
+  const keyword = typeof error.code === "string" ? VALIDATION_KEYWORD_BY_CODE[error.code] : undefined;
+  return keyword
+    ? `${base}/${keyword.replaceAll("~", "~0").replaceAll("/", "~1")}`
+    : undefined;
+}
 
 function wrapNode(node: ReturnType<typeof compileSchema>): CompiledSchema {
+  const schemaPaths = validationSchemaPaths(node);
   return {
     validate(value: unknown) {
       const r = node.validate(value);
       if (r.valid) return { valid: true, failures: [] };
-      const failures: ValidationFailure[] = (r.errors ?? []).map((e: JslError) => ({
-        path: normalizePointer(e.data?.pointer),
-        message: e.message ?? "schema violation",
-      }));
+      const failures: ValidationFailure[] = (r.errors ?? []).map((e: JslError) => {
+        const schemaPath = validationSchemaPath(e, schemaPaths);
+        return {
+          path: normalizePointer(e.data?.pointer),
+          message: e.message ?? "schema violation",
+          ...(schemaPath ? { schemaPath } : {}),
+        };
+      });
       return { valid: false, failures };
     },
   };
