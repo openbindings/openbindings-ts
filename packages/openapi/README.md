@@ -20,6 +20,15 @@ See the [spec](https://github.com/openbindings/spec) and the [invocation pattern
 
 ## Install
 
+Non-string parameter conversion remains an explicit host policy. To opt in,
+construct `new OpenAPIInvoker({ parameterConversion: decimalParameterConversion })`
+using the helper exported by this package. It emits lowercase booleans and
+finite, non-exponent decimal numbers within the JavaScript-safe integer range,
+normalizing negative zero. Strings are unchanged; null, compound values,
+non-finite and out-of-range numbers refuse. Default adapters and native clients
+do not select this policy implicitly. The Go adapter's
+`DecimalParameterConversion` is checked against the same shared-JSON vectors.
+
 ```
 npm install @openbindings/openapi
 ```

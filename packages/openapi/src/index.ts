@@ -25,3 +25,4 @@ export type {
   OpenAPIResponse,
   OpenAPIMediaType,
 } from "./types.js";
+export { decimalParameterConversion } from "./parameter-policy.js";

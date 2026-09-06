@@ -1,0 +1,56 @@
+[
+  {
+    "value": "002",
+    "expected": "002"
+  },
+  {
+    "value": true,
+    "expected": "true"
+  },
+  {
+    "value": false,
+    "expected": "false"
+  },
+  {
+    "value": 0,
+    "expected": "0"
+  },
+  {
+    "value": 2,
+    "expected": "2"
+  },
+  {
+    "value": -2,
+    "expected": "-2"
+  },
+  {
+    "value": 1.25,
+    "expected": "1.25"
+  },
+  {
+    "value": 1e-7,
+    "expected": "0.0000001"
+  },
+  {
+    "value": -1e-8,
+    "expected": "-0.00000001"
+  },
+  {
+    "value": 9007199254740991,
+    "expected": "9007199254740991"
+  },
+  {
+    "value": 9007199254740992,
+    "refuse": true
+  },
+  {
+    "value": null,
+    "refuse": true
+  },
+  {
+    "value": {
+      "a": 2
+    },
+    "refuse": true
+  }
+]
