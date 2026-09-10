@@ -1,0 +1,39 @@
+{
+  "name": "@openbindings/json-schema",
+  "version": "0.2.0",
+  "description": "Exact JSON Schema numeric adapters backed by a maintained existing evaluator",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
+    }
+  },
+  "files": [
+    "dist", "README.md", "LICENSE", "THIRD_PARTY_NOTICES.md"
+  ],
+  "publishConfig": { "access": "public" },
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "build": "tsup",
+    "test": "vitest run",
+    "lint": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@openbindings/json": "workspace:*",
+    "json-schema-library": "11.6.2"
+  }
+}

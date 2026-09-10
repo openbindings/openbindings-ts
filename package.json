@@ -6,6 +6,8 @@
     "browser:imports": "node scripts/verify-browser-imports.mjs",
     "browser:worker": "node scripts/verify-worker-build.mjs",
     "pack:verify": "node scripts/verify-packed-packages.mjs",
+    "validator:verify": "node scripts/validator-dependency.mjs verify && vitest run packages/core/src/validator-dependency.test.ts",
+    "validator:qualify": "pnpm validator:verify && vitest run third_party/json-schema-library/qualification.test.ts",
     "release:verify": "node scripts/verify-release-tag.mjs",
     "test:release": "node --test scripts/verify-release-tag.test.mjs",
     "test": "vitest run packages && node scripts/verify-verbal-identity.mjs",
@@ -15,6 +17,7 @@
     "lint": "pnpm -r --filter './packages/*' run lint && eslint . --ignore-pattern 'packages/**'"
   },
   "devDependencies": {
+    "@openbindings/jsonata": "link:../jsonata/javascript",
     "@eslint/js": "^10.0.1",
     "@types/json-schema": "^7.0.15",
     "@types/node": "^22.19.17",

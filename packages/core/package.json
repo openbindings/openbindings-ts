@@ -9,6 +9,10 @@
   "sideEffects": false,
   "exports": {
     ".": {
+      "browser": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.browser.js"
+      },
       "import": {
         "types": "./dist/index.d.ts",
         "default": "./dist/index.js"
@@ -20,14 +24,15 @@
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "THIRD_PARTY_NOTICES.md"
   ],
   "publishConfig": {
     "access": "public"
   },
   "scripts": {
-    "build": "tsup",
-    "prepack": "tsup",
+    "build": "tsup && node ../../scripts/shared-runtime-entry.mjs",
+    "prepack": "tsup && node ../../scripts/shared-runtime-entry.mjs",
     "test": "vitest run",
     "conformance": "node --import tsx scripts/run-conformance.ts",
     "lint": "tsc --noEmit && tsc -p tsconfig.test.json && eslint ."
@@ -49,8 +54,12 @@
     "node": ">=18"
   },
   "dependencies": {
-    "canonicalize": "^2.1.0",
-    "json-schema-library": "^11.6.1",
+    "@openbindings/json": "workspace:*",
+    "@openbindings/json-schema": "workspace:*",
+    "canonicalize": "^2.1.0"
+  },
+  "devDependencies": {
+    "json-schema-library": "11.6.2",
     "jsonata": "2.1.1"
   }
 }

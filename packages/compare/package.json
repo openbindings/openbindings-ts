@@ -49,6 +49,7 @@
     "node": ">=18"
   },
   "dependencies": {
+    "@openbindings/json": "workspace:*",
     "@openbindings/core": "workspace:^",
     "canonicalize": "^2.1.0"
   }

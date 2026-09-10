@@ -11,18 +11,39 @@ import { parseDocument, validateInterface, resolveOperation } from "@openbinding
 ```
 
 `prepareInterface` creates the reusable semantic form used by composition and
-invocation. It validates a private RFC 8785 snapshot, assigns a SHA-256 content
-revision, builds canonical operation/dependency/binding indexes, memoizes exact
-boundary-contract identities, and shares compiled operation schemas:
+invocation. The adopted 2026-09-08 architecture requires one exact, detached
+working snapshot, ownership-local caches and optional JCS export. Preparation
+must not require a JCS representation; fingerprints cannot erase distinctions
+when deciding boundary equality or cache reuse. Boundary graphs retain authored
+schema structure, array order, presence and reachable resource content; they
+are not the comparison profile's normalized schema identity.
+
+The candidate implements that separation: `snapshotId` is local correlation,
+not content equality. `exportJCS()` is optional and throws if canonicalization
+would change a retained value; a failed export leaves the snapshot usable.
+Use `compareBoundaryContracts` for exact authored-boundary evidence, not IDs.
+Successful comparisons between immutable owners may be reused internally.
+These implementation commitments do not add Core/binding conformance rules or
+qualify JSONata. Shared evaluator-dependent activation remains a separate gate.
+
+The prepared layer builds canonical operation/dependency/binding indexes and
+shares compiled operation schemas:
 
 ```ts
 const prepared = await prepareInterface(iface);
 const dependency = prepared.dependency("delivery");
-console.log(prepared.revision, dependency?.operation.canonicalKey);
+console.log(prepared.snapshotId, dependency?.operation.canonicalKey);
+// Only when an explicit canonical export is needed; handle export failure:
+const { canonical, revision } = await prepared.exportJCS();
 ```
 
 Preparation never mutates or retains caller-owned objects and never fetches
 external schema resources implicitly.
+
+Go/TypeScript consumers must retain the neutral JSON carriers at ordinary data
+boundaries. In TypeScript use `@openbindings/json` (also re-exported by the SDK
+facade) for parsing, encoding and copying values. Node import/require entries
+share an owner runtime; browser-condition exports use native ESM.
 
 The layered packages build on it:
 

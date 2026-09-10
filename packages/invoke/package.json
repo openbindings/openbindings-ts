@@ -8,7 +8,15 @@
   "types": "./dist/index.d.ts",
   "sideEffects": false,
   "exports": {
+    "./jsonata": {
+      "import": { "types": "./dist/jsonata.d.ts", "default": "./dist/jsonata.js" },
+      "require": { "types": "./dist/jsonata.d.cts", "default": "./dist/jsonata.cjs" }
+    },
     ".": {
+      "browser": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.browser.js"
+      },
       "import": {
         "types": "./dist/index.d.ts",
         "default": "./dist/index.js"
@@ -26,8 +34,8 @@
     "access": "public"
   },
   "scripts": {
-    "build": "tsup",
-    "prepack": "tsup",
+    "build": "tsup && node ../../scripts/shared-runtime-entry.mjs",
+    "prepack": "tsup && node ../../scripts/shared-runtime-entry.mjs",
     "test": "vitest run",
     "bench:composition": "node --expose-gc --import tsx bench/composition.ts",
     "lint": "tsc --noEmit && tsc -p tsconfig.test.json && tsc -p tsconfig.bench.json && eslint ."
@@ -50,6 +58,7 @@
     "node": ">=18"
   },
   "dependencies": {
+    "@openbindings/json": "workspace:*",
     "@openbindings/compare": "workspace:^",
     "@openbindings/core": "workspace:^"
   }

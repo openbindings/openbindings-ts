@@ -1,9 +1,9 @@
-import canonicalize from "canonicalize";
+import { equalJSON, parseJSON, JSONValueSet } from "@openbindings/json";
 import { OutsideProfileError, SelectorError, SchemaError } from "./errors.js";
 import { inputCompatible, outputCompatible } from "./compat.js";
 import type { CompatResult } from "./compat.js";
 import type { JSONValue, JSONObject } from "./helpers.js";
-import { asMap, asSlice, canonicalKey, pathOrRoot, ptrJoin, toFloat64 } from "./helpers.js";
+import { asMap, asSlice, pathOrRoot, ptrJoin, compareNumeric } from "./helpers.js";
 
 
 export interface Fetcher {
@@ -157,12 +157,7 @@ export class Normalizer {
         if (!m) throw new Error(`${pathOrRoot(path)}.${k}[${i}]: must be object`);
         variants.push(await this.normalizeAt(m, ptrJoin(path, `${k}[${i}]`)));
       }
-      const scored = variants.map((v) => ({
-        canon: canonicalize(v) ?? "",
-        v,
-      }));
-      scored.sort((a, b) => (a.canon < b.canon ? -1 : a.canon > b.canon ? 1 : 0));
-      out[k] = scored.map((s) => s.v);
+      out[k] = variants;
     }
 
     return out;
@@ -217,7 +212,7 @@ export class Normalizer {
       try {
         const raw = await this.fetcher.fetch(u);
         const text = typeof raw === "string" ? raw : new TextDecoder().decode(raw);
-        doc = JSON.parse(text);
+        doc = parseJSON(text);
       } catch (e: unknown) {
         cleanup();
         throw new SelectorError(pathOrRoot(path), ref, e instanceof Error ? e : String(e));
@@ -455,7 +450,7 @@ function mergeAllOfBranch(acc: JSONObject, branch: JSONObject, path: string): vo
 
   if ("const" in branch) {
     if ("const" in acc) {
-      if (canonicalKey(acc["const"]) !== canonicalKey(branch["const"])) {
+      if (!equalJSON(acc["const"], branch["const"])) {
         throw new SchemaError(path, "allOf const conflict");
       }
     } else {
@@ -478,9 +473,8 @@ function mergeAllOfBranch(acc: JSONObject, branch: JSONObject, path: string): vo
 
   for (const k of ["minimum", "exclusiveMinimum", "minLength", "minItems"]) {
     if (k in branch) {
-      const bf = toFloat64(branch[k]);
       if (k in acc) {
-        if (bf > toFloat64(acc[k])) acc[k] = branch[k];
+        if (compareNumeric(branch[k], acc[k]) > 0) acc[k] = branch[k];
       } else {
         acc[k] = branch[k];
       }
@@ -488,9 +482,8 @@ function mergeAllOfBranch(acc: JSONObject, branch: JSONObject, path: string): vo
   }
   for (const k of ["maximum", "exclusiveMaximum", "maxLength", "maxItems"]) {
     if (k in branch) {
-      const bf = toFloat64(branch[k]);
       if (k in acc) {
-        if (bf < toFloat64(acc[k])) acc[k] = branch[k];
+        if (compareNumeric(branch[k], acc[k]) < 0) acc[k] = branch[k];
       } else {
         acc[k] = branch[k];
       }
@@ -525,6 +518,6 @@ function unionStrings(a: string[], b: string[]): string[] {
 }
 
 function intersectValues(a: unknown[], b: unknown[]): unknown[] {
-  const bKeys = new Set(b.map(canonicalKey));
-  return a.filter((v) => bKeys.has(canonicalKey(v)));
+  const candidates = new JSONValueSet(b);
+  return a.filter(v => candidates.has(v));
 }

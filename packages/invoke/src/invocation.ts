@@ -25,6 +25,7 @@ import {
   ERR_INVOCATION_CLOSED,
 } from "./errcodes.js";
 import type { InvocationErrorCode } from "./errcodes.js";
+import { cloneJSON, isJSONNumber } from "@openbindings/json";
 
 /**
  * The structured error type for all terminal invocation failures. A class
@@ -82,7 +83,7 @@ function normalizePortableInvocationData(value: unknown): unknown {
   // hidden fields, symbols, and non-finite numbers. A JSON round-trip then
   // gives in-process callers the same value that framed callers observe
   // (including normalization such as -0 to 0).
-  return deepFreezeJSON(JSON.parse(JSON.stringify(value)) as unknown);
+  return deepFreezeJSON(cloneJSON(value));
 }
 
 function deepFreezeJSON(value: unknown): unknown {
@@ -94,6 +95,7 @@ function deepFreezeJSON(value: unknown): unknown {
 }
 
 function portableJSONValue(value: unknown, ancestors: Set<object>): boolean {
+  if (isJSONNumber(value)) return true;
   if (value === null || typeof value === "string" || typeof value === "boolean") return true;
   if (typeof value === "number") return Number.isFinite(value);
   if (typeof value !== "object") return false;

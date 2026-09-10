@@ -75,7 +75,7 @@ export class PreparedRealization<I = unknown, O = unknown> {
   readonly #assertActive: () => void;
 
   readonly providerKey: string;
-  readonly interfaceRevision: string;
+  readonly interfaceSnapshotId: string;
   readonly operationKey: string;
   readonly bindingKey: string;
   readonly sourceKey: string;
@@ -90,7 +90,7 @@ export class PreparedRealization<I = unknown, O = unknown> {
     this.#behavior = behavior;
     this.#assertActive = () => provider.assertActive();
     this.providerKey = provider.key;
-    this.interfaceRevision = provider.interface.revision;
+    this.interfaceSnapshotId = provider.interface.snapshotId;
     this.operationKey = descriptor.operationKey;
     this.bindingKey = descriptor.bindingKey;
     this.sourceKey = descriptor.sourceKey;

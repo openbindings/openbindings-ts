@@ -1,5 +1,6 @@
-import { canonicalize, canonicalizedValue } from "./canonical-json.js";
-import { compileOperationSchema, type CompiledSchema } from "./schema-validation.js";
+import { canonicalize } from "./canonical-json.js";
+import { cloneJSON, equalJSON, parseJSON, stringifyJSON } from "@openbindings/json";
+import { compileOperationSchema, schemaChildValues, type CompiledSchema } from "./schema-validation.js";
 import type {
   BindingEntry,
   DependencyEntry,
@@ -43,11 +44,29 @@ export interface PreparedBindingDescriptor {
  * not embedded in the OBI. Core never fetches such resources implicitly.
  */
 export interface PreparedBoundaryContract {
-  readonly revision: string;
-  readonly canonical: string;
   readonly complete: boolean;
   readonly unavailableReferences: readonly string[];
 }
+
+export type BoundaryIdentity = "equal" | "different" | "unavailable";
+const contractGraphs = new WeakMap<PreparedBoundaryContract, ContractGraph>();
+const contractComparisons = new WeakMap<PreparedBoundaryContract, WeakMap<PreparedBoundaryContract, BoundaryIdentity>>();
+
+/** Compare owned authored values, not serialization or runtime labels. */
+export function compareBoundaryContracts(left: PreparedBoundaryContract, right: PreparedBoundaryContract): BoundaryIdentity {
+  const a = contractGraphs.get(left), b = contractGraphs.get(right);
+  if (!a || !b || !left.complete || !right.complete) return "unavailable";
+  const memo = contractComparisons.get(left) ?? new WeakMap<PreparedBoundaryContract, BoundaryIdentity>();
+  const cached = memo.get(right);
+  if (cached !== undefined) return cached;
+  // Owners and their graphs are immutable. This memo retains no foreign
+  // owner strongly and caches no capability failure or policy decision.
+  const result = equalJSON(a, b) ? "equal" : "different";
+  memo.set(right, result); contractComparisons.set(left, memo);
+  return result;
+}
+
+let nextSnapshotId = 0;
 
 export interface PrepareInterfaceOptions {
   readonly validation?: ValidateOptions;
@@ -55,8 +74,7 @@ export interface PrepareInterfaceOptions {
 
 interface PreparedState {
   readonly snapshot: OBInterface;
-  readonly canonical: string;
-  readonly revision: string;
+  readonly snapshotId: string;
   readonly operations: ReadonlyMap<string, PreparedOperationDescriptor>;
   readonly identifiers: ReadonlyMap<string, PreparedOperationDescriptor>;
   readonly dependencies: ReadonlyMap<string, PreparedDependencyDescriptor>;
@@ -64,13 +82,12 @@ interface PreparedState {
   readonly schemaAnchors: () => ReadonlyMap<string, unknown>;
   readonly schemaValidators: Map<string, CompiledSchema>;
   readonly boundaryContracts: Map<string, Promise<PreparedBoundaryContract>>;
-  readonly boundaryRevisions: Map<string, string>;
 }
 
 const EMPTY_KEYS: readonly string[] = Object.freeze([]);
 
 /**
- * A validated, immutable, content-addressed semantic snapshot of one OBI.
+ * A validated, immutable, privately owned semantic snapshot of one OBI.
  *
  * Instances are nominal: callers can obtain one only through
  * {@link prepareInterface}. The snapshot owns all indexes and compiled-schema
@@ -85,14 +102,18 @@ export class PreparedInterface {
     Object.freeze(this);
   }
 
-  /** SHA-256 of the RFC 8785 canonical OBI JSON. */
-  get revision(): string {
-    return this.#state.revision;
+  /** Local correlation only; never equality, persistent identity or authority. */
+  get snapshotId(): string {
+    return this.#state.snapshotId;
   }
 
-  /** The RFC 8785 canonical JSON used to create this prepared value. */
-  get canonical(): string {
-    return this.#state.canonical;
+  /** Explicit fallible RFC 8785 export. Failure leaves this owner usable. */
+  async exportJCS(): Promise<Readonly<{ canonical: string; revision: string }>> {
+    const candidate = canonicalize(JSON.parse(stringifyJSON(this.#state.snapshot)));
+    if (candidate === undefined || !equalJSON(this.#state.snapshot, parseJSON(candidate))) {
+      throw new TypeError("openbindings: JCS export would change a carried JSON value");
+    }
+    return Object.freeze({ canonical: candidate, revision: await sha256(candidate) });
   }
 
   /** A private-copy, deeply frozen OBI snapshot. */
@@ -140,8 +161,7 @@ export class PreparedInterface {
     const descriptor = this.operation(operationIdentifier);
     if (!descriptor) return undefined;
     if (descriptor.operation[position] == null) return undefined;
-    const contractRevision = this.#state.boundaryRevisions.get(descriptor.canonicalKey);
-    const cacheKey = `${contractRevision ?? descriptor.canonicalKey}\u0000${position}`;
+    const cacheKey = `${descriptor.canonicalKey}\u0000${position}`;
     let validator = this.#state.schemaValidators.get(cacheKey);
     if (!validator) {
       validator = compileOperationSchema(
@@ -166,48 +186,30 @@ export class PreparedInterface {
     if (!descriptor) return undefined;
     let prepared = this.#state.boundaryContracts.get(descriptor.canonicalKey);
     if (!prepared) {
-      prepared = prepareBoundaryContract(
+      prepared = Promise.resolve().then(() => prepareBoundaryContract(
         this.#state.snapshot,
         descriptor.canonicalKey,
         descriptor.operation,
         this.#state.schemaAnchors,
-      ).then(contract => {
-        this.#state.boundaryRevisions.set(descriptor.canonicalKey, contract.revision);
-        return contract;
-      });
+      ));
       this.#state.boundaryContracts.set(descriptor.canonicalKey, prepared);
     }
     return prepared;
   }
 
   /** @internal The only construction path; private state provides nominality. */
-  static async create(
+  static create(
     iface: OBInterface,
     options?: PrepareInterfaceOptions,
-  ): Promise<PreparedInterface> {
+  ): PreparedInterface {
     if (!iface || typeof iface !== "object") {
       throw new TypeError("openbindings: interface is required");
     }
-    const canonical = canonicalizedValue(iface);
-    if (canonical === undefined) {
-      throw new TypeError("openbindings: interface is not representable as JSON");
-    }
-    const serialized = canonical.canonical;
-    const revisionPromise = sha256(serialized);
-    // Mark the concurrent digest handled even when later synchronous
-    // validation rejects; the same promise is still awaited on success.
-    void revisionPromise.catch(() => {});
-    // R1 deliberately creates authority from the canonical bytes rather than
-    // trusting even the equivalent normalization graph used to produce them.
-    const snapshot = JSON.parse(serialized) as OBInterface;
+    const snapshot = cloneJSON(iface) as unknown as OBInterface;
     validateInterface(snapshot, options?.validation);
 
-    // `snapshot` was parsed from canonical JSON, so its own string-key order
-    // is already the required UTF-16 order. Materialize each top-level entry
-    // array once: re-sorting/re-enumerating the 5,000-entry binding and
-    // operation maps here added measurable cold tail latency without changing
-    // any observable ordering.
-    const entries = canonical.requiresManualOrdering ? sortedEntries : Object.entries;
+    // Public enumeration stays deterministic without canonicalizing values.
+    const entries = sortedEntries;
     const operationEntries = entries(snapshot.operations);
     const dependencyEntries = entries(snapshot.dependencies ?? {});
     const bindingEntries = entries(snapshot.bindings ?? {});
@@ -275,8 +277,7 @@ export class PreparedInterface {
 
     return new PreparedInterface({
       snapshot,
-      canonical: serialized,
-      revision: await revisionPromise,
+      snapshotId: `snapshot:${++nextSnapshotId}`,
       operations,
       identifiers,
       dependencies,
@@ -284,7 +285,6 @@ export class PreparedInterface {
       schemaAnchors: memoizedSchemaAnchors(snapshot),
       schemaValidators: new Map(),
       boundaryContracts: new Map(),
-      boundaryRevisions: new Map(),
     });
   }
 }
@@ -298,7 +298,7 @@ export function prepareInterface(
 ): Promise<PreparedInterface> {
   return iface instanceof PreparedInterface
     ? Promise.resolve(iface)
-    : PreparedInterface.create(iface, options);
+    : Promise.resolve().then(() => PreparedInterface.create(iface, options));
 }
 
 function sortedEntries<T>(
@@ -355,12 +355,12 @@ interface ContractGraph {
   readonly unavailableReferences: readonly string[];
 }
 
-async function prepareBoundaryContract(
+function prepareBoundaryContract(
   iface: OBInterface,
   operationKey: string,
   operation: Operation,
   anchors: () => ReadonlyMap<string, unknown>,
-): Promise<PreparedBoundaryContract> {
+): PreparedBoundaryContract {
   const resources: Record<string, unknown> = {};
   const unavailable = new Set<string>();
   const visitedObjects = new WeakSet<object>();
@@ -386,7 +386,7 @@ async function prepareBoundaryContract(
         visit(target);
       }
     }
-    for (const child of Object.values(object)) visit(child);
+    for (const child of schemaChildValues(object)) visit(child);
   };
 
   if (Object.hasOwn(operation, "input")) visit(operation.input);
@@ -404,18 +404,12 @@ async function prepareBoundaryContract(
     resources: Object.fromEntries(sortedEntries(resources)),
     unavailableReferences: Object.freeze([...unavailable].sort()),
   };
-  const serialized = canonicalize(graph);
-  if (serialized === undefined) {
-    throw new TypeError(
-      `openbindings: operation ${JSON.stringify(operationKey)} contract is not representable as JSON`,
-    );
-  }
-  return Object.freeze({
-    revision: await sha256(serialized),
-    canonical: serialized,
+  const contract = Object.freeze({
     complete: unavailable.size === 0,
     unavailableReferences: graph.unavailableReferences,
   });
+  contractGraphs.set(contract, deepFreeze(graph));
+  return contract;
 }
 
 function schemaAnchors(iface: OBInterface): ReadonlyMap<string, unknown> {
@@ -435,9 +429,9 @@ function schemaAnchors(iface: OBInterface): ReadonlyMap<string, unknown> {
       const key = keyword === "$id" ? identifier : `#${identifier}`;
       if (!anchors.has(key)) anchors.set(key, value);
     }
-    for (const child of Object.values(object)) visit(child);
+    for (const child of schemaChildValues(object)) visit(child);
   };
-  visit(iface.schemas);
+  for (const schema of Object.values(iface.schemas ?? {})) visit(schema);
   for (const operation of Object.values(iface.operations)) {
     visit(operation.input);
     visit(operation.output);
@@ -501,7 +495,7 @@ function findAnchor(root: unknown, name: string): unknown {
     } else {
       const object = value as Record<string, unknown>;
       if (object.$anchor === name || object.$dynamicAnchor === name) return value;
-      for (const child of Object.values(object)) pending.push(child);
+      for (const child of schemaChildValues(object)) pending.push(child);
     }
   }
   return undefined;

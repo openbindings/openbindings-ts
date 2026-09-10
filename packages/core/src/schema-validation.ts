@@ -4,20 +4,19 @@
  * input/output schema). Also exposes helpers used by OperationInvoker
  * for OBI-T-16 runtime validation.
  *
- * Validator backend: json-schema-library. Pure ES, tree-walking, no
- * `eval` / `new Function()`. Works across the SDK's target runtimes
- * (Cloudflare Workers, Vercel Edge, Netlify Edge, Deno Deploy, Node
- * 18+, modern browsers including CSP-strict, Bun, AWS Lambda) —
- * verified by bundling probes and by the official JSON Schema test
- * suite (1287/1299 required cases; the misses are format-assertion
- * cases neutralized by the boundary draft below and cases unreachable
- * in valid OBI documents).
+ * Validator backend: pinned json-schema-library with a private, reproducible
+ * correction, bundled into the shared adapter's ESM/CJS artifacts. It is tree-walking and
+ * does not require eval/new Function. See third_party/json-schema-library for
+ * provenance, regression/qualification gates and known limitations. Passing a
+ * retained corpus is not a claim of complete JSON Schema or exact-value support.
  *
  * The choice of validator backend is an internal implementation detail;
  * the SDK's public error and result types are stable across any future
  * swap. See STABILITY.md.
  */
-import { compileSchema, draft2020 } from "json-schema-library";
+import { compileSchema } from "@openbindings/json-schema";
+import { cloneJSON, isJSONNumber, stringifyJSON, numberToken, integerNumberToken, compareNumberTokens } from "@openbindings/json";
+import { OBI_BOUNDARY_DRAFT } from "./exact-schema-draft.js";
 import type { OBInterface } from "./types.js";
 import { isValidSemver } from "./version.js";
 import metaSchema from "./metaschema-2020-12/schema.json" with { type: "json" };
@@ -35,14 +34,6 @@ import metaUnevaluated from "./metaschema-2020-12/meta-unevaluated.json" with { 
  * annotation, never an assertion — emptying the registry makes the
  * backend annotation-only natively, with no schema rewriting.
  */
-const OBI_BOUNDARY_DRAFT = {
-  ...draft2020,
-  formats: {},
-  // The legacy draft-7 `dependencies` keyword is not part of 2020-12
-  // (replaced by dependentSchemas/dependentRequired); an unknown keyword
-  // never asserts at an OBI boundary, matching the Go backend.
-  keywords: draft2020.keywords.filter((k) => k.keyword !== "dependencies"),
-};
 
 /**
  * A compiled schema ready for repeated validation. The SDK-owned
@@ -133,7 +124,7 @@ function validationSchemaPath(error: JslError, paths: WeakMap<object, string>): 
 
 function wrapNode(node: ReturnType<typeof compileSchema>): CompiledSchema {
   const schemaPaths = validationSchemaPaths(node);
-  return {
+  return Object.freeze({
     validate(value: unknown) {
       const r = node.validate(value);
       if (r.valid) return { valid: true, failures: [] };
@@ -147,14 +138,14 @@ function wrapNode(node: ReturnType<typeof compileSchema>): CompiledSchema {
       });
       return { valid: false, failures };
     },
-  };
+  });
 }
 
 /** Names the JSON type of a decoded value for diagnostics (Go parity). */
 function jsonTypeName(v: unknown): string {
   if (v === null) return "null";
   if (typeof v === "boolean") return "boolean";
-  if (typeof v === "number") return "number";
+  if (typeof v === "number" || isJSONNumber(v)) return "number";
   if (typeof v === "string") return "string";
   if (Array.isArray(v)) return "array";
   if (typeof v === "object") return "object";
@@ -177,14 +168,14 @@ export function validateSchemaWellFormedness(
   schema: unknown,
 ): void {
   if (typeof schema === "boolean") return; // boolean form is always well-formed
-  if (typeof schema === "object" && schema !== null && !Array.isArray(schema)) {
+  if (isObjectFormSchema(schema)) {
     // Fast path first (see metaValidatesNodeWise): a synthesized boundary
     // schema is a DAG whose shared component subtrees repeat thousands of
     // times, and the backend re-walks every repetition. When the node-wise
     // check proves well-formedness, the whole-tree walk is skipped; when it
     // cannot, the whole-tree walk below remains the sole authority on which
     // failures are reported.
-    if (metaValidatesNodeWise(schema as Record<string, unknown>)) return;
+    if (metaValidatesNodeWise(schema)) return;
     const meta = metaValidator().validate(schema);
     if (!meta.valid) {
       for (const f of meta.failures) {
@@ -269,7 +260,7 @@ const NODE_SHAPE_VERDICT_LIMIT = 20000;
 
 /** An object-form schema: the only value this decomposition lifts out. */
 function isObjectFormSchema(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
+  return typeof value === "object" && value !== null && !Array.isArray(value) && !isJSONNumber(value);
 }
 
 /** Object or boolean form — the two forms a schema position admits. */
@@ -346,7 +337,7 @@ function metaValidatesNodeWise(root: Record<string, unknown>): boolean {
 
     let key: string | undefined;
     try {
-      key = JSON.stringify(shape);
+      key = stringifyJSON(shape);
     } catch {
       // A value JSON cannot represent (a cycle through an annotation, a
       // BigInt) has no shape key; decide this node without the cache.
@@ -468,7 +459,7 @@ type StructuralProblem = (path: string, message: string) => void;
 const OBI_IDENTIFIER = /^[A-Za-z0-9_][A-Za-z0-9_.-]*$/;
 
 function plainJSONObject(value: unknown): Record<string, unknown> | undefined {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
+  return typeof value === "object" && value !== null && !Array.isArray(value) && !isJSONNumber(value)
     ? value as Record<string, unknown>
     : undefined;
 }
@@ -702,7 +693,8 @@ function validateBindingShape(
   optionalTyped(binding, "deprecated", `${path}/deprecated`, "boolean", problem);
   if (present(binding, "preference")) {
     const preference = binding.preference;
-    if (typeof preference !== "number" || !Number.isSafeInteger(preference)) {
+    const token = numberToken(preference);
+    if (token === undefined || !integerNumberToken(token) || compareNumberTokens(token, "-9007199254740991") < 0 || compareNumberTokens(token, "9007199254740991") > 0) {
       problem(`${path}/preference`, "must be a safe integer");
     }
   }
@@ -861,7 +853,7 @@ export function compileOperationSchema(
   if (cached) return cached;
 
   const closure = operationSchemaClosure(iface, operationName, position);
-  const document: Record<string, unknown> = closure ?? structuredClone(iface);
+  const document: Record<string, unknown> = closure ?? cloneJSON(iface) as Record<string, unknown>;
   // The OBI root is a resolution container, not itself a JSON Schema. Ignore
   // every root field that happens to spell a JSON Schema keyword; Core says
   // unknown OBI fields are ignored, so (for example) an unknown root `type`
@@ -902,7 +894,7 @@ function operationSchemaClosure(
   const document: Record<string, unknown> = {
     operations: {
       [operationName]: {
-        [position]: structuredClone(rootSchema),
+        [position]: cloneJSON(rootSchema),
       },
     },
   };
@@ -929,7 +921,7 @@ function operationSchemaClosure(
       const target = resolveDocumentPointer(iface, reference.slice(1));
       if (target === undefined) return undefined;
       if (hasResourceControl(target)) return undefined;
-      setDocumentPointer(document, reference.slice(1), structuredClone(target));
+      setDocumentPointer(document, reference.slice(1), cloneJSON(target));
       pending.push(target);
     }
     for (const child of Object.values(object)) pending.push(child);
@@ -1133,6 +1125,17 @@ const SCHEMA_SINGLE_KEYWORDS = new Set([
 ]);
 const SCHEMA_ARRAY_KEYWORDS = new Set(["prefixItems", "allOf", "anyOf", "oneOf"]);
 
+/** Internal authored-schema traversal; instance data and annotations are opaque. */
+export function schemaChildValues(node: Record<string, unknown>): unknown[] {
+  const children: unknown[] = [];
+  for (const [key, value] of Object.entries(node)) {
+    if (SCHEMA_MAP_KEYWORDS.has(key) && isObjectFormSchema(value)) children.push(...Object.values(value));
+    else if (SCHEMA_ARRAY_KEYWORDS.has(key) && Array.isArray(value)) children.push(...value as unknown[]);
+    else if (SCHEMA_SINGLE_KEYWORDS.has(key)) children.push(value);
+  }
+  return children;
+}
+
 const isObj = (v: unknown): v is Record<string, unknown> =>
   typeof v === "object" && v !== null && !Array.isArray(v);
 
@@ -1186,7 +1189,10 @@ function assertFullyResolvable(
     }
     if (visited.has(node)) return;
     visited.add(node);
-    if (validateReachableSchemas) {
+    if (validateReachableSchemas && !metaValidatesNodeWise(node)) {
+      // Reuse the same conservative, backend-proved shape admission as
+      // document preparation. The closure walk below still visits every
+      // reachable reference; failure reporting stays with the full backend.
       const meta = metaValidator().validate(node);
       if (!meta.valid) {
         const first = meta.failures[0] ?? { path: "", message: "schema violation" };
@@ -1363,26 +1369,15 @@ export interface ValidationFailure {
 }
 
 /**
- * Wraps CompiledSchema.validate to catch any thrown errors (the
- * underlying validator may throw on inputs JSON cannot represent, e.g.
- * `undefined`). Callers see an SDK-defined error contract rather than
- * the underlying validator's API.
+ * Projects established instance verdicts into the SDK diagnostic shape.
+ * Evaluator/capability exceptions propagate: an inability to establish a
+ * verdict must never be converted into evidence that the instance is invalid.
  */
 export function safeValidate(
   validator: CompiledSchema,
   value: unknown,
 ): { valid: true } | { valid: false; errors: string[]; failures: ValidationFailure[] } {
-  let result;
-  try {
-    result = validator.validate(value);
-  } catch (err) {
-    const message = (err as Error).message ?? "validator error";
-    return {
-      valid: false,
-      errors: [message],
-      failures: [{ path: "", message }],
-    };
-  }
+  const result = validator.validate(value);
   if (result.valid) return { valid: true };
   const failures = result.failures;
   const errors = failures.map((f) => (f.path ? `${f.path}: ${f.message}` : f.message));
@@ -1413,7 +1408,7 @@ export function buildSchemaDefs(
   if (cached) return cached;
   const out: Record<string, unknown> = {};
   for (const [name, sch] of Object.entries(schemas)) {
-    const copy = structuredClone(sch);
+    const copy = cloneJSON(sch) as typeof sch;
     if (typeof copy === "object" && copy !== null) {
       rewriteSchemaRefs(copy);
     }
@@ -1427,7 +1422,7 @@ function buildCompoundSchema(
   schema: unknown,
   defs: Record<string, unknown> | undefined,
 ): unknown {
-  const root = structuredClone(schema);
+  const root = cloneJSON(schema) as typeof schema;
   if (typeof root !== "object" || root === null || Array.isArray(root)) {
     return root;
   }

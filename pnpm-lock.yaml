@@ -9,10 +9,18 @@ overrides:
   esbuild: '>=0.28.1'
   ip-address: '>=10.1.1'
 
+patchedDependencies:
+  json-schema-library@11.6.2:
+    hash: 2ccd301ce9a33ee4b249fb62e3e76bed841c1362f90094d8973f36d34c2b76fc
+    path: patches/json-schema-library@11.6.2.patch
+
 importers:
 
   .:
     devDependencies:
+      '@openbindings/jsonata':
+        specifier: link:../jsonata/javascript
+        version: link:../jsonata/javascript
       '@eslint/js':
         specifier: ^10.0.1
         version: 10.0.1(eslint@10.7.0)
@@ -136,6 +144,9 @@ importers:
 
   packages/compare:
     dependencies:
+      '@openbindings/json':
+        specifier: workspace:*
+        version: link:../json
       '@openbindings/core':
         specifier: workspace:^
         version: link:../core
@@ -164,15 +175,22 @@ importers:
 
   packages/core:
     dependencies:
+      '@openbindings/json-schema':
+        specifier: workspace:*
+        version: link:../json-schema
+      '@openbindings/json':
+        specifier: workspace:*
+        version: link:../json
       canonicalize:
         specifier: ^2.1.0
         version: 2.1.0
-      json-schema-library:
-        specifier: ^11.6.1
-        version: 11.6.1
+    devDependencies:
       jsonata:
         specifier: 2.1.1
         version: 2.1.1
+      json-schema-library:
+        specifier: 11.6.2
+        version: 11.6.2(patch_hash=2ccd301ce9a33ee4b249fb62e3e76bed841c1362f90094d8973f36d34c2b76fc)
 
   packages/graphql:
     devDependencies:
@@ -213,12 +231,33 @@ importers:
 
   packages/invoke:
     dependencies:
+      '@openbindings/json':
+        specifier: workspace:*
+        version: link:../json
       '@openbindings/compare':
         specifier: workspace:^
         version: link:../compare
       '@openbindings/core':
         specifier: workspace:^
         version: link:../core
+
+  packages/json:
+    dependencies:
+      core-js-pure:
+        specifier: 3.50.0
+        version: 3.50.0
+      lossless-json:
+        specifier: 4.3.1
+        version: 4.3.1
+
+  packages/json-schema:
+    dependencies:
+      '@openbindings/json':
+        specifier: workspace:*
+        version: link:../json
+      json-schema-library:
+        specifier: 11.6.2
+        version: 11.6.2(patch_hash=2ccd301ce9a33ee4b249fb62e3e76bed841c1362f90094d8973f36d34c2b76fc)
 
   packages/mcp:
     dependencies:
@@ -241,6 +280,9 @@ importers:
 
   packages/openapi:
     dependencies:
+      '@openbindings/json':
+        specifier: workspace:*
+        version: link:../json
       '@openbindings/openapi-client':
         specifier: ^0.1.0
         version: link:../../../openapi-client/typescript
@@ -290,6 +332,9 @@ importers:
       '@openbindings/invoke':
         specifier: workspace:^
         version: link:../invoke
+      '@openbindings/json':
+        specifier: workspace:^
+        version: link:../json
       '@openbindings/synthesize':
         specifier: workspace:^
         version: link:../synthesize
@@ -1134,6 +1179,9 @@ packages:
     resolution: {integrity: sha512-yki5XnKuf750l50uGTllt6kKILY4nQ1eNIQatoXEByZ5dWgnKqbnqmTrBE5B4N7lrMJKQ2ytWMiTO2o0v6Ew/w==}
     engines: {node: '>= 0.6'}
 
+  core-js-pure@3.50.0:
+    resolution: {integrity: sha512-6GP3Pxz4IKyWjAfa747vIu/jilB5z29JWROLqH/b+pXVcpgh6tM06ZIBwSuglgVqzDYURhOK6oEzTrG0bCHitA==}
+
   cors@2.8.6:
     resolution: {integrity: sha512-tJtZBBHA6vjIAaF6EnIaq6laBBP9aq/Y3ouVJjEfoHbRBcHBAHYcMh/w8LDrk2PvIMMq8gmopa5D4V8RmbrxGw==}
     engines: {node: '>= 0.10'}
@@ -1457,8 +1505,8 @@ packages:
   json-buffer@3.0.1:
     resolution: {integrity: sha512-4bV5BfR2mqfQTJm+V5tPPdf+ZpuhiIvTuAB5g8kcrXOZpTT/QwwVRWBywX1ozr6lEuPdbHxwaJlm9G6mI2sfSQ==}
 
-  json-schema-library@11.6.1:
-    resolution: {integrity: sha512-WAdI8/IdFtgfd9RzjV5lsd82RNXoWb0TR52Z+eQW6xeHGXtLJihvbdCvUVLMaQVO6DnwGj1WyGnaey/w6SmdxA==}
+  json-schema-library@11.6.2:
+    resolution: {integrity: sha512-BwvoJfc6RNrYRxQ9AujaTMaLdQosdceRe0huKMnnIJa2b4QZlnmPgQm7iUMoyxS2ioTsTMVPWjuoqvFYF0HZ4Q==}
 
   json-schema-traverse@0.4.1:
     resolution: {integrity: sha512-xbbCH5dCYU5T8LcEhhuh7HJ88HXuW3qsI3Y0zOZFKfZEHcpWiHU/Jxzk629Brsab/mMiHQti9wMP+845RPe3Vg==}
@@ -1576,6 +1624,9 @@ packages:
 
   long@5.3.2:
     resolution: {integrity: sha512-mNAgZ1GmyNhD7AuqnTG3/VQ26o760+ZYBPKjPvugO8+nLbYfX6TVpJPseBvopbdY+qpZ/lKUnmEc1LeZYS3QAA==}
+
+  lossless-json@4.3.1:
+    resolution: {integrity: sha512-SqD/Bg3ZfltBJ2Z14hJ/BihnvtV553WO4g9/ePtlp4lrnl9jF3AdIJt53A/Wkg/0Li+LMfxaBqgx1MiFZdQlpQ==}
 
   magic-string@0.30.21:
     resolution: {integrity: sha512-vd2F4YUyEXKGcLHoq+TEyCjxueSeHnFxyyjNp80yg0XV4vUhnDer/lvvlqM/arB5bXQN5K2/3oinyCRyx8T2CQ==}
@@ -2816,6 +2867,8 @@ snapshots:
 
   cookie@0.7.2: {}
 
+  core-js-pure@3.50.0: {}
+
   cors@2.8.6:
     dependencies:
       object-assign: 4.1.1
@@ -3170,7 +3223,7 @@ snapshots:
 
   json-buffer@3.0.1: {}
 
-  json-schema-library@11.6.1:
+  json-schema-library@11.6.2(patch_hash=2ccd301ce9a33ee4b249fb62e3e76bed841c1362f90094d8973f36d34c2b76fc):
     dependencies:
       '@hyperjump/json-schema-formats': 1.0.2
       '@sagold/json-pointer': 7.2.1
@@ -3262,6 +3315,8 @@ snapshots:
   lodash.camelcase@4.3.0: {}
 
   long@5.3.2: {}
+
+  lossless-json@4.3.1: {}
 
   magic-string@0.30.21:
     dependencies:

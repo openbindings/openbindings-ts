@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { OBInterface } from "./types.js";
-import { prepareInterface } from "./prepared-interface.js";
+import { prepareInterface, compareBoundaryContracts } from "./prepared-interface.js";
+import { parseJSON, stringifyJSON } from "@openbindings/json";
 
 function document(): OBInterface {
   return {
@@ -39,7 +40,20 @@ function document(): OBInterface {
 }
 
 describe("PreparedInterface", () => {
-  it("is content-addressed, immutable, and idempotent", async () => {
+  it("does not interpret references in instance data or annotations", async () => {
+    const iface = document();
+    iface.operations.deliver!.input = { const: { $ref: "https://data.example/id" }, "x-note": { $ref: "https://annotation.example/id" } };
+    const prepared = await prepareInterface(iface);
+    expect((await prepared.boundaryContract("deliver"))!.complete).toBe(true);
+  });
+
+  it("admits exact safe-integer-valued preferences without native coercion", async () => {
+    const iface = document();
+    iface.bindings!.local!.preference = parseJSON("1.0") as never;
+    const prepared = await prepareInterface(iface);
+    expect(stringifyJSON(prepared.interfaceSnapshot.bindings!.local!.preference)).toBe("1.0");
+  });
+  it("is locally owned, immutable, and idempotent with optional JCS export", async () => {
     const original = document();
     const first = await prepareInterface(original);
     const reordered = {
@@ -52,8 +66,10 @@ describe("PreparedInterface", () => {
     };
     const second = await prepareInterface(reordered);
 
-    expect(first.revision).toMatch(/^sha256:[0-9a-f]{64}$/);
-    expect(second.revision).toBe(first.revision);
+    const exported = await first.exportJCS();
+    expect(exported.revision).toMatch(/^sha256:[0-9a-f]{64}$/);
+    expect(await second.exportJCS()).toEqual(exported);
+    expect(second.snapshotId).not.toBe(first.snapshotId);
     expect(await prepareInterface(first)).toBe(first);
 
     original.operations.deliver!.description = "mutated";
@@ -92,7 +108,7 @@ describe("PreparedInterface", () => {
     });
 
     expect(prepared.operationKeys()).toEqual(["10", "2"]);
-    expect(prepared.canonical).toBe(
+    expect((await prepared.exportJCS()).canonical).toBe(
       '{"openbindings":"0.2.0","operations":{"10":{},"2":{}}}',
     );
   });
@@ -106,7 +122,7 @@ describe("PreparedInterface", () => {
     irrelevant.schemas!.Unused = { type: "integer" };
     const irrelevantContract = await (await prepareInterface(irrelevant))
       .boundaryContract("deliver")!;
-    expect(irrelevantContract.revision).toBe(baseContract.revision);
+    expect(compareBoundaryContracts(irrelevantContract, baseContract)).toBe("equal");
 
     const relevant = document();
     relevant.schemas!.Item = {
@@ -116,7 +132,7 @@ describe("PreparedInterface", () => {
     };
     const relevantContract = await (await prepareInterface(relevant))
       .boundaryContract("deliver")!;
-    expect(relevantContract.revision).not.toBe(baseContract.revision);
+    expect(compareBoundaryContracts(relevantContract, baseContract)).toBe("different");
 
     const reorderedAllOf = document();
     reorderedAllOf.operations.deliver!.input = {
@@ -129,7 +145,7 @@ describe("PreparedInterface", () => {
     };
     const secondOrder = await (await prepareInterface(reorderedAllOf))
       .boundaryContract("deliver")!;
-    expect(secondOrder.revision).not.toBe(firstOrder.revision);
+    expect(compareBoundaryContracts(secondOrder, firstOrder)).toBe("different");
   });
 
   it("reports external schema closure instead of fetching ambiently", async () => {
@@ -158,7 +174,19 @@ describe("PreparedInterface", () => {
       .boundaryContract("deliver")!;
 
     expect(first.complete).toBe(true);
-    expect(first.revision).toBe(second.revision);
-    expect(first.canonical).toBe(second.canonical);
+    expect(compareBoundaryContracts(first, second)).toBe("equal");
+  });
+
+  it("retains wide values when JCS cannot export them", async () => {
+    const raw = '{"openbindings":"0.2.0","operations":{"wide":{"input":{"const":9007199254740993}}}}';
+    const prepared = await prepareInterface(parseJSON(raw) as unknown as OBInterface);
+    await expect(prepared.exportJCS()).rejects.toThrow(/JCS/);
+    expect(stringifyJSON(prepared.interfaceSnapshot)).toBe(raw);
+    expect(prepared.schemaValidator("wide", "input")!.validate(parseJSON("9007199254740993")).valid).toBe(true);
+  });
+
+  it("exports equivalent decimal spellings without requiring binary exactness", async () => {
+    const prepared = await prepareInterface(parseJSON('{"openbindings":"0.2.0","operations":{"n":{"input":{"const":0.100}}}}') as unknown as OBInterface);
+    expect((await prepared.exportJCS()).canonical).toContain('"const":0.1');
   });
 });

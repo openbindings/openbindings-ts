@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import jsonata from "jsonata";
+import { createJSONataExecutor } from "@openbindings/jsonata";
+import { createJSONataEvaluator } from "@openbindings/invoke/jsonata";
+const officialEvaluator = createJSONataEvaluator(createJSONataExecutor());
 import { OperationInvoker, operationSignature } from "@openbindings/invoke";
 import { BINDING_SPEC_OPENAPI_31 as BINDING_SPEC } from "./constants.js";
 import { OpenAPIInvoker, OpenAPISynthesizer } from "./test-helpers.js";
@@ -83,7 +85,7 @@ describe("openbindings.openapi-3.1@1 whole JSON carriage", () => {
         expect(await observed.json()).toEqual({ kind: "named", name: "Ada" });
         return new Response(undefined, { status: 204 });
       },
-      transformEvaluator: { evaluate: (expression, data) => jsonata(expression).evaluate(data) },
+      transformEvaluator: { evaluate: (expression, data) => officialEvaluator.evaluate(expression, data) },
     });
     const call = invoker.invoke(iface, operationSignature("createItem"));
     await call.write({ kind: "query", payload: { kind: "named", name: "Ada" } });

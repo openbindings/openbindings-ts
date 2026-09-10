@@ -12,7 +12,10 @@ export default tseslint.config(
     ignores: ["**/dist/**", "**/node_modules/**", // CI checks out the sibling spec and interfaces repos INSIDE the
     // workspace (ci.yml `path: spec` / `path: interfaces`) for the
     // conformance corpora; their scripts are not ours to lint.
-    "spec/**", "interfaces/**"],
+    "spec/**", "interfaces/**",
+    // Mechanically vendored syntax-only JavaScript has its own upstream lint
+    // gate and hash/replay verification. It is not part of a TS program.
+    "packages/core/src/internal/jsonata-syntax/*.cjs"],
   },
   eslint.configs.recommended,
   tseslint.configs.recommendedTypeChecked,
@@ -28,6 +31,7 @@ export default tseslint.config(
           "packages/*/tsconfig.json",
           "packages/*/tsconfig.test.json",
           "packages/*/tsconfig.bench.json",
+          "third_party/*/tsconfig.json",
           "examples/react-operation-dependencies/tsconfig.json",
         ],
         tsconfigRootDir: import.meta.dirname,

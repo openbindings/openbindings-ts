@@ -1,0 +1,1020 @@
+diff --git a/src/branchValidity.test.ts b/src/branchValidity.test.ts
+new file mode 100644
+index 00000000..96dfce4f
+--- /dev/null
++++ b/src/branchValidity.test.ts
+@@ -0,0 +1,135 @@
++import { strict as assert } from "assert";
++import { compileSchema } from "./compileSchema";
++import { branchValidity } from "./branchValidity";
++import { ValidationPath } from "./Keyword";
++
++describe("scan-local whole-branch validity", () => {
++    for (const valid of [true, false]) {
++        it(`reuses a synchronous ${valid} result without growing the caller path`, () => {
++            const node = compileSchema(valid ? {deprecated: true} : false);
++            let visits = 0;
++            // Boolean false returns before validators: instrument a schema assertion instead.
++            const branch = valid ? node : compileSchema({type: "string"});
++            branch.validators.push(() => { visits++; });
++            const check = branchValidity(1, "#");
++            const path: ValidationPath = []; Object.freeze(path);
++            assert.equal(check(branch, path), valid);
++            assert.equal(check(branch, []), valid);
++            assert.equal(visits, 1); assert.deepEqual(path, []);
++        });
++    }
++    it("keys by node identity, not equal schema locations", () => {
++        const check = branchValidity(1, "#");
++        assert.equal(check(compileSchema({type: "number"}), []), true);
++        assert.equal(check(compileSchema({type: "string"}), []), false);
++    });
++    for (const change of ["append", "pointer", "node", "reorder", "remove"]) {
++        it(`invalidates when the full path changes: ${change}`, () => {
++            const a = compileSchema({}), b = compileSchema({}), node = compileSchema({});
++            let visits = 0; node.validators.push(() => { visits++; });
++            const path: ValidationPath = [{node:a,pointer:"#"},{node:b,pointer:"#/b"}];
++            const check = branchValidity(1,"#"); check(node,path); check(node,path);
++            if (change === "append") path.push({node:a,pointer:"#/c"});
++            if (change === "pointer") path[0].pointer = "#/changed";
++            if (change === "node") path[0].node = b;
++            if (change === "reorder") path.reverse();
++            if (change === "remove") path.pop();
++            check(node,path); check(node,path); assert.equal(visits,2);
++        });
++    }
++    it("never reuses across independent scans, instances or pointers", () => {
++        const node = compileSchema({type:"number"});
++        const seen: string[] = []; node.validators.push(({pointer}) => { seen.push(pointer); });
++        assert.equal(branchValidity(1,"#/a")(node,[]),true);
++        assert.equal(branchValidity("1","#/a")(node,[]),false);
++        assert.equal(branchValidity(1,"#/b")(node,[]),true);
++        assert.deepEqual(seen,["#/a","#/a","#/b"]);
++    });
++    it("does not cache a throwing evaluation", () => {
++        const node = compileSchema({}); let visits = 0;
++        node.validators.push(() => { if (++visits === 1) throw Error("probe"); });
++        const check = branchValidity(null,"#");
++        assert.throws(() => check(node,[]), /probe/);
++        assert.equal(check(node,[]),true); assert.equal(check(node,[]),true); assert.equal(visits,2);
++    });
++    it("does not cache pending asynchronous evaluations", () => {
++        const node = compileSchema({}); let visits = 0;
++        node.validators.push(() => { visits++; return Promise.resolve([]); });
++        const check = branchValidity(null,"#");
++        assert.equal(check(node,[]),true); assert.equal(check(node,[]),true); assert.equal(visits,2);
++    });
++    it("resolves the same dynamic branch separately under different anchors", () => {
++        const root = compileSchema({$id:"https://audit.invalid/dynamic", $defs:{
++            n:{$id:"num",$dynamicAnchor:"a",type:"number"}, s:{$id:"str",$dynamicAnchor:"a",type:"string"},
++            branch:{$dynamicRef:"num#a"}
++        }});
++        const branch = root.$defs!.branch, check = branchValidity(1,"#");
++        const path: ValidationPath = [{node:root.$defs!.n,pointer:"#"}];
++        assert.equal(check(branch,path),true); assert.equal(check(branch,path),true);
++        path[0].node = root.$defs!.s;
++        assert.equal(check(branch,path),false); assert.equal(check(branch,path),false);
++        path[0].node = root.$defs!.n;
++        assert.equal(check(branch,path),true);
++    });
++    for (const kind of ["properties","items"]) for (const combinator of ["anyOf","oneOf","if"]) {
++        it(`isolates public calls and mutated input for ${kind}/${combinator}`, () => {
++            const object = kind === "properties";
++            const branch = object ? {properties:{a:{type:"number"},b:{type:"number"}}} : {prefixItems:[{type:"number"},{type:"number"}]};
++            const schema = combinator === "if" ? {if:branch,then:true,else:false} : {[combinator]:[branch]};
++            const node = compileSchema({...schema,[object?"unevaluatedProperties":"unevaluatedItems"]:false});
++            const data: any = object ? {a:1,b:2} : [1,2];
++            const key = object ? "a" : 0;
++            const path: ValidationPath = [];
++            assert.equal(node.validate(data,"#",path).valid,true);
++            data[key] = "wrong";
++            assert.equal(node.validate(data,"#",path).valid,false);
++            data[key] = 1;
++            assert.equal(node.validate(data,"#",path).valid,true);
++        });
++    }
++    it("does not share results between two instance positions using the same ref", () => {
++        const node = compileSchema({$defs:{obj:{anyOf:[{properties:{a:{type:"number"}}}],unevaluatedProperties:false}},
++            properties:{left:{$ref:"#/$defs/obj"},right:{$ref:"#/$defs/obj"}}});
++        assert.equal(node.validate({left:{a:1},right:{a:"wrong"}}).valid,false);
++        assert.equal(node.validate({left:{a:1},right:{a:2}}).valid,true);
++    });
++    it("isolates nested reentrant public validation", () => {
++        const inner = compileSchema({anyOf:[{properties:{a:{type:"number"}}}],unevaluatedProperties:false});
++        const outer = compileSchema({anyOf:[{properties:{a:{type:"number"},b:{type:"number"}}}],unevaluatedProperties:false});
++        let calls = 0;
++        outer.anyOf![0].validators.push(() => {
++            calls++; assert.equal(inner.validate({a:"wrong"}).valid,false);
++            assert.equal(inner.validate({a:1}).valid,true);
++        });
++        assert.equal(outer.validate({a:1,b:2}).valid,true); assert.equal(calls,2);
++        assert.equal(outer.validate({a:1,b:2}).valid,true); assert.equal(calls,4);
++    });
++    it("retains separately emitted public annotations", () => {
++        // The upstream anyOf keyword does not emit its children's annotations.
++        // Assert preservation of an annotation that the public validator emits.
++        const node = compileSchema({deprecated:true,anyOf:[{deprecated:true,properties:{a:true,b:true}}],unevaluatedProperties:false});
++        for (let i=0;i<3;i++) {
++            const result = node.validate({a:1,b:2}); assert.equal(result.valid,true);
++            assert.equal(result.annotations.length,1);
++        }
++    });
++    it("keeps referenced property coverage out of the caller path", () => {
++        const node = compileSchema({$defs:{obj:{properties:{a:true,b:true,c:true}}},anyOf:[{$ref:"#/$defs/obj"}],unevaluatedProperties:false});
++        const path: ValidationPath = [];
++        assert.equal(node.validate({a:1,b:2,c:3},"#",path).valid,true);
++        assert.equal(path.length,1); assert.equal(path[0].node,node);
++    });
++    for (const nested of [true,false]) {
++        it(`keeps invalid prefix assertions effective (${nested ? "nested" : "adjacent"})`, () => {
++            const branch = {prefixItems:[{type:"number"}],maxItems:1};
++            const node = compileSchema({...nested?{anyOf:[branch]}:branch,unevaluatedItems:false});
++            assert.equal(node.validate([1]).valid,true);
++            assert.equal(node.validate(["wrong"]).valid,false);
++            assert.equal(node.validate([1,2]).valid,false);
++        });
++    }
++    it("does not collect prefix coverage from an invalid branch", () => {
++        const node = compileSchema({anyOf:[{prefixItems:[true],maxItems:0},{}],unevaluatedItems:false});
++        assert.equal(node.validate([1]).valid,false);
++    });
++});
+diff --git a/src/branchValidity.ts b/src/branchValidity.ts
+new file mode 100644
+index 00000000..3cd846ca
+--- /dev/null
++++ b/src/branchValidity.ts
+@@ -0,0 +1,35 @@
++import { ValidationPath } from "./Keyword";
++import { isJsonError, SchemaNode } from "./types";
++import { validateBranch } from "./validateBranch";
++
++/** Private, scan-local whole-branch validity. Not a validation-session cache.
++ * The instance, schema and synchronous extension behavior must remain stable
++ * during the scan. Never retain this closure on a node, context or caller path.
++ */
++export function branchValidity(data: unknown, pointer: string) {
++    let scope: ValidationPath | undefined;
++    const results = new Map<SchemaNode, boolean>();
++
++    return (node: SchemaNode, path: ValidationPath): boolean => {
++        // Compare values, not the mutable path-array identity or its length alone.
++        // A reference resolver may append to the caller's traversal between checks.
++        if (
++            !scope || scope.length !== path.length ||
++            scope.some((entry, i) => entry.node !== path[i].node || entry.pointer !== path[i].pointer)
++        ) {
++            results.clear();
++            scope = path.map(({ node, pointer }) => ({ node, pointer }));
++        }
++        if (results.has(node)) {
++            return results.get(node)!;
++        }
++        const result = validateBranch(node, data, pointer, path);
++        const valid = !result.some(isJsonError);
++        // Preserve existing synchronous validity, but never reuse pending work.
++        // Exceptions likewise leave no cached result. Diagnostics aren't cached.
++        if (!result.some((entry) => entry instanceof Promise)) {
++            results.set(node, valid);
++        }
++        return valid;
++    };
++}
+diff --git a/src/coverageReferences.test.ts b/src/coverageReferences.test.ts
+new file mode 100644
+index 00000000..49a05c5f
+--- /dev/null
++++ b/src/coverageReferences.test.ts
+@@ -0,0 +1,129 @@
++import { strict as assert } from "assert";
++import { compileSchema } from "./compileSchema";
++import { draft2020 } from "./draft2020";
++import { coverageReferences } from "./coverageReferences";
++import { ValidationPath } from "./Keyword";
++import { isJsonError, SchemaNode } from "./types";
++
++const fixture = () => compileSchema({$id:"https://audit.invalid/root",$defs:{target:{type:"number"}},anyOf:[{$ref:"#/$defs/target"}]});
++const spy = (node: SchemaNode) => {
++    const original = node.resolveRef; let calls = 0;
++    node.resolveRef = function(args) { calls++; return original.call(this,args); };
++    return () => calls;
++};
++
++describe("scan-local reference targets", () => {
++    it("reuses a target and reproduces its complete appended path", () => {
++        const root=fixture(),site=root.anyOf![0],calls=spy(site),resolve=coverageReferences("#/value");
++        const a:ValidationPath=[{node:root,pointer:"#"}],b:ValidationPath=[{node:root,pointer:"#"}];
++        const first=resolve(site,a),second=resolve(site,b);
++        assert.equal(first,second);assert.equal(calls(),1);assert.deepEqual(a,b);
++        assert.equal(a.length,2);assert.equal(a[1].pointer,"#/value");assert.notEqual(a[1],b[1]);
++    });
++    for(const change of ["append","pointer","node","reorder","remove"]) {
++        it(`distinguishes an incoming path change: ${change}`, () => {
++            const root=fixture(),site=root.anyOf![0],calls=spy(site),resolve=coverageReferences("#");
++            const a:ValidationPath=[{node:root,pointer:"#"},{node:site,pointer:"#/child"}];
++            const b=a.map(e=>({...e}));
++            if(change==="append")b.push({node:root,pointer:"#/extra"});
++            if(change==="pointer")b[0].pointer="#/different";
++            if(change==="node")b[0].node=site;
++            if(change==="reorder")b.reverse();
++            if(change==="remove")b.pop();
++            resolve(site,a);resolve(site,b);assert.equal(calls(),2);
++        });
++    }
++    it("keeps A/B/A dynamic contexts distinct and reusable", () => {
++        const root=compileSchema({$id:"https://audit.invalid/root",$defs:{
++            n:{$id:"num",$dynamicAnchor:"a",type:"number"},s:{$id:"str",$dynamicAnchor:"a",type:"string"},
++            site:{$dynamicRef:"num#a"}
++        }});
++        const site=root.$defs!.site,calls=spy(site),resolve=coverageReferences("#");
++        const n=resolve(site,[{node:root.$defs!.n,pointer:"#"}]);
++        const s=resolve(site,[{node:root.$defs!.s,pointer:"#"}]);
++        assert.equal(n.validate(1).valid,true);assert.equal(s.validate(1).valid,false);
++        assert.equal(resolve(site,[{node:root.$defs!.n,pointer:"#"}]),n);
++        assert.equal(resolve(site,[{node:root.$defs!.s,pointer:"#"}]),s);assert.equal(calls(),2);
++    });
++    it("keeps distinct reference sites and their overlays separate", () => {
++        const root=compileSchema({$defs:{target:{type:"number",title:"target"}},allOf:[
++            {$ref:"#/$defs/target",title:"first",description:"a"},{$ref:"#/$defs/target",title:"second",description:"b"}
++        ]});
++        const resolve=coverageReferences("#"),a=resolve(root.allOf![0],[]),b=resolve(root.allOf![1],[]);
++        assert.notEqual(a,b);assert.equal(a.schema.title,"first");assert.equal(b.schema.title,"second");
++        assert.equal(a.schema.description,"a");assert.equal(b.schema.description,"b");
++        assert.equal(a.evaluationPath,root.allOf![0].evaluationPath+"/$ref");
++        assert.equal(b.evaluationPath,root.allOf![1].evaluationPath+"/$ref");
++    });
++    it("reuses each link of a chain with the same replayed scope", () => {
++        const root=compileSchema({$defs:{middle:{$ref:"#/$defs/end"},end:{type:"number"}},anyOf:[{$ref:"#/$defs/middle"}]});
++        const site=root.anyOf![0],resolve=coverageReferences("#"),a:ValidationPath=[],b:ValidationPath=[];
++        const middle=resolve(site,a),calls=spy(middle),end=resolve(middle,a);
++        assert.equal(resolve(site,b),middle);assert.equal(resolve(middle,b),end);assert.equal(calls(),1);assert.deepEqual(a,b);
++    });
++    it("does not cache identity resolutions", () => {
++        const node=compileSchema({}),calls=spy(node),resolve=coverageReferences("#");
++        assert.equal(resolve(node,[]),node);assert.equal(resolve(node,[]),node);assert.equal(calls(),2);
++    });
++    it("does not cache reference errors", () => {
++        const node=compileSchema({$ref:"https://audit.invalid/missing"}),calls=spy(node),resolve=coverageReferences("#");
++        assert(isJsonError(resolve(node,[])));assert(isJsonError(resolve(node,[])));assert.equal(calls(),2);
++    });
++    it("does not cache exceptions", () => {
++        const root=fixture(),site=root.anyOf![0],original=site.resolveRef;let calls=0;
++        site.resolveRef=function(args){if(++calls===1)throw Error("probe");return original.call(this,args);};
++        const resolve=coverageReferences("#");assert.throws(()=>resolve(site,[]),/probe/);
++        const target=resolve(site,[]);assert.equal(resolve(site,[]),target);assert.equal(calls,2);
++    });
++    it("does not cache a resolver that changes the path prefix", () => {
++        const root=fixture(),site=root.anyOf![0],target=root.$defs!.target;let calls=0;
++        site.resolveRef=({path}={})=>{calls++;path![0].pointer="#/changed";return target;};
++        const resolve=coverageReferences("#");
++        for(let i=0;i<2;i++){const path=[{node:root,pointer:"#"}];assert.equal(resolve(site,path),target);assert.equal(path[0].pointer,"#/changed");}
++        assert.equal(calls,2);
++    });
++    it("does not let the caller mutate retained replay entries", () => {
++        const root=fixture(),site=root.anyOf![0],resolve=coverageReferences("#/value"),a:ValidationPath=[];
++        const target=resolve(site,a);a[0].pointer="#/tampered";a[0].node=root;
++        const b:ValidationPath=[];assert.equal(resolve(site,b),target);assert.equal(b[0].pointer,"#/value");assert.equal(b[0].node,target);
++    });
++    it("binds pointers and lifetime to separate scans", () => {
++        const root=fixture(),site=root.anyOf![0],calls=spy(site),a:ValidationPath=[],b:ValidationPath=[];
++        coverageReferences("#/a")(site,a);coverageReferences("#/b")(site,b);
++        assert.equal(calls(),2);assert.equal(a[0].pointer,"#/a");assert.equal(b[0].pointer,"#/b");
++    });
++    it("isolates reentrant scans", () => {
++        const root=fixture(),site=root.anyOf![0],original=site.resolveRef;let calls=0,nested=false;
++        site.resolveRef=function(args){calls++;if(!nested){nested=true;coverageReferences("#/nested")(site,[]);}return original.call(this,args);};
++        const resolve=coverageReferences("#/outer"),path:ValidationPath=[];
++        const target=resolve(site,path);assert.equal(resolve(site,[]),target);assert.equal(calls,2);assert.equal(path[0].pointer,"#/outer");
++    });
++    it("sees registry replacement between public validations", () => {
++        const node=compileSchema({anyOf:[{$ref:"https://audit.invalid/target"}],unevaluatedProperties:false});
++        node.addRemoteSchema("https://audit.invalid/target",{properties:{a:{type:"number"},b:{type:"number"}}});
++        assert.equal(node.validate({a:1,b:2}).valid,true);
++        node.addRemoteSchema("https://audit.invalid/target",{properties:{a:{type:"string"},b:{type:"string"}}});
++        assert.equal(node.validate({a:1,b:2}).valid,false);assert.equal(node.validate({a:"a",b:"b"}).valid,true);
++    });
++    it("sees changes to a reused instance between public calls", () => {
++        const node=compileSchema({$defs:{target:{properties:{a:{type:"number"},b:{type:"number"}}}},anyOf:[{$ref:"#/$defs/target"}],unevaluatedProperties:false});
++        const data:{a:number|string,b:number}={a:1,b:2};
++        assert.equal(node.validate(data).valid,true);data.a="bad";assert.equal(node.validate(data).valid,false);data.a=1;assert.equal(node.validate(data).valid,true);
++    });
++    for(const count of [1,10,100]) {
++        it(`bounds target compilation across ${count} properties and resets next call`, () => {
++            let compilations=0;
++            const draft={...draft2020,keywords:[...draft2020.keywords,{id:"x-count",keyword:"x-count",parse:(node:SchemaNode)=>{if(node.schema["x-count"])compilations++;}}]};
++            const properties=Object.fromEntries(Array.from({length:count},(_,i)=>["p"+i,{type:"number"}]));
++            const node=compileSchema({$defs:{target:{"x-count":true,properties}},anyOf:[{$ref:"#/$defs/target"}],unevaluatedProperties:false},{drafts:[draft]});
++            const data=Object.fromEntries(Object.keys(properties).map(k=>[k,1]));
++            for(let i=0;i<2;i++){compilations=0;assert.equal(node.validate(data).valid,true);assert.equal(compilations,3);}
++        });
++    }
++    it("retains diagnostic schemas, locations and pointers on reuse", () => {
++        const root=fixture(),site=root.anyOf![0],resolve=coverageReferences("#/field");
++        const first=resolve(site,[]),second=resolve(site,[]),plain=site.resolveRef({pointer:"#/field",path:[]});
++        assert.equal(first.evaluationPath,plain.evaluationPath);assert.equal(second.schemaLocation,plain.schemaLocation);
++        assert.deepEqual(second.validate("bad","#/field"),plain.validate("bad","#/field"));
++    });
++});
+diff --git a/src/coverageReferences.ts b/src/coverageReferences.ts
+new file mode 100644
+index 00000000..2c002976
+--- /dev/null
++++ b/src/coverageReferences.ts
+@@ -0,0 +1,45 @@
++import { ValidationPath } from "./Keyword";
++import { isSchemaNode, SchemaNode } from "./types";
++
++type Entry = {
++    incoming: ValidationPath;
++    appended: ValidationPath;
++    resolved: SchemaNode;
++};
++
++const copyPath = (path: ValidationPath): ValidationPath => path.map((entry) => ({ ...entry }));
++const samePath = (a: ValidationPath, b: ValidationPath) =>
++    a.length === b.length && a.every((entry, i) => entry.node === b[i].node && entry.pointer === b[i].pointer);
++
++/** Private reference-target reuse for one synchronous property-coverage scan.
++ * Keep this closure local to that scan. Schema/registry/extension state must
++ * remain stable during it; no results survive into another validation call.
++ */
++export function coverageReferences(pointer: string) {
++    const entries = new Map<SchemaNode, Entry[]>();
++
++    return (node: SchemaNode, path: ValidationPath): SchemaNode => {
++        const matches = entries.get(node);
++        const cached = matches?.find((entry) => samePath(entry.incoming, path));
++        if (cached) {
++            // Resolution also contributes dynamic scope. Reproduce that effect
++            // on this walk's path without exposing our retained path entries.
++            for (const entry of cached.appended) path.push({ ...entry });
++            return cached.resolved;
++        }
++
++        const incoming = copyPath(path);
++        const resolved = node.resolveRef({ pointer, path });
++        if (
++            resolved !== node && isSchemaNode(resolved) &&
++            path.length >= incoming.length && samePath(incoming, path.slice(0, incoming.length))
++        ) {
++            const entry = { incoming, resolved, appended: copyPath(path.slice(incoming.length)) };
++            if (matches) matches.push(entry);
++            else entries.set(node, [entry]);
++        }
++        // Errors, throws, self/identity results and non-append path mutations
++        // are never reused. The original resolver determines all outcomes.
++        return resolved;
++    };
++}
+diff --git a/src/draft2019-09/keywords/unevaluatedItems.ts b/src/draft2019-09/keywords/unevaluatedItems.ts
+index d616044f..dd5e7c27 100644
+--- a/src/draft2019-09/keywords/unevaluatedItems.ts
++++ b/src/draft2019-09/keywords/unevaluatedItems.ts
+@@ -2,6 +2,7 @@ import { isObject } from "../../utils/isObject";
+ import { SchemaNode } from "../../types";
+ import { Keyword, JsonSchemaValidatorParams, ValidationReturnType } from "../../Keyword";
+ import { validateNode } from "../../validateNode";
++import { isValidBranch } from "../../validateBranch";
+ 
+ const KEYWORD = "unevaluatedItems";
+ 
+@@ -61,7 +62,7 @@ function validateUnevaluatedItems({ node, data, pointer, path }: JsonSchemaValid
+ 
+     // console.log("EVAL", reducedNode.schema);
+ 
+-    const validIf = node.if != null && validateNode(node.if, data, pointer, path).length === 0;
++    const validIf = node.if != null && isValidBranch(node.if, data, pointer, path);
+     const errors: ValidationReturnType = [];
+     // "unevaluatedItems with nested items"
+     for (let i = 0; i < data.length; i += 1) {
+@@ -71,7 +72,7 @@ function validateUnevaluatedItems({ node, data, pointer, path }: JsonSchemaValid
+ 
+         if (child) {
+             // when a single node is invalid
+-            if (validateNode(child, value, `${pointer}/${i}`, path).length > 0) {
++            if (!isValidBranch(child, value, `${pointer}/${i}`, path)) {
+                 // nothing should validate, so we validate unevaluated items only
+                 const unevaluatedItems = node.unevaluatedItems;
+                 if (unevaluatedItems) {
+diff --git a/src/isItemEvaluated.ts b/src/isItemEvaluated.ts
+index 827bcf5c..45fa0b8f 100644
+--- a/src/isItemEvaluated.ts
++++ b/src/isItemEvaluated.ts
+@@ -1,7 +1,8 @@
+ import { ValidationPath } from "./Keyword";
+ import { SchemaNode } from "./types";
+ import { getValue } from "./utils/getValue";
+-import { validateNode } from "./validateNode";
++import { isValidBranch } from "./validateBranch";
++import { branchValidity } from "./branchValidity";
+ 
+ type Options = {
+     /** array node */
+@@ -14,6 +15,7 @@ type Options = {
+     pointer: string;
+ 
+     path: ValidationPath;
++    validBranch?: ReturnType<typeof branchValidity>;
+ };
+ 
+ /**
+@@ -23,27 +25,38 @@ type Options = {
+  * - This function currently checks for schema that are not visible by simple validation
+  * - We could introduce this method as a new keyword-layer
+  */
+-export function isItemEvaluated({ node, data, key, pointer, path }: Options) {
++export function isItemEvaluated({ node, data, key, pointer, path, validBranch = branchValidity(data, pointer) }: Options) {
+     const value = getValue(data, key);
+ 
+     if (node.schema.unevaluatedItems === true || node.schema.items === true) {
+         return true;
+     }
+ 
+-    if (node.contains && validateNode(node.contains, value, `${pointer}/${key}`, path).length === 0) {
++    // Adjacent prefixItems performs its own assertions. An in-range prefix is
++    // evaluated even when its assertion fails; enclosing branches are validity-
++    // gated below before their evaluated locations can contribute.
++    if (node.prefixItems && key < node.prefixItems.length) {
++        return true;
++    }
++
++    if (node.contains && isValidBranch(node.contains, value, `${pointer}/${key}`, path)) {
+         return true;
+     }
+ 
+     if (node.allOf) {
+         for (const allOf of node.allOf) {
+-            if (isItemEvaluated({ node: allOf, data, key, pointer, path })) {
++            if (isItemEvaluated({ node: allOf, data, key, pointer, path, validBranch })) {
+                 return true;
+             }
+         }
+     }
+     if (node.anyOf) {
+         for (const anyOf of node.anyOf) {
+-            if (isItemEvaluated({ node: anyOf, data, key, pointer, path })) {
++            // only a branch that validates the data contributes evaluated-item state
++            if (
++                validBranch(anyOf, path) &&
++                isItemEvaluated({ node: anyOf, data, key, pointer, path, validBranch })
++            ) {
+                 return true;
+             }
+         }
+@@ -51,17 +64,21 @@ export function isItemEvaluated({ node, data, key, pointer, path }: Options) {
+ 
+     if (node.oneOf) {
+         for (const oneOf of node.oneOf) {
+-            if (isItemEvaluated({ node: oneOf, data, key, pointer, path })) {
++            // only a branch that validates the data contributes evaluated-item state
++            if (
++                validBranch(oneOf, path) &&
++                isItemEvaluated({ node: oneOf, data, key, pointer, path, validBranch })
++            ) {
+                 return true;
+             }
+         }
+     }
+ 
+     if (node.if) {
+-        if (isItemEvaluated({ node: node.if, data, key, pointer, path })) {
++        const validIf = validBranch(node.if, path);
++        if (validIf && isItemEvaluated({ node: node.if, data, key, pointer, path, validBranch })) {
+             return true;
+         }
+-        const validIf = validateNode(node.if, data, pointer, path).length === 0;
+ 
+         if (validIf && node.if.prefixItems && node.if.prefixItems.length > key) {
+             // evaluated by if
+@@ -69,11 +86,11 @@ export function isItemEvaluated({ node, data, key, pointer, path }: Options) {
+         }
+ 
+         if (validIf && node.then) {
+-            if (isItemEvaluated({ node: node.then, data, key, pointer, path })) {
++            if (isItemEvaluated({ node: node.then, data, key, pointer, path, validBranch })) {
+                 return true;
+             }
+         } else if (!validIf && node.else) {
+-            if (isItemEvaluated({ node: node.else, data, key, pointer, path })) {
++            if (isItemEvaluated({ node: node.else, data, key, pointer, path, validBranch })) {
+                 return true;
+             }
+         }
+diff --git a/src/isPropertyEvaluated.ts b/src/isPropertyEvaluated.ts
+index 16be8822..12937912 100644
+--- a/src/isPropertyEvaluated.ts
++++ b/src/isPropertyEvaluated.ts
+@@ -2,7 +2,9 @@ import { ValidationPath } from "./Keyword";
+ import { SchemaNode } from "./types";
+ import { hasProperty } from "./utils/hasProperty";
+ // import { getValue } from "./utils/getValue";
+-import { validateNode } from "./validateNode";
++import { isValidBranch } from "./validateBranch";
++import { branchValidity } from "./branchValidity";
++import { coverageReferences } from "./coverageReferences";
+ 
+ type Options = {
+     /** array node */
+@@ -15,6 +17,8 @@ type Options = {
+     pointer: string;
+ 
+     path: ValidationPath;
++    validBranch?: ReturnType<typeof branchValidity>;
++    resolveReference?: ReturnType<typeof coverageReferences>;
+ };
+ 
+ /**
+@@ -24,7 +28,7 @@ type Options = {
+  * - This function currently checks for schema that are not visible by simple validation
+  * - We could introduce this method as a new keyword-layer
+  */
+-export function isPropertyEvaluated({ node, data, key, pointer, path }: Options) {
++export function isPropertyEvaluated({ node, data, key, pointer, path, validBranch = branchValidity(data, pointer), resolveReference = coverageReferences(pointer) }: Options) {
+     if (Array.isArray(node.schema.required) && !node.schema.required.find((prop) => hasProperty(data, prop))) {
+         return false;
+     }
+@@ -33,7 +37,7 @@ export function isPropertyEvaluated({ node, data, key, pointer, path }: Options)
+         return true;
+     }
+ 
+-    if (node.properties?.[key] && node.properties[key].validate(data[key], pointer, path).valid) {
++    if (node.properties?.[key] && isValidBranch(node.properties[key], data[key], `${pointer}/${key}`, path)) {
+         return true;
+     }
+ 
+@@ -43,7 +47,7 @@ export function isPropertyEvaluated({ node, data, key, pointer, path }: Options)
+ 
+     if (node.allOf) {
+         for (const allOf of node.allOf) {
+-            if (isPropertyEvaluated({ node: allOf, data, key, pointer, path })) {
++            if (isPropertyEvaluated({ node: allOf, data, key, pointer, path, validBranch, resolveReference })) {
+                 return true;
+             }
+         }
+@@ -51,7 +55,11 @@ export function isPropertyEvaluated({ node, data, key, pointer, path }: Options)
+ 
+     if (node.anyOf) {
+         for (const anyOf of node.anyOf) {
+-            if (isPropertyEvaluated({ node: anyOf, data, key, pointer, path })) {
++            // only a branch that validates the data contributes evaluated-property state
++            if (
++                validBranch(anyOf, path) &&
++                isPropertyEvaluated({ node: anyOf, data, key, pointer, path, validBranch, resolveReference })
++            ) {
+                 return true;
+             }
+         }
+@@ -59,32 +67,36 @@ export function isPropertyEvaluated({ node, data, key, pointer, path }: Options)
+ 
+     if (node.oneOf) {
+         for (const oneOf of node.oneOf) {
+-            if (isPropertyEvaluated({ node: oneOf, data, key, pointer, path })) {
++            // only a branch that validates the data contributes evaluated-property state
++            if (
++                validBranch(oneOf, path) &&
++                isPropertyEvaluated({ node: oneOf, data, key, pointer, path, validBranch, resolveReference })
++            ) {
+                 return true;
+             }
+         }
+     }
+ 
+     if (node.if) {
+-        if (isPropertyEvaluated({ node: node.if, data, key, pointer, path })) {
++        const validIf = validBranch(node.if, path);
++        if (validIf && isPropertyEvaluated({ node: node.if, data, key, pointer, path, validBranch, resolveReference })) {
+             return true;
+         }
+ 
+-        const validIf = validateNode(node.if, data, pointer, path).length === 0;
+         if (validIf && node.then) {
+-            if (isPropertyEvaluated({ node: node.then, data, key, pointer, path })) {
++            if (isPropertyEvaluated({ node: node.then, data, key, pointer, path, validBranch, resolveReference })) {
+                 return true;
+             }
+         } else if (!validIf && node.else) {
+-            if (isPropertyEvaluated({ node: node.else, data, key, pointer, path })) {
++            if (isPropertyEvaluated({ node: node.else, data, key, pointer, path, validBranch, resolveReference })) {
+                 return true;
+             }
+         }
+     }
+ 
+-    const resolved = node.resolveRef({ pointer, path });
++    const resolved = resolveReference(node, path);
+     if (resolved !== node) {
+-        if (isPropertyEvaluated({ node: resolved, data, key, pointer, path })) {
++        if (isPropertyEvaluated({ node: resolved, data, key, pointer, path, validBranch, resolveReference })) {
+             return true;
+         }
+     }
+diff --git a/src/keywords/anyOf.ts b/src/keywords/anyOf.ts
+index 18e648c7..953419cd 100644
+--- a/src/keywords/anyOf.ts
++++ b/src/keywords/anyOf.ts
+@@ -1,7 +1,7 @@
+ import { mergeSchema } from "../utils/mergeSchema";
+ import { Keyword, JsonSchemaReducerParams, JsonSchemaValidatorParams, ValidationAnnotation } from "../Keyword";
+ import { SchemaNode } from "../types";
+-import { validateNode } from "../validateNode";
++import { isValidBranch } from "../validateBranch";
+ import { collectValidationErrors } from "src/utils/collectValidationErrors";
+ 
+ const KEYWORD = "anyOf";
+@@ -47,7 +47,7 @@ function reduceAnyOf({ node, data, pointer, path }: JsonSchemaReducerParams) {
+     let mergedSchema = {};
+     let dynamicId = "";
+     for (let i = 0; i < node[KEYWORD].length; i += 1) {
+-        if (validateNode(node[KEYWORD][i], data, pointer, path).length === 0) {
++        if (isValidBranch(node[KEYWORD][i], data, pointer, path)) {
+             const { node: schemaNode } = node[KEYWORD][i].reduceNode(data);
+ 
+             if (schemaNode) {
+@@ -73,7 +73,7 @@ function validateAnyOf({ node, data, pointer, path }: JsonSchemaValidatorParams)
+         return;
+     }
+     for (const anyOf of node[KEYWORD]) {
+-        if (validateNode(anyOf, data, pointer, path).length === 0) {
++        if (isValidBranch(anyOf, data, pointer, path)) {
+             return undefined;
+         }
+     }
+diff --git a/src/keywords/contains.ts b/src/keywords/contains.ts
+index 9b1e80e36d948e0639aac1f94784d75e87e531e7..bef3ed7c7093d452bc9b9e6d7ec53820edbecc82 100644
+--- a/src/keywords/contains.ts
++++ b/src/keywords/contains.ts
+@@ -1,7 +1,6 @@
+-import { isObject } from "../utils/isObject";
+ import { isBooleanSchema, isJsonSchema, SchemaNode } from "../types";
+ import { Keyword, JsonSchemaValidatorParams } from "../Keyword";
+-import { validateNode } from "../validateNode";
++import { isValidBranch } from "../validateBranch";
+ 
+ const KEYWORD = "contains";
+ 
+@@ -48,36 +47,31 @@ function validateContains({ node, data, pointer, path }: JsonSchemaValidatorPara
+     if (!Array.isArray(data)) {
+         return;
+     }
+-    if (schema.contains === false) {
+-        return node.createError("contains-array-error", { pointer, value: data, schema });
+-    }
+-
+-    if (schema.contains === true) {
+-        if (Array.isArray(data) && data.length === 0) {
+-            return node.createError("contains-any-error", { pointer, value: data, schema });
++    // Boolean schemas still participate in occurrence-count assertions. Their
++    // match count is known without visiting children; do not return early.
++    let count = schema.contains === true ? data.length : 0;
++    if (typeof schema.contains !== "boolean") {
++        for (const [index, d] of data.entries()) {
++            if (isValidBranch(node.contains!, d, `${pointer}/${index}`, path)) {
++                count++;
++            }
+         }
+-        return undefined;
+     }
+ 
+-    if (!isObject(schema.contains) || !Array.isArray(data)) {
+-        // - ignore invalid schema
+-        // - ignore invalid dara
++    // These keywords were introduced in 2019-09. The shared keyword must not
++    // make unknown count keywords assert in draft-06/07.
++    const counted = node.context.version === "draft-2019-09" || node.context.version === "draft-2020-12";
++    const max = counted ? schema.maxContains ?? Infinity : Infinity;
++    const min = counted ? schema.minContains ?? 1 : 1;
++    if (max >= count && min <= count) {
+         return undefined;
+     }
+-
+-    let count = 0;
+-    for (const d of data) {
+-        // we tested for contains in addValidate
+-        if (validateNode(node.contains!, d, pointer, path).length === 0) {
+-            count++;
+-        }
++    // Preserve established diagnostics for the ordinary boolean/default cases.
++    if (schema.contains === false && min > count) {
++        return node.createError("contains-array-error", { pointer, value: data, schema });
+     }
+-
+-    // @draft >= 2019-09
+-    const max = schema.maxContains ?? Infinity;
+-    const min = schema.minContains ?? 1;
+-    if (max >= count && min <= count) {
+-        return undefined;
++    if (schema.contains === true && data.length === 0 && min === 1) {
++        return node.createError("contains-any-error", { pointer, value: data, schema });
+     }
+     if (max < count) {
+         return node.createError("contains-max-error", { pointer, schema, delta: count - max, value: data });
+diff --git a/src/keywords/ifthenelse.ts b/src/keywords/ifthenelse.ts
+index da18be0c..22cc9370 100644
+--- a/src/keywords/ifthenelse.ts
++++ b/src/keywords/ifthenelse.ts
+@@ -2,6 +2,7 @@ import { mergeSchema } from "../utils/mergeSchema";
+ import { Keyword, JsonSchemaReducerParams, JsonSchemaValidatorParams, ValidationAnnotation } from "../Keyword";
+ import { isBooleanSchema, isJsonSchema, SchemaNode } from "../types";
+ import { validateNode } from "../validateNode";
++import { isValidBranch } from "../validateBranch";
+ import { collectValidationErrors } from "src/utils/collectValidationErrors";
+ 
+ export const ifKeyword: Keyword = {
+@@ -71,7 +72,7 @@ function reduceIf({ node, data, pointer, path }: JsonSchemaReducerParams) {
+         return undefined;
+     }
+ 
+-    if (validateNode(node.if, data, pointer, [...(path ?? [])]).length === 0) {
++    if (isValidBranch(node.if, data, pointer, path)) {
+         if (node.then) {
+             // reduce creates a new node
+             const { node: schemaNode } = node.then.reduceNode(data);
+@@ -111,7 +112,7 @@ function validateIfThenElse({ node, data, pointer, path }: JsonSchemaValidatorPa
+     if (node.if == null) {
+         return;
+     }
+-    if (validateNode(node.if, data, pointer, [...(path ?? [])]).length === 0) {
++    if (isValidBranch(node.if, data, pointer, path)) {
+         if (node.then) {
+             return validateNode(node.then, data, pointer, path);
+         }
+diff --git a/src/keywords/not.ts b/src/keywords/not.ts
+index 77260b0b..97cbd21d 100644
+--- a/src/keywords/not.ts
++++ b/src/keywords/not.ts
+@@ -1,6 +1,6 @@
+ import { Keyword, JsonSchemaValidatorParams } from "../Keyword";
+ import { isBooleanSchema, isJsonSchema, SchemaNode } from "../types";
+-import { validateNode } from "../validateNode";
++import { isValidBranch } from "../validateBranch";
+ 
+ const KEYWORD = "not";
+ 
+@@ -33,7 +33,7 @@ export function parseNot(node: SchemaNode) {
+ function validateNot({ node, data, pointer, path }: JsonSchemaValidatorParams<"not">) {
+     const { schema } = node;
+     // not has been tested in addValidate
+-    if (validateNode(node[KEYWORD]!, data, pointer, path).length === 0) {
++    if (isValidBranch(node[KEYWORD]!, data, pointer, path)) {
+         return node.createError("not-error", { value: data, not: schema[KEYWORD], pointer, schema });
+     }
+ }
+diff --git a/src/keywords/oneOf.ts b/src/keywords/oneOf.ts
+index 964a9917..13c54ddd 100644
+--- a/src/keywords/oneOf.ts
++++ b/src/keywords/oneOf.ts
+@@ -6,12 +6,13 @@ import {
+     ValidationReturnType,
+     ValidationAnnotation
+ } from "../Keyword";
+-import { isSchemaNode, SchemaNode } from "../types";
++import { isJsonError, isSchemaNode, SchemaNode } from "../types";
+ import settings from "../settings";
+ import { getValue } from "../utils/getValue";
+ import sanitizeErrors from "../utils/sanitizeErrors";
+ import { isObject } from "../utils/isObject";
+ import { validateNode } from "../validateNode";
++import { isValidBranch, validateBranch } from "../validateBranch";
+ import { joinDynamicId } from "../SchemaNode";
+ import { collectValidationErrors } from "src/utils/collectValidationErrors";
+ 
+@@ -76,8 +77,8 @@ function reduceOneOf({ node, data, pointer, path }: Omit<JsonSchemaReducerParams
+     const matches: { index: number; node: SchemaNode }[] = [];
+     const errors: ValidationReturnType[] = [];
+     for (let i = 0; i < node.oneOf.length; i += 1) {
+-        const validationErrors = validateNode(node.oneOf[i], data, pointer, path);
+-        if (validationErrors.length === 0) {
++        const validationErrors = validateBranch(node.oneOf[i], data, pointer, path);
++        if (!validationErrors.some(isJsonError)) {
+             matches.push({ index: i, node: node.oneOf[i] });
+         } else {
+             errors.push(...validationErrors);
+@@ -161,10 +162,10 @@ export function reduceOneOfDeclarator({ node, data, pointer, path }: Omit<JsonSc
+ 
+         // collect errors in case we fail finding a matching schema
+         const result = sanitizeErrors(
+-            validateNode(resultNode, oneOfPropertyValue, `${pointer}/${oneOfProperty}`, path)
++            validateBranch(resultNode, oneOfPropertyValue, `${pointer}/${oneOfProperty}`, path)
+         );
+ 
+-        if (result.length > 0) {
++        if (result.some(isJsonError)) {
+             errors.push(...result);
+         } else {
+             // return at once when we found a schema
+@@ -203,7 +204,7 @@ function fuzzyObjectValue(node: SchemaNode, data: Record<string, unknown>, point
+     const keys = Object.keys(node.properties ?? {});
+     for (const key of keys) {
+         if (data[key]) {
+-            if (validateNode(node.properties[key], data[key], pointer, path).length === 0) {
++            if (isValidBranch(node.properties[key], data[key], `${pointer}/${key}`, path)) {
+                 value += 1;
+             }
+         }
+@@ -317,8 +318,8 @@ function validateFromDeclarator({ node, data, pointer = "#", path }: JsonSchemaV
+     for (const oneOfNode of oneOf) {
+         const { node: oneOfPropertyNode, error } = oneOfNode.getNodeChild(oneOfProperty, oneOfValue);
+         if (oneOfPropertyNode) {
+-            const validationResult = validateNode(oneOfPropertyNode, oneOfValue, `${pointer}/${oneOfProperty}`, path);
+-            if (validationResult.length > 0) {
++            const validationResult = validateBranch(oneOfPropertyNode, oneOfValue, `${pointer}/${oneOfProperty}`, path);
++            if (validationResult.some(isJsonError)) {
+                 errors.push(...validationResult);
+             } else {
+                 matches.push({ index: oneOf.indexOf(oneOfNode), node: oneOfNode });
+@@ -368,8 +369,8 @@ function oneOfValidator({ node, data, pointer = "#", path }: JsonSchemaValidator
+     const matches: { index: number; node: SchemaNode }[] = [];
+     const errors: ValidationReturnType = [];
+     for (let i = 0; i < oneOf.length; i += 1) {
+-        const validationResult = validateNode(oneOf[i], data, pointer, path);
+-        if (validationResult.length > 0) {
++        const validationResult = validateBranch(oneOf[i], data, pointer, path);
++        if (validationResult.some(isJsonError)) {
+             errors.push(...validationResult);
+         } else {
+             matches.push({ index: i, node: oneOf[i] });
+diff --git a/src/keywords/unevaluatedItems.ts b/src/keywords/unevaluatedItems.ts
+index d1742e41..8022786c 100644
+--- a/src/keywords/unevaluatedItems.ts
++++ b/src/keywords/unevaluatedItems.ts
+@@ -1,7 +1,9 @@
+ import { isBooleanSchema, isJsonSchema, SchemaNode } from "../types";
+ import { Keyword, JsonSchemaValidatorParams, ValidationReturnType } from "../Keyword";
+ import { validateNode } from "../validateNode";
++import { isValidBranch } from "../validateBranch";
+ import { isItemEvaluated } from "../isItemEvaluated";
++import { branchValidity } from "../branchValidity";
+ 
+ const KEYWORD = "unevaluatedItems";
+ 
+@@ -57,9 +59,10 @@ function validateUnevaluatedItems({ node, data, pointer, path }: JsonSchemaValid
+     }
+ 
+     const errors: ValidationReturnType = [];
++    const validBranch = branchValidity(data, pointer);
+     // "unevaluatedItems with nested items"
+     for (let i = 0; i < data.length; i += 1) {
+-        if (isItemEvaluated({ node, data, pointer, key: i, path })) {
++        if (isItemEvaluated({ node, data, pointer, key: i, path: [...path], validBranch })) {
+             continue;
+         }
+ 
+@@ -83,11 +86,11 @@ function validateUnevaluatedItems({ node, data, pointer, path }: JsonSchemaValid
+             }
+         }
+ 
+-        if (child && validateNode(child, value, `${pointer}/${i}`, path).length > 0) {
++        if (child && !isValidBranch(child, value, `${pointer}/${i}`, path)) {
+             // when a single node is invalid
+             if (
+                 node.unevaluatedItems &&
+-                node.unevaluatedItems.validate(value, `${pointer}/${i}`, path).valid === false
++                !isValidBranch(node.unevaluatedItems, value, `${pointer}/${i}`, path)
+             ) {
+                 return node.createError("unevaluated-items-error", {
+                     pointer: `${pointer}/${i}`,
+diff --git a/src/keywords/unevaluatedProperties.ts b/src/keywords/unevaluatedProperties.ts
+index b3f5e529..b2c8f88d 100644
+--- a/src/keywords/unevaluatedProperties.ts
++++ b/src/keywords/unevaluatedProperties.ts
+@@ -2,7 +2,10 @@ import { isObject } from "../utils/isObject";
+ import { isBooleanSchema, isJsonSchema, SchemaNode } from "../types";
+ import { Keyword, JsonSchemaValidatorParams, ValidationReturnType } from "../Keyword";
+ import { validateNode } from "../validateNode";
++import { isValidBranch } from "../validateBranch";
+ import { isPropertyEvaluated } from "../isPropertyEvaluated";
++import { branchValidity } from "../branchValidity";
++import { coverageReferences } from "../coverageReferences";
+ 
+ const KEYWORD = "unevaluatedProperties";
+ 
+@@ -55,6 +58,8 @@ function validateUnevaluatedProperties({ node, data, pointer, path }: JsonSchema
+     }
+ 
+     const errors: ValidationReturnType = [];
++    const validBranch = branchValidity(data, pointer);
++    const resolveReference = coverageReferences(pointer);
+     for (const propertyName of unevaluated) {
+         // Properties defined directly on this schema object are always
+         // evaluated by the "properties" keyword, regardless of whether the
+@@ -63,7 +68,9 @@ function validateUnevaluatedProperties({ node, data, pointer, path }: JsonSchema
+         if (node.properties?.[propertyName]) {
+             continue;
+         }
+-        if (isPropertyEvaluated({ node, data, key: propertyName, pointer, path })) {
++        // Reference traversal in this speculative coverage walk must not become
++        // dynamic scope for the next property in the instance.
++        if (isPropertyEvaluated({ node, data, key: propertyName, pointer, path: [...path], validBranch, resolveReference })) {
+             continue;
+         }
+ 
+@@ -89,7 +96,7 @@ function validateUnevaluatedProperties({ node, data, pointer, path }: JsonSchema
+             }
+         }
+ 
+-        if (child && validateNode(child, data[propertyName], `${pointer}/${propertyName}`, path).length > 0) {
++        if (child && !isValidBranch(child, data[propertyName], `${pointer}/${propertyName}`, path)) {
+             if (node.unevaluatedProperties) {
+                 const validationResult = validateNode(
+                     node.unevaluatedProperties,
+diff --git a/src/validateBranch.test.ts b/src/validateBranch.test.ts
+new file mode 100644
+index 00000000..4900fbe2
+--- /dev/null
++++ b/src/validateBranch.test.ts
+@@ -0,0 +1,70 @@
++import {strict as assert} from "assert";
++import {compileSchema} from "./compileSchema";
++import {isValidBranch,validateBranch} from "./validateBranch";
++import {ValidationPath} from "./Keyword";
++import {isJsonAnnotation,isJsonError} from "./types";
++
++describe("speculative branch validity",()=>{
++    it("does not confuse an annotation with a failed assertion",()=>{
++        const node=compileSchema({deprecated:true});
++        const path:ValidationPath=[];
++        assert.equal(isValidBranch(node,1,"#",path),true);
++        assert(validateBranch(node,1,"#",path).some(isJsonAnnotation));
++        assert.deepEqual(path,[]);
++    });
++    it("retains errors and annotations for diagnostic consumers",()=>{
++        const node=compileSchema({deprecated:true,type:"string"});
++        assert.equal(isValidBranch(node,1,"#",[]),false);
++        const result=validateBranch(node,1,"#",[]);
++        assert(result.some(isJsonError));assert(result.some(isJsonAnnotation));
++    });
++    it("never appends speculative traversal to a frozen caller path",()=>{
++        const root=compileSchema({});
++        const path:ValidationPath=[{pointer:"#",node:root}];Object.freeze(path);
++        const branch=compileSchema({anyOf:[{type:"number"},{type:"string"}]});
++        assert.equal(isValidBranch(branch,1,"#/value",path),true);
++        assert.equal(path.length,1);assert.equal(path[0].node,root);
++    });
++    it("keeps repeated reference decisions stable",()=>{
++        const node=compileSchema({$defs:{n:{deprecated:true,type:"number"}},oneOf:[{$ref:"#/$defs/n"},{type:"string"}]});
++        for(let i=0;i<5;i++){
++            assert.equal(node.validate(1).valid,true);
++            assert.equal(node.validate(null).valid,false);
++        }
++    });
++    for(const combinator of ["anyOf","oneOf"])for(const kind of ["properties","items"]){
++        const object=kind==="properties",annotation=object?"additionalProperties":"items",unevaluated=object?"unevaluatedProperties":"unevaluatedItems",count=object?"maxProperties":"maxItems";
++        it(`ignores failed ${combinator} ${kind} contributors`,()=>{
++            const node=compileSchema({[combinator]:[{[annotation]:true,[count]:0},{type:object?"object":"array"}],[unevaluated]:false});
++            assert.equal(node.validate(object?{x:1}:[1]).valid,false);
++        });
++    }
++    for(const kind of ["properties","items"]){
++        const object=kind==="properties",annotation=object?"additionalProperties":"items",unevaluated=object?"unevaluatedProperties":"unevaluatedItems";
++        it(`accepts valid annotated ${kind} contributors`,()=>{
++            const node=compileSchema({anyOf:[{deprecated:true,[annotation]:true},{type:object?"object":"array"}],[unevaluated]:false});
++            assert.equal(node.validate(object?{x:1}:[1]).valid,true);
++        });
++        it(`does not use a failed if predicate to evaluate ${kind}`,()=>{
++            const node=compileSchema({if:{[annotation]:true,[object?"maxProperties":"maxItems"]:0},else:{type:object?"object":"array"},[unevaluated]:false});
++            assert.equal(node.validate(object?{x:1}:[1]).valid,false);
++        });
++    }
++    it("selects then for a valid annotation-only predicate",()=>{
++        assert.equal(compileSchema({if:{deprecated:true},then:false,else:true}).validate(1).valid,false);
++        assert.equal(compileSchema({if:{deprecated:true},then:true,else:false}).validate(1).valid,true);
++    });
++    it("counts valid annotated oneOf alternatives",()=>{
++        assert.equal(compileSchema({oneOf:[{deprecated:true},{}]}).validate(1).valid,false);
++    });
++    it("handles annotated contains and not predicates",()=>{
++        assert.equal(compileSchema({contains:{deprecated:true},unevaluatedItems:false}).validate([1]).valid,true);
++        assert.equal(compileSchema({not:{deprecated:true}}).validate(1).valid,false);
++    });
++    it("retains the existing synchronous public treatment of pending async results",()=>{
++        const node=compileSchema({});
++        node.validators.push(()=>Promise.resolve(undefined));
++        assert.equal(isValidBranch(node,1,"#",[]),node.validate(1).valid);
++        assert(validateBranch(node,1,"#",[]).some(r=>r instanceof Promise));
++    });
++});
+diff --git a/src/validateBranch.ts b/src/validateBranch.ts
+new file mode 100644
+index 00000000..169bbfc7
+--- /dev/null
++++ b/src/validateBranch.ts
+@@ -0,0 +1,19 @@
++import { ValidationPath } from "./Keyword";
++import { isJsonError, SchemaNode } from "./types";
++import { validateNode } from "./validateNode";
++
++/**
++ * Evaluate a speculative branch without appending its traversal to the caller's
++ * path. Keep the full result so callers that report diagnostics do not lose it.
++ */
++export function validateBranch(node: SchemaNode, data: unknown, pointer: string, path: ValidationPath) {
++    return validateNode(node, data, pointer, [...(path ?? [])]);
++}
++
++/**
++ * Synchronous validity, matching SchemaNode.validate().valid: annotations are
++ * not errors. This does not await or define validity for custom async keywords.
++ */
++export function isValidBranch(node: SchemaNode, data: unknown, pointer: string, path: ValidationPath) {
++    return !validateBranch(node, data, pointer, path).some(isJsonError);
++}

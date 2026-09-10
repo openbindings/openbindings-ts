@@ -1,0 +1,18 @@
+{
+  "schema": 1,
+  "purpose": "Private syntax-only validator; no evaluation API or numeric policy",
+  "upstream": "https://github.com/jsonata-js/jsonata",
+  "baseCommit": "6c7e95fdbf4405a1e741852a7cd8cd985b4305bb",
+  "sourceFiles": {
+    "src/parser.js": "0ac142ed463fe83c420b88873ef20a4d34e963116972512bbc67bca263bdc027",
+    "src/signature.js": "fe13873bfae24aec56c364c8d149e50a37b59a9abc784968278680c61b27b4a8",
+    "LICENSE": "b8918d8758f30711632d30ab2f838b574b55b3fe3f05c54268a80683779bf6b8"
+  },
+  "files": {
+    "parser.cjs": "e3f5683d706b99875881c84c514a12384b29b1db6162f32d71b09ed99a6fdb78",
+    "signature.cjs": "2b64459a487c4f86c3602e38eac70006e5f05ea860b941a443e319f7c6cce68f",
+    "LICENSE": "b8918d8758f30711632d30ab2f838b574b55b3fe3f05c54268a80683779bf6b8",
+    "number-lexeme.cjs": "1a74cca7fc87e76e4e4e07a0ae1233417029321da2c40ed74a77faf5c9281922",
+    "parser.d.cts": "5dc8c240008b4e8801d0d794a1534726a7f32f9c9d7ccd3d3717ef7a454204ea"
+  }
+}

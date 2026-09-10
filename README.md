@@ -109,12 +109,18 @@ for (const [name, op] of Object.entries(iface.operations)) {
 
 ### Resolve and invoke operations
 
+The standalone JSONata runtime is currently a private development candidate.
+The following package names describe the intended composition, not packages
+already available from the registry. Use the coordinated local workspace or
+qualified archives until the prerequisite runtime is published.
+
 ```sh
-npm install @openbindings/sdk @openbindings/openapi jsonata@2.1.1
+npm install @openbindings/sdk @openbindings/openapi @openbindings/jsonata
 ```
 
 ```typescript
-import jsonata from "jsonata";
+import { createJSONataExecutor } from "@openbindings/jsonata";
+import { createJSONataEvaluator } from "@openbindings/invoke/jsonata";
 import { OpenBindingsRuntime } from "@openbindings/sdk";
 import { OpenAPIAdapter, decimalParameterConversion } from "@openbindings/openapi";
 
@@ -122,9 +128,7 @@ import { OpenAPIAdapter, decimalParameterConversion } from "@openbindings/openap
 const runtime = new OpenBindingsRuntime({
   providers: [new OpenAPIAdapter({ parameterConversion: decimalParameterConversion })],
   // Evaluate the parameter/body mappings produced by synthesis.
-  transformEvaluator: {
-    evaluate: (expression, data) => jsonata(expression).evaluate(data),
-  },
+  transformEvaluator: createJSONataEvaluator(createJSONataExecutor()),
 });
 
 // Resolve an OBI from a URL (well-known discovery, with synthesis as the

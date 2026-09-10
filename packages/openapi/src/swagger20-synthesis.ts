@@ -1,3 +1,4 @@
+import { cloneValueGraph } from "@openbindings/json";
 import {
   MAX_TESTED_VERSION,
   type BindingEntry,
@@ -199,7 +200,7 @@ function projectSchema(value: unknown, request: boolean, sourceRef: string): {
   ]);
   const result: Record<string, unknown> = {};
   const losses: Swagger20ProjectionLoss[] = [];
-  for (const [key, member] of Object.entries(value)) if (allowed.has(key)) result[key] = structuredClone(member);
+  for (const [key, member] of Object.entries(value)) if (allowed.has(key)) result[key] = cloneValueGraph(member);
   if (result.type === "file" || result.format === "binary" || result.format === "byte") {
     result.type = "string";
     result.contentEncoding = "base64";
@@ -268,9 +269,10 @@ function envelopeTransform(parameters: Record<string, string>, bodyField: string
   const parameterObject = `{${Object.entries(parameters).sort(([left], [right]) => left.localeCompare(right)).map(
     ([key, field]) => `${JSON.stringify(key)}:$lookup($,${JSON.stringify(field)})`,
   ).join(",")}}`;
-  const parameterValue = "$count($keys($parameters)) > 0 ? $parameters : undefined()";
-  const bodyValue = bodyField === undefined ? "undefined()"
-    : `$exists($lookup($,${JSON.stringify(bodyField)})) ? $lookup($,${JSON.stringify(bodyField)}) : undefined()`;
+  const absent = '$lookup({},"__openbindings_absent")';
+  const parameterValue = `$count($keys($parameters)) > 0 ? $parameters : ${absent}`;
+  const bodyValue = bodyField === undefined ? absent
+    : `$exists($lookup($,${JSON.stringify(bodyField)})) ? $lookup($,${JSON.stringify(bodyField)}) : ${absent}`;
   return `($parameters := ${parameterObject}; {"parameters":${parameterValue},"body":${bodyValue}})`;
 }
 

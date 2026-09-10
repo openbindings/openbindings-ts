@@ -4,6 +4,7 @@
  * public API and return one normalized observation; this module owns matching
  * so every TypeScript adapter judges the same contract as the Go runner.
  */
+import { equalJSON, isJSONNumber, parseJSON, stringifyJSON } from "@openbindings/json";
 
 export interface ProcessorScenarioFile {
   format:
@@ -222,7 +223,7 @@ function semanticValue(
       if (lines.some((line) => line === "" || line.includes("\r"))) {
         throw new Error("invalid JSON Lines record boundary");
       }
-      return lines.map((line) => JSON.parse(line) as unknown);
+      return lines.map((line) => parseJSON(line));
     }
     case "json-sequence": {
       if (typeof actual !== "string" || actual === "") {
@@ -238,7 +239,7 @@ function semanticValue(
         if (text === "" || text.includes(String.fromCharCode(0x1e))) {
           throw new Error("invalid JSON sequence frame");
         }
-        values.push(JSON.parse(text) as unknown);
+        values.push(parseJSON(text));
         offset = end + 1;
       }
       return values;
@@ -247,19 +248,19 @@ function semanticValue(
       if (typeof actual !== "string") throw new Error("querystring assertion requires a URL");
       const query = rawQuery(actual);
       const decoded = decodeAndValidateQueryComponent(query);
-      return JSON.parse(decoded) as unknown;
+      return parseJSON(decoded);
     }
     case "query-json-parameter": {
       if (typeof actual !== "string") throw new Error("query assertion requires a URL");
       const units = namedUnits(rawQuery(actual), false, family);
       checkNames(units, assertion);
-      return JSON.parse(selectedUnit(units, assertion.name).value) as unknown;
+      return parseJSON(selectedUnit(units, assertion.name).value);
     }
     case "form-json-field": {
       if (typeof actual !== "string") throw new Error("form assertion requires a string body");
       const units = namedUnits(actual, true, family);
       checkNames(units, assertion);
-      return JSON.parse(selectedUnit(units, assertion.name).value) as unknown;
+      return parseJSON(selectedUnit(units, assertion.name).value);
     }
     case "multipart-json-part": {
       if (!isRecord(actual)) throw new Error("multipart assertion requires a dispatch object");
@@ -275,7 +276,7 @@ function semanticValue(
       if (selected.contentType.toLowerCase() !== "application/json") {
         throw new Error("multipart JSON part has wrong content type");
       }
-      return JSON.parse(selected.value) as unknown;
+      return parseJSON(selected.value);
     }
   }
 }
@@ -468,32 +469,16 @@ function contains(actual: unknown, needle: unknown): boolean {
 }
 
 function jsonEqual(a: unknown, b: unknown): boolean {
-  return canonicalJSON(a) === canonicalJSON(b);
-}
-
-function canonicalJSON(value: unknown): string {
-  return JSON.stringify(sortJSON(value));
-}
-
-function sortJSON(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(sortJSON);
-  if (isRecord(value)) {
-    return Object.fromEntries(
-      Object.keys(value)
-        .sort()
-        .map((key) => [key, sortJSON(value[key])]),
-    );
-  }
-  return value;
+  return equalJSON(a, b);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
+  return value !== null && typeof value === "object" && !Array.isArray(value) && !isJSONNumber(value);
 }
 
 function printable(value: unknown): string {
   try {
-    return JSON.stringify(value);
+    return stringifyJSON(value);
   } catch {
     return String(value);
   }

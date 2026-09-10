@@ -1,11 +1,8 @@
 /**
- * TS side of the JSONata transform differential-conformance gate
- * (spec/conformance/transforms). The `agree/` corpus pins the NORMATIVE
- * jsonata-js output every conformant engine must reproduce; this runs each
- * agree case through jsonata-js (the engine the TS SDK uses) and asserts it
- * matches. It pins the TS side of the cross-SDK parity contract — a Go(gnata)
- * regression is caught by ob's Go gate, a TS regression (a jsonata upgrade or
- * config change) is caught here.
+ * Historical reference-runtime regression, not Core conformance and not
+ * qualification of the separately selected official evaluator. The development
+ * dependency here retains the archived agree/ observations; current documented
+ * language cases run through the actual invocation adapter in invoke tests.
  *
  * The corpus ROOT is located via OB_SPEC_CORPUS, appending the `transforms`
  * subpath internally, matching the operationgraph corpus test. Skips when unset.

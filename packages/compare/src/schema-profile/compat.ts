@@ -1,5 +1,6 @@
 import type { JSONObject, JSONValue } from "./helpers.js";
-import { asMap, asSlice, canonicalKey, ptrJoin, toFloat64 } from "./helpers.js";
+import { asMap, asSlice, renderValue, ptrJoin, numericToken, compareNumeric, ValueSet } from "./helpers.js";
+import { compareNumberTokens, equalJSON } from "@openbindings/json";
 import { NotNormalizedError } from "./errors.js";
 
 export interface CompatResult {
@@ -79,7 +80,7 @@ function assertNormalized(schema: JSONObject, path: string): void {
   if (props) {
     for (const k of Object.keys(props).sort()) {
       const vm = asMap(props[k]);
-      if (vm) assertNormalized(vm, ptrJoin(path, `properties[${canonicalKey(k)}]`));
+      if (vm) assertNormalized(vm, ptrJoin(path, `properties[${renderValue(k)}]`));
     }
   }
   const ap = asMap(schema["additionalProperties"]);
@@ -194,7 +195,7 @@ function subsetTypes(a: Set<string> | null, b: Set<string> | null): boolean {
 
 /**
  * Returns a comma-separated list of the types in `a` that are not in `b`,
- * each rendered via canonicalKey — the same JCS (JSON-string escaping)
+ * each rendered via renderValue — the same JCS (JSON-string escaping)
  * rendering member names get — and sorted lexicographically so the reason
  * string is deterministic. Legitimate lowercase type names render
  * byte-identically to the previous literal quoting; the difference is
@@ -207,12 +208,12 @@ function missingTypes(a: Set<string> | null, b: Set<string> | null): string {
   const missing: string[] = [];
   for (const k of a) {
     if (b === null) {
-      missing.push(canonicalKey(k));
+      missing.push(renderValue(k));
       continue;
     }
     if (b.has(k)) continue;
     if (k === "integer" && b.has("number")) continue;
-    missing.push(canonicalKey(k));
+    missing.push(renderValue(k));
   }
   missing.sort();
   return missing.join(", ");
@@ -244,29 +245,29 @@ function compatConstEnum(tgt: JSONObject, cand: JSONObject, isInput: boolean): C
   if (isInput) {
     if (tgtHasConst) {
       if (candHasConst) {
-        return canonicalKey(tgt["const"]) === canonicalKey(cand["const"])
+        return equalJSON(tgt["const"], cand["const"])
           ? COMPATIBLE
-          : fail(`const: candidate const ${canonicalKey(cand["const"])} does not match target const ${canonicalKey(tgt["const"])}`);
+          : fail(`const: candidate const ${renderValue(cand["const"])} does not match target const ${renderValue(tgt["const"])}`);
       }
       if (candHasEnum) {
-        return candEnum!.has(canonicalKey(tgt["const"]))
+        return candEnum!.has(tgt["const"])
           ? COMPATIBLE
-          : fail(`enum: target const ${canonicalKey(tgt["const"])} not in candidate enum`);
+          : fail(`enum: target const ${renderValue(tgt["const"])} not in candidate enum`);
       }
       return COMPATIBLE;
     }
     if (tgtHasEnum) {
       if (candHasConst) {
         if (tgtEnum!.size !== 1) {
-          return fail(`const: candidate const ${canonicalKey(cand["const"])} cannot cover ${tgtEnum!.size} target enum values`);
+          return fail(`const: candidate const ${renderValue(cand["const"])} cannot cover ${tgtEnum!.size} target enum values`);
         }
-        return tgtEnum!.has(canonicalKey(cand["const"]))
+        return tgtEnum!.has(cand["const"])
           ? COMPATIBLE
-          : fail(`const: candidate const ${canonicalKey(cand["const"])} not in target enum`);
+          : fail(`const: candidate const ${renderValue(cand["const"])} not in target enum`);
       }
       if (candHasEnum) {
-        for (const k of sortedSetValues(tgtEnum!)) {
-          if (!candEnum!.has(k)) return fail(`enum: target value ${k} not in candidate enum`);
+        for (const k of tgtEnum!) {
+          if (!candEnum!.has(k)) return fail(`enum: target value ${renderValue(k)} not in candidate enum`);
         }
         return COMPATIBLE;
       }
@@ -277,13 +278,13 @@ function compatConstEnum(tgt: JSONObject, cand: JSONObject, isInput: boolean): C
 
   if (tgtHasEnum) {
     if (candHasConst) {
-      return tgtEnum!.has(canonicalKey(cand["const"]))
+      return tgtEnum!.has(cand["const"])
         ? COMPATIBLE
-        : fail(`enum: candidate const ${canonicalKey(cand["const"])} not in target enum`);
+        : fail(`enum: candidate const ${renderValue(cand["const"])} not in target enum`);
     }
     if (candHasEnum) {
-      for (const k of sortedSetValues(candEnum!)) {
-        if (!tgtEnum!.has(k)) return fail(`enum: candidate value ${k} not in target enum`);
+      for (const k of candEnum!) {
+        if (!tgtEnum!.has(k)) return fail(`enum: candidate value ${renderValue(k)} not in target enum`);
       }
       return COMPATIBLE;
     }
@@ -291,30 +292,29 @@ function compatConstEnum(tgt: JSONObject, cand: JSONObject, isInput: boolean): C
   }
   if (tgtHasConst) {
     if (candHasConst) {
-      return canonicalKey(tgt["const"]) === canonicalKey(cand["const"])
+      return equalJSON(tgt["const"], cand["const"])
         ? COMPATIBLE
-        : fail(`const: candidate const ${canonicalKey(cand["const"])} does not match target const ${canonicalKey(tgt["const"])}`);
+        : fail(`const: candidate const ${renderValue(cand["const"])} does not match target const ${renderValue(tgt["const"])}`);
     }
     if (candHasEnum) {
       if (candEnum!.size !== 1) {
-        return fail(`const: candidate enum has ${candEnum!.size} values but target allows only const ${canonicalKey(tgt["const"])}`);
+        return fail(`const: candidate enum has ${candEnum!.size} values but target allows only const ${renderValue(tgt["const"])}`);
       }
-      return candEnum!.has(canonicalKey(tgt["const"]))
+      return candEnum!.has(tgt["const"])
         ? COMPATIBLE
-        : fail(`const: candidate enum value does not match target const ${canonicalKey(tgt["const"])}`);
+        : fail(`const: candidate enum value does not match target const ${renderValue(tgt["const"])}`);
     }
-    return fail(`const: candidate is unconstrained but target requires const ${canonicalKey(tgt["const"])}`);
+    return fail(`const: candidate is unconstrained but target requires const ${renderValue(tgt["const"])}`);
   }
   return COMPATIBLE;
 }
 
-function enumSetOf(schema: JSONObject): [Set<string> | null, boolean] {
+function enumSetOf(schema: JSONObject): [ValueSet | null, boolean] {
   if (!("enum" in schema)) return [null, false];
   const arr = asSlice(schema["enum"]);
   // A malformed (non-array) enum value behaves as an empty set — present
   // but admitting nothing — matching the Go SDK's nil-map semantics.
-  if (!arr) return [new Set<string>(), true];
-  return [new Set(arr.map(canonicalKey)), true];
+  return [new ValueSet(arr ?? []), true];
 }
 
 /** A set's values in lexicographic order — reasons never leak insertion order. */
@@ -326,7 +326,7 @@ function sortedSetValues(set: Set<string>): string[] {
  * Applies the object rules. Set and property iteration is SORTED so the
  * first-failing member named in the reason is deterministic (and
  * byte-identical with the Go SDK) when several members fail. Property and
- * required member names interpolate via canonicalKey — the same JCS
+ * required member names interpolate via renderValue — the same JCS
  * rendering values get — so names carrying quotes, backslashes, or control
  * characters escape identically across the reference SDKs (plain names
  * render exactly as a bare quoted spelling).
@@ -339,7 +339,7 @@ function compatObject(tgt: JSONObject, cand: JSONObject, isInput: boolean): Comp
 
   if (isInput) {
     for (const k of sortedSetValues(candReq)) {
-      if (!tgtReq.has(k)) return fail(`required: candidate requires ${canonicalKey(k)} but target does not`);
+      if (!tgtReq.has(k)) return fail(`required: candidate requires ${renderValue(k)} but target does not`);
     }
     for (const p of Object.keys(tgtProps).sort()) {
       const tvm = asMap(tgtProps[p]);
@@ -348,14 +348,14 @@ function compatObject(tgt: JSONObject, cand: JSONObject, isInput: boolean): Comp
         const cvm = asMap(candProps[p]);
         if (!cvm) continue;
         const r = compat(tvm, cvm, true);
-        if (!r.compatible) return prefixed(`properties[${canonicalKey(p)}]`, r);
+        if (!r.compatible) return prefixed(`properties[${renderValue(p)}]`, r);
       }
     }
     return COMPATIBLE;
   }
 
   for (const k of sortedSetValues(tgtReq)) {
-    if (!candReq.has(k)) return fail(`required: target requires ${canonicalKey(k)} but candidate does not`);
+    if (!candReq.has(k)) return fail(`required: target requires ${renderValue(k)} but candidate does not`);
   }
 
   const tgtAP = tgt["additionalProperties"];
@@ -365,14 +365,14 @@ function compatObject(tgt: JSONObject, cand: JSONObject, isInput: boolean): Comp
     if (!(p in tgtProps)) {
       // The extra-property fault names the property's own path (the same
       // properties["..."] site every other property-level failure uses).
-      if (tgtAP === false) return fail(`properties[${canonicalKey(p)}]: target forbids additional properties`);
+      if (tgtAP === false) return fail(`properties[${renderValue(p)}]: target forbids additional properties`);
     }
     if (p in tgtProps) {
       const tvm = asMap(tgtProps[p]);
       const cvm = asMap(cv);
       if (tvm && cvm) {
         const r = compat(tvm, cvm, false);
-        if (!r.compatible) return prefixed(`properties[${canonicalKey(p)}]`, r);
+        if (!r.compatible) return prefixed(`properties[${renderValue(p)}]`, r);
       }
     }
   }
@@ -466,7 +466,7 @@ function compatNumericBounds(tgt: JSONObject, cand: JSONObject, isInput: boolean
 
   // Exclusive bounds are marked; numbers render in ECMAScript form, which
   // is the JCS rendering the Go SDK uses — the strings match byte for byte.
-  const fmtBound = (v: number, excl: boolean): string => (excl ? `exclusive ${v}` : `${v}`);
+  const fmtBound = (v: string, excl: boolean): string => (excl ? `exclusive ${v}` : v);
 
   if (isInput) {
     if (tgtHasLo && candHasLo) {
@@ -496,53 +496,57 @@ function compatNumericBounds(tgt: JSONObject, cand: JSONObject, isInput: boolean
   return COMPATIBLE;
 }
 
-function effectiveLowerBound(schema: JSONObject): [number, boolean] {
+function effectiveLowerBound(schema: JSONObject): [string, boolean] {
   const hasMin = "minimum" in schema;
   const hasEMin = "exclusiveMinimum" in schema;
   if (hasMin && hasEMin) {
-    const mv = toFloat64(schema["minimum"]);
-    const ev = toFloat64(schema["exclusiveMinimum"]);
-    return ev >= mv ? [ev, true] : [mv, false];
+    const mv = numericToken(schema["minimum"]);
+    const ev = numericToken(schema["exclusiveMinimum"]);
+    return compareNumberTokens(ev, mv) >= 0 ? [ev, true] : [mv, false];
   }
-  if (hasEMin) return [toFloat64(schema["exclusiveMinimum"]), true];
-  if (hasMin) return [toFloat64(schema["minimum"]), false];
-  return [0, false];
+  if (hasEMin) return [numericToken(schema["exclusiveMinimum"]), true];
+  if (hasMin) return [numericToken(schema["minimum"]), false];
+  return ["0", false];
 }
 
-function effectiveUpperBound(schema: JSONObject): [number, boolean] {
+function effectiveUpperBound(schema: JSONObject): [string, boolean] {
   const hasMax = "maximum" in schema;
   const hasEMax = "exclusiveMaximum" in schema;
   if (hasMax && hasEMax) {
-    const mv = toFloat64(schema["maximum"]);
-    const ev = toFloat64(schema["exclusiveMaximum"]);
-    return ev <= mv ? [ev, true] : [mv, false];
+    const mv = numericToken(schema["maximum"]);
+    const ev = numericToken(schema["exclusiveMaximum"]);
+    return compareNumberTokens(ev, mv) <= 0 ? [ev, true] : [mv, false];
   }
-  if (hasEMax) return [toFloat64(schema["exclusiveMaximum"]), true];
-  if (hasMax) return [toFloat64(schema["maximum"]), false];
-  return [0, false];
+  if (hasEMax) return [numericToken(schema["exclusiveMaximum"]), true];
+  if (hasMax) return [numericToken(schema["maximum"]), false];
+  return ["0", false];
 }
 
-function lowerBoundLessOrEqual(a: number, aExcl: boolean, b: number, bExcl: boolean): boolean {
-  if (a < b) return true;
-  if (a > b) return false;
+function lowerBoundLessOrEqual(a: string, aExcl: boolean, b: string, bExcl: boolean): boolean {
+  const c = compareNumberTokens(a, b);
+  if (c < 0) return true;
+  if (c > 0) return false;
   return !(aExcl && !bExcl);
 }
 
-function lowerBoundGreaterOrEqual(a: number, aExcl: boolean, b: number, bExcl: boolean): boolean {
-  if (a > b) return true;
-  if (a < b) return false;
+function lowerBoundGreaterOrEqual(a: string, aExcl: boolean, b: string, bExcl: boolean): boolean {
+  const c = compareNumberTokens(a, b);
+  if (c > 0) return true;
+  if (c < 0) return false;
   return !(bExcl && !aExcl);
 }
 
-function upperBoundLessOrEqual(a: number, aExcl: boolean, b: number, bExcl: boolean): boolean {
-  if (a < b) return true;
-  if (a > b) return false;
+function upperBoundLessOrEqual(a: string, aExcl: boolean, b: string, bExcl: boolean): boolean {
+  const c = compareNumberTokens(a, b);
+  if (c < 0) return true;
+  if (c > 0) return false;
   return !(bExcl && !aExcl);
 }
 
-function upperBoundGreaterOrEqual(a: number, aExcl: boolean, b: number, bExcl: boolean): boolean {
-  if (a > b) return true;
-  if (a < b) return false;
+function upperBoundGreaterOrEqual(a: string, aExcl: boolean, b: string, bExcl: boolean): boolean {
+  const c = compareNumberTokens(a, b);
+  if (c > 0) return true;
+  if (c < 0) return false;
   return !(aExcl && !bExcl);
 }
 
@@ -555,26 +559,26 @@ function compatSimpleBounds(
 ): CompatResult {
   if (isInput) {
     if (minKey in tgt && minKey in cand) {
-      if (toFloat64(cand[minKey]) > toFloat64(tgt[minKey])) {
-        return fail(`${minKey}: candidate ${minKey} ${toFloat64(cand[minKey])} is greater than target ${minKey} ${toFloat64(tgt[minKey])}`);
+      if (compareNumeric(cand[minKey], tgt[minKey]) > 0) {
+        return fail(`${minKey}: candidate ${minKey} ${numericToken(cand[minKey])} is greater than target ${minKey} ${numericToken(tgt[minKey])}`);
       }
     }
     if (maxKey in tgt && maxKey in cand) {
-      if (toFloat64(cand[maxKey]) < toFloat64(tgt[maxKey])) {
-        return fail(`${maxKey}: candidate ${maxKey} ${toFloat64(cand[maxKey])} is less than target ${maxKey} ${toFloat64(tgt[maxKey])}`);
+      if (compareNumeric(cand[maxKey], tgt[maxKey]) < 0) {
+        return fail(`${maxKey}: candidate ${maxKey} ${numericToken(cand[maxKey])} is less than target ${maxKey} ${numericToken(tgt[maxKey])}`);
       }
     }
   } else {
     if (minKey in tgt) {
-      if (!(minKey in cand)) return fail(`${minKey}: target has ${minKey} ${toFloat64(tgt[minKey])} but candidate has none`);
-      if (toFloat64(cand[minKey]) < toFloat64(tgt[minKey])) {
-        return fail(`${minKey}: candidate ${minKey} ${toFloat64(cand[minKey])} is less than target ${minKey} ${toFloat64(tgt[minKey])}`);
+      if (!(minKey in cand)) return fail(`${minKey}: target has ${minKey} ${numericToken(tgt[minKey])} but candidate has none`);
+      if (compareNumeric(cand[minKey], tgt[minKey]) < 0) {
+        return fail(`${minKey}: candidate ${minKey} ${numericToken(cand[minKey])} is less than target ${minKey} ${numericToken(tgt[minKey])}`);
       }
     }
     if (maxKey in tgt) {
-      if (!(maxKey in cand)) return fail(`${maxKey}: target has ${maxKey} ${toFloat64(tgt[maxKey])} but candidate has none`);
-      if (toFloat64(cand[maxKey]) > toFloat64(tgt[maxKey])) {
-        return fail(`${maxKey}: candidate ${maxKey} ${toFloat64(cand[maxKey])} is greater than target ${maxKey} ${toFloat64(tgt[maxKey])}`);
+      if (!(maxKey in cand)) return fail(`${maxKey}: target has ${maxKey} ${numericToken(tgt[maxKey])} but candidate has none`);
+      if (compareNumeric(cand[maxKey], tgt[maxKey]) > 0) {
+        return fail(`${maxKey}: candidate ${maxKey} ${numericToken(cand[maxKey])} is greater than target ${maxKey} ${numericToken(tgt[maxKey])}`);
       }
     }
   }

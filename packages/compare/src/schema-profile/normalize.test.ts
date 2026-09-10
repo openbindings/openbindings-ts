@@ -117,14 +117,14 @@ describe("Normalizer.normalize", () => {
     ).rejects.toThrow(SchemaError);
   });
 
-  it("sorts union variants by canonical form", async () => {
+  it("retains authored union order for traversal", async () => {
     const n = new Normalizer();
     const result = await n.normalize({
       oneOf: [{ type: "string" }, { type: "integer" }],
     });
     const variants = result.oneOf as any[];
     const types = variants.map((v: any) => v.type[0]);
-    expect(types).toEqual(["integer", "string"]);
+    expect(types).toEqual(["string", "integer"]);
   });
 
   it("strips $defs", async () => {

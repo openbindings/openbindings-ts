@@ -1,5 +1,6 @@
 import type { OBInterface, BindingEntry, Operation, Source, Transform, TransformOrRef, BindingSpecInfo, BindingSpecVerdict } from "@openbindings/core";
 import { PreparedInterface, prepareInterface, resolveTransform } from "@openbindings/core";
+import { cloneValueGraph, equalJSON, isJSONNumber } from "@openbindings/json";
 import type {
   BindingInvocationArgs,
   InvokeOptions,
@@ -730,9 +731,11 @@ export class OperationInvoker {
                     prepared.iface.transforms,
                     inputTransform,
                     item.value,
+                    callerInv.signal,
                   );
                   return { value, done: false };
                 } catch {
+                  callerInv.signal.throwIfAborted();
                   const error = new InvocationError(ERR_TRANSFORM_ERROR);
                   callerInv.fireError(error);
                   throw error;
@@ -758,15 +761,21 @@ export class OperationInvoker {
               prepared.iface.transforms,
               outputTransform,
               output,
+              callerInv.signal,
             );
           } catch {
+            callerInv.signal.throwIfAborted();
             const error = new InvocationError(ERR_TRANSFORM_ERROR);
             callerInv.fireError(error);
             throw error;
           }
         }
         if (outputValidator) {
-          const result = safeValidate(outputValidator, output);
+          const result = operationValidationResult(outputValidator, output);
+          if (result instanceof InvocationError) {
+            callerInv.fireError(result);
+            throw result;
+          }
           if (!result.valid) {
             diagnostics?.recordValidation(
               "output",
@@ -1022,7 +1031,7 @@ export class OperationInvoker {
     let attemptGen = 0;
     let inputSurface: InvocationError | undefined;
 
-    const pumpInputs = async (inner: Invocation<unknown, unknown>): Promise<void> => {
+    const pumpInputs = async (inner: Invocation<unknown, unknown>, signal: AbortSignal): Promise<void> => {
       const myGen = attemptGen;
       // Replay the prefix the previous attempt(s) already consumed. Snapshot
       // the ARRAY REFERENCE first: this attempt's own first output closes the
@@ -1057,8 +1066,15 @@ export class OperationInvoker {
           let v: unknown = r.value;
           if (binding.inputTransform) {
             try {
-              v = await applyTransformRef(evaluator!, iface.transforms, binding.inputTransform, v);
+              v = await applyTransformRef(evaluator!, iface.transforms, binding.inputTransform, v, signal);
             } catch {
+              if (signal.aborted) {
+                // No next() is in flight while transforming this item. Restore
+                // the raw input for the next attempt; do not transform replayed
+                // post-transform values a second time.
+                stash = s;
+                return;
+              }
               await inner.cancel();
               callerInv.fireError(
                 new InvocationError(ERR_TRANSFORM_ERROR),
@@ -1095,6 +1111,10 @@ export class OperationInvoker {
 
     let rounds = 0;
     for (;;) {
+      const attempt = new AbortController();
+      const abortAttempt = (): void => attempt.abort(callerInv.signal.reason);
+      if (callerInv.signal.aborted) abortAttempt();
+      else callerInv.signal.addEventListener("abort", abortAttempt, { once: true });
       let inner: Invocation<unknown, unknown>;
       try {
         const args = bindingArgs();
@@ -1102,12 +1122,14 @@ export class OperationInvoker {
           ? compiledBinding.invokeBindingAfterPreflight(args)
           : (compiledBinding ?? this.invoker).invokeBinding(args);
       } catch (err) {
+        callerInv.signal.removeEventListener("abort", abortAttempt);
+        attempt.abort();
         callerInv.fireError(wireError(err));
         return;
       }
 
       attemptGen++;
-      const pump = pumpInputs(inner);
+      const pump = pumpInputs(inner, attempt.signal);
 
       let surface: InvocationError | undefined;
       let retry = false;
@@ -1120,9 +1142,10 @@ export class OperationInvoker {
           let data: unknown = out;
           if (binding.outputTransform) {
             try {
-              data = await applyTransformRef(evaluator!, iface.transforms, binding.outputTransform, data);
+              data = await applyTransformRef(evaluator!, iface.transforms, binding.outputTransform, data, attempt.signal);
             } catch {
               await inner.cancel();
+              if (attempt.signal.aborted) break;
               surface = new InvocationError(ERR_TRANSFORM_ERROR);
               break;
             }
@@ -1130,7 +1153,12 @@ export class OperationInvoker {
           // OBI-T-16: an invalid output is not emitted; the invocation
           // terminates. Per-item for streaming bindings.
           if (outputValidator) {
-            const r = safeValidate(outputValidator, data);
+            const r = operationValidationResult(outputValidator, data);
+            if (r instanceof InvocationError) {
+              await inner.cancel();
+              surface = r;
+              break;
+            }
             if (!r.valid) {
               await inner.cancel();
               diagnostics?.recordValidation(
@@ -1176,6 +1204,8 @@ export class OperationInvoker {
       // Unpark and retire this attempt's pump before deciding next steps —
       // the shared stash must have exactly one consumer at a time.
       attemptGen++;
+      callerInv.signal.removeEventListener("abort", abortAttempt);
+      attempt.abort();
       wake();
       await pump;
 
@@ -1241,7 +1271,8 @@ function makeInputValidator(
       }
     }
     if (compileError) return compileError;
-    const r = safeValidate(validator!, input);
+    const r = operationValidationResult(validator!, input);
+    if (r instanceof InvocationError) return r;
     if (!r.valid) {
       diagnostics?.recordValidation("input", operationName, bindingKey, r.failures);
       return new InvocationError(ERR_OPERATION_VALIDATION_FAILED);
@@ -1258,7 +1289,8 @@ function validatorHook(
 ): ((input: unknown) => InvocationError | null) | undefined {
   if (!validator) return undefined;
   return (input: unknown): InvocationError | null => {
-    const result = safeValidate(validator, input);
+    const result = operationValidationResult(validator, input);
+    if (result instanceof InvocationError) return result;
     if (!result.valid) {
       diagnostics?.recordValidation("input", operationName, bindingKey, result.failures);
     }
@@ -1268,8 +1300,13 @@ function validatorHook(
   };
 }
 
+function operationValidationResult(validator: CompiledSchema, value: unknown): ReturnType<typeof safeValidate> | InvocationError {
+  try { return safeValidate(validator, value); }
+  catch { return new InvocationError(ERR_RUNTIME); }
+}
+
 function immutableValueSnapshot<T>(value: T): T {
-  return deepFreeze(structuredClone(value));
+  return deepFreeze(cloneValueGraph(value));
 }
 
 const immutableInterfaceSnapshots = new WeakSet<object>();
@@ -1297,25 +1334,13 @@ function asInvocationError(err: unknown): InvocationError {
 
 /** JSON-domain structural comparison used only to suppress identical context retries. */
 function contextValuesEqual(left: unknown, right: unknown): boolean {
-  const canonical = (value: unknown, seen: Set<object>): unknown => {
-    if (!value || typeof value !== "object") return value;
-    if (seen.has(value)) throw new TypeError("cyclic context");
-    seen.add(value);
-    try {
-      if (Array.isArray(value)) return value.map((entry) => canonical(entry, seen));
-      return Object.fromEntries(
-        Object.entries(value as Record<string, unknown>)
-          .sort(([a], [b]) => a.localeCompare(b))
-          .map(([key, entry]) => [key, canonical(entry, seen)]),
-      );
-    } finally {
-      seen.delete(value);
-    }
-  };
+  if (left === undefined || right === undefined) return left === right;
   try {
-    return JSON.stringify(canonical(left, new Set())) === JSON.stringify(canonical(right, new Set()));
+    return equalJSON(left, right);
   } catch {
-    return Object.is(left, right);
+    // This is only a retry-suppression optimization. Unavailable comparison
+    // is a conservative miss, never equality or an incompatible verdict.
+    return false;
   }
 }
 
@@ -1434,7 +1459,9 @@ async function applyTransformRef(
   transforms: Record<string, Transform> | undefined,
   transformOrRef: TransformOrRef,
   data: unknown,
+  signal: AbortSignal,
 ): Promise<unknown> {
+  signal.throwIfAborted();
   const expr = resolveTransform(transformOrRef, transforms);
   if (expr === undefined) {
     if (typeof transformOrRef === "object" && transformOrRef !== null && transformOrRef.$ref) {
@@ -1443,5 +1470,41 @@ async function applyTransformRef(
     throw new Error("openbindings: invalid transform: neither selector nor inline");
   }
   if (expr === "") throw new EmptyTransformExpressionError();
-  return evaluator.evaluate(expr, data);
+  const result = await evaluator.evaluate(expr, data, { signal });
+  signal.throwIfAborted();
+  if (!isTransformJSONValue(result)) {
+    throw new Error("openbindings: transform result is not a JSON value");
+  }
+  return result;
+}
+
+// Validate the abstract JSON result, independently of an optional operation
+// schema. Do not stringify it: that would silently turn nonfinite numbers into
+// null, drop undefined members, and invoke user-defined serialization hooks.
+function isTransformJSONValue(value: unknown, ancestors = new Set<object>()): boolean {
+  if (value === null || typeof value === "string" || typeof value === "boolean") return true;
+  if (typeof value === "number") return Number.isFinite(value);
+  if (isJSONNumber(value)) return true;
+  if (typeof value !== "object" || ancestors.has(value)) return false;
+  ancestors.add(value);
+  try {
+    if (Array.isArray(value)) {
+      // JSONata sequences may carry non-index metadata. Only indexed elements
+      // belong to the JSON array; neither holes nor accessors are JSON values.
+      for (let index = 0; index < value.length; index++) {
+        const descriptor = Object.getOwnPropertyDescriptor(value, String(index));
+        if (!descriptor || !("value" in descriptor) || !isTransformJSONValue(descriptor.value, ancestors)) return false;
+      }
+      return true;
+    }
+    const prototype: unknown = Object.getPrototypeOf(value);
+    if (prototype !== Object.prototype && prototype !== null) return false;
+    return Reflect.ownKeys(value).every(key => {
+      const descriptor = Object.getOwnPropertyDescriptor(value, key)!;
+      return typeof key === "string" && descriptor.enumerable === true && "value" in descriptor
+        && isTransformJSONValue(descriptor.value, ancestors);
+    });
+  } finally {
+    ancestors.delete(value);
+  }
 }

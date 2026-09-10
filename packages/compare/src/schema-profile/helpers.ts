@@ -1,10 +1,10 @@
-import canonicalize from "canonicalize";
+import { isJSONNumber, stringifyJSON, numberToken, compareNumberTokens, JSONValueSet } from "@openbindings/json";
 
 export type JSONValue = unknown;
 export type JSONObject = Record<string, unknown>;
 
 export function asMap(v: JSONValue): JSONObject | null {
-  if (v && typeof v === "object" && !Array.isArray(v)) return v as JSONObject;
+  if (v && typeof v === "object" && !Array.isArray(v) && !isJSONNumber(v)) return v as JSONObject;
   return null;
 }
 
@@ -23,15 +23,23 @@ export function ptrJoin(prefix: string, next: string): string {
   return `${prefix}.${next}`;
 }
 
-export function canonicalKey(v: JSONValue): string {
-  return canonicalize(v) ?? "<unserializable>";
+/** Diagnostic rendering only. Never use these bytes as value identity. */
+export function renderValue(v: JSONValue): string {
+  // Property names and native scalars have no opaque children or hooks.
+  if (v === null || typeof v === "string" || typeof v === "boolean"
+    || (typeof v === "number" && Number.isFinite(v))) return JSON.stringify(v);
+  const ordered = (x: unknown): unknown => Array.isArray(x) ? x.map(ordered)
+    : asMap(x) ? Object.fromEntries(Object.keys(x as JSONObject).sort().map(k => [k, ordered((x as JSONObject)[k])])) : x;
+  return stringifyJSON(ordered(v));
 }
 
-export function toFloat64(v: JSONValue): number {
-  if (typeof v === "number") return v;
-  if (typeof v === "string") {
-    const n = parseFloat(v);
-    return isNaN(n) ? 0 : n;
-  }
-  return 0;
+export function numericToken(v: JSONValue): string {
+  const token = numberToken(v);
+  if (token === undefined) throw new TypeError("Schema bound must be a JSON number");
+  return token;
 }
+
+export const compareNumeric = (a: unknown, b: unknown): number => compareNumberTokens(numericToken(a), numericToken(b));
+
+/** Instance-value set retaining first-authored order, including its spelling. */
+export class ValueSet extends JSONValueSet {}

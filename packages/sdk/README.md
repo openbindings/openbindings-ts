@@ -52,8 +52,13 @@ cross-implementation agreement.
 
 Install the OpenAPI adapter and the JSONata evaluator used by this example:
 
+The standalone JSONata runtime is currently a private development candidate.
+The following package names describe the intended composition, not packages
+already available from the registry. Use the coordinated local workspace or
+qualified archives until the prerequisite runtime is published.
+
 ```sh
-npm install @openbindings/sdk @openbindings/openapi jsonata@2.1.1
+npm install @openbindings/sdk @openbindings/openapi @openbindings/jsonata
 ```
 
 Synthesized parameter and body mappings use transforms. Register their
@@ -61,16 +66,15 @@ evaluator explicitly when constructing the runtime. This example also opts
 into decimal conversion for its numeric query parameter:
 
 ```typescript
-import jsonata from "jsonata";
+import { createJSONataExecutor } from "@openbindings/jsonata";
+import { createJSONataEvaluator } from "@openbindings/invoke/jsonata";
 import { OpenBindingsRuntime } from "@openbindings/sdk";
 import { OpenAPIAdapter, decimalParameterConversion } from "@openbindings/openapi";
 
 const openapi = new OpenAPIAdapter({ parameterConversion: decimalParameterConversion });
 const runtime = new OpenBindingsRuntime({
   providers: [openapi],
-  transformEvaluator: {
-    evaluate: (expression, data) => jsonata(expression).evaluate(data),
-  },
+  transformEvaluator: createJSONataEvaluator(createJSONataExecutor()),
 });
 const { iface } = await runtime.resolve("https://api.example.com");
 const call = runtime.invoke(iface, "listItems");
@@ -81,7 +85,7 @@ for await (const item of call.outputs) {
 ```
 
 `runtime.prepareProvider(key, interfaceOrPreparedInterface)` indexes one
-immutable provider revision through the same registered provider set. For
+immutable provider snapshot through the same registered provider set. For
 human-facing validation explanations, pass a `DiagnosticCollector` in invoke
 options; its bounded phase/pointer/keyword records stay process-local and never
 enter portable `InvocationError.data`.
@@ -318,15 +322,14 @@ model.
 
 ## Transforms (invoking tools only)
 
-OpenBindings 0.2.0 mandates JSONata 2.1 as the transform language for tools that evaluate `inputTransform`/`outputTransform` (OBI-T-10). Document validation bundles the pinned `jsonata` 2.1 library to parse-check every transform expression for syntactic validity (OBI-D-18). Invocation requires an explicitly configured `TransformEvaluator`. Install `jsonata@2.1.1` as an application dependency and register it for evaluation:
+OpenBindings 0.2.0 mandates JSONata 2.1 as the transform language for tools that evaluate `inputTransform`/`outputTransform` (OBI-T-10). Document validation uses a private syntax-only parser without initializing the evaluator to parse-check every transform expression for syntactic validity (OBI-D-18). Invocation requires an explicitly configured `TransformEvaluator`. Install `@openbindings/jsonata` as an application dependency and register it for evaluation:
 
 ```typescript
-import jsonata from "jsonata";
+import { createJSONataExecutor } from "@openbindings/jsonata";
+import { createJSONataEvaluator } from "@openbindings/invoke/jsonata";
 import { OperationInvoker, type TransformEvaluator } from "@openbindings/sdk";
 
-const transformEvaluator: TransformEvaluator = {
-  evaluate: (expression, data) => jsonata(expression).evaluate(data),
-};
+const transformEvaluator: TransformEvaluator = createJSONataEvaluator(createJSONataExecutor());
 
 const invoker = new OperationInvoker([/* invokers */], { transformEvaluator });
 ```
