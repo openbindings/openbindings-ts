@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync, existsSync } from "node:fs";
-import { createJSONExecutor } from "@openbindings/jsonata-runtime";
+import { createJSONExecutor } from "@openbindings/jsonata";
 import { createJSONataEvaluator } from "@openbindings/invoke/jsonata";
 const officialEvaluator = createJSONataEvaluator(createJSONExecutor());
 import { compileOperationSchema } from "@openbindings/core";

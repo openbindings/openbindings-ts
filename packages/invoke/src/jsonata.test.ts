@@ -5,7 +5,7 @@ import { basename, join } from "node:path";
 import { equalJSON, parseJSON, stringifyJSON } from "@openbindings/json";
 import type { OBInterface } from "@openbindings/core";
 import { createJSONataEvaluator } from "./jsonata.js";
-import { createNodeExecutor } from "@openbindings/jsonata-runtime/node";
+import { createNodeExecutor } from "@openbindings/jsonata/node";
 import { OperationInvoker } from "./operation-invoker.js";
 import { HandlerBindingInvoker } from "./handler-binding-invoker.js";
 import type { TransformEvaluator } from "./invokers.js";

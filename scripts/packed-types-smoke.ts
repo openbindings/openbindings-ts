@@ -16,7 +16,7 @@ import type { GraphQLInvoker } from "@openbindings/graphql";
 import type { OperationGraphInvoker } from "@openbindings/operationgraph";
 import { OpenBindingsRuntime as Runtime } from "@openbindings/sdk";
 import { OpenAPIAdapter as Adapter, decimalParameterConversion } from "@openbindings/openapi";
-import { createJSONExecutor } from "@openbindings/jsonata-runtime";
+import { createJSONExecutor } from "@openbindings/jsonata";
 import { createJSONataEvaluator } from "@openbindings/invoke/jsonata";
 
 // Type-check the explicit evaluator setup shown in the SDK quick start.

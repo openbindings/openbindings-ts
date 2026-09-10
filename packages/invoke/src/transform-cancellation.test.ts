@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { createJSONExecutor } from "@openbindings/jsonata-runtime";
+import { createJSONExecutor } from "@openbindings/jsonata";
 import { createJSONataEvaluator } from "./jsonata.js";
 import type { OBInterface } from "@openbindings/core";
 import { OperationInvoker } from "./operation-invoker.js";

@@ -6,7 +6,7 @@ import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const source = path.resolve(process.argv[2] ?? path.join(root, "../jsonata-runtime/javascript"));
+const source = path.resolve(process.argv[2] ?? path.join(root, "../jsonata/javascript"));
 const target = path.join(root, "packages/core/src/internal/jsonata-syntax");
 const digest = bytes => createHash("sha256").update(bytes).digest("hex");
 const files = {};

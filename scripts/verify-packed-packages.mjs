@@ -28,14 +28,14 @@ const openAPIClientDirectory = process.env.OPENBINDINGS_OPENAPI_CLIENT_DIR
 const asyncAPIClientDirectory = process.env.OPENBINDINGS_ASYNCAPI_CLIENT_DIR
   ?? join(root, "..", "asyncapi-client", "typescript");
 const jsonataRuntimeDirectory = process.env.JSONATA_RUNTIME_DIR
-  ?? join(root, "..", "jsonata-runtime", "javascript");
+  ?? join(root, "..", "jsonata", "javascript");
 
 function run(command, args, cwd = root) {
   execFileSync(command, args, { cwd, stdio: "inherit" });
 }
 
 try {
-  const jsonataRuntimeTarball = join(temporary, "jsonata-runtime.tgz");
+  const jsonataRuntimeTarball = join(temporary, "jsonata.tgz");
   run("pnpm", ["--dir", jsonataRuntimeDirectory, "pack", "--out", jsonataRuntimeTarball]);
   if (!existsSync(join(openAPIClientDirectory, "package.json"))) {
     throw new Error(
@@ -125,7 +125,7 @@ if (!result.ok || result.data?.ok !== true) throw new Error("packed client did n
 
 const { OpenBindingsRuntime, single } = await import("@openbindings/sdk");
 const { OpenAPIAdapter, decimalParameterConversion } = await import("@openbindings/openapi");
-const { createJSONExecutor } = await import("@openbindings/jsonata-runtime");
+const { createJSONExecutor } = await import("@openbindings/jsonata");
 const { createJSONataEvaluator } = await import("@openbindings/invoke/jsonata");
 const adapterRequests = [];
 const adapterFetch = async input => {

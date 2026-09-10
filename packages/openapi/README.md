@@ -50,11 +50,11 @@ already available from the registry. Use the coordinated local workspace or
 qualified archives until the prerequisite runtime is published.
 
 ```sh
-npm install @openbindings/sdk @openbindings/openapi @openbindings/jsonata-runtime
+npm install @openbindings/sdk @openbindings/openapi @openbindings/jsonata
 ```
 
 ```typescript
-import { createJSONExecutor } from "@openbindings/jsonata-runtime";
+import { createJSONExecutor } from "@openbindings/jsonata";
 import { createJSONataEvaluator } from "@openbindings/invoke/jsonata";
 import { OpenBindingsRuntime } from "@openbindings/sdk";
 import { OpenAPIAdapter, decimalParameterConversion } from "@openbindings/openapi";
