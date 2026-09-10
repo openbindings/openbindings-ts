@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { createJSONExecutor } from "@openbindings/jsonata";
+import { createJSONataExecutor } from "@openbindings/jsonata";
 import { createJSONataEvaluator } from "@openbindings/invoke/jsonata";
-const officialEvaluator = createJSONataEvaluator(createJSONExecutor());
+const officialEvaluator = createJSONataEvaluator(createJSONataExecutor());
 import { prepareInterface, type OBInterface } from "@openbindings/core";
 import {
   CompositionSession,

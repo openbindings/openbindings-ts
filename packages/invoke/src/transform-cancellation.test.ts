@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { createJSONExecutor } from "@openbindings/jsonata";
+import { createJSONataExecutor } from "@openbindings/jsonata";
 import { createJSONataEvaluator } from "./jsonata.js";
 import type { OBInterface } from "@openbindings/core";
 import { OperationInvoker } from "./operation-invoker.js";
@@ -150,7 +150,7 @@ it("a genuine transform failure retains its terminal after a late cancellation",
 
 // The candidate runtime is loaded only by this qualification test; the SDK
 // remains dependency-injected and no published default is switched here.
-const officialEvaluator = createJSONataEvaluator(createJSONExecutor({ timeout: 1000 }));
+const officialEvaluator = createJSONataEvaluator(createJSONataExecutor({ timeout: 1000 }));
 
 for (const direction of ["input", "output"] as const) {
   it(`real JSONata ${direction} evaluation stops through the SDK on a timer-driven cancellation`, async () => {

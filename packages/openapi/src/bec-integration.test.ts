@@ -1,8 +1,8 @@
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from "node:http";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { createJSONExecutor } from "@openbindings/jsonata";
+import { createJSONataExecutor } from "@openbindings/jsonata";
 import { createJSONataEvaluator } from "@openbindings/invoke/jsonata";
-const officialEvaluator = createJSONataEvaluator(createJSONExecutor());
+const officialEvaluator = createJSONataEvaluator(createJSONataExecutor());
 import { type OBInterface } from "@openbindings/core";
 import {
   ERR_EXECUTION_FAILED,

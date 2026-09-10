@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { createJSONExecutor } from "@openbindings/jsonata";
+import { createJSONataExecutor } from "@openbindings/jsonata";
 import { createJSONataEvaluator } from "@openbindings/invoke/jsonata";
-const officialEvaluator = createJSONataEvaluator(createJSONExecutor());
+const officialEvaluator = createJSONataEvaluator(createJSONataExecutor());
 import { OperationInvoker, operationSignature } from "@openbindings/invoke";
 import { BINDING_SPEC_OPENAPI_31 as BINDING_SPEC } from "./constants.js";
 import { OpenAPIInvoker, OpenAPISynthesizer } from "./test-helpers.js";

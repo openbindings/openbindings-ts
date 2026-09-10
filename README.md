@@ -119,7 +119,7 @@ npm install @openbindings/sdk @openbindings/openapi @openbindings/jsonata
 ```
 
 ```typescript
-import { createJSONExecutor } from "@openbindings/jsonata";
+import { createJSONataExecutor } from "@openbindings/jsonata";
 import { createJSONataEvaluator } from "@openbindings/invoke/jsonata";
 import { OpenBindingsRuntime } from "@openbindings/sdk";
 import { OpenAPIAdapter, decimalParameterConversion } from "@openbindings/openapi";
@@ -128,7 +128,7 @@ import { OpenAPIAdapter, decimalParameterConversion } from "@openbindings/openap
 const runtime = new OpenBindingsRuntime({
   providers: [new OpenAPIAdapter({ parameterConversion: decimalParameterConversion })],
   // Evaluate the parameter/body mappings produced by synthesis.
-  transformEvaluator: createJSONataEvaluator(createJSONExecutor()),
+  transformEvaluator: createJSONataEvaluator(createJSONataExecutor()),
 });
 
 // Resolve an OBI from a URL (well-known discovery, with synthesis as the

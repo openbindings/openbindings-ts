@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync, existsSync } from "node:fs";
-import { createJSONExecutor } from "@openbindings/jsonata";
+import { createJSONataExecutor } from "@openbindings/jsonata";
 import { createJSONataEvaluator } from "@openbindings/invoke/jsonata";
-const officialEvaluator = createJSONataEvaluator(createJSONExecutor());
+const officialEvaluator = createJSONataEvaluator(createJSONataExecutor());
 import { compileOperationSchema } from "@openbindings/core";
 import { OperationInvoker, operationSignature, single } from "@openbindings/invoke";
 import { OpenAPIInvoker, OpenAPISynthesizer } from "./test-helpers.js";

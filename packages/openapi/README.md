@@ -54,7 +54,7 @@ npm install @openbindings/sdk @openbindings/openapi @openbindings/jsonata
 ```
 
 ```typescript
-import { createJSONExecutor } from "@openbindings/jsonata";
+import { createJSONataExecutor } from "@openbindings/jsonata";
 import { createJSONataEvaluator } from "@openbindings/invoke/jsonata";
 import { OpenBindingsRuntime } from "@openbindings/sdk";
 import { OpenAPIAdapter, decimalParameterConversion } from "@openbindings/openapi";
@@ -63,7 +63,7 @@ const runtime = new OpenBindingsRuntime({
   // Explicit consumer policy for numeric and boolean parameter text.
   providers: [new OpenAPIAdapter({ parameterConversion: decimalParameterConversion })],
   // Synthesis expresses parameter/body mappings as Core transforms.
-  transformEvaluator: createJSONataEvaluator(createJSONExecutor()),
+  transformEvaluator: createJSONataEvaluator(createJSONataExecutor()),
 });
 const { iface, coverage } = await runtime.resolve("https://api.example.com/openapi.json");
 const call = runtime.invoke(iface, "listItems");

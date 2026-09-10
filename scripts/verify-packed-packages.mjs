@@ -125,7 +125,7 @@ if (!result.ok || result.data?.ok !== true) throw new Error("packed client did n
 
 const { OpenBindingsRuntime, single } = await import("@openbindings/sdk");
 const { OpenAPIAdapter, decimalParameterConversion } = await import("@openbindings/openapi");
-const { createJSONExecutor } = await import("@openbindings/jsonata");
+const { createJSONataExecutor } = await import("@openbindings/jsonata");
 const { createJSONataEvaluator } = await import("@openbindings/invoke/jsonata");
 const adapterRequests = [];
 const adapterFetch = async input => {
@@ -139,7 +139,7 @@ const adapterFetch = async input => {
 const runtime = new OpenBindingsRuntime({
   providers: [new OpenAPIAdapter({ fetch: adapterFetch, parameterConversion: decimalParameterConversion })],
   fetch: adapterFetch,
-  transformEvaluator: createJSONataEvaluator(createJSONExecutor()),
+  transformEvaluator: createJSONataEvaluator(createJSONataExecutor()),
 });
 const synthesized = await runtime.synthesizeInterfaceWithCoverage({
   sources: [{ bindingSpec: "openbindings.openapi-3.1@1", content: {

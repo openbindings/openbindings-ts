@@ -66,7 +66,7 @@ evaluator explicitly when constructing the runtime. This example also opts
 into decimal conversion for its numeric query parameter:
 
 ```typescript
-import { createJSONExecutor } from "@openbindings/jsonata";
+import { createJSONataExecutor } from "@openbindings/jsonata";
 import { createJSONataEvaluator } from "@openbindings/invoke/jsonata";
 import { OpenBindingsRuntime } from "@openbindings/sdk";
 import { OpenAPIAdapter, decimalParameterConversion } from "@openbindings/openapi";
@@ -74,7 +74,7 @@ import { OpenAPIAdapter, decimalParameterConversion } from "@openbindings/openap
 const openapi = new OpenAPIAdapter({ parameterConversion: decimalParameterConversion });
 const runtime = new OpenBindingsRuntime({
   providers: [openapi],
-  transformEvaluator: createJSONataEvaluator(createJSONExecutor()),
+  transformEvaluator: createJSONataEvaluator(createJSONataExecutor()),
 });
 const { iface } = await runtime.resolve("https://api.example.com");
 const call = runtime.invoke(iface, "listItems");
@@ -325,11 +325,11 @@ model.
 OpenBindings 0.2.0 mandates JSONata 2.1 as the transform language for tools that evaluate `inputTransform`/`outputTransform` (OBI-T-10). Document validation uses a private syntax-only parser without initializing the evaluator to parse-check every transform expression for syntactic validity (OBI-D-18). Invocation requires an explicitly configured `TransformEvaluator`. Install `@openbindings/jsonata` as an application dependency and register it for evaluation:
 
 ```typescript
-import { createJSONExecutor } from "@openbindings/jsonata";
+import { createJSONataExecutor } from "@openbindings/jsonata";
 import { createJSONataEvaluator } from "@openbindings/invoke/jsonata";
 import { OperationInvoker, type TransformEvaluator } from "@openbindings/sdk";
 
-const transformEvaluator: TransformEvaluator = createJSONataEvaluator(createJSONExecutor());
+const transformEvaluator: TransformEvaluator = createJSONataEvaluator(createJSONataExecutor());
 
 const invoker = new OperationInvoker([/* invokers */], { transformEvaluator });
 ```
