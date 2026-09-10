@@ -3,7 +3,9 @@ import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import jsonata from "jsonata";
+import { createJSONExecutor } from "@openbindings/jsonata-runtime";
+import { createJSONataEvaluator } from "@openbindings/invoke/jsonata";
+const officialEvaluator = createJSONataEvaluator(createJSONExecutor());
 import { type ProcessorScenario, type ProcessorScenarioFile } from "@openbindings/core";
 import { CONTEXT_REQUIRED, OperationInvoker, operationSignature, type InvocationError } from "@openbindings/invoke";
 import { OpenAPIInvoker, OpenAPISynthesizer } from "./test-helpers.js";
@@ -49,7 +51,7 @@ describe("OpenAPI native-client differential", () => {
           });
           const call = new OperationInvoker([new OpenAPIInvoker()], {
             transformEvaluator: {
-              evaluate: (expression, data) => jsonata(expression).evaluate(data),
+              evaluate: (expression, data) => officialEvaluator.evaluate(expression, data),
             },
           }).invoke(
             iface,
@@ -187,7 +189,7 @@ describe("OpenAPI native-client differential", () => {
 
       const invoker = new OperationInvoker([new OpenAPIInvoker()], {
         transformEvaluator: {
-          evaluate: (expression, data) => jsonata(expression).evaluate(data),
+          evaluate: (expression, data) => officialEvaluator.evaluate(expression, data),
         },
       });
       const call = invoker.invoke(iface, operationSignature("createItem"));
@@ -269,7 +271,7 @@ describe("OpenAPI native-client differential", () => {
     const call = new OperationInvoker([new OpenAPIInvoker()], {
       fetch,
       transformEvaluator: {
-        evaluate: (expression, data) => jsonata(expression).evaluate(data),
+        evaluate: (expression, data) => officialEvaluator.evaluate(expression, data),
       },
     }).invoke(
       iface,

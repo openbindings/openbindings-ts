@@ -69,7 +69,7 @@ paths:
     ["+12.3", 12.3],
     [".5", 0.5],
   ] as const)("emits %s with its §10.3.2 JSON type", async (spelling, want) => {
-    expect(await emittedExample(spelling)).toStrictEqual(want);
+    expect(equalJSON(await emittedExample(spelling), want)).toBe(true);
   });
 
   // ±.inf and .nan have no JSON image, so the artifact is refused whole
@@ -88,3 +88,4 @@ paths:
     },
   );
 });
+import { equalJSON } from "@openbindings/json";

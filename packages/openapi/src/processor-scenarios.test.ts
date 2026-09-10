@@ -2,7 +2,9 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import jsonata from "jsonata";
+import { createJSONExecutor } from "@openbindings/jsonata-runtime";
+import { createJSONataEvaluator } from "@openbindings/invoke/jsonata";
+const officialEvaluator = createJSONataEvaluator(createJSONExecutor());
 import {
   matchProcessorObservation,
   type ProcessorObservation,
@@ -21,6 +23,7 @@ import {
 } from "@openbindings/invoke";
 import { OpenAPIInvoker, OpenAPISynthesizer } from "./invoker.js";
 import { Swagger20Number } from "@openbindings/openapi-client/provider";
+import { isJSONNumber, stringifyJSON } from "@openbindings/json";
 
 if (process.env.OB_CORPUS_REQUIRED === "1" && !process.env.OB_SPEC_CORPUS) {
   throw new Error("OB_CORPUS_REQUIRED=1 requires OB_SPEC_CORPUS");
@@ -157,7 +160,7 @@ async function runScenario(
     ? new OperationInvoker([new OpenAPIInvoker()], {
       fetch: fetchMock,
       transformEvaluator: {
-        evaluate: (expression, data) => jsonata(expression).evaluate(data),
+        evaluate: (expression, data) => officialEvaluator.evaluate(expression, data),
       },
     }).invoke(
       await new OpenAPISynthesizer({ fetch: fetchMock }).synthesizeInterface({ sources: [invocationSource] }),
@@ -365,12 +368,11 @@ function parseProcessorCorpus(path: string, preserveNumberTokens: boolean): Proc
   return JSON.parse(source, reviver) as ProcessorScenarioFile;
 }
 
-function scenarioParameterConversion(scenario: ProcessorScenario): ((value: boolean | number) => string) | undefined {
+function scenarioParameterConversion(scenario: ProcessorScenario): ((value: boolean | number | Swagger20Number) => string) | undefined {
   const raw = scenario.given.configuration?.parameterConversion;
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
-  return (value: boolean | number) => {
-    const exact = value as unknown;
-    const key = exact instanceof Swagger20Number ? exact.lexeme : JSON.stringify(value);
+  return (value: boolean | number | Swagger20Number) => {
+    const key = isJSONNumber(value) ? value.rawJSON : stringifyJSON(value);
     const converted = (raw as Record<string, unknown>)[key];
     if (typeof converted !== "string") throw new Error(`parameterConversion has no result for ${key}`);
     return converted;

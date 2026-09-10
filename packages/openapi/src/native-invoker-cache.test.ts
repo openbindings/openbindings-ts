@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { OpenAPIClient } from "@openbindings/openapi-client";
+import {parseJSON} from "@openbindings/json";
 import { OpenAPIInvoker } from "./invoker.js";
 
 const DOCUMENT = {
@@ -18,6 +19,37 @@ const DOCUMENT = {
 
 describe("native OpenAPI source cache", () => {
   afterEach(() => vi.restoreAllMocks());
+
+  for (const collide of [false,true]) it(`keeps exact numbers distinct from marker-shaped objects (hash collision=${collide})`, async () => {
+    if (collide) vi.spyOn(globalThis.crypto.subtle,"digest").mockResolvedValue(new ArrayBuffer(32));
+    const load=vi.spyOn(OpenAPIClient,"load"),invoker=new OpenAPIInvoker();
+    for(const value of [parseJSON("9007199254740993"),{rawJSON:"9007199254740993"}]) {
+      const call=invoker.invokeBinding({
+        source:{bindingSpec:"openbindings.openapi-3.1@1",content:{...DOCUMENT,"x-value":value}},
+        selector:"#/paths/~1ping/get",fetch:async()=>new Response(null,{status:204}),
+      });
+      await call.close();for await(const output of call.outputs)void output;await call.closed;
+    }
+    expect(load).toHaveBeenCalledTimes(2);
+  });
+
+  it("owns source material before awaiting its digest", async () => {
+    let release!: (value: ArrayBuffer) => void;
+    let began!: () => void;
+    const started=new Promise<void>(resolve=>{began=resolve;});
+    const digest=new Promise<ArrayBuffer>(resolve=>{release=resolve;});
+    vi.spyOn(globalThis.crypto.subtle,"digest").mockImplementationOnce(()=>{began();return digest;});
+    const document={...DOCUMENT,servers:[{url:"https://original.example.test"}]};
+    const destinations:string[]=[];
+    const invoker=new OpenAPIInvoker();
+    const call=invoker.invokeBinding({
+      source:{bindingSpec:"openbindings.openapi-3.1@1",content:document},selector:"#/paths/~1ping/get",
+      fetch:async input=>{destinations.push(String(input));return new Response(null,{status:204});},
+    });
+    await started;document.servers[0]!.url="https://mutated.example.test";release(new ArrayBuffer(32));
+    await call.close();for await(const output of call.outputs)void output;await call.closed;
+    expect(destinations).toEqual(["https://original.example.test/ping"]);
+  });
 
   it("reuses one executable client for an identical content-only revision", async () => {
     const load = vi.spyOn(OpenAPIClient, "load");

@@ -12,6 +12,8 @@
  * value is a document rule (OBI-D-17), enforced by validateInterface
  * rather than by this type.
  */
+import { isJSONNumber, type JSONNumber } from "@openbindings/json";
+
 export type JSONSchema = Record<string, unknown> | boolean;
 
 /**
@@ -26,7 +28,7 @@ export type JSONSchema = Record<string, unknown> | boolean;
 // eslint-disable-next-line @typescript-eslint/no-redundant-type-constituents
 export function schemaObjectForm(v: JSONSchema | unknown): Record<string, unknown> | undefined {
   if (typeof v === "boolean") return v ? {} : { not: {} };
-  if (typeof v === "object" && v !== null && !Array.isArray(v)) {
+  if (typeof v === "object" && v !== null && !Array.isArray(v) && !isJSONNumber(v)) {
     return v as Record<string, unknown>;
   }
   return undefined;
@@ -99,7 +101,7 @@ export interface BindingEntry {
   operation: string;
   source: string;
   selector?: string;
-  preference?: number;
+  preference?: number | JSONNumber;
   description?: string;
   deprecated?: boolean;
   inputTransform?: TransformOrRef;

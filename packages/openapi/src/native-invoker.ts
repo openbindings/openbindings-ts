@@ -1,4 +1,5 @@
-import { canonicalize, checkBindingSpecs as checkBindingSpecSupport, type BindingSpecInfo, type BindingSpecVerdict } from "@openbindings/core";
+import { checkBindingSpecs as checkBindingSpecSupport, type BindingSpecInfo, type BindingSpecVerdict } from "@openbindings/core";
+import {parseJSON, stringifyJSON} from "@openbindings/json";
 import {
   CONTEXT_REQUIRED,
   InvocationError,
@@ -58,7 +59,7 @@ export interface OpenAPIInvokerOptions {
 export class OpenAPIInvoker implements BindingInvoker {
   private static readonly MAX_SOURCE_CLIENTS = 64;
   private readonly options: Readonly<OpenAPIInvokerOptions>;
-  private readonly sourceClients = new Map<string, Promise<OpenAPIClient>>();
+  private readonly sourceClients = new Map<string, {material: string; client: Promise<OpenAPIClient>}>();
 
   constructor(options: OpenAPIInvokerOptions = {}) {
     this.options = {
@@ -176,6 +177,7 @@ export class OpenAPIInvoker implements BindingInvoker {
     if (key) {
       const cached = this.cachedSourceClient(args, key);
       if (cached) return cached;
+      return loadClient({...args, source:key.source}, false);
     }
     return Object.hasOwn(args.source, "content") ? loadClient(args, false) : undefined;
   }
@@ -185,23 +187,24 @@ export class OpenAPIInvoker implements BindingInvoker {
     if (!key) return loadClient(args);
     const present = this.cachedSourceClient(args, key);
     if (present) return present;
-    const pending = loadClient(args, true);
-    this.sourceClients.set(key, pending);
+    const pending = loadClient({...args, source:key.source}, true);
+    this.sourceClients.set(key.key, {material:key.material, client:pending});
     if (this.sourceClients.size > OpenAPIInvoker.MAX_SOURCE_CLIENTS) {
       const oldest = this.sourceClients.keys().next().value;
-      if (oldest !== undefined && oldest !== key) this.sourceClients.delete(oldest);
+      if (oldest !== undefined && oldest !== key.key) this.sourceClients.delete(oldest);
     }
     pending.catch(() => {
-      if (this.sourceClients.get(key) === pending) this.sourceClients.delete(key);
+      if (this.sourceClients.get(key.key)?.client === pending) this.sourceClients.delete(key.key);
     });
     return pending;
   }
 
   private cachedSourceClient(
     _args: BindingInvocationArgs,
-    key: string,
+    key: SourceClientKey,
   ): Promise<OpenAPIClient> | undefined {
-    return this.sourceClients.get(key);
+    const entry=this.sourceClients.get(key.key);
+    return entry?.material===key.material ? entry.client : undefined;
   }
 }
 
@@ -227,15 +230,25 @@ async function loadClient(args: BindingInvocationArgs, allowDocumentFetch = true
   });
 }
 
-async function sourceClientKey(args: BindingInvocationArgs): Promise<string | undefined> {
+interface SourceClientKey {
+  key: string;
+  material: string;
+  source: BindingInvocationArgs["source"];
+}
+
+async function sourceClientKey(args: BindingInvocationArgs): Promise<SourceClientKey | undefined> {
   if (Object.hasOwn(args.source, "content")) {
     if (!selfContainedCacheSource(args.source.content)) return undefined;
-    const content = canonicalize(args.source.content);
-    if (content === undefined) return undefined;
+    // Exact encoded bytes are a cache accelerator, not a canonical identity.
+    // Retain a collision witness and own the loader's source before awaiting
+    // the digest, so caller mutation cannot install new content under an old key.
+    const content = stringifyJSON(args.source.content);
+    const source = {...args.source, content:parseJSON(content)};
+    const prefix = sourceLocationClientPrefix(args);
     const digest = await sha256(content);
     return digest === undefined
       ? undefined
-      : `${sourceLocationClientPrefix(args)}${digest}`;
+      : {key:`${prefix}${digest}`, material:content, source};
   }
   return undefined;
 }

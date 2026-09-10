@@ -5,16 +5,18 @@
  * tables carry the same fixtures and the same expected strings; a change on
  * one side must land on both.
  *
- * Conventions pinned here:
- *   - values and counts interpolate in JCS (RFC 8785) rendering — strings
- *     quoted, numbers in ECMAScript form;
+ * Official SDK qualification, beyond the optional profile's keyword floor.
+ * Conventions pinned here (the exact-value pack adds wider numeric cases):
+ *   - values and counts render truthfully as JSON; these ordinary values
+ *     retain their existing JCS-compatible spellings;
  *   - the const/enum prefix names the DECIDING keyword: the keyword whose
  *     constraint rejects the flowing value (input: the candidate's; output:
  *     the target's);
  *   - exclusive bounds are marked ("exclusive 0");
  *   - unions carry the real union key and the failing variant index;
- *   - multi-member faults (types, enum values, required, properties) name
+ *   - multi-member faults (types, required, properties) name
  *     the lexicographically FIRST failing member;
+ *   - enum values and union variants name the first failing authored element;
  *   - property/required member names and type names interpolate in the same
  *     JCS rendering as values (quoted, JSON-string escaping) — visible only
  *     for names carrying quotes, backslashes, or control characters; plain
@@ -103,11 +105,11 @@ const reasonCases: ReasonCase[] = [
     reason: `const: candidate const "b" not in target enum`,
   },
   {
-    name: "input enum vs enum missing sorted",
+    name: "input enum vs enum missing authored",
     direction: "input",
     target: `{"enum":["b","a","c"]}`,
     candidate: `{"enum":["c"]}`,
-    reason: `enum: target value "a" not in candidate enum`,
+    reason: `enum: target value "b" not in candidate enum`,
   },
 
   // --- const/enum: output (deciding keyword = target's) ---
@@ -119,11 +121,11 @@ const reasonCases: ReasonCase[] = [
     reason: `enum: candidate const "b" not in target enum`,
   },
   {
-    name: "output enum vs enum extra sorted",
+    name: "output enum vs enum extra authored",
     direction: "output",
     target: `{"enum":["a"]}`,
     candidate: `{"enum":["a","c","b"]}`,
-    reason: `enum: candidate value "b" not in target enum`,
+    reason: `enum: candidate value "c" not in target enum`,
   },
   {
     name: "output enum vs unconstrained",

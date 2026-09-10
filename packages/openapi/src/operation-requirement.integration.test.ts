@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import jsonata from "jsonata";
+import { createJSONExecutor } from "@openbindings/jsonata-runtime";
+import { createJSONataEvaluator } from "@openbindings/invoke/jsonata";
+const officialEvaluator = createJSONataEvaluator(createJSONExecutor());
 import { prepareInterface, type OBInterface } from "@openbindings/core";
 import {
   CompositionSession,
@@ -120,7 +122,7 @@ describe("runtime composition — OpenAPI and local substitution", () => {
       interface: candidate,
       runtime: new OperationInvoker([new OpenAPIInvoker()], {
         fetch,
-        transformEvaluator: { evaluate: (expression, data) => jsonata(expression).evaluate(data) },
+        transformEvaluator: { evaluate: (expression, data) => officialEvaluator.evaluate(expression, data) },
       }),
     });
     const localDocument: OBInterface = {

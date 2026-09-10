@@ -6,6 +6,8 @@ import { fileURLToPath } from "node:url";
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const packages = [
+  ["@openbindings/json", "json"],
+  ["@openbindings/json-schema", "json-schema"],
   ["@openbindings/core", "core"],
   ["@openbindings/compare", "compare"],
   ["@openbindings/invoke", "invoke"],
@@ -25,12 +27,16 @@ const openAPIClientDirectory = process.env.OPENBINDINGS_OPENAPI_CLIENT_DIR
   ?? join(root, "..", "openapi-client", "typescript");
 const asyncAPIClientDirectory = process.env.OPENBINDINGS_ASYNCAPI_CLIENT_DIR
   ?? join(root, "..", "asyncapi-client", "typescript");
+const jsonataRuntimeDirectory = process.env.JSONATA_RUNTIME_DIR
+  ?? join(root, "..", "jsonata-runtime", "javascript");
 
 function run(command, args, cwd = root) {
   execFileSync(command, args, { cwd, stdio: "inherit" });
 }
 
 try {
+  const jsonataRuntimeTarball = join(temporary, "jsonata-runtime.tgz");
+  run("pnpm", ["--dir", jsonataRuntimeDirectory, "pack", "--out", jsonataRuntimeTarball]);
   if (!existsSync(join(openAPIClientDirectory, "package.json"))) {
     throw new Error(
       `standalone OpenAPI client checkout not found at ${openAPIClientDirectory}; set OPENBINDINGS_OPENAPI_CLIENT_DIR`,
@@ -73,6 +79,8 @@ try {
           // force every semver dependency between them to the local tarballs.
           ...Object.fromEntries(
             [
+              "@openbindings/json",
+              "@openbindings/json-schema",
               "@openbindings/core",
               "@openbindings/compare",
               "@openbindings/invoke",
@@ -117,7 +125,8 @@ if (!result.ok || result.data?.ok !== true) throw new Error("packed client did n
 
 const { OpenBindingsRuntime, single } = await import("@openbindings/sdk");
 const { OpenAPIAdapter, decimalParameterConversion } = await import("@openbindings/openapi");
-const { default: jsonata } = await import("jsonata");
+const { createJSONExecutor } = await import("@openbindings/jsonata-runtime");
+const { createJSONataEvaluator } = await import("@openbindings/invoke/jsonata");
 const adapterRequests = [];
 const adapterFetch = async input => {
   const url = String(input);
@@ -130,9 +139,7 @@ const adapterFetch = async input => {
 const runtime = new OpenBindingsRuntime({
   providers: [new OpenAPIAdapter({ fetch: adapterFetch, parameterConversion: decimalParameterConversion })],
   fetch: adapterFetch,
-  transformEvaluator: {
-    evaluate: (expression, data) => jsonata(expression).evaluate(data),
-  },
+  transformEvaluator: createJSONataEvaluator(createJSONExecutor()),
 });
 const synthesized = await runtime.synthesizeInterfaceWithCoverage({
   sources: [{ bindingSpec: "openbindings.openapi-3.1@1", content: {
@@ -184,7 +191,7 @@ console.log("packed parameterized SDK invocation verified with explicit JSONata 
   // not-yet-published sibling package from the registry while constructing a
   // single multi-tarball add transaction.
   run("pnpm", ["add", openAPIClientTarball, asyncAPIClientTarball, tarballs[0]], temporary);
-  run("pnpm", ["add", ...tarballs.slice(1), "jsonata@2.1.1"], temporary);
+  run("pnpm", ["add", ...tarballs.slice(1), jsonataRuntimeTarball], temporary);
   run(process.execPath, ["import-smoke.mjs"], temporary);
   run(process.execPath, ["require-smoke.cjs"], temporary);
   run(

@@ -386,3 +386,10 @@ export {
   SelectorError,
   SchemaError,
 } from "@openbindings/compare";
+// Exact JSON at application boundaries. The neutral leaf remains independently
+// usable; these are re-exports, not SDK-owned numerical semantics.
+export {
+  JSONNumber, JSONCapabilityError, parseJSON, stringifyJSON, cloneJSON,
+  cloneValueGraph, isJSONNumber, numberToken, equalJSON,
+  compareNumberTokens, integerNumberToken,
+} from "@openbindings/json";

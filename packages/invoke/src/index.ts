@@ -71,6 +71,7 @@ export type {
   BindingCompiler,
   CompiledBindingInvoker,
   TransformEvaluator,
+  TransformEvaluationOptions,
   TransformEvaluatorWithBindings,
   BindingSelector,
   ContextResolver,

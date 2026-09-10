@@ -1,5 +1,6 @@
 import type { CompatibilityIssue } from "@openbindings/compare";
 import { checkOperationCompatibility } from "@openbindings/compare";
+import { compareBoundaryContracts } from "@openbindings/core";
 import type {
   PreparedInterface,
   PreparedOperationDescriptor,
@@ -137,12 +138,7 @@ async function referenceContractEvidence(
   const providerContract = await provider.boundaryContract(
     correspondence.providerOperation.canonicalKey,
   )!;
-  if (
-    requiredContract.complete &&
-    providerContract.complete &&
-    requiredContract.revision === providerContract.revision &&
-    requiredContract.canonical === providerContract.canonical
-  ) {
+  if (compareBoundaryContracts(requiredContract, providerContract) === "equal") {
     return Object.freeze({
       verdict: "compatible",
       method: "exact",

@@ -146,7 +146,7 @@ export function matchSynthesisScenario(
   if (scenario.expected.assertions !== undefined) {
     try {
       checkAssertions(
-        JSON.parse(JSON.stringify(result.interface)) as unknown,
+        result.interface,
         scenario.expected.assertions,
       );
     } catch (error: unknown) {

@@ -79,9 +79,15 @@ export function isBindingCompiler(value: BindingInvoker): value is BindingInvoke
     typeof (value as unknown as Record<string, unknown>)["compileBinding"] === "function";
 }
 
+/** Per-call host controls; never exposed as expression variables or JSON data. */
+export interface TransformEvaluationOptions {
+  /** Cooperative cancellation, not preemption of arbitrary host code. */
+  signal?: AbortSignal;
+}
+
 /** Evaluates a transform expression (e.g., JSONata) against input data. */
 export interface TransformEvaluator {
-  evaluate(expression: string, data: unknown): Promise<unknown>;
+  evaluate(expression: string, data: unknown, options?: TransformEvaluationOptions): Promise<unknown>;
 }
 
 /**
@@ -94,6 +100,7 @@ export interface TransformEvaluatorWithBindings extends TransformEvaluator {
     expression: string,
     data: unknown,
     bindings: Record<string, unknown>,
+    options?: TransformEvaluationOptions,
   ): Promise<unknown>;
 }
 

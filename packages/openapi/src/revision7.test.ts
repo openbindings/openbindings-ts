@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import jsonata from "jsonata";
+import { createJSONExecutor } from "@openbindings/jsonata-runtime";
+import { createJSONataEvaluator } from "@openbindings/invoke/jsonata";
+const officialEvaluator = createJSONataEvaluator(createJSONExecutor());
 import { OperationInvoker, operationSignature } from "@openbindings/invoke";
 import { BINDING_SPEC_OPENAPI_31 as BINDING_SPEC } from "./constants.js";
 import { OpenAPIInvoker, OpenAPISynthesizer } from "./test-helpers.js";
@@ -50,7 +52,7 @@ describe("openbindings.openapi-3.1@1 OAS 3.0 schema-omitted byte carriage", () =
           headers: { "Content-Type": "application/octet-stream" },
         });
       },
-      transformEvaluator: { evaluate: (expression, data) => jsonata(expression).evaluate(data) },
+      transformEvaluator: { evaluate: (expression, data) => officialEvaluator.evaluate(expression, data) },
     });
     const call = invoker.invoke(iface, operationSignature("storeArchive"));
     await call.write({ body: "AAH+/w==" });

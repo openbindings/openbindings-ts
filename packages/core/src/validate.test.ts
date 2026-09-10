@@ -326,8 +326,8 @@ describe("validateInterface", () => {
 
   it("rejects empty transform expressions (OBI-D-18)", () => {
     // OBI-D-18: every transform expression parses as a syntactically valid
-    // JSONata expression; an empty string is not one (jsonata-js 2.1.1
-    // rejects it at parse, the normative tiebreak).
+    // JSONata expression; an empty string is not one. Evaluation is not
+    // required to decide syntax membership.
     const iface = minimalInterface();
     iface.transforms = { t: "" };
     iface.bindings!["getUser.main"] = {

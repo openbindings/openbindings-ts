@@ -14,7 +14,7 @@ import { describe, it, expect } from "vitest";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import canonicalize from "canonicalize";
+import { equalNormalizedSchemas } from "./identity.js";
 import { Normalizer } from "./normalize.js";
 import { inputCompatible, outputCompatible } from "./compat.js";
 import { OutsideProfileError } from "./errors.js";
@@ -240,14 +240,7 @@ async function runIdenticalFixture(
     const normLeft = await nLeft.normalize(leftSchema);
     const normRight = await nRight.normalize(rightSchema);
 
-    const leftJSON = canonicalize(normLeft) ?? "";
-    const rightJSON = canonicalize(normRight) ?? "";
-
-    if (entry.verdict === "compatible") {
-      expect(leftJSON).toBe(rightJSON);
-    } else {
-      expect(leftJSON).not.toBe(rightJSON);
-    }
+    expect(equalNormalizedSchemas(normLeft, normRight)).toBe(entry.verdict === "compatible");
   }
 
   return entry.verdict;

@@ -49,6 +49,7 @@
     "node": ">=18"
   },
   "dependencies": {
+    "@openbindings/json": "workspace:*",
     "@openbindings/openapi-client": "^0.1.0"
   },
   "peerDependencies": {

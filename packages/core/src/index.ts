@@ -48,9 +48,10 @@ export type { ResolvedOperation } from "./resolve-operation.js";
 export { lookupDependency } from "./lookup-dependency.js";
 export type { ResolvedDependency } from "./lookup-dependency.js";
 
-export { PreparedInterface, prepareInterface } from "./prepared-interface.js";
+export { PreparedInterface, prepareInterface, compareBoundaryContracts } from "./prepared-interface.js";
 export type {
   OperationSchemaPosition,
+  BoundaryIdentity,
   PrepareInterfaceOptions,
   PreparedBindingDescriptor,
   PreparedBoundaryContract,

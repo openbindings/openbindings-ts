@@ -1,3 +1,4 @@
+import { cloneValueGraph } from "@openbindings/json";
 import {
   checkBindingSpecs as checkBindingSpecSupport,
   type BindingEntry,
@@ -165,7 +166,7 @@ function interfaceFromProjection(
     if (projection.version) iface.version = projection.version;
     if (projection.description) iface.description = projection.description;
     iface.operations = Object.fromEntries(Object.entries(projection.operations).map(
-      ([key, operation]) => [key, { ...structuredClone(operation) }],
+      ([key, operation]) => [key, { ...cloneValueGraph(operation) }],
     ));
     const bindings: Record<string, BindingEntry> = {};
     for (const [key, binding] of Object.entries(projection.bindings ?? {})) {
@@ -179,7 +180,7 @@ function interfaceFromProjection(
     if (Object.keys(bindings).length > 0) iface.bindings = bindings;
     if (projection.dependencies && Object.keys(projection.dependencies).length > 0) {
       iface.dependencies = Object.fromEntries(Object.entries(projection.dependencies).map(
-        ([key, dependency]) => [key, { ...structuredClone(dependency) }],
+        ([key, dependency]) => [key, { ...cloneValueGraph(dependency) }],
       ));
     }
   }

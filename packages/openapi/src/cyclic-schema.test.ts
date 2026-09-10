@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync, existsSync } from "node:fs";
-import jsonata from "jsonata";
+import { createJSONExecutor } from "@openbindings/jsonata-runtime";
+import { createJSONataEvaluator } from "@openbindings/invoke/jsonata";
+const officialEvaluator = createJSONataEvaluator(createJSONExecutor());
 import { compileOperationSchema } from "@openbindings/core";
 import { OperationInvoker, operationSignature, single } from "@openbindings/invoke";
 import { OpenAPIInvoker, OpenAPISynthesizer } from "./test-helpers.js";
@@ -88,7 +90,7 @@ describe("cyclic schema synthesis (rev 2a)", () => {
     const invoker = new OperationInvoker([new OpenAPIInvoker()], {
       fetch,
       transformEvaluator: {
-        evaluate: (expression, data) => jsonata(expression).evaluate(data),
+        evaluate: (expression, data) => officialEvaluator.evaluate(expression, data),
       },
     });
     const call = invoker.invoke(iface, operationSignature("createTree"));

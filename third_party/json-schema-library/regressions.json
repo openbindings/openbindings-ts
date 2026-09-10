@@ -1,0 +1,326 @@
+[
+  {
+    "id": "anyOf-properties-failed-branch",
+    "schemaJSON": "{\"anyOf\":[{\"additionalProperties\":true,\"maxProperties\":0},{\"type\":\"object\"}],\"unevaluatedProperties\":false}",
+    "instanceJSON": "{\"x\":1}",
+    "expected": false
+  },
+  {
+    "id": "anyOf-properties-valid-branch",
+    "schemaJSON": "{\"anyOf\":[{\"additionalProperties\":true}],\"unevaluatedProperties\":false}",
+    "instanceJSON": "{\"x\":1}",
+    "expected": true
+  },
+  {
+    "id": "anyOf-properties-no-annotating-branch",
+    "schemaJSON": "{\"anyOf\":[{\"type\":\"object\"}],\"unevaluatedProperties\":false}",
+    "instanceJSON": "{\"x\":1}",
+    "expected": false
+  },
+  {
+    "id": "anyOf-properties-valid-deprecated-branch",
+    "schemaJSON": "{\"anyOf\":[{\"deprecated\":true,\"additionalProperties\":true},{\"type\":\"object\"}],\"unevaluatedProperties\":false}",
+    "instanceJSON": "{\"x\":1}",
+    "expected": true
+  },
+  {
+    "id": "anyOf-items-failed-branch",
+    "schemaJSON": "{\"anyOf\":[{\"items\":true,\"maxItems\":0},{\"type\":\"array\"}],\"unevaluatedItems\":false}",
+    "instanceJSON": "[1]",
+    "expected": false
+  },
+  {
+    "id": "anyOf-items-valid-branch",
+    "schemaJSON": "{\"anyOf\":[{\"items\":true}],\"unevaluatedItems\":false}",
+    "instanceJSON": "[1]",
+    "expected": true
+  },
+  {
+    "id": "anyOf-items-no-annotating-branch",
+    "schemaJSON": "{\"anyOf\":[{\"type\":\"array\"}],\"unevaluatedItems\":false}",
+    "instanceJSON": "[1]",
+    "expected": false
+  },
+  {
+    "id": "anyOf-items-valid-deprecated-branch",
+    "schemaJSON": "{\"anyOf\":[{\"deprecated\":true,\"items\":true},{\"type\":\"array\"}],\"unevaluatedItems\":false}",
+    "instanceJSON": "[1]",
+    "expected": true
+  },
+  {
+    "id": "oneOf-properties-failed-branch",
+    "schemaJSON": "{\"oneOf\":[{\"additionalProperties\":true,\"maxProperties\":0},{\"type\":\"object\"}],\"unevaluatedProperties\":false}",
+    "instanceJSON": "{\"x\":1}",
+    "expected": false
+  },
+  {
+    "id": "oneOf-properties-valid-branch",
+    "schemaJSON": "{\"oneOf\":[{\"additionalProperties\":true}],\"unevaluatedProperties\":false}",
+    "instanceJSON": "{\"x\":1}",
+    "expected": true
+  },
+  {
+    "id": "oneOf-properties-no-annotating-branch",
+    "schemaJSON": "{\"oneOf\":[{\"type\":\"object\"}],\"unevaluatedProperties\":false}",
+    "instanceJSON": "{\"x\":1}",
+    "expected": false
+  },
+  {
+    "id": "oneOf-items-failed-branch",
+    "schemaJSON": "{\"oneOf\":[{\"items\":true,\"maxItems\":0},{\"type\":\"array\"}],\"unevaluatedItems\":false}",
+    "instanceJSON": "[1]",
+    "expected": false
+  },
+  {
+    "id": "oneOf-items-valid-branch",
+    "schemaJSON": "{\"oneOf\":[{\"items\":true}],\"unevaluatedItems\":false}",
+    "instanceJSON": "[1]",
+    "expected": true
+  },
+  {
+    "id": "oneOf-items-no-annotating-branch",
+    "schemaJSON": "{\"oneOf\":[{\"type\":\"array\"}],\"unevaluatedItems\":false}",
+    "instanceJSON": "[1]",
+    "expected": false
+  },
+  {
+    "id": "failed-if-properties",
+    "schemaJSON": "{\"if\":{\"properties\":{\"value\":true},\"maxProperties\":0},\"else\":{\"type\":\"object\"},\"unevaluatedProperties\":false}",
+    "instanceJSON": "{\"value\":1}",
+    "expected": false
+  },
+  {
+    "id": "failed-if-items",
+    "schemaJSON": "{\"if\":{\"items\":true,\"maxItems\":0},\"else\":{\"type\":\"array\"},\"unevaluatedItems\":false}",
+    "instanceJSON": "[1]",
+    "expected": false
+  },
+  {
+    "id": "valid-if-properties",
+    "schemaJSON": "{\"if\":{\"properties\":{\"value\":true}},\"then\":{\"type\":\"object\"},\"unevaluatedProperties\":false}",
+    "instanceJSON": "{\"value\":1}",
+    "expected": true
+  },
+  {
+    "id": "valid-if-items",
+    "schemaJSON": "{\"if\":{\"items\":true},\"then\":{\"type\":\"array\"},\"unevaluatedItems\":false}",
+    "instanceJSON": "[1]",
+    "expected": true
+  },
+  {
+    "id": "annotation-if-then-false",
+    "schemaJSON": "{\"if\":{\"deprecated\":true},\"then\":false,\"else\":true}",
+    "instanceJSON": "1",
+    "expected": false
+  },
+  {
+    "id": "annotation-if-then-true",
+    "schemaJSON": "{\"if\":{\"deprecated\":true},\"then\":true,\"else\":false}",
+    "instanceJSON": "1",
+    "expected": true
+  },
+  {
+    "id": "nested-object-original",
+    "schemaJSON": "{\"properties\":{\"inner\":{\"anyOf\":[{\"properties\":{\"a\":{\"const\":2},\"b\":true}},{\"properties\":{\"a\":{\"const\":1}}}],\"unevaluatedProperties\":false}}}",
+    "instanceJSON": "{\"inner\":{\"a\":1,\"b\":1}}",
+    "expected": false
+  },
+  {
+    "id": "nested-array-original",
+    "schemaJSON": "{\"items\":{\"anyOf\":[{\"properties\":{\"a\":{\"const\":2},\"b\":true}},{\"properties\":{\"a\":{\"const\":1}}}],\"unevaluatedProperties\":false}}",
+    "instanceJSON": "[{\"a\":1,\"b\":1}]",
+    "expected": false
+  },
+  {
+    "id": "ref-original",
+    "schemaJSON": "{\"$defs\":{\"closed\":{\"anyOf\":[{\"properties\":{\"a\":{\"const\":2},\"b\":true}},{\"properties\":{\"a\":{\"const\":1}}}],\"unevaluatedProperties\":false}},\"$ref\":\"#/$defs/closed\"}",
+    "instanceJSON": "{\"a\":1,\"b\":1}",
+    "expected": false
+  },
+  {
+    "id": "ref-valid",
+    "schemaJSON": "{\"$defs\":{\"closed\":{\"anyOf\":[{\"properties\":{\"a\":{\"const\":2},\"b\":true}},{\"properties\":{\"a\":{\"const\":1}}}],\"unevaluatedProperties\":false}},\"$ref\":\"#/$defs/closed\"}",
+    "instanceJSON": "{\"a\":2,\"b\":1}",
+    "expected": true
+  },
+  {
+    "id": "anyOf-annotation-only-root",
+    "schemaJSON": "{\"anyOf\":[{\"deprecated\":true}]}",
+    "instanceJSON": "{\"x\":1}",
+    "expected": true
+  },
+  {
+    "id": "anyOf-annotation-and-failure-root",
+    "schemaJSON": "{\"anyOf\":[{\"deprecated\":true,\"type\":\"string\"}]}",
+    "instanceJSON": "{\"x\":1}",
+    "expected": false
+  },
+  {
+    "id": "anyOf-two-valid-root",
+    "schemaJSON": "{\"anyOf\":[{\"deprecated\":true},{}]}",
+    "instanceJSON": "{\"x\":1}",
+    "expected": true
+  },
+  {
+    "id": "oneOf-annotation-only-root",
+    "schemaJSON": "{\"oneOf\":[{\"deprecated\":true}]}",
+    "instanceJSON": "{\"x\":1}",
+    "expected": true
+  },
+  {
+    "id": "oneOf-annotation-and-failure-root",
+    "schemaJSON": "{\"oneOf\":[{\"deprecated\":true,\"type\":\"string\"}]}",
+    "instanceJSON": "{\"x\":1}",
+    "expected": false
+  },
+  {
+    "id": "oneOf-two-valid-root",
+    "schemaJSON": "{\"oneOf\":[{\"deprecated\":true},{}]}",
+    "instanceJSON": "{\"x\":1}",
+    "expected": false
+  },
+  {
+    "id": "not-annotation-root",
+    "schemaJSON": "{\"not\":{\"deprecated\":true}}",
+    "instanceJSON": "{\"x\":1}",
+    "expected": false
+  },
+  {
+    "id": "not-annotation-failure-root",
+    "schemaJSON": "{\"not\":{\"deprecated\":true,\"type\":\"string\"}}",
+    "instanceJSON": "{\"x\":1}",
+    "expected": true
+  },
+  {
+    "id": "anyOf-annotation-only-property",
+    "schemaJSON": "{\"anyOf\":[{\"properties\":{\"x\":{\"deprecated\":true}}}]}",
+    "instanceJSON": "{\"x\":1}",
+    "expected": true
+  },
+  {
+    "id": "anyOf-annotation-and-failure-property",
+    "schemaJSON": "{\"anyOf\":[{\"properties\":{\"x\":{\"deprecated\":true}},\"type\":\"string\"}]}",
+    "instanceJSON": "{\"x\":1}",
+    "expected": false
+  },
+  {
+    "id": "anyOf-two-valid-property",
+    "schemaJSON": "{\"anyOf\":[{\"properties\":{\"x\":{\"deprecated\":true}}},{}]}",
+    "instanceJSON": "{\"x\":1}",
+    "expected": true
+  },
+  {
+    "id": "oneOf-annotation-only-property",
+    "schemaJSON": "{\"oneOf\":[{\"properties\":{\"x\":{\"deprecated\":true}}}]}",
+    "instanceJSON": "{\"x\":1}",
+    "expected": true
+  },
+  {
+    "id": "oneOf-annotation-and-failure-property",
+    "schemaJSON": "{\"oneOf\":[{\"properties\":{\"x\":{\"deprecated\":true}},\"type\":\"string\"}]}",
+    "instanceJSON": "{\"x\":1}",
+    "expected": false
+  },
+  {
+    "id": "oneOf-two-valid-property",
+    "schemaJSON": "{\"oneOf\":[{\"properties\":{\"x\":{\"deprecated\":true}}},{}]}",
+    "instanceJSON": "{\"x\":1}",
+    "expected": false
+  },
+  {
+    "id": "not-annotation-property",
+    "schemaJSON": "{\"not\":{\"properties\":{\"x\":{\"deprecated\":true}}}}",
+    "instanceJSON": "{\"x\":1}",
+    "expected": false
+  },
+  {
+    "id": "not-annotation-failure-property",
+    "schemaJSON": "{\"not\":{\"properties\":{\"x\":{\"deprecated\":true}},\"type\":\"string\"}}",
+    "instanceJSON": "{\"x\":1}",
+    "expected": true
+  },
+  {
+    "id": "contains-annotation",
+    "schemaJSON": "{\"contains\":{\"deprecated\":true},\"unevaluatedItems\":false}",
+    "instanceJSON": "[1]",
+    "expected": true
+  },
+  {
+    "id": "contains-annotation-min",
+    "schemaJSON": "{\"contains\":{\"deprecated\":true,\"type\":\"number\"},\"minContains\":2}",
+    "instanceJSON": "[1,2]",
+    "expected": true
+  },
+  {
+    "id": "contains-annotation-min-fail",
+    "schemaJSON": "{\"contains\":{\"deprecated\":true,\"type\":\"number\"},\"minContains\":2}",
+    "instanceJSON": "[1,\"x\"]",
+    "expected": false
+  },
+  {
+    "id": "contains-annotation-max-fail",
+    "schemaJSON": "{\"contains\":{\"deprecated\":true,\"type\":\"number\"},\"maxContains\":1}",
+    "instanceJSON": "[1,2]",
+    "expected": false
+  },
+  {
+    "id": "prefix-annotation",
+    "schemaJSON": "{\"prefixItems\":[{\"deprecated\":true}],\"unevaluatedItems\":false}",
+    "instanceJSON": "[1]",
+    "expected": true
+  },
+  {
+    "id": "property-annotation",
+    "schemaJSON": "{\"properties\":{\"x\":{\"deprecated\":true}},\"unevaluatedProperties\":false}",
+    "instanceJSON": "{\"x\":1}",
+    "expected": true
+  },
+  {
+    "id": "failed-then-anyOf",
+    "schemaJSON": "{\"anyOf\":[{\"if\":true,\"then\":{\"properties\":{\"x\":true},\"maxProperties\":0}},{\"type\":\"object\"}],\"unevaluatedProperties\":false}",
+    "instanceJSON": "{\"x\":1}",
+    "expected": false
+  },
+  {
+    "id": "failed-else-anyOf",
+    "schemaJSON": "{\"anyOf\":[{\"if\":false,\"else\":{\"properties\":{\"x\":true},\"maxProperties\":0}},{\"type\":\"object\"}],\"unevaluatedProperties\":false}",
+    "instanceJSON": "{\"x\":1}",
+    "expected": false
+  },
+  {
+    "id": "ref-annotation-anyOf",
+    "schemaJSON": "{\"$defs\":{\"a\":{\"deprecated\":true,\"properties\":{\"x\":true}}},\"anyOf\":[{\"$ref\":\"#/$defs/a\"}],\"unevaluatedProperties\":false}",
+    "instanceJSON": "{\"x\":1}",
+    "expected": true
+  },
+  {
+    "id": "failed-then-oneOf",
+    "schemaJSON": "{\"oneOf\":[{\"if\":true,\"then\":{\"properties\":{\"x\":true},\"maxProperties\":0}},{\"type\":\"object\"}],\"unevaluatedProperties\":false}",
+    "instanceJSON": "{\"x\":1}",
+    "expected": false
+  },
+  {
+    "id": "failed-else-oneOf",
+    "schemaJSON": "{\"oneOf\":[{\"if\":false,\"else\":{\"properties\":{\"x\":true},\"maxProperties\":0}},{\"type\":\"object\"}],\"unevaluatedProperties\":false}",
+    "instanceJSON": "{\"x\":1}",
+    "expected": false
+  },
+  {
+    "id": "ref-annotation-oneOf",
+    "schemaJSON": "{\"$defs\":{\"a\":{\"deprecated\":true,\"properties\":{\"x\":true}}},\"oneOf\":[{\"$ref\":\"#/$defs/a\"}],\"unevaluatedProperties\":false}",
+    "instanceJSON": "{\"x\":1}",
+    "expected": true
+  },
+  {
+    "id": "unselected-then",
+    "schemaJSON": "{\"if\":false,\"then\":{\"properties\":{\"x\":true}},\"else\":{\"type\":\"object\"},\"unevaluatedProperties\":false}",
+    "instanceJSON": "{\"x\":1}",
+    "expected": false
+  },
+  {
+    "id": "unselected-else",
+    "schemaJSON": "{\"if\":true,\"then\":{\"type\":\"object\"},\"else\":{\"properties\":{\"x\":true}},\"unevaluatedProperties\":false}",
+    "instanceJSON": "{\"x\":1}",
+    "expected": false
+  }
+]

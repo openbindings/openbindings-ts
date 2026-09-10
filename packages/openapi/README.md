@@ -44,12 +44,18 @@ contracts and uses `@openbindings/openapi-client` as its artifact engine.
 
 One adapter instance supplies invocation, synthesis, and source inspection:
 
+The standalone JSONata runtime is currently a private development candidate.
+The following package names describe the intended composition, not packages
+already available from the registry. Use the coordinated local workspace or
+qualified archives until the prerequisite runtime is published.
+
 ```sh
-npm install @openbindings/sdk @openbindings/openapi jsonata@2.1.1
+npm install @openbindings/sdk @openbindings/openapi @openbindings/jsonata-runtime
 ```
 
 ```typescript
-import jsonata from "jsonata";
+import { createJSONExecutor } from "@openbindings/jsonata-runtime";
+import { createJSONataEvaluator } from "@openbindings/invoke/jsonata";
 import { OpenBindingsRuntime } from "@openbindings/sdk";
 import { OpenAPIAdapter, decimalParameterConversion } from "@openbindings/openapi";
 
@@ -57,9 +63,7 @@ const runtime = new OpenBindingsRuntime({
   // Explicit consumer policy for numeric and boolean parameter text.
   providers: [new OpenAPIAdapter({ parameterConversion: decimalParameterConversion })],
   // Synthesis expresses parameter/body mappings as Core transforms.
-  transformEvaluator: {
-    evaluate: (expression, data) => jsonata(expression).evaluate(data),
-  },
+  transformEvaluator: createJSONataEvaluator(createJSONExecutor()),
 });
 const { iface, coverage } = await runtime.resolve("https://api.example.com/openapi.json");
 const call = runtime.invoke(iface, "listItems");

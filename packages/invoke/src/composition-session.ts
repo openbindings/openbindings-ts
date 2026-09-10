@@ -65,7 +65,7 @@ export interface InspectedProvider extends ProviderPolicyCandidate {
 }
 
 export interface DependencyInspection {
-  readonly sessionRevision: string;
+  readonly sessionId: string;
   readonly policyId: string;
   readonly dependencyKey: string;
   readonly requiredOperationKey: string;
@@ -103,7 +103,7 @@ export class PreparedDependencyRoute<I = unknown, O = unknown> {
   readonly #realization: PreparedRealization<I, O>;
 
   readonly policyId: string;
-  readonly consumerRevision: string;
+  readonly consumerSnapshotId: string;
   readonly dependencyKey: string;
   readonly requiredOperationKey: string;
   readonly providerKey: string;
@@ -122,7 +122,7 @@ export class PreparedDependencyRoute<I = unknown, O = unknown> {
   ) {
     this.#realization = realization;
     this.policyId = policyId;
-    this.consumerRevision = consumer.revision;
+    this.consumerSnapshotId = consumer.snapshotId;
     this.dependencyKey = dependency.key;
     this.requiredOperationKey = dependency.operation.canonicalKey;
     this.providerKey = eligible.provider.key;
@@ -230,10 +230,12 @@ function structuredFailure(error: unknown): { code: string; data?: unknown } | u
 /**
  * Application-scoped composition over immutable consumer/provider snapshots.
  */
+let nextSessionId = 0;
+
 export class CompositionSession {
   readonly consumer: PreparedInterface;
   readonly policy: CompositionPolicy;
-  readonly revision: string;
+  readonly sessionId: string;
   readonly #registrations: readonly Required<Pick<ProviderRegistration, "provider"> & { preference: number }>[];
 
   constructor(options: CompositionSessionOptions) {
@@ -252,13 +254,7 @@ export class CompositionSession {
       }
       return Object.freeze({ provider: registration.provider, preference });
     }));
-    this.revision = [
-      this.policy.id,
-      this.consumer.revision,
-      ...this.#registrations
-        .map(({ provider, preference }) => `${provider.key}:${provider.interface.revision}:${preference}`)
-        .sort(),
-    ].join("|");
+    this.sessionId = `session:${++nextSessionId}`;
     Object.freeze(this);
   }
 
@@ -286,7 +282,7 @@ export class CompositionSession {
       );
     const assessments = evaluated.flatMap(result => result.assessments);
     return Object.freeze({
-      sessionRevision: this.revision,
+      sessionId: this.sessionId,
       policyId: this.policy.id,
       dependencyKey: key,
       requiredOperationKey: required.operation.canonicalKey,

@@ -76,7 +76,7 @@ export class OpenBindingsRuntime {
   }
 
   /**
-   * Prepare one immutable provider revision using this runtime's exact
+   * Prepare one immutable provider snapshot using this runtime's exact
    * registered capabilities. Realizations remain lazy until selected.
    */
   prepareProvider(

@@ -1,6 +1,8 @@
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from "node:http";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import jsonata from "jsonata";
+import { createJSONExecutor } from "@openbindings/jsonata-runtime";
+import { createJSONataEvaluator } from "@openbindings/invoke/jsonata";
+const officialEvaluator = createJSONataEvaluator(createJSONExecutor());
 import { type OBInterface } from "@openbindings/core";
 import {
   ERR_EXECUTION_FAILED,
@@ -217,7 +219,7 @@ describe("BEC Integration (real HTTP)", () => {
 
     const opInvoker = new OperationInvoker([new OpenAPIInvoker({ parameterConversion: String })], {
       contextResolver: storeContextResolver(store),
-      transformEvaluator: { evaluate: (expression, data) => jsonata(expression).evaluate(data) },
+      transformEvaluator: { evaluate: (expression, data) => officialEvaluator.evaluate(expression, data) },
     });
     const iface = await fetchIface();
 

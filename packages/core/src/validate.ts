@@ -7,7 +7,7 @@ import {
   validateExamplesAgainstOpSchemas,
   validateSchemaWellFormedness,
 } from "./schema-validation.js";
-import jsonata from "jsonata";
+import parseJSONata from "./internal/jsonata-syntax/parser.cjs";
 
 export interface ValidateOptions {
   rejectUnknownTypedFields?: boolean;
@@ -228,8 +228,8 @@ export function validateInterface(
   }
 
   // OBI-D-18: every value in the transforms map parses as a syntactically
-  // valid expression of the pinned transform language (JSONata 2.1,
-  // jsonata-js 2.1.1 parse-acceptance tiebreak). Parse-only: evaluation
+  // valid expression of the pinned transform language (the incorporated
+  // JSONata 2.1 documentation). Parse-only: evaluation
   // failures (undefined results, dynamic errors) remain invoke-time
   // outcomes per OBI-T-10 / ERR_TRANSFORM_ERROR.
   for (const [k, transform] of sortedEntries(iface.transforms)) {
@@ -339,8 +339,8 @@ function validateInlineTransform(
 ): void {
   // Per §5.5, transforms are JSONata expression strings. OBI-D-18: every
   // transform expression parses as a syntactically valid expression of the
-  // pinned language (JSONata 2.1, jsonata-js 2.1.1 parse-acceptance
-  // tiebreak). Parse-only — membership in the language, not success of
+  // pinned language (the incorporated JSONata 2.1 documentation).
+  // Parse-only — membership in the language, not success of
   // evaluation: undefined results and dynamic errors remain invoke-time
   // outcomes per OBI-T-10 / ERR_TRANSFORM_ERROR.
   if (typeof expr !== "string") {
@@ -359,7 +359,7 @@ function validateInlineTransform(
  */
 function jsonataParses(expr: string): boolean {
   try {
-    jsonata(expr);
+    parseJSONata(expr);
     return true;
   } catch {
     return false;

@@ -53,6 +53,7 @@
     "@openbindings/compare": "workspace:^",
     "@openbindings/core": "workspace:^",
     "@openbindings/invoke": "workspace:^",
+	"@openbindings/json": "workspace:^",
     "@openbindings/synthesize": "workspace:^"
   }
 }

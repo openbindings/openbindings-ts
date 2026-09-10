@@ -1,4 +1,5 @@
 export { Normalizer } from "./normalize.js";
+export { equalNormalizedSchemas } from "./identity.js";
 export type { Fetcher } from "./normalize.js";
 export type { JSONValue, JSONObject } from "./helpers.js";
 export { inputCompatible, outputCompatible } from "./compat.js";

@@ -1,9 +1,9 @@
 /**
  * Serializes a JSON value to its canonical form per RFC 8785 (JSON
  * Canonicalization Scheme, JCS): deterministic UTF-16 object-key ordering and
- * ECMAScript number/string formatting. It underlies prepared-interface
- * revisions and the schema-comparison profile, mirroring Go's
- * `canonicaljson.Marshal`.
+ * ECMAScript number/string formatting, mirroring Go's `canonicaljson.Marshal`.
+ * This is an explicit canonical export facility, not the authority for exact
+ * working snapshots, authored boundary identity, or exact schema comparison.
  *
  * Returns `undefined` for input the JCS cannot represent (for example a bare
  * `undefined`).
