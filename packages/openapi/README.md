@@ -44,7 +44,7 @@ contracts and uses `@openbindings/openapi-client` as its artifact engine.
 
 One adapter instance supplies invocation, synthesis, and source inspection:
 
-The standalone JSONata runtime is currently a private development candidate.
+The standalone JSONata runtime is a public-source development candidate.
 The following package names describe the intended composition, not packages
 already available from the registry. Use the coordinated local workspace or
 qualified archives until the prerequisite runtime is published.

@@ -81,7 +81,7 @@ export async function synthesizeSwagger20(
       continue;
     }
     let projected: ReturnType<typeof projectOperation>;
-    try { projected = projectOperation(operation); }
+    try { projected = projectOperation(operation, operationKey); }
     catch (error: unknown) {
       if (!tolerant) throw error;
       coverage.push({
@@ -130,7 +130,7 @@ function operationKeyFor(operation: Swagger20SynthesisOperation, used: Set<strin
   return uniqueKey(sanitizeKey(parts.join(".")), used);
 }
 
-function projectOperation(operation: Swagger20SynthesisOperation): {
+function projectOperation(operation: Swagger20SynthesisOperation, operationKey: string): {
   operation: Operation;
   inputTransform?: string;
   losses: Swagger20ProjectionLoss[];
@@ -141,6 +141,7 @@ function projectOperation(operation: Swagger20SynthesisOperation): {
     ...(operation.tags.length > 0 ? { tags: [...operation.tags] } : {}),
   };
   const properties: Record<string, JSONSchema> = {};
+  const position = `#/operations/${escapePointer(operationKey)}`;
   const required: string[] = [];
   const parameterFields: Record<string, string> = {};
   const locations = new Map<string, string>();
@@ -156,6 +157,7 @@ function projectOperation(operation: Swagger20SynthesisOperation): {
     const callerKey = qualified ? `${parameter.in}/${escapePointer(parameter.name)}` : parameter.name;
     const field = uniqueInputField(callerKey, used);
     const projected = projectSchema(parameter.schema, true, `${operation.ref}/parameters/${parameter.in}/${escapePointer(parameter.name)}`);
+    relocateSchema(projected.schema, `${position}/input/properties/${escapePointer(field)}`);
     properties[field] = projected.schema;
     losses.push(...projected.losses);
     parameterFields[callerKey] = field;
@@ -165,6 +167,7 @@ function projectOperation(operation: Swagger20SynthesisOperation): {
   if (operation.body) {
     bodyField = uniqueInputField("body", used);
     const projected = projectSchema(operation.body.schema, true, `${operation.ref}/body/schema`);
+    relocateSchema(projected.schema, `${position}/input/properties/${escapePointer(bodyField)}`);
     properties[bodyField] = projected.schema;
     losses.push(...projected.losses);
     if (operation.body.required) required.push(bodyField);
@@ -175,17 +178,40 @@ function projectOperation(operation: Swagger20SynthesisOperation): {
       ...(required.length > 0 ? { required: required.sort() } : {}),
     };
   }
+  const outputs: JSONSchema[] = [];
   for (const response of operation.responses) {
     if (!response.canSucceed || !response.usable || !response.schemaPresent || !response.schema
       || ["204", "205", "304"].includes(response.key) || operation.method === "head") continue;
     const projected = projectSchema(response.schema, false, `${response.sourceRef}/schema`);
     losses.push(...projected.losses);
-    if (result.output === undefined) result.output = projected.schema;
-    else if (isSchemaRecord(result.output) && Array.isArray(result.output.anyOf)) result.output.anyOf.push(projected.schema);
-    else result.output = { anyOf: [result.output, projected.schema] };
+    outputs.push(projected.schema);
+  }
+  if (outputs.length === 1) {
+    relocateSchema(outputs[0], `${position}/output`);
+    result.output = outputs[0];
+  } else if (outputs.length > 1) {
+    outputs.forEach((schema, index) => relocateSchema(schema, `${position}/output/anyOf/${index}`));
+    result.output = { anyOf: outputs };
   }
   const inputTransform = envelopeTransform(parameterFields, bodyField);
   return { operation: result, ...(inputTransform ? { inputTransform } : {}), losses };
+}
+
+// Each native image has its own local closure. Move schema references with the
+// image, while leaving reference-looking strings in defaults and enums intact.
+function relocateSchema(value: unknown, position: string): void {
+  if (!isSchemaRecord(value)) return;
+  if (typeof value.$ref === "string" && (value.$ref === "#" || value.$ref.startsWith("#/"))) {
+    value.$ref = position + value.$ref.slice(1);
+  }
+  for (const key of ["items", "additionalProperties"] as const) {
+    if (isSchemaRecord(value[key])) relocateSchema(value[key], position);
+  }
+  for (const key of ["properties", "$defs"] as const) {
+    const children = value[key];
+    if (isRecord(children)) for (const child of Object.values(children)) relocateSchema(child, position);
+  }
+  if (Array.isArray(value.allOf)) for (const child of value.allOf) relocateSchema(child, position);
 }
 
 function projectSchema(value: unknown, request: boolean, sourceRef: string): {
