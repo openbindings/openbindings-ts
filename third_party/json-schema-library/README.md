@@ -39,7 +39,13 @@ Use pnpm 10.15.0 and the frozen repository lockfile. To verify an install:
 ```sh
 pnpm install --frozen-lockfile
 node scripts/validator-dependency.mjs verify
+node scripts/validator-dependency.mjs verify-source /path/to/json-schema-library-11.6.2.tgz
 ```
+
+`verify-source` checks the pinned npm archive integrity, applies `source.patch`
+in a disposable directory, compares every source/test fixture and the license
+with the installed derivative, then runs the ordinary ESM/CJS build replay.
+It leaves the installed dependency and repository sources unchanged.
 
 To regenerate, use `pnpm patch json-schema-library@11.6.2 --ignore-existing
 --edit-dir <directory>`, apply `source.patch` there, run

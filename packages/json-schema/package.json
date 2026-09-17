@@ -30,7 +30,7 @@
   "scripts": {
     "build": "tsup",
     "test": "vitest run",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit && tsc -p tsconfig.test.json"
   },
   "dependencies": {
     "@openbindings/json": "workspace:*",

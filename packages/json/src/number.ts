@@ -1,6 +1,7 @@
 import { compareNumber, splitNumber, isNumber } from "lossless-json";
 
-/** Operation limits are resource limits, not JSON admission/encoding limits. */
+/** Operation limits are resource limits, not JSON admission/encoding limits.
+ * @deprecated Internal to json-schema; the public surface reports the same limit as ValueError ERR_JSON_BUDGET. */
 export class JSONCapabilityError extends RangeError {
   constructor(operation: string) { super(`Exact JSON ${operation} exceeds its supported work limit`); this.name = "JSONCapabilityError"; }
 }
@@ -15,6 +16,7 @@ function parts(token: string) {
   return splitNumber(token);
 }
 
+/** @deprecated Use `compare` from `@openbindings/json/advanced`. */
 export function compareNumberTokens(a: string, b: string): -1 | 0 | 1 {
   const aa = parts(a);
   if (a === b) return 0; // work admission still precedes the shortcut
@@ -38,11 +40,13 @@ export function numberIndexKey(token: string): string {
   return `q${p.sign}:${p.digits}:${p.exponent}`;
 }
 
+/** @deprecated Internal to json-schema; not part of the public surface. */
 export function integerNumberToken(token: string): boolean {
   const p = parts(token);
   return p.digits === "0" || p.exponent >= p.digits.length - 1;
 }
 
+/** @deprecated Internal to json-schema; not part of the public surface. */
 export function multipleNumberTokens(value: string, divisor: string): boolean {
   const a = parts(value), b = parts(divisor);
   if (b.digits === "0") throw new TypeError("Zero divisor is not a JSON Schema multipleOf");
