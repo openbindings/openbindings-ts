@@ -18,7 +18,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           repository: openbindings/jsonata
-          ref: 2bcac4dbe8e8161dbab7c46dbbfcac69e142a190
+          ref: ce99d0e560d19383ac967640b3519bb24fbe1d28
           path: jsonata
       # The conformance corpora are normative and live in the sibling spec and
       # interfaces repos; without these checkouts the corpus gates skip
