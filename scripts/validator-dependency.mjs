@@ -1,7 +1,9 @@
 // Rebuild only the upstream package's public ESM/CJS entry points. No SDK API,
 // runtime loader, generated-code evaluator, or custom traversal engine is added.
 import { build, version } from "esbuild";
-import { readFileSync, writeFileSync, realpathSync } from "node:fs";
+import { readFileSync, writeFileSync, realpathSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { execFileSync } from "node:child_process";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
@@ -9,13 +11,34 @@ import assert from "node:assert/strict";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const mode = process.argv[2];
-assert(["build", "verify"].includes(mode), "usage: validator-dependency.mjs build <pnpm edit-dir> | verify");
+assert(["build", "verify", "verify-source"].includes(mode), "usage: validator-dependency.mjs build <pnpm edit-dir> | verify | verify-source <11.6.2 npm archive>");
 assert.equal(version, "0.28.1", "requalify before changing the patch builder");
 const directory = mode === "build" ? resolve(process.argv[3])
   : realpathSync(resolve(root, "packages/core/node_modules/json-schema-library"));
 const pkg = JSON.parse(readFileSync(resolve(directory, "package.json")));
 assert.equal(pkg.version, "11.6.2");
 const hash = value => createHash("sha256").update(value).digest("hex");
+if (mode === "verify-source") {
+  const archive = resolve(process.argv[3]), bytes = readFileSync(archive);
+  const integrity = "sha512-" + createHash("sha512").update(bytes).digest("base64");
+  assert.equal(integrity, "sha512-BwvoJfc6RNrYRxQ9AujaTMaLdQosdceRe0huKMnnIJa2b4QZlnmPgQm7iUMoyxS2ioTsTMVPWjuoqvFYF0HZ4Q==", "Pinned upstream archive drift");
+  const scratch = mkdtempSync(resolve(tmpdir(), "ob-validator-source-"));
+  try {
+    // Extraction is allowed only after checking the complete pinned archive.
+    execFileSync("tar", ["-xzf", archive, "-C", scratch]);
+    const upstream = resolve(scratch, "package"), patch = resolve(root, "third_party/json-schema-library/source.patch");
+    execFileSync("git", ["apply", "--check", patch], { cwd: upstream });
+    execFileSync("git", ["apply", patch], { cwd: upstream });
+    const sources = base => readdirSync(base, { withFileTypes: true }).flatMap(entry =>
+      entry.isDirectory() ? sources(resolve(base, entry.name)).map(name => entry.name + "/" + name)
+        : entry.name.endsWith(".ts") ? [entry.name] : []).sort();
+    // Runtime source and added upstream test fixtures must both replay.
+    assert.deepEqual(sources(resolve(upstream, "src")), sources(resolve(directory, "src")), "Patched source membership drift");
+    for (const name of ["index.ts", "LICENSE.md", ...sources(resolve(upstream, "src")).map(name => "src/" + name)])
+      assert.deepEqual(readFileSync(resolve(upstream, name)), readFileSync(resolve(directory, name)), name + ": patched source drift");
+    console.log(`validator source replay: ${integrity}`);
+  } finally { rmSync(scratch, { recursive: true, force: true }); }
+}
 const inputs = {};
 const outputs = {};
 for (const format of ["esm", "cjs"]) {

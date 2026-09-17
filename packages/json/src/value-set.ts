@@ -3,7 +3,8 @@ import { numberIndexKey } from "./number.js";
 
 /** Owned, first-insertion-ordered JSON values. Private lookup keys only narrow
  * exact comparisons. They are not canonical JSON or persistent identities.
- * Numeric indexing uses the existing numeric-predicate work budget. */
+ * Numeric indexing uses the existing numeric-predicate work budget.
+ * @deprecated Internal to json-schema; not part of the public surface. */
 export class JSONValueSet implements Iterable<JSONValue> {
   private readonly buckets = new Map<string, JSONValue>();
   private collisions?: Map<string, JSONValue[]>;

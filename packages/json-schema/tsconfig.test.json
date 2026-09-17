@@ -1,0 +1,11 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "types": ["node"],
+    "rootDir": ".",
+    "paths": { "@openbindings/json-schema": ["./src/index.ts"] }
+  },
+  "include": ["src", "test", "vitest.config.ts"],
+  "exclude": []
+}

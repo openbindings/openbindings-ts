@@ -1,0 +1,15 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "types": ["node"],
+    "rootDir": ".",
+    "paths": {
+      "@openbindings/json": ["./src/index.ts"],
+      "@openbindings/json/advanced": ["./src/advanced.ts"],
+      "@openbindings/json/internal": ["./src/internal.ts"]
+    }
+  },
+  "include": ["src", "test", "vitest.config.ts"],
+  "exclude": []
+}

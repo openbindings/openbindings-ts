@@ -51,7 +51,7 @@ describe("exact JSON carriage", () => {
   });
   it("rejects array metadata without invoking hooks or getters",()=>{
     let calls=0;
-    const hook=[];Object.defineProperty(hook,"toJSON",{get(){calls++;return ()=>"replaced"}});
+    const hook: unknown[]=[];Object.defineProperty(hook,"toJSON",{get(){calls++;return ()=>"replaced"}});
     const extra=Object.assign([1],{metadata:true});
     const symbol=Object.assign([1],{[Symbol("hidden")]:true});
     for(const value of [hook,extra,symbol]) expect(()=>stringifyJSON(value)).toThrow();

@@ -4,6 +4,7 @@ import isRawJSON from "core-js-pure/actual/json/is-raw-json.js";
 /** Detach an internal JSON-shaped graph, retaining alias/cycle cut points.
  * This is not JSON admission: optional undefined metadata may exist in models.
  * Exact numbers are immutable leaves, never objects to walk or reconstitute.
+ * @deprecated Internal to json-schema; results of the public surface are frozen and need no clone.
  */
 export function cloneValueGraph<T>(value: T): T {
   const memo = new Map<object, unknown>();

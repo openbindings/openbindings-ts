@@ -1,9 +1,32 @@
-import parse from "core-js-pure/actual/json/parse.js";
+import { parseExact } from "./parse.js";
 import stringify from "core-js-pure/actual/json/stringify.js";
 import rawJSON from "core-js-pure/actual/json/raw-json.js";
 import isRawJSON from "core-js-pure/actual/json/is-raw-json.js";
-import { isNumber } from "lossless-json";
+import { isNumber as isNumberTokenText } from "lossless-json";
 import { compareNumberTokens } from "./number.js";
+
+// ---------------------------------------------------------------------------
+// The public surface (design/value-api-shape-loop/candidate/json.d.ts).
+// Plain data with rich leaves: plain arrays and objects, primitives, and the
+// two leaf classes Decimal and Encoded.
+// ---------------------------------------------------------------------------
+export { ValueError, type ValueErrorCode } from "./errors.js";
+export { type ForcingReason, type Costs } from "./counters.js";
+export {
+  Decimal, Encoded, BASE64, type Encoding, type RawJSON, type Numeric, type Text,
+  number, toNumber, isNumber, isDecimal, base64, encoded, isEncoded, bytes,
+} from "./leaves.js";
+export { parse, stringify, equal, plain, type Value, type Plain, type PlainOptions, type Limits, type ParseOptions } from "./codec.js";
+
+// ---------------------------------------------------------------------------
+// Retired surface. Every name below keeps working until Block 8 deletes it.
+// The replacements live in the public surface above or in "./advanced".
+// ---------------------------------------------------------------------------
+
+// The deprecation notes for these six live on their declarations, so the
+// built declaration files carry them: compareNumberTokens, integerNumberToken,
+// multipleNumberTokens and JSONCapabilityError in number.ts, cloneValueGraph
+// in graph.ts, JSONValueSet in value-set.ts.
 export { compareNumberTokens, integerNumberToken, multipleNumberTokens, JSONCapabilityError } from "./number.js";
 export { cloneValueGraph } from "./graph.js";
 export { JSONValueSet } from "./value-set.js";
@@ -11,25 +34,29 @@ export { JSONValueSet } from "./value-set.js";
 // RawJSON supplies authenticated, immutable cross-copy branding in the native
 // runtime or the pinned pure compatibility implementation. The field alone is
 // NEVER a brand. No global JSON methods or prototype are changed.
+/** @deprecated Use `Decimal` (built by `number`, `parse` or admission). */
 export class JSONNumber {
   declare readonly rawJSON: string;
   constructor(token: string) {
-    if (!isNumber(token)) throw new TypeError("Invalid JSON number token");
+    if (!isNumberTokenText(token)) throw new TypeError("Invalid JSON number token");
     return rawJSON(token) as JSONNumber;
   }
   static [Symbol.hasInstance](value: unknown): boolean { return isJSONNumber(value); }
 }
 
+/** @deprecated Use `isDecimal`. */
 export function isJSONNumber(value: unknown): value is JSONNumber {
-  return isRawJSON(value) && isNumber((value as JSONNumber).rawJSON);
+  return isRawJSON(value) && isNumberTokenText((value as JSONNumber).rawJSON);
 }
 
-/** Exact token access. Native callers supply only the number they already own. */
+/** Exact token access. Native callers supply only the number they already own.
+ * @deprecated Use `String(n)`: a number and a Decimal both print their digits. */
 export function numberToken(value: unknown): string | undefined {
   return isJSONNumber(value) ? value.rawJSON
     : typeof value === "number" && Number.isFinite(value) ? String(value) : undefined;
 }
 
+/** @deprecated Use `equal`. */
 export function equalJSON(a: unknown, b: unknown): boolean {
   assertJSONValue(a); assertJSONValue(b);
   return equalValue(a, b);
@@ -47,23 +74,19 @@ function equalValue(a: unknown, b: unknown): boolean {
   return keys.length === Object.keys(bb).length && keys.every(k => Object.hasOwn(bb, k) && equalValue(aa[k], bb[k]));
 }
 
+/** @deprecated Use `Value`. */
 export type JSONValue = null | boolean | string | number | JSONNumber | JSONValue[] | {[key: string]: JSONValue};
 
 /** Parse one JSON value without first reducing its numeric tokens. Boundary
- * owners retain their own duplicate, encoding, BOM and Unicode policies. */
+ * owners retain their own duplicate, encoding, BOM and Unicode policies.
+ * @deprecated Use `parse`, which applies the one number rule by value. */
 export function parseJSON(text: string): JSONValue {
-  return parse(text, (_key, value, context) => {
-    if (typeof value !== "number") return value;
-    if (context.source === undefined) throw new Error("JSON source-text access is unavailable");
-    // Literal safe integers already have an exact host representation. Other
-    // spellings remain opaque number carriers, with no implicit conversion.
-    if (Number.isSafeInteger(value) && /^-?(0|[1-9][0-9]*)$/.test(context.source)) return value;
-    return new JSONNumber(context.source);
-  }) as JSONValue;
+  return parseExact(text, value => value) as JSONValue;
 }
 
 /** Serialize actual JSON values. This does not invoke arbitrary toJSON hooks,
- * silently omit undefined members, or turn nonfinite numbers into null. */
+ * silently omit undefined members, or turn nonfinite numbers into null.
+ * @deprecated Use `stringify`. */
 export function stringifyJSON(value: unknown, space?: number | string): string {
   // Admitted native scalars have neither members nor serialization hooks.
   // Keep the same established serializer without allocating an object walk.
@@ -75,6 +98,7 @@ export function stringifyJSON(value: unknown, space?: number | string): string {
   return text;
 }
 
+/** @deprecated Results of the public surface are frozen and need no clone; `plain` gives a mutable primitive copy. */
 export function cloneJSON(value: unknown): JSONValue {
   if (isNativeJSONScalar(value)) return value === 0 ? 0 : value;
   // Detachment is not a text boundary. Reuse the descriptor-checked walk
@@ -82,6 +106,7 @@ export function cloneJSON(value: unknown): JSONValue {
   return walkJSON(value, new Set(), true, false) as JSONValue;
 }
 
+/** @deprecated Admission is loud at every public entry; no assertion is needed. */
 export function assertJSONValue(value: unknown): asserts value is JSONValue {
   if (isNativeJSONScalar(value)) return;
   walkJSON(value, new Set(), false);
