@@ -18,7 +18,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           repository: openbindings/jsonata
-          ref: e2a5e518e6b5bd247ab327d427c591dc72743f2d
+          ref: 2bcac4dbe8e8161dbab7c46dbbfcac69e142a190
           path: jsonata
       # The conformance corpora are normative and live in the sibling spec and
       # interfaces repos; without these checkouts the corpus gates skip
@@ -57,12 +57,12 @@ jobs:
           node-version: 22
           cache: pnpm
           cache-dependency-path: openbindings-ts/pnpm-lock.yaml
-      - name: Build the qualified standalone runtime
-        run: npm --prefix ../jsonata/javascript ci --ignore-scripts && npm --prefix ../jsonata/javascript run build
       - name: Build neutral JSON prerequisites
         run: |
           pnpm install --frozen-lockfile --ignore-scripts
           pnpm --filter @openbindings/json --filter @openbindings/json-schema build
+      - name: Build the qualified standalone runtime
+        run: npm --prefix ../jsonata/javascript ci --ignore-scripts && npm --prefix ../jsonata/javascript run build
       - name: Build standalone artifact clients
         run: |
           pnpm --dir ../openapi-client install --frozen-lockfile
