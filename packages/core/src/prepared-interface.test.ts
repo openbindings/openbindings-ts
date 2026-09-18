@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { OBInterface } from "./types.js";
 import { prepareInterface, compareBoundaryContracts } from "./prepared-interface.js";
-import { parse, stringifyJSON } from "@openbindings/json";
+import { parse, stringify } from "@openbindings/json";
 
 function document(): OBInterface {
   return {
@@ -47,11 +47,20 @@ describe("PreparedInterface", () => {
     expect((await prepared.boundaryContract("deliver"))!.complete).toBe(true);
   });
 
-  it("admits exact safe-integer-valued preferences without native coercion", async () => {
-    const iface = document();
-    iface.bindings!.local!.preference = parse("1.0") as never;
-    const prepared = await prepareInterface(iface);
-    expect(stringifyJSON(prepared.interfaceSnapshot.bindings!.local!.preference)).toBe("1.0");
+  it("admits preferences by value, keeping digits no primitive can hold", async () => {
+    // A number is its value, not its spelling: "1.0" is one, and one is a
+    // primitive. Exactness is what a primitive cannot hold, and that is kept.
+    const spelled = document();
+    spelled.bindings!.local!.preference = parse("1.0") as never;
+    const asValue = await prepareInterface(spelled);
+    expect(stringify(asValue.interfaceSnapshot.bindings!.local!.preference)).toBe("1");
+
+    // A preference must be a safe integer, so every admissible one is a
+    // primitive. A value that needs more digits than that is refused, not
+    // rounded into range.
+    const wide = document();
+    wide.bindings!.local!.preference = parse("9007199254740993") as never;
+    await expect(prepareInterface(wide)).rejects.toThrow(/must be a safe integer/);
   });
   it("is locally owned, immutable, and idempotent with optional JCS export", async () => {
     const original = document();
@@ -181,7 +190,7 @@ describe("PreparedInterface", () => {
     const raw = '{"openbindings":"0.2.0","operations":{"wide":{"input":{"const":9007199254740993}}}}';
     const prepared = await prepareInterface(parse(raw) as unknown as OBInterface);
     await expect(prepared.exportJCS()).rejects.toThrow(/JCS/);
-    expect(stringifyJSON(prepared.interfaceSnapshot)).toBe(raw);
+    expect(stringify(prepared.interfaceSnapshot)).toBe(raw);
     expect(prepared.schemaValidator("wide", "input")!.validate(parse("9007199254740993")).valid).toBe(true);
   });
 

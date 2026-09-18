@@ -5,7 +5,7 @@ import { InvocationImpl, InvocationError, type Invocation } from "./invocation.j
 import type { BindingInvoker, TransformEvaluator } from "./invokers.js";
 import type { BindingInvocationArgs } from "./invoker-types.js";
 import { ERR_TRANSFORM_ERROR } from "./errcodes.js";
-import { JSONNumber, equalJSON, parseJSON } from "@openbindings/json";
+import { Decimal, equal, parse } from "@openbindings/json";
 
 async function run(
   direction: "input" | "output",
@@ -88,11 +88,11 @@ describe("Core transform result JSON domain", () => {
   });
 
   it("admits authenticated SDK numbers without inspecting marker-like data fields", async () => {
-    for (const value of [new JSONNumber("9223372036854775807"), parseJSON('{"amount":1e-400,"rawJSON":"7","isLosslessNumber":true,"_jsonata_function":true}')]) {
+    for (const value of [new JSONNumber("9223372036854775807"), parse('{"amount":1e-400,"rawJSON":"7","isLosslessNumber":true,"_jsonata_function":true}')]) {
       const result = await run("output", async () => value);
       expect(result.error).toBeUndefined();
       expect(result.values).toHaveLength(1);
-      expect(equalJSON(result.values[0], value)).toBe(true);
+      expect(equal(result.values[0], value)).toBe(true);
     }
   });
 

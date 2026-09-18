@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseJSON } from "@openbindings/json";
+import { parse } from "@openbindings/json";
 import { compileOperationSchema } from "./schema-validation.js";
 import type { OBInterface } from "./types.js";
 

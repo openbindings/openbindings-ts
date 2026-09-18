@@ -1,5 +1,5 @@
 import type { OBInterface } from "./types.js";
-import { parseJSON } from "@openbindings/json";
+import { parse as parseValue } from "@openbindings/json";
 import { ValidationError } from "./errors.js";
 import { validateAgainstOBISchema } from "./schema-validation.js";
 import { validateInterface, type ValidateOptions } from "./validate.js";
@@ -53,7 +53,7 @@ export function parseDocument(input: string | Uint8Array): OBInterface {
     throw new SyntaxError("parse document: leading byte-order mark is forbidden (OBI-D-01)");
   }
   rejectDuplicateObjectKeys(text);
-  const parsed: unknown = parseJSON(text);
+  const parsed: unknown = parseValue(text);
 
   const errs: string[] = [];
   validateAgainstOBISchema(errs, parsed);

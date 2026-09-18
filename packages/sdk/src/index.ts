@@ -389,7 +389,7 @@ export {
 // Exact JSON at application boundaries. The neutral leaf remains independently
 // usable; these are re-exports, not SDK-owned numerical semantics.
 export {
-  JSONNumber, JSONCapabilityError, parseJSON, stringifyJSON, cloneJSON,
-  cloneValueGraph, isJSONNumber, numberToken, equalJSON,
-  compareNumberTokens, integerNumberToken,
+  Decimal, Encoded, ValueError, parse, stringify, equal, plain,
+  isDecimal, isEncoded, isNumber, number,
 } from "@openbindings/json";
+export type { Value, Numeric } from "@openbindings/json";

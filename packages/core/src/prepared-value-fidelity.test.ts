@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { parseJSON } from "../../json/src/index.js";
+import { parse } from "@openbindings/json";
 import { prepareInterface, compareBoundaryContracts } from "./prepared-interface.js";
 import type { OBInterface } from "./types.js";
 
@@ -37,8 +37,8 @@ describe.skipIf(!pack)("official SDK qualification — exact snapshots (not Core
       ["candidate", c.rightJSON, witness.candidateValid],
     ] as const;
     for (const [side, raw, want] of sides) it(c.id + "/" + side, async () => {
-      const iface = parseJSON(raw) as unknown as OBInterface;
-      const sample = parseJSON(witness.instanceJSON);
+      const iface = parse(raw) as unknown as OBInterface;
+      const sample = parse(witness.instanceJSON);
       const prepared = await prepareInterface(iface);
       const validator = prepared.schemaValidator("test", c.direction);
       expect(validator).toBeDefined();
@@ -58,7 +58,7 @@ describe.skipIf(!pack)("official SDK qualification — authored identity and loc
     if (!(c.id in identities)) continue;
     it(c.id, async () => {
       const boundary = async (raw: string) => {
-        const prepared = await prepareInterface(parseJSON(raw) as unknown as OBInterface);
+        const prepared = await prepareInterface(parse(raw) as unknown as OBInterface);
         const before = prepared.schemaValidator("test", c.direction);
         const contract = await prepared.boundaryContract("test")!;
         expect(contract.complete).toBe(true);

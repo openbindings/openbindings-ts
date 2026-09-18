@@ -25,14 +25,14 @@ type Case = {
 };
 
 function token(value: unknown): string {
-  return isJSONNumber(value) ? value.rawJSON : String(value);
+  return isDecimal(value) ? value.rawJSON : String(value);
 }
 
 function decode(raw: string, expected: string[]): Doc {
-  const value = parseJSON(raw);
+  const value = parse(raw);
   const got: string[] = [];
   const walk = (v: unknown): void => {
-    if (isJSONNumber(v) || typeof v === "number") {
+    if (isDecimal(v) || typeof v === "number") {
       got.push(token(v));
       return;
     }

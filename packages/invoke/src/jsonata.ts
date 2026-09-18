@@ -1,4 +1,4 @@
-import { parseJSON, stringifyJSON } from "@openbindings/json";
+import { parse, stringify } from "@openbindings/json";
 import type { TransformEvaluationOptions, TransformEvaluatorWithBindings } from "./invokers.js";
 
 /** A JSON-text executor supplied by the selected runtime. This is an adapter
@@ -18,12 +18,12 @@ export interface JSONataTextExecutor {
 export function createJSONataEvaluator(executor: JSONataTextExecutor): TransformEvaluatorWithBindings {
   const evaluate = async (expression: string, data: unknown, bindings: Record<string, unknown> | undefined, options?: TransformEvaluationOptions): Promise<unknown> => {
     options?.signal?.throwIfAborted();
-    const inputJSON = stringifyJSON(data);
-    const bindingsJSON = bindings === undefined ? undefined : stringifyJSON(bindings);
+    const inputJSON = stringify(data as never);
+    const bindingsJSON = bindings === undefined ? undefined : stringify(bindings as never);
     options?.signal?.throwIfAborted();
     const output = await executor.evaluate(expression, inputJSON, {bindingsJSON, signal: options?.signal});
     options?.signal?.throwIfAborted();
-    return parseJSON(output);
+    return parse(output);
   };
   return Object.freeze({
     evaluate: (expression: string, data: unknown, options?: TransformEvaluationOptions) => evaluate(expression,data,undefined,options),

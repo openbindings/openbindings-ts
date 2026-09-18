@@ -1,5 +1,5 @@
 import {describe,it,expect} from "vitest";
-import {parse,JSONCapabilityError} from "@openbindings/json";
+import {parse,ValueError} from "@openbindings/json";
 import {prepareInterface,compareBoundaryContracts} from "./prepared-interface.js";
 
 describe("immutable boundary-pair memo",()=>{
@@ -18,8 +18,18 @@ describe("immutable boundary-pair memo",()=>{
     expect(compareBoundaryContracts(missing!,missing!)).toBe("unavailable");
   });
   it("never turns a capability failure into cached equality",async()=>{
+    // Two spellings of the same enormous number cannot be compared within the
+    // work limit, so the answer is a refusal every time it is asked, never a
+    // remembered "equal". Identical spellings need no such work and are equal.
     const huge=await(await prepareInterface({openbindings:"0.2.0",operations:{x:{input:{const:parse("1e10001")}}}})).boundaryContract("x");
-    const other=await(await prepareInterface({openbindings:"0.2.0",operations:{x:{input:{const:parse("1e10001")}}}})).boundaryContract("x");
-    for(let i=0;i<2;i++)expect(()=>compareBoundaryContracts(huge!,other!)).toThrow(JSONCapabilityError);
+    const spelled=await(await prepareInterface({openbindings:"0.2.0",operations:{x:{input:{const:parse("1.0e10001")}}}})).boundaryContract("x");
+    for(let i=0;i<2;i++){
+      let raised:unknown;
+      try{compareBoundaryContracts(huge!,spelled!);}catch(error){raised=error;}
+      expect(raised).toBeInstanceOf(ValueError);
+      expect((raised as ValueError).code).toBe("ERR_JSON_BUDGET");
+    }
+    const same=await(await prepareInterface({openbindings:"0.2.0",operations:{x:{input:{const:parse("1e10001")}}}})).boundaryContract("x");
+    expect(compareBoundaryContracts(huge!,same!)).toBe("equal");
   });
 });

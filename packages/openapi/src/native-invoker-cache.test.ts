@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { OpenAPIClient } from "@openbindings/openapi-client";
-import {parseJSON} from "@openbindings/json";
+import { parse } from "@openbindings/json";
 import { OpenAPIInvoker } from "./invoker.js";
 
 const DOCUMENT = {
@@ -23,7 +23,7 @@ describe("native OpenAPI source cache", () => {
   for (const collide of [false,true]) it(`keeps exact numbers distinct from marker-shaped objects (hash collision=${collide})`, async () => {
     if (collide) vi.spyOn(globalThis.crypto.subtle,"digest").mockResolvedValue(new ArrayBuffer(32));
     const load=vi.spyOn(OpenAPIClient,"load"),invoker=new OpenAPIInvoker();
-    for(const value of [parseJSON("9007199254740993"),{rawJSON:"9007199254740993"}]) {
+    for(const value of [parse("9007199254740993"),{rawJSON:"9007199254740993"}]) {
       const call=invoker.invokeBinding({
         source:{bindingSpec:"openbindings.openapi-3.1@1",content:{...DOCUMENT,"x-value":value}},
         selector:"#/paths/~1ping/get",fetch:async()=>new Response(null,{status:204}),

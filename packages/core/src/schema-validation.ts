@@ -18,7 +18,7 @@ import { compile } from "@openbindings/json-schema";
 import type { Schema } from "@openbindings/json-schema";
 import { admit } from "@openbindings/json/internal";
 import type { Value } from "@openbindings/json";
-import { cloneJSON, isDecimal, isEncoded, isNumber, stringify, integerNumberToken, compareNumberTokens } from "@openbindings/json";
+import { isDecimal, isEncoded, isNumber, stringify, integerNumberToken, compareNumberTokens } from "@openbindings/json";
 import { OBI_BOUNDARY_DRAFT } from "./exact-schema-draft.js";
 import type { OBInterface } from "./types.js";
 import { isValidSemver } from "./version.js";
@@ -99,6 +99,26 @@ const VALIDATION_KEYWORD_BY_CODE: Readonly<Record<string, string>> = Object.free
   "unevaluated-items-error": "unevaluatedItems",
   "unique-items-error": "uniqueItems",
 });
+
+/**
+ * A mutable structural copy of an admitted value.
+ *
+ * The shared value package offers no deep clone on purpose: its results are
+ * frozen, so nothing needs defending against mutation. A derived document is
+ * the exception — the compile-time view injects a root `$ref` and writes
+ * resolved targets into pointers — so it is rebuilt here instead. Only
+ * containers are rebuilt; an exact number or a byte-backed string is an
+ * immutable leaf and carries by reference.
+ */
+function mutableCopy<T>(value: T): T {
+  if (Array.isArray(value)) return value.map((item) => mutableCopy(item)) as unknown as T;
+  if (typeof value !== "object" || value === null || isDecimal(value) || isEncoded(value)) return value;
+  const out: Record<string, unknown> = {};
+  for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
+    out[key] = mutableCopy(child);
+  }
+  return out as T;
+}
 
 function validationSchemaPaths(root: unknown): WeakMap<object, string> {
   const paths = new WeakMap<object, string>();
@@ -877,7 +897,7 @@ export function compileOperationSchema(
   if (cached) return cached;
 
   const closure = operationSchemaClosure(iface, operationName, position);
-  const document: Record<string, unknown> = closure ?? cloneJSON(iface) as Record<string, unknown>;
+  const document: Record<string, unknown> = closure ?? mutableCopy(iface) as unknown as Record<string, unknown>;
   // The OBI root is a resolution container, not itself a JSON Schema. Ignore
   // every root field that happens to spell a JSON Schema keyword; Core says
   // unknown OBI fields are ignored, so (for example) an unknown root `type`
@@ -918,7 +938,7 @@ function operationSchemaClosure(
   const document: Record<string, unknown> = {
     operations: {
       [operationName]: {
-        [position]: cloneJSON(rootSchema),
+        [position]: mutableCopy(rootSchema),
       },
     },
   };
@@ -945,7 +965,7 @@ function operationSchemaClosure(
       const target = resolveDocumentPointer(iface, reference.slice(1));
       if (target === undefined) return undefined;
       if (hasResourceControl(target)) return undefined;
-      setDocumentPointer(document, reference.slice(1), cloneJSON(target));
+      setDocumentPointer(document, reference.slice(1), mutableCopy(target));
       pending.push(target);
     }
     for (const child of Object.values(object)) pending.push(child);
@@ -1423,7 +1443,7 @@ export function buildSchemaDefs(
   if (cached) return cached;
   const out: Record<string, unknown> = {};
   for (const [name, sch] of Object.entries(schemas)) {
-    const copy = cloneJSON(sch) as typeof sch;
+    const copy = mutableCopy(sch);
     if (typeof copy === "object" && copy !== null) {
       rewriteSchemaRefs(copy);
     }
@@ -1437,7 +1457,7 @@ function buildCompoundSchema(
   schema: unknown,
   defs: Record<string, unknown> | undefined,
 ): unknown {
-  const root = cloneJSON(schema) as typeof schema;
+  const root = mutableCopy(schema);
   if (typeof root !== "object" || root === null || Array.isArray(root)) {
     return root;
   }

@@ -1,6 +1,6 @@
 import type { JSONObject, JSONValue } from "./helpers.js";
 import { asMap, asSlice, renderValue, ptrJoin, numericToken, compareNumeric, ValueSet } from "./helpers.js";
-import { compareNumberTokens, equalJSON } from "@openbindings/json";
+import { compareNumberTokens, equal } from "@openbindings/json";
 import { NotNormalizedError } from "./errors.js";
 
 export interface CompatResult {
@@ -245,7 +245,7 @@ function compatConstEnum(tgt: JSONObject, cand: JSONObject, isInput: boolean): C
   if (isInput) {
     if (tgtHasConst) {
       if (candHasConst) {
-        return equalJSON(tgt["const"], cand["const"])
+        return equal(tgt["const"] as never, cand["const"] as never)
           ? COMPATIBLE
           : fail(`const: candidate const ${renderValue(cand["const"])} does not match target const ${renderValue(tgt["const"])}`);
       }
@@ -292,7 +292,7 @@ function compatConstEnum(tgt: JSONObject, cand: JSONObject, isInput: boolean): C
   }
   if (tgtHasConst) {
     if (candHasConst) {
-      return equalJSON(tgt["const"], cand["const"])
+      return equal(tgt["const"] as never, cand["const"] as never)
         ? COMPATIBLE
         : fail(`const: candidate const ${renderValue(cand["const"])} does not match target const ${renderValue(tgt["const"])}`);
     }

@@ -1,10 +1,10 @@
-import { isJSONNumber, stringifyJSON, numberToken, compareNumberTokens, JSONValueSet } from "@openbindings/json";
+import { isDecimal, isEncoded, isNumber, stringify, compareNumberTokens, JSONValueSet } from "@openbindings/json";
 
 export type JSONValue = unknown;
 export type JSONObject = Record<string, unknown>;
 
 export function asMap(v: JSONValue): JSONObject | null {
-  if (v && typeof v === "object" && !Array.isArray(v) && !isJSONNumber(v)) return v as JSONObject;
+  if (v && typeof v === "object" && !Array.isArray(v) && !isDecimal(v) && !isEncoded(v)) return v as JSONObject;
   return null;
 }
 
@@ -30,11 +30,11 @@ export function renderValue(v: JSONValue): string {
     || (typeof v === "number" && Number.isFinite(v))) return JSON.stringify(v);
   const ordered = (x: unknown): unknown => Array.isArray(x) ? x.map(ordered)
     : asMap(x) ? Object.fromEntries(Object.keys(x as JSONObject).sort().map(k => [k, ordered((x as JSONObject)[k])])) : x;
-  return stringifyJSON(ordered(v));
+  return stringify(ordered(v) as never);
 }
 
 export function numericToken(v: JSONValue): string {
-  const token = numberToken(v);
+  const token = isNumber(v) ? String(v) : undefined;
   if (token === undefined) throw new TypeError("Schema bound must be a JSON number");
   return token;
 }
