@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { OBInterface } from "./types.js";
 import { prepareInterface, compareBoundaryContracts } from "./prepared-interface.js";
-import { parseJSON, stringifyJSON } from "@openbindings/json";
+import { parse, stringifyJSON } from "@openbindings/json";
 
 function document(): OBInterface {
   return {
@@ -49,7 +49,7 @@ describe("PreparedInterface", () => {
 
   it("admits exact safe-integer-valued preferences without native coercion", async () => {
     const iface = document();
-    iface.bindings!.local!.preference = parseJSON("1.0") as never;
+    iface.bindings!.local!.preference = parse("1.0") as never;
     const prepared = await prepareInterface(iface);
     expect(stringifyJSON(prepared.interfaceSnapshot.bindings!.local!.preference)).toBe("1.0");
   });
@@ -179,14 +179,14 @@ describe("PreparedInterface", () => {
 
   it("retains wide values when JCS cannot export them", async () => {
     const raw = '{"openbindings":"0.2.0","operations":{"wide":{"input":{"const":9007199254740993}}}}';
-    const prepared = await prepareInterface(parseJSON(raw) as unknown as OBInterface);
+    const prepared = await prepareInterface(parse(raw) as unknown as OBInterface);
     await expect(prepared.exportJCS()).rejects.toThrow(/JCS/);
     expect(stringifyJSON(prepared.interfaceSnapshot)).toBe(raw);
-    expect(prepared.schemaValidator("wide", "input")!.validate(parseJSON("9007199254740993")).valid).toBe(true);
+    expect(prepared.schemaValidator("wide", "input")!.validate(parse("9007199254740993")).valid).toBe(true);
   });
 
   it("exports equivalent decimal spellings without requiring binary exactness", async () => {
-    const prepared = await prepareInterface(parseJSON('{"openbindings":"0.2.0","operations":{"n":{"input":{"const":0.100}}}}') as unknown as OBInterface);
+    const prepared = await prepareInterface(parse('{"openbindings":"0.2.0","operations":{"n":{"input":{"const":0.100}}}}') as unknown as OBInterface);
     expect((await prepared.exportJCS()).canonical).toContain('"const":0.1');
   });
 });
