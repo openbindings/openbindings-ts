@@ -23,7 +23,7 @@ import {
 } from "@openbindings/invoke";
 import { OpenAPIInvoker, OpenAPISynthesizer } from "./invoker.js";
 import { Swagger20Number } from "@openbindings/openapi-client/provider";
-import { isJSONNumber, stringifyJSON } from "@openbindings/json";
+import { isDecimal, stringify, isNumber } from "@openbindings/json";
 
 if (process.env.OB_CORPUS_REQUIRED === "1" && !process.env.OB_SPEC_CORPUS) {
   throw new Error("OB_CORPUS_REQUIRED=1 requires OB_SPEC_CORPUS");
@@ -372,7 +372,7 @@ function scenarioParameterConversion(scenario: ProcessorScenario): ((value: bool
   const raw = scenario.given.configuration?.parameterConversion;
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
   return (value: boolean | number | Swagger20Number) => {
-    const key = isJSONNumber(value) ? value.rawJSON : stringifyJSON(value);
+    const key = isNumber(value) ? String(value) : stringify(value as never);
     const converted = (raw as Record<string, unknown>)[key];
     if (typeof converted !== "string") throw new Error(`parameterConversion has no result for ${key}`);
     return converted;

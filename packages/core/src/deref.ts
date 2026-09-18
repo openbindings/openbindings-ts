@@ -9,7 +9,7 @@
  * references (no infinite recursion).
  */
 
-import { parseJSON, cloneValueGraph, isJSONNumber } from "@openbindings/json";
+import { parse, cloneValueGraph, isDecimal, isEncoded } from "@openbindings/json";
 
 export interface DereferenceOptions {
   /** Base URL for resolving relative external $refs. */
@@ -109,7 +109,7 @@ function resolveURI(base: string | undefined, reference: string): string | undef
 function defaultParse(text: string): unknown {
   const trimmed = text.trimStart();
   if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
-    return parseJSON(text);
+    return parse(text);
   }
   // Can't parse non-JSON without a custom parser; throw a clear error.
   throw new Error("External $ref returned non-JSON content. Pass a 'parse' option to dereference() to handle YAML or other formats.");
@@ -363,7 +363,7 @@ export async function dereference<T = unknown>(
   }
 
   async function walkAsync(node: unknown, document: DocumentContext): Promise<unknown> {
-    if (node == null || typeof node !== "object" || isJSONNumber(node)) return node;
+    if (node == null || typeof node !== "object" || isDecimal(node) || isEncoded(node)) return node;
     if (resolvedNodes.has(node)) return resolvedNodes.get(node);
 
     if (Array.isArray(node)) {

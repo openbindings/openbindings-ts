@@ -1,4 +1,4 @@
-import { equalJSON } from "@openbindings/json";
+import { equal } from "@openbindings/json";
 import { asMap } from "./helpers.js";
 import type { JSONObject } from "./helpers.js";
 
@@ -30,7 +30,7 @@ export function equalNormalizedSchemas(a: JSONObject, b: JSONObject): boolean {
       }
     } else if ((key === "items" || key === "additionalProperties") && asMap(av) && asMap(bv)) {
       if (!equalNormalizedSchemas(av as JSONObject, bv as JSONObject)) return false;
-    } else if (!equalJSON(av, bv)) return false;
+    } else if (!equal(av as never, bv as never)) return false;
   }
   return true;
 }

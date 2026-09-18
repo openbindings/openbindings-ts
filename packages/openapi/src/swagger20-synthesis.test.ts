@@ -6,7 +6,7 @@ import { OpenAPISynthesizer } from "./invoker.js";
 import { BINDING_SPEC_OPENAPI_20 } from "./constants.js";
 import { OpenAPIInvoker } from "./invoker.js";
 import { OperationInvoker } from "@openbindings/invoke";
-import { equalJSON } from "@openbindings/json";
+import { equal } from "@openbindings/json";
 
 describe("Swagger 2.0 generated absence branches", () => {
   const cases = [
@@ -35,7 +35,7 @@ describe("Swagger 2.0 generated absence branches", () => {
       // Only the serialized artifact crosses from generation to consumption.
       const document = JSON.parse(JSON.stringify(iface));
       const expression = document.bindings["createItem.openapi"].inputTransform;
-      expect(equalJSON(await officialEvaluator.evaluate(expression, fixture.input), fixture.expected)).toBe(true);
+      expect(equal(await officialEvaluator.evaluate(expression, fixture.input), fixture.expected)).toBe(true);
       let dispatches = 0;
       const call = new OperationInvoker([new OpenAPIInvoker()], {
         transformEvaluator: { evaluate: (expr, value) => officialEvaluator.evaluate(expr, value) },

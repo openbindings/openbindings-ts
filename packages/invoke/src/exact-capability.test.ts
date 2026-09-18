@@ -1,6 +1,6 @@
 import { expect, it } from "vitest";
 import { prepareInterface, type OBInterface } from "@openbindings/core";
-import { parseJSON } from "@openbindings/json";
+import { parse } from "@openbindings/json";
 import { OperationInvoker } from "./operation-invoker.js";
 import { operationSignature } from "./operation-signature.js";
 import { HandlerBindingInvoker } from "./handler-binding-invoker.js";
@@ -30,7 +30,7 @@ for (const path of ["lazy", "prepared-direct", "prepared-pump"] as const) for (c
     const terminal = call.closed.catch(error => error);
     const output = single(call.outputs).catch(error => error);
     try {
-      const written = await call.write(parseJSON("1e100000000000000000000000000000000000000")).catch(error => error);
+      const written = await call.write(parse("1e100000000000000000000000000000000000000")).catch(error => error);
       if (position === "input") expect(written).toMatchObject({code: ERR_RUNTIME});
       else { expect(written).toBeUndefined(); expect(await output).toMatchObject({code: ERR_RUNTIME}); }
       expect(await terminal).toMatchObject({code: ERR_RUNTIME});

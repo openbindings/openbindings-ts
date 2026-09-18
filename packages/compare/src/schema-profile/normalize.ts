@@ -1,4 +1,4 @@
-import { equalJSON, parseJSON, JSONValueSet } from "@openbindings/json";
+import { equal, parse, JSONValueSet } from "@openbindings/json";
 import { OutsideProfileError, SelectorError, SchemaError } from "./errors.js";
 import { inputCompatible, outputCompatible } from "./compat.js";
 import type { CompatResult } from "./compat.js";
@@ -212,7 +212,7 @@ export class Normalizer {
       try {
         const raw = await this.fetcher.fetch(u);
         const text = typeof raw === "string" ? raw : new TextDecoder().decode(raw);
-        doc = parseJSON(text);
+        doc = parse(text);
       } catch (e: unknown) {
         cleanup();
         throw new SelectorError(pathOrRoot(path), ref, e instanceof Error ? e : String(e));
@@ -450,7 +450,7 @@ function mergeAllOfBranch(acc: JSONObject, branch: JSONObject, path: string): vo
 
   if ("const" in branch) {
     if ("const" in acc) {
-      if (!equalJSON(acc["const"], branch["const"])) {
+      if (!equal(acc["const"] as never, branch["const"] as never)) {
         throw new SchemaError(path, "allOf const conflict");
       }
     } else {

@@ -1,5 +1,5 @@
 import { checkBindingSpecs as checkBindingSpecSupport, type BindingSpecInfo, type BindingSpecVerdict } from "@openbindings/core";
-import {parseJSON, stringifyJSON} from "@openbindings/json";
+import {parse, stringify} from "@openbindings/json";
 import {
   CONTEXT_REQUIRED,
   InvocationError,
@@ -242,8 +242,8 @@ async function sourceClientKey(args: BindingInvocationArgs): Promise<SourceClien
     // Exact encoded bytes are a cache accelerator, not a canonical identity.
     // Retain a collision witness and own the loader's source before awaiting
     // the digest, so caller mutation cannot install new content under an old key.
-    const content = stringifyJSON(args.source.content);
-    const source = {...args.source, content:parseJSON(content)};
+    const content = stringify(args.source.content as never);
+    const source = {...args.source, content:parse(content)};
     const prefix = sourceLocationClientPrefix(args);
     const digest = await sha256(content);
     return digest === undefined

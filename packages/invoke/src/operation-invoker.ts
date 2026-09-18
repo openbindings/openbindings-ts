@@ -1,6 +1,6 @@
 import type { OBInterface, BindingEntry, Operation, Source, Transform, TransformOrRef, BindingSpecInfo, BindingSpecVerdict } from "@openbindings/core";
 import { PreparedInterface, prepareInterface, resolveTransform } from "@openbindings/core";
-import { cloneValueGraph, equalJSON, isJSONNumber } from "@openbindings/json";
+import { cloneValueGraph, equal, isDecimal, isEncoded } from "@openbindings/json";
 import type {
   BindingInvocationArgs,
   InvokeOptions,
@@ -1336,7 +1336,7 @@ function asInvocationError(err: unknown): InvocationError {
 function contextValuesEqual(left: unknown, right: unknown): boolean {
   if (left === undefined || right === undefined) return left === right;
   try {
-    return equalJSON(left, right);
+    return equal(left as never, right as never);
   } catch {
     // This is only a retry-suppression optimization. Unavailable comparison
     // is a conservative miss, never equality or an incompatible verdict.
@@ -1484,7 +1484,7 @@ async function applyTransformRef(
 function isTransformJSONValue(value: unknown, ancestors = new Set<object>()): boolean {
   if (value === null || typeof value === "string" || typeof value === "boolean") return true;
   if (typeof value === "number") return Number.isFinite(value);
-  if (isJSONNumber(value)) return true;
+  if (isDecimal(value) || isEncoded(value)) return true;
   if (typeof value !== "object" || ancestors.has(value)) return false;
   ancestors.add(value);
   try {

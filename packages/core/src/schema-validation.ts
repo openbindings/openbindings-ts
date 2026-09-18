@@ -14,8 +14,11 @@
  * the SDK's public error and result types are stable across any future
  * swap. See STABILITY.md.
  */
-import { compileSchema } from "@openbindings/json-schema";
-import { cloneJSON, isJSONNumber, stringifyJSON, numberToken, integerNumberToken, compareNumberTokens } from "@openbindings/json";
+import { compile } from "@openbindings/json-schema";
+import type { Schema } from "@openbindings/json-schema";
+import { admit } from "@openbindings/json/internal";
+import type { Value } from "@openbindings/json";
+import { isDecimal, isEncoded, isNumber, stringify, integerNumberToken, compareNumberTokens } from "@openbindings/json";
 import { OBI_BOUNDARY_DRAFT } from "./exact-schema-draft.js";
 import type { OBInterface } from "./types.js";
 import { isValidSemver } from "./version.js";
@@ -97,9 +100,29 @@ const VALIDATION_KEYWORD_BY_CODE: Readonly<Record<string, string>> = Object.free
   "unique-items-error": "uniqueItems",
 });
 
-function validationSchemaPaths(node: ReturnType<typeof compileSchema>): WeakMap<object, string> {
+/**
+ * A mutable structural copy of an admitted value.
+ *
+ * The shared value package offers no deep clone on purpose: its results are
+ * frozen, so nothing needs defending against mutation. A derived document is
+ * the exception — the compile-time view injects a root `$ref` and writes
+ * resolved targets into pointers — so it is rebuilt here instead. Only
+ * containers are rebuilt; an exact number or a byte-backed string is an
+ * immutable leaf and carries by reference.
+ */
+function mutableCopy<T>(value: T): T {
+  if (Array.isArray(value)) return value.map((item) => mutableCopy(item)) as unknown as T;
+  if (typeof value !== "object" || value === null || isDecimal(value) || isEncoded(value)) return value;
+  const out: Record<string, unknown> = {};
+  for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
+    out[key] = mutableCopy(child);
+  }
+  return out as T;
+}
+
+function validationSchemaPaths(root: unknown): WeakMap<object, string> {
   const paths = new WeakMap<object, string>();
-  const pending: Array<{ value: unknown; pointer: string }> = [{ value: node.schema, pointer: "" }];
+  const pending: Array<{ value: unknown; pointer: string }> = [{ value: root, pointer: "" }];
   while (pending.length > 0) {
     const { value, pointer } = pending.pop()!;
     if (typeof value !== "object" || value === null || paths.has(value)) continue;
@@ -122,11 +145,32 @@ function validationSchemaPath(error: JslError, paths: WeakMap<object, string>): 
     : undefined;
 }
 
-function wrapNode(node: ReturnType<typeof compileSchema>): CompiledSchema {
-  const schemaPaths = validationSchemaPaths(node);
+/**
+ * Compiles one schema document and wraps it in the SDK's stable result shape.
+ *
+ * The document is admitted here rather than inside the compiler so this side
+ * keeps a reference to the exact graph the validator reports against.
+ * Admission rebuilds a plain graph into a frozen one but returns an
+ * already-admitted value untouched, so the compiler's own admission is a
+ * no-op and every schema object an error carries is an object in `admitted`.
+ * That is what lets a failure still name the schema pointer it violated.
+ *
+ * Compiling through the exact entry point is also what makes an exact value
+ * validatable at all: the retired one left the instance unadmitted, so a
+ * Decimal — which is what this project's JSON reader produces for every
+ * number outside the safe-integer range — reached a validator that did not
+ * recognize it as a number.
+ */
+function compileAdmitted(root: unknown, options?: Parameters<typeof compile>[1]): CompiledSchema {
+  const admitted = admit(root as Value);
+  return wrapSchema(compile(admitted, options), admitted);
+}
+
+function wrapSchema(schema: Schema, admitted: unknown): CompiledSchema {
+  const schemaPaths = validationSchemaPaths(admitted);
   return Object.freeze({
     validate(value: unknown) {
-      const r = node.validate(value);
+      const r = schema.validate(value as Value);
       if (r.valid) return { valid: true, failures: [] };
       const failures: ValidationFailure[] = (r.errors ?? []).map((e: JslError) => {
         const schemaPath = validationSchemaPath(e, schemaPaths);
@@ -145,7 +189,7 @@ function wrapNode(node: ReturnType<typeof compileSchema>): CompiledSchema {
 function jsonTypeName(v: unknown): string {
   if (v === null) return "null";
   if (typeof v === "boolean") return "boolean";
-  if (typeof v === "number" || isJSONNumber(v)) return "number";
+  if (isNumber(v)) return "number";
   if (typeof v === "string") return "string";
   if (Array.isArray(v)) return "array";
   if (typeof v === "object") return "object";
@@ -216,7 +260,7 @@ function metaValidator(): CompiledSchema {
   // The meta-schema's own $schema is itself; drop it to avoid a
   // self-referential dialect lookup during compilation.
   delete compound.$schema;
-  _metaValidator = wrapNode(compileSchema(compound, { drafts: [OBI_BOUNDARY_DRAFT] }));
+  _metaValidator = compileAdmitted(compound);
   return _metaValidator;
 }
 
@@ -260,7 +304,7 @@ const NODE_SHAPE_VERDICT_LIMIT = 20000;
 
 /** An object-form schema: the only value this decomposition lifts out. */
 function isObjectFormSchema(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value) && !isJSONNumber(value);
+  return typeof value === "object" && value !== null && !Array.isArray(value) && !isDecimal(value) && !isEncoded(value);
 }
 
 /** Object or boolean form — the two forms a schema position admits. */
@@ -337,7 +381,7 @@ function metaValidatesNodeWise(root: Record<string, unknown>): boolean {
 
     let key: string | undefined;
     try {
-      key = stringifyJSON(shape);
+      key = stringify(shape as never);
     } catch {
       // A value JSON cannot represent (a cycle through an annotation, a
       // BigInt) has no shape key; decide this node without the cache.
@@ -459,7 +503,7 @@ type StructuralProblem = (path: string, message: string) => void;
 const OBI_IDENTIFIER = /^[A-Za-z0-9_][A-Za-z0-9_.-]*$/;
 
 function plainJSONObject(value: unknown): Record<string, unknown> | undefined {
-  return typeof value === "object" && value !== null && !Array.isArray(value) && !isJSONNumber(value)
+  return typeof value === "object" && value !== null && !Array.isArray(value) && !isDecimal(value) && !isEncoded(value)
     ? value as Record<string, unknown>
     : undefined;
 }
@@ -693,7 +737,7 @@ function validateBindingShape(
   optionalTyped(binding, "deprecated", `${path}/deprecated`, "boolean", problem);
   if (present(binding, "preference")) {
     const preference = binding.preference;
-    const token = numberToken(preference);
+    const token = isNumber(preference) ? String(preference) : undefined;
     if (token === undefined || !integerNumberToken(token) || compareNumberTokens(token, "-9007199254740991") < 0 || compareNumberTokens(token, "9007199254740991") > 0) {
       problem(`${path}/preference`, "must be a safe integer");
     }
@@ -853,7 +897,7 @@ export function compileOperationSchema(
   if (cached) return cached;
 
   const closure = operationSchemaClosure(iface, operationName, position);
-  const document: Record<string, unknown> = closure ?? cloneJSON(iface) as Record<string, unknown>;
+  const document: Record<string, unknown> = closure ?? mutableCopy(iface) as unknown as Record<string, unknown>;
   // The OBI root is a resolution container, not itself a JSON Schema. Ignore
   // every root field that happens to spell a JSON Schema keyword; Core says
   // unknown OBI fields are ignored, so (for example) an unknown root `type`
@@ -894,7 +938,7 @@ function operationSchemaClosure(
   const document: Record<string, unknown> = {
     operations: {
       [operationName]: {
-        [position]: cloneJSON(rootSchema),
+        [position]: mutableCopy(rootSchema),
       },
     },
   };
@@ -921,7 +965,7 @@ function operationSchemaClosure(
       const target = resolveDocumentPointer(iface, reference.slice(1));
       if (target === undefined) return undefined;
       if (hasResourceControl(target)) return undefined;
-      setDocumentPointer(document, reference.slice(1), cloneJSON(target));
+      setDocumentPointer(document, reference.slice(1), mutableCopy(target));
       pending.push(target);
     }
     for (const child of Object.values(object)) pending.push(child);
@@ -1040,7 +1084,7 @@ function compileExampleSchemaUncached(
     if (!meta.valid) {
       // An invalid result normally carries at least one failure; if the
       // backend ever reports invalid without details, fall back to the
-      // same generic diagnostic wrapNode uses.
+      // same generic diagnostic the wrapper uses.
       const first = meta.failures[0] ?? { path: "", message: "schema violation" };
       throw new Error(
         `schema does not conform to JSON Schema 2020-12: ${first.path ? first.path + ": " : ""}${first.message}`,
@@ -1048,7 +1092,7 @@ function compileExampleSchemaUncached(
     }
     assertFullyResolvable(root as Record<string, unknown>);
   }
-  return wrapNode(compileSchema(root as object, { drafts: [OBI_BOUNDARY_DRAFT] }));
+  return compileAdmitted(root);
 }
 
 /**
@@ -1064,21 +1108,12 @@ function compileDocumentRootSchema(
 ): CompiledSchema {
   assertFullyResolvable(root, schemaRoots, true);
   const remotes = embeddedIDResources(schemaRoots);
-  const options = {
-    drafts: [OBI_BOUNDARY_DRAFT],
-    formatAssertion: false as const,
-  };
+  const options = { formatAssertion: false as const };
   if (remotes.length > 0) {
-    const [first, ...rest] = remotes;
-    const remote = compileSchema(first!, options);
-    for (const resource of rest) {
-      remote.addRemoteSchema(String(resource.$id), resource);
-    }
-    return wrapNode(compileSchema(root, { ...options, remote }));
+    // The embedded resources are admitted with the root by the compiler.
+    return compileAdmitted(root, { ...options, remotes } as Parameters<typeof compile>[1]);
   }
-  return wrapNode(compileSchema(root, {
-    ...options,
-  }));
+  return compileAdmitted(root, options);
 }
 
 /**
@@ -1108,7 +1143,7 @@ function embeddedIDResources(schemaRoots: unknown[]): Record<string, unknown>[] 
  * asserts.
  */
 export function compileEmbeddedSchema(schema: unknown): CompiledSchema {
-  return wrapNode(compileSchema(schema as object, { drafts: [OBI_BOUNDARY_DRAFT] }));
+  return compileAdmitted(schema);
 }
 
 // ---------------------------------------------------------------------------
@@ -1408,7 +1443,7 @@ export function buildSchemaDefs(
   if (cached) return cached;
   const out: Record<string, unknown> = {};
   for (const [name, sch] of Object.entries(schemas)) {
-    const copy = cloneJSON(sch) as typeof sch;
+    const copy = mutableCopy(sch);
     if (typeof copy === "object" && copy !== null) {
       rewriteSchemaRefs(copy);
     }
@@ -1422,7 +1457,7 @@ function buildCompoundSchema(
   schema: unknown,
   defs: Record<string, unknown> | undefined,
 ): unknown {
-  const root = cloneJSON(schema) as typeof schema;
+  const root = mutableCopy(schema);
   if (typeof root !== "object" || root === null || Array.isArray(root)) {
     return root;
   }

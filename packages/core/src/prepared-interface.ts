@@ -1,5 +1,6 @@
 import { canonicalize } from "./canonical-json.js";
-import { cloneJSON, equalJSON, parseJSON, stringifyJSON } from "@openbindings/json";
+import { equal, parse, stringify } from "@openbindings/json";
+import { admit } from "@openbindings/json/internal";
 import { compileOperationSchema, schemaChildValues, type CompiledSchema } from "./schema-validation.js";
 import type {
   BindingEntry,
@@ -61,7 +62,7 @@ export function compareBoundaryContracts(left: PreparedBoundaryContract, right: 
   if (cached !== undefined) return cached;
   // Owners and their graphs are immutable. This memo retains no foreign
   // owner strongly and caches no capability failure or policy decision.
-  const result = equalJSON(a, b) ? "equal" : "different";
+  const result = equal(a as never, b as never) ? "equal" : "different";
   memo.set(right, result); contractComparisons.set(left, memo);
   return result;
 }
@@ -109,8 +110,8 @@ export class PreparedInterface {
 
   /** Explicit fallible RFC 8785 export. Failure leaves this owner usable. */
   async exportJCS(): Promise<Readonly<{ canonical: string; revision: string }>> {
-    const candidate = canonicalize(JSON.parse(stringifyJSON(this.#state.snapshot)));
-    if (candidate === undefined || !equalJSON(this.#state.snapshot, parseJSON(candidate))) {
+    const candidate = canonicalize(JSON.parse(stringify(this.#state.snapshot as never)));
+    if (candidate === undefined || !equal(this.#state.snapshot as never, parse(candidate))) {
       throw new TypeError("openbindings: JCS export would change a carried JSON value");
     }
     return Object.freeze({ canonical: candidate, revision: await sha256(candidate) });
@@ -205,7 +206,10 @@ export class PreparedInterface {
     if (!iface || typeof iface !== "object") {
       throw new TypeError("openbindings: interface is required");
     }
-    const snapshot = cloneJSON(iface) as unknown as OBInterface;
+    // Admission is the private, deeply frozen copy this snapshot promises:
+    // it refuses anything outside the JSON domain and freezes what it returns,
+    // so a caller cannot reach back into it afterwards.
+    const snapshot = admit(iface as never) as unknown as OBInterface;
     validateInterface(snapshot, options?.validation);
 
     // Public enumeration stays deterministic without canonicalizing values.
