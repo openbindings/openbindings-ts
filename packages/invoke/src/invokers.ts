@@ -59,8 +59,9 @@ export interface CompiledBindingInvoker {
    * The operation layer supplies its own binding-facing handle after applying
    * the ordinary operation validation/transform boundary. Implementations
    * MUST NOT repeat `prepareBinding`: the operation layer evaluates it once
-   * before entering this method. This capability is only used when reactive
-   * context retry is not installed; other compiled bindings retain the
+   * before entering this method. This capability is only used when no
+   * context resolver is installed (preflight resolution merges context on
+   * the two-handle path); other compiled bindings retain the
    * cardinality-neutral two-handle adapter.
    */
   invokeBindingHandle?<I = unknown, O = unknown>(

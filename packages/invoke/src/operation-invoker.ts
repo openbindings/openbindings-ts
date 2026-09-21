@@ -20,7 +20,6 @@ import {
   InvocationError,
   InvocationImpl,
   contextRequiredError,
-  isContextRequired,
   isContextRequiredDetails,
 } from "./invocation.js";
 import { OperationNotFoundError, ValidationError } from "@openbindings/core";
@@ -56,21 +55,16 @@ import {
 } from "./hooks.js";
 import type { DiagnosticCollector } from "./diagnostics.js";
 
-/**
- * Maximum CONTEXT_REQUIRED resolve-and-retry rounds per invocation. A
- * binding that keeps challenging after resolution is either mis-declaring
- * its requirements or being fed an insufficient resolver; surfacing beats
- * looping.
- */
-const MAX_CONTEXT_ROUNDS = 3;
-
 export interface OperationInvokerOptions {
   bindingSelector?: BindingSelector;
   transformEvaluator?: TransformEvaluator;
   /**
-   * Resolves CONTEXT_REQUIRED challenges raised by bindings. When unset, or
-   * when it declines (returns null), the challenge surfaces to the caller
-   * as an ordinary terminal InvocationError.
+   * Resolves the context requirements a binding reports at preflight
+   * (`prepareBinding`), before the attempt starts. When unset, or when it
+   * declines (returns null), the requirement surfaces to the caller as a
+   * CONTEXT_REQUIRED terminal InvocationError. It is not consulted for a
+   * live CONTEXT_REQUIRED raised during the attempt: that terminates the
+   * invocation for the caller to resolve and invoke again.
    */
   contextResolver?: ContextResolver;
   fetch?: typeof globalThis.fetch;
@@ -169,12 +163,13 @@ interface PreparedOperationState<I, O> {
  *     it is emitted; a failure is terminal and the value is not emitted.
  *     Callers that need to inspect unvalidated payloads call
  *     `invokeBinding` directly.
- *   - CONTEXT_REQUIRED negotiation: challenges raised by the binding before
- *     any input was consumed are resolved via the configured resolver and
- *     the binding is re-driven against the same input buffer (the
- *     already-forwarded prefix is replayed). Once the binding shows
- *     observable progress (a first output), challenges surface to the
- *     caller instead.
+ *   - CONTEXT_REQUIRED resolution runs at preflight only: the requirements
+ *     the binding reports through `prepareBinding` are resolved via the
+ *     configured resolver and the one attempt starts with the merged
+ *     context. A live CONTEXT_REQUIRED raised by the binding during the
+ *     attempt terminates the invocation with that error and its details
+ *     intact, whether or not inputs were forwarded or outputs produced;
+ *     the caller resolves it and invokes again. Nothing is replayed.
  *
  * `invoke` throws synchronously on wiring/document errors (unknown
  * operation, binding, or source) — failures knowable before any work
@@ -334,9 +329,9 @@ export class OperationInvoker {
    *
    * Contract narrowing vs the bare handle: `header` on an operation-layer
    * invocation settles with the binding's metadata at the FIRST DELIVERED
-   * output (or at terminal), not the instant the binding sets it — forwarding
-   * any earlier would pin metadata from an attempt that CONTEXT_REQUIRED
-   * negotiation may yet discard and re-drive.
+   * output (or at terminal), not the instant the binding sets it: operation-
+   * layer metadata accompanies an operation-layer output, one that the
+   * transforms and output validation have already accepted.
    */
   invoke<I = unknown, O = unknown>(
     obi: OBInterface,
@@ -668,9 +663,9 @@ export class OperationInvoker {
 
   /**
    * Runs a captured in-process binding against the caller's invocation
-   * channel directly. Deterministic preflight remains once per attempt; no
-   * registry lookup, second InvocationImpl, pump, replay log, or JSON bridge
-   * exists on this path.
+   * channel directly. Deterministic preflight runs once; no registry
+   * lookup, second InvocationImpl, pump, or JSON bridge exists on this
+   * path.
    */
   private async runDirectPreparedBinding<I, O>(
     callerInv: InvocationImpl<I, O>,
@@ -874,10 +869,11 @@ export class OperationInvoker {
   }
 
   /**
-   * Drives the binding-layer invocation(s) behind one caller-facing handle:
-   * an input pump forwarding (transformed) caller inputs, an output loop
-   * forwarding (transformed, schema-validated) binding outputs, and the
-   * CONTEXT_REQUIRED resolve-replay-retry machinery between attempts.
+   * Drives the one binding-layer invocation behind one caller-facing handle:
+   * preflight context resolution, then an input pump forwarding
+   * (transformed) caller inputs and an output loop forwarding (transformed,
+   * schema-validated) binding outputs. Every binding terminal, a live
+   * CONTEXT_REQUIRED included, ends the invocation as-is.
    */
   private async run<I, O>(
     callerInv: InvocationImpl<I, O>,
@@ -940,8 +936,8 @@ export class OperationInvoker {
 
     const mergeResolved = (resolved: Record<string, unknown>): boolean => {
       const next: Record<string, unknown> = { ...(context ?? {}), ...resolved };
-      // The binding-invoker contract retries with the *augmented* context, not
-      // a replaced one. Top-level credential fields are leaf values, so an
+      // Preflight resolution starts the attempt with the *augmented* context,
+      // not a replaced one. Top-level credential fields are leaf values, so an
       // overwrite is correct — but `configuration` is a map keyed by
       // configuration point, and a resolved config.value (R1a) names one point;
       // overwriting the whole map would clobber sibling points the caller
@@ -997,14 +993,17 @@ export class OperationInvoker {
       return;
     }
 
-    // ----- shared input machinery (survives attempt swaps) -----
+    // ----- input pump -----
 
     // The single reader of the caller's input buffer. At most one next() is
-    // in flight; its result lands in `stash` and survives a retry swap, so
-    // no caller input is ever lost between attempts.
+    // in flight; its result lands in `stash`. `retired` lets the pump stop
+    // waiting once the attempt has ended (binding terminal or caller cancel)
+    // without issuing a second next(); a pull still in flight at that point
+    // settles into the stash and is dropped with the invocation.
     const callerInputs = callerInv.inputs()[Symbol.asyncIterator]();
     let stash: { r?: IteratorResult<I, void>; err?: unknown } | null = null;
     let pulling = false;
+    let retired = false;
     let wakeWaiters: (() => void)[] = [];
     const wake = (): void => {
       const ws = wakeWaiters;
@@ -1021,39 +1020,10 @@ export class OperationInvoker {
       );
     };
 
-    // Inputs already forwarded to the binding, post-transform, recorded for
-    // replay while the retry window is open. The window closes at the
-    // binding's first output (observable progress: by the binding contract,
-    // CONTEXT_REQUIRED precedes any side effect, so a challenge after
-    // output cannot be retried safely).
-    let replayLog: unknown[] = [];
-    let retryEligible = true;
-    let attemptGen = 0;
     let inputSurface: InvocationError | undefined;
 
     const pumpInputs = async (inner: Invocation<unknown, unknown>, signal: AbortSignal): Promise<void> => {
-      const myGen = attemptGen;
-      // Replay the prefix the previous attempt(s) already consumed. Snapshot
-      // the ARRAY REFERENCE first: this attempt's own first output closes the
-      // retry window and rebinds `replayLog` to a fresh empty array — the
-      // snapshot keeps the in-flight replay iterating the full prefix instead
-      // of being truncated mid-loop (which would silently drop inputs).
-      const replay = replayLog;
-      for (let i = 0; i < replay.length; i++) {
-        try {
-          await inner.write(replay[i]);
-        } catch (err) {
-          if (err instanceof InvocationError && err.code === ERR_INPUT_CLOSED) {
-            // Same propagation as the live loop below: the binding stopped
-            // reading; further caller writes must reject rather than be
-            // silently accepted into a buffer nobody drains.
-            void callerInv.closeInput();
-            inputSurface ??= new InvocationError(ERR_TOO_MANY_INPUTS);
-          }
-          return; // inner terminal or input-closed; the output loop owns reporting
-        }
-      }
-      while (attemptGen === myGen) {
+      while (!retired) {
         if (stash) {
           const s = stash;
           stash = null;
@@ -1068,13 +1038,11 @@ export class OperationInvoker {
             try {
               v = await applyTransformRef(evaluator!, iface.transforms, binding.inputTransform, v, signal);
             } catch {
-              if (signal.aborted) {
-                // No next() is in flight while transforming this item. Restore
-                // the raw input for the next attempt; do not transform replayed
-                // post-transform values a second time.
-                stash = s;
-                return;
-              }
+              // The attempt ended (binding terminal or caller cancel) while
+              // this item was being transformed: whoever ended it owns the
+              // report, and a successful write is accepted into exactly one
+              // attempt, so the interrupted input is simply dropped.
+              if (signal.aborted) return;
               await inner.cancel();
               callerInv.fireError(
                 new InvocationError(ERR_TRANSFORM_ERROR),
@@ -1082,7 +1050,6 @@ export class OperationInvoker {
               return;
             }
           }
-          if (retryEligible) replayLog.push(v);
           try {
             await inner.write(v);
           } catch (err) {
@@ -1097,7 +1064,7 @@ export class OperationInvoker {
               inputSurface ??= new InvocationError(ERR_TOO_MANY_INPUTS);
               return;
             }
-            // Inner terminal: if a retry follows, v is in the replay log.
+            // Inner terminal; the output loop owns reporting.
             return;
           }
           continue;
@@ -1107,121 +1074,96 @@ export class OperationInvoker {
       }
     };
 
-    // ----- attempt loop -----
+    // ----- the single attempt -----
 
-    let rounds = 0;
-    for (;;) {
-      const attempt = new AbortController();
-      const abortAttempt = (): void => attempt.abort(callerInv.signal.reason);
-      if (callerInv.signal.aborted) abortAttempt();
-      else callerInv.signal.addEventListener("abort", abortAttempt, { once: true });
-      let inner: Invocation<unknown, unknown>;
-      try {
-        const args = bindingArgs();
-        inner = compiledBinding?.invokeBindingAfterPreflight
-          ? compiledBinding.invokeBindingAfterPreflight(args)
-          : (compiledBinding ?? this.invoker).invokeBinding(args);
-      } catch (err) {
-        callerInv.signal.removeEventListener("abort", abortAttempt);
-        attempt.abort();
-        callerInv.fireError(wireError(err));
-        return;
-      }
+    // `attempt` scopes in-flight transform evaluation to this attempt: it
+    // aborts when the caller cancels and when the binding reaches a
+    // terminal, so no evaluation outlives the invocation it served.
+    const attempt = new AbortController();
+    const abortAttempt = (): void => attempt.abort(callerInv.signal.reason);
+    if (callerInv.signal.aborted) abortAttempt();
+    else callerInv.signal.addEventListener("abort", abortAttempt, { once: true });
+    let inner: Invocation<unknown, unknown>;
+    try {
+      const args = bindingArgs();
+      inner = compiledBinding?.invokeBindingAfterPreflight
+        ? compiledBinding.invokeBindingAfterPreflight(args)
+        : (compiledBinding ?? this.invoker).invokeBinding(args);
+    } catch (err) {
+      callerInv.signal.removeEventListener("abort", abortAttempt);
+      attempt.abort();
+      callerInv.fireError(wireError(err));
+      return;
+    }
 
-      attemptGen++;
-      const pump = pumpInputs(inner, attempt.signal);
+    const pump = pumpInputs(inner, attempt.signal);
 
-      let surface: InvocationError | undefined;
-      let retry = false;
-      try {
-        for await (const out of inner.outputs) {
-          if (retryEligible) {
-            retryEligible = false;
-            replayLog = [];
-          }
-          let data: unknown = out;
-          if (binding.outputTransform) {
-            try {
-              data = await applyTransformRef(evaluator!, iface.transforms, binding.outputTransform, data, attempt.signal);
-            } catch {
-              await inner.cancel();
-              if (attempt.signal.aborted) break;
-              surface = new InvocationError(ERR_TRANSFORM_ERROR);
-              break;
-            }
-          }
-          // OBI-T-16: an invalid output is not emitted; the invocation
-          // terminates. Per-item for streaming bindings.
-          if (outputValidator) {
-            const r = operationValidationResult(outputValidator, data);
-            if (r instanceof InvocationError) {
-              await inner.cancel();
-              surface = r;
-              break;
-            }
-            if (!r.valid) {
-              await inner.cancel();
-              diagnostics?.recordValidation(
-                "output",
-                binding.operation,
-                bindingKey,
-                r.failures,
-              );
-              surface = new InvocationError(ERR_OPERATION_VALIDATION_FAILED);
-              break;
-            }
-          }
+    let surface: InvocationError | undefined;
+    try {
+      for await (const out of inner.outputs) {
+        let data: unknown = out;
+        if (binding.outputTransform) {
           try {
-            await callerInv.emitOutput(data as O);
+            data = await applyTransformRef(evaluator!, iface.transforms, binding.outputTransform, data, attempt.signal);
           } catch {
-            // Caller-side terminal (cancel / abandoned iteration): tear
-            // down the binding and stop. Nothing to report — the caller
-            // handle is already terminal.
             await inner.cancel();
+            if (attempt.signal.aborted) break;
+            surface = new InvocationError(ERR_TRANSFORM_ERROR);
             break;
           }
         }
-      } catch (err) {
-        const invErr = asInvocationError(err);
-        if (
-          isContextRequired(invErr) &&
-          retryEligible &&
-          this.contextResolver &&
-          rounds < MAX_CONTEXT_ROUNDS
-        ) {
-          try {
-            const resolvedCtx = await this.contextResolver(invErr.data);
-            if (resolvedCtx && mergeResolved(resolvedCtx)) retry = true;
-            else surface = invErr;
-          } catch {
-            surface = new InvocationError(ERR_RUNTIME);
+        // OBI-T-16: an invalid output is not emitted; the invocation
+        // terminates. Per-item for streaming bindings.
+        if (outputValidator) {
+          const r = operationValidationResult(outputValidator, data);
+          if (r instanceof InvocationError) {
+            await inner.cancel();
+            surface = r;
+            break;
           }
-        } else {
-          surface = invErr;
+          if (!r.valid) {
+            await inner.cancel();
+            diagnostics?.recordValidation(
+              "output",
+              binding.operation,
+              bindingKey,
+              r.failures,
+            );
+            surface = new InvocationError(ERR_OPERATION_VALIDATION_FAILED);
+            break;
+          }
+        }
+        try {
+          await callerInv.emitOutput(data as O);
+        } catch {
+          // Caller-side terminal (cancel / abandoned iteration): tear
+          // down the binding and stop. Nothing to report: the caller
+          // handle is already terminal.
+          await inner.cancel();
+          break;
         }
       }
+    } catch (err) {
+      // Every binding terminal ends the invocation as-is. A live
+      // CONTEXT_REQUIRED is no exception: the resolver serves preflight
+      // only, and the caller owns any second attempt.
+      surface = asInvocationError(err);
+    }
 
-      // Unpark and retire this attempt's pump before deciding next steps —
-      // the shared stash must have exactly one consumer at a time.
-      attemptGen++;
-      callerInv.signal.removeEventListener("abort", abortAttempt);
-      attempt.abort();
-      wake();
-      await pump;
+    // Retire the pump before reporting: abort any in-flight transform,
+    // unpark a pump waiting on caller input, and let it exit.
+    retired = true;
+    callerInv.signal.removeEventListener("abort", abortAttempt);
+    attempt.abort();
+    wake();
+    await pump;
 
-      if (!retry && !surface && inputSurface) surface = inputSurface;
+    if (!surface && inputSurface) surface = inputSurface;
 
-      if (retry) {
-        rounds++;
-        continue;
-      }
-
-      if (surface) {
-        callerInv.fireError(surface);
-      } else {
-        callerInv.closeOutput();
-      }
-      return;
+    if (surface) {
+      callerInv.fireError(surface);
+    } else {
+      callerInv.closeOutput();
     }
   }
 
@@ -1332,14 +1274,15 @@ function asInvocationError(err: unknown): InvocationError {
   return new InvocationError(ERR_RUNTIME);
 }
 
-/** JSON-domain structural comparison used only to suppress identical context retries. */
+/** JSON-domain structural comparison used only to detect a preflight resolution that supplied nothing new. */
 function contextValuesEqual(left: unknown, right: unknown): boolean {
   if (left === undefined || right === undefined) return left === right;
   try {
     return equal(left as never, right as never);
   } catch {
-    // This is only a retry-suppression optimization. Unavailable comparison
-    // is a conservative miss, never equality or an incompatible verdict.
+    // This only decides whether preflight resolution changed anything.
+    // Unavailable comparison is a conservative miss, never equality or an
+    // incompatible verdict.
     return false;
   }
 }

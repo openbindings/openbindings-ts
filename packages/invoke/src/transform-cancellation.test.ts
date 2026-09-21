@@ -96,45 +96,47 @@ it("concurrent invocations have independent evaluator signals", async () => {
   } finally { await a.cancel(); await b.cancel(); }
 });
 
-it("attempt retirement stops evaluation, preserves the raw input, and retries without a transform error", async () => {
+it("a binding terminal retires an in-flight input transform: the terminal surfaces, not a transform error, and nothing is retried", async () => {
   const entered = latch(), stopped = latch();
+  const details = { target: "test", alternatives: [{ requirements: [{ type: "auth.bearer" }] }] };
   let attempts = 0, evaluations = 0;
   const mock: BindingInvoker = {
     bindingSpecs: () => [{ bindingSpec: "test.cancellation@1" }],
     checkBindingSpecs: specs => specs.map(bindingSpec => ({ bindingSpec, supported: true })),
     invokeBinding<I = unknown, O = unknown>(args: BindingInvocationArgs): Invocation<I, O> {
       const inner = new InvocationImpl<unknown, unknown>({ signal: args.signal });
-      const first = ++attempts === 1;
+      attempts++;
       void (async () => {
-        if (first) {
-          await entered.promise;
-          inner.fireError(contextRequiredError({ target: "test", alternatives: [{ requirements: [{ type: "auth.bearer" }] }] }));
-        } else {
-          for await (const v of inner.inputs()) await inner.emitOutput(v);
-          inner.closeOutput();
-        }
+        // Challenge live, while the operation layer is still transforming
+        // the caller's first input for this attempt.
+        await entered.promise;
+        inner.fireError(contextRequiredError(details));
       })().catch(() => { /* terminal cleanup */ });
       return inner as Invocation<I, O>;
     },
   };
+  const resolutions: unknown[] = [];
   const op = new OperationInvoker([mock], {
-    contextResolver: async () => ({ bearerToken: "test-only" }),
-    transformEvaluator: { async evaluate(_expr, value, options) {
-      if (++evaluations === 1) {
-        entered.resolve(); await untilAbort(options!.signal!); stopped.resolve();
-        throw new Error("retired attempt");
-      }
-      return { mapped: value };
+    contextResolver: async d => { resolutions.push(d); return { bearerToken: "test-only" }; },
+    transformEvaluator: { async evaluate(_expr, _value, options) {
+      evaluations++;
+      entered.resolve(); await untilAbort(options!.signal!); stopped.resolve();
+      throw new Error("retired attempt");
     } },
   });
   const call = op.invoke(fixture("input"), { key: "test" });
-  const closed = call.closed;
+  const closed = call.closed.catch(error => error);
   try {
     await call.write("raw"); await call.close();
-    const values = []; for await (const value of call.outputs) values.push(value);
-    await closed; await stopped.promise;
-    expect(values).toEqual([{ mapped: "raw" }]);
-    expect(attempts).toBe(2); expect(evaluations).toBe(2);
+    const outputs = call.outputs[Symbol.asyncIterator]();
+    const read = await outputs.next().catch(error => error);
+    await stopped.promise;
+    expect(read).toMatchObject({ code: "CONTEXT_REQUIRED", data: details });
+    expect(await closed).toMatchObject({ code: "CONTEXT_REQUIRED", data: details });
+    // One attempt, one evaluation (retired through its signal), and the
+    // resolver was never consulted for the live challenge.
+    expect(attempts).toBe(1); expect(evaluations).toBe(1);
+    expect(resolutions).toEqual([]);
   } finally { await call.cancel(); }
 });
 

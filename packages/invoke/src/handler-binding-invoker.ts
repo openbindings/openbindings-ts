@@ -171,7 +171,7 @@ export class HandlerBindingInvoker implements BindingInvoker {
         if (handle.signal.aborted) return;
         try {
           // The operation layer has already evaluated the captured
-          // registration's prepare callback for this attempt. Calling the
+          // registration's prepare callback for this invocation. Calling the
           // handler directly removes the otherwise redundant inner
           // InvocationImpl without weakening the operation boundary.
           await registration.handler(handle, dynamicArgs);

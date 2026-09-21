@@ -6,11 +6,13 @@ same options after its bindings argument. There is one evaluation API, not a
 legacy/cancellable capability pair. The host signal is never expression data.
 
 The operation invoker supplies a signal for both input and output transforms,
-including prepared/direct calls. Retried attempts have separate cancellation
-state. Retiring an interrupted input transform restores its raw input for retry;
-successfully transformed replay values are not transformed again. Internal
-retirement is not an ERR_TRANSFORM_ERROR. The existing first-terminal rule and
-public ERR_CANCELLED behavior remain authoritative for invocation results.
+including prepared/direct calls. An invocation is exactly one attempt. When
+the binding reaches a terminal (a live CONTEXT_REQUIRED included) while an
+input transform is in flight, that evaluation is retired through its signal
+and the binding's terminal, not an ERR_TRANSFORM_ERROR, surfaces; the
+interrupted input is not transformed again, because nothing is replayed. The
+existing first-terminal rule and public ERR_CANCELLED behavior remain
+authoritative for invocation results.
 
 Evaluators should check before work and at cooperative checkpoints. The SDK
 checks again before accepting results. A Promise race that only stops waiting

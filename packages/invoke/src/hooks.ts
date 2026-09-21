@@ -145,8 +145,8 @@ function hookTerminal(
  * never an unhandled rejection), and provenance-carrying (every failure
  * names the deciding tier).
  *
- * Hooks may run multiple times per invoke (per attempt, per delivery unit)
- * and must be effectively pure.
+ * Hooks may run multiple times per invoke (per delivery unit) and must be
+ * effectively pure.
  */
 export class InvokeHooks {
   private readonly perInvocation: HookSlots;
