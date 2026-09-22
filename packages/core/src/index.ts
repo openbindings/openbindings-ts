@@ -59,12 +59,12 @@ export type {
   PreparedOperationDescriptor,
 } from "./prepared-interface.js";
 
-export { concludeVerification } from "./verification.js";
+export { concludeConformance } from "./conformance.js";
 export type {
   RuleEvidenceStatus,
-  VerificationConclusion,
-  VerificationReport,
-} from "./verification.js";
+  ConformanceConclusion,
+  ValidationReport,
+} from "./conformance.js";
 
 export { isHttpUrl } from "./helpers.js";
 

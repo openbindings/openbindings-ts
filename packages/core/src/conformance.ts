@@ -2,18 +2,22 @@
 export type RuleEvidenceStatus =
   | "satisfied"
   | "violated"
-  | "unverified"
+  | "inconclusive"
   | "not-applicable";
 
-export type VerificationConclusion =
+export type ConformanceConclusion =
   | "conformant"
   | "non-conformant"
   | "conformance-undetermined";
 
-export interface VerificationReport {
-  conclusion: VerificationConclusion;
+/**
+ * A validator's conformance conclusion and the rule identifiers OBI-T-17
+ * requires it to report.
+ */
+export interface ValidationReport {
+  conclusion: ConformanceConclusion;
   violated: string[];
-  unverified: string[];
+  inconclusive: string[];
 }
 
 /**
@@ -21,35 +25,35 @@ export interface VerificationReport {
  * evidence. The caller supplies every applicable rule; absence is not itself
  * an evidence status.
  *
- * A violation is decisive even when other rules remain unverified. Without a
- * violation, any unverified applicable rule makes the result undetermined;
+ * A violation is decisive even when other rules remain inconclusive. Without a
+ * violation, any inconclusive applicable rule makes the result undetermined;
  * otherwise it is conformant. Rule identifiers are sorted for deterministic
  * SDK output; the core specification requires their identity, not this order.
  * An unrecognized status received from untyped JavaScript is treated
- * conservatively as unverified rather than allowing malformed evidence to
+ * conservatively as inconclusive rather than allowing malformed evidence to
  * produce a conformant conclusion.
  */
-export function concludeVerification(
+export function concludeConformance(
   evidence: Readonly<Record<string, RuleEvidenceStatus>>,
-): VerificationReport {
+): ValidationReport {
   const violated: string[] = [];
-  const unverified: string[] = [];
+  const inconclusive: string[] = [];
   for (const [rule, status] of Object.entries(evidence)) {
     if (status === "violated") violated.push(rule);
     if (
-      status === "unverified" ||
+      status === "inconclusive" ||
       !["satisfied", "violated", "not-applicable"].includes(status)
     ) {
-      unverified.push(rule);
+      inconclusive.push(rule);
     }
   }
   violated.sort();
-  unverified.sort();
-  const conclusion: VerificationConclusion =
+  inconclusive.sort();
+  const conclusion: ConformanceConclusion =
     violated.length > 0
       ? "non-conformant"
-      : unverified.length > 0
+      : inconclusive.length > 0
         ? "conformance-undetermined"
         : "conformant";
-  return { conclusion, violated, unverified };
+  return { conclusion, violated, inconclusive };
 }

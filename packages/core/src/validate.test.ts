@@ -533,7 +533,7 @@ describe("validateInterface example validation edge cases (OBI-D-11)", () => {
   });
 
   it("abstains from example validation when the operation schema has an external $ref", () => {
-    // Capability-relative verification: an unresolvable external reference
+    // Capability-relative validation: an unresolvable external reference
     // means the validator abstains rather than failing the document.
     const iface = baseIface(
       { $ref: "https://schemas.example.com/user.json" },

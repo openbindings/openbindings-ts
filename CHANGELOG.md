@@ -4,6 +4,16 @@
 
 ### Changed
 
+- **`concludeVerification` is now `concludeConformance`** (breaking,
+  pre-1.0). It returns a `ValidationReport` whose `conclusion` is a
+  `ConformanceConclusion` and whose `inconclusive` array replaces
+  `unverified`; the `RuleEvidenceStatus` value `"unverified"` is now
+  `"inconclusive"`. The names follow the core specification, which calls
+  checking a document validation and titles §10.5 "Conformance
+  conclusions", and match the Go SDK. `validateInterface` does not yet
+  return a report; that remains a parity item with the Go SDK's
+  `Interface.Validate`.
+
 - **`OperationInvoker` no longer replays an invocation after a live
   `CONTEXT_REQUIRED`** (breaking; the context-challenge replay removal ruling,
   2026-09-21). Preflight resolution is unchanged: the invoker still calls

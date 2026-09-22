@@ -28,11 +28,11 @@ import {
   MAX_TESTED_VERSION,
   MIN_SUPPORTED_VERSION,
   resolveOperation,
-  concludeVerification,
+  concludeConformance,
 } from "../src/index.js";
 import { compileOperationSchema } from "../src/schema-validation.js";
 import type { OBInterface } from "../src/types.js";
-import type { RuleEvidenceStatus } from "../src/verification.js";
+import type { RuleEvidenceStatus } from "../src/conformance.js";
 
 interface FixtureTest {
   description: string;
@@ -347,20 +347,20 @@ async function runToolScenario(
         : failScenario(rule, scenario.description, `results ${JSON.stringify(actual)}; expected ${JSON.stringify(expected)}`);
     }
 
-    if (scenario.action === "conclude-verification") {
-      const report = concludeVerification(
+    if (scenario.action === "conclude-conformance") {
+      const report = concludeConformance(
         scenario.given.evidence as Record<string, RuleEvidenceStatus>,
       );
       const expectedViolated = [...(scenario.expected.violated as string[])].sort();
-      const expectedUnverified = [...(scenario.expected.unverified as string[])].sort();
+      const expectedInconclusive = [...(scenario.expected.inconclusive as string[])].sort();
       if (report.conclusion !== scenario.expected.conclusion) {
         return failScenario(rule, scenario.description, `conclusion ${JSON.stringify(report.conclusion)}; expected ${JSON.stringify(scenario.expected.conclusion)}`);
       }
       if (JSON.stringify(report.violated) !== JSON.stringify(expectedViolated)) {
         return failScenario(rule, scenario.description, `violated rules ${JSON.stringify(report.violated)}; expected ${JSON.stringify(expectedViolated)}`);
       }
-      if (JSON.stringify(report.unverified) !== JSON.stringify(expectedUnverified)) {
-        return failScenario(rule, scenario.description, `unverified rules ${JSON.stringify(report.unverified)}; expected ${JSON.stringify(expectedUnverified)}`);
+      if (JSON.stringify(report.inconclusive) !== JSON.stringify(expectedInconclusive)) {
+        return failScenario(rule, scenario.description, `inconclusive rules ${JSON.stringify(report.inconclusive)}; expected ${JSON.stringify(expectedInconclusive)}`);
       }
       return passScenario(rule, scenario.description);
     }
