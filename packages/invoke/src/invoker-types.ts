@@ -16,10 +16,11 @@ export interface InvocationSource {
  *
  * Runtime prerequisites (credentials, configuration) travel in `context`
  * as opaque well-known fields; a binding that needs context it wasn't
- * given terminates with `CONTEXT_REQUIRED` before any side effect, and
- * resolution happens above the binding (see OperationInvoker's
- * contextResolver). Bindings depend on context data, never on a context
- * store or platform callbacks.
+ * given terminates with `CONTEXT_REQUIRED` before any side effect.
+ * Resolution happens above the binding: the operation invoker consults its
+ * contextResolver at preflight (`prepareBinding`), and a live challenge
+ * ends the invocation for the caller to resolve and invoke again. Bindings
+ * depend on context data, never on a context store or platform callbacks.
  */
 export interface BindingInvocationArgs {
   source: InvocationSource;
@@ -83,8 +84,9 @@ export function resolveDeliveryUnitLimit(
 /**
  * Optional, per-call inputs to `OperationInvoker.invoke`. All fields are
  * usually omitted: invocation context is normally resolved by the invoker's
- * contextResolver via the reactive CONTEXT_REQUIRED path, and the binding is
- * selected automatically only when a sole invocable candidate remains. The
+ * contextResolver at preflight, from the requirements the binding reports
+ * through `prepareBinding`, and the binding is selected automatically only
+ * when a sole invocable candidate remains. The
  * operation and interface are not here: the
  * operation comes from the {@link OperationSignature} and the interface is a
  * positional argument, so one signature works against any interface.

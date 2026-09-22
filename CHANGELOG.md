@@ -4,6 +4,22 @@
 
 ### Changed
 
+- **`OperationInvoker` no longer replays an invocation after a live
+  `CONTEXT_REQUIRED`** (breaking; the context-challenge replay removal ruling,
+  2026-09-21). Preflight resolution is unchanged: the invoker still calls
+  `prepareBinding`, consults the configured `contextResolver`, and starts the
+  attempt with the merged context. A `CONTEXT_REQUIRED` the binding raises
+  during that attempt now terminates the invocation with the error and its
+  `ContextRequiredDetails` intact, whether or not inputs were written or
+  outputs produced; the resolver is not consulted for it and no second
+  attempt is started. The replay log, retry window, and attempt loop are
+  gone, so a client-streaming call that stays silent no longer retains its
+  whole input stream to keep a possible redo invisible, and the SDK no longer
+  decides on the caller's behalf that a redo is side-effect free. Callers that
+  relied on the invisible redo add their own loop (README, "Context and
+  authentication"); `storeContextResolver` and the resolver contract are
+  unaffected.
+
 - **The SDK can now prepare immutable provider revisions and expose bounded,
   process-local operation-validation diagnostics.** Runtime capability checks
   compare exact opaque binding identifiers, while optional collectors identify

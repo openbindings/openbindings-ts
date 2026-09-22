@@ -64,7 +64,7 @@ describe("Core transform result JSON domain", () => {
             expect(result.error).toMatchObject({ code: ERR_TRANSFORM_ERROR });
             expect(result.readError).toMatchObject({ code: ERR_TRANSFORM_ERROR });
             expect(result.values).toEqual([]);
-            expect(result.attempts).toBe(1); // No replay after a local failure.
+            expect(result.attempts).toBe(1); // Exactly one attempt; a local failure ends it.
             if (direction === "input") expect(result.received).toEqual([]);
           });
         }
@@ -96,7 +96,7 @@ describe("Core transform result JSON domain", () => {
     }
   });
 
-  it("retains prior stream values, then fails once without replay", async () => {
+  it("retains prior stream values, then fails once, in the one attempt", async () => {
     const result = await run("output", async (_expression, data) => data === 2 ? Infinity : data, false, [1, 2, 3]);
     expect(result.values).toEqual([1]);
     expect(result.error).toMatchObject({ code: ERR_TRANSFORM_ERROR });

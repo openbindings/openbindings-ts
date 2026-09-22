@@ -9,10 +9,12 @@ import {
   InvocationError,
   contextRequiredError,
   configValueRequirement,
+  isContextRequired,
   single,
   type ContextRequiredDetails,
   type Invocation,
 } from "./invocation.js";
+import { scopeContext } from "./context.js";
 import type {
   BindingInvoker,
   TransformEvaluator,
@@ -47,17 +49,29 @@ const BEARER_DETAILS: ContextRequiredDetails = {
   alternatives: [{ requirements: [{ type: "auth.bearer" }] }],
 };
 
+const SERVER_DETAILS: ContextRequiredDetails = {
+  target: "https://api.example.com",
+  alternatives: [
+    { requirements: [configValueRequirement("server", "/url", "supply a connection URL")] },
+  ],
+};
+
+function serverConfigured(context: Record<string, unknown> | undefined): boolean {
+  const cfg = context?.["configuration"] as Record<string, unknown> | undefined;
+  return Boolean(cfg?.["server"]);
+}
+
 interface MockOpts {
   bindingSpec?: string;
   /** ping returns one binding-native failure completion. */
   nativeFailure?: boolean;
   /** getUser challenges CONTEXT_REQUIRED when context lacks bearerToken (after reading its input). */
   requireBearer?: boolean;
-  /** getUser challenges unconditionally, even with context (tests the retry cap). */
+  /** getUser challenges live unconditionally, even with context (a challenge no resolution can satisfy). */
   challengeAlways?: boolean;
   /** getUser challenges config.value until context.configuration.server is present. */
   requireServerConfig?: boolean;
-  /** Expose prepareBinding reporting the bearer requirement when missing. */
+  /** Expose prepareBinding reporting the enabled requirements (bearer, server config) the context leaves unsatisfied. */
   preflight?: boolean;
 }
 
@@ -76,7 +90,9 @@ class MockBindingInvoker implements BindingInvoker {
     if (opts.preflight) {
       this.prepareBinding = async (args) => {
         this.prepares++;
-        return args.context?.["bearerToken"] ? null : BEARER_DETAILS;
+        if (opts.requireBearer && !args.context?.["bearerToken"]) return BEARER_DETAILS;
+        if (opts.requireServerConfig && !serverConfigured(args.context)) return SERVER_DETAILS;
+        return null;
       };
     }
   }
@@ -143,19 +159,9 @@ class MockBindingInvoker implements BindingInvoker {
           h.fireError(contextRequiredError(BEARER_DETAILS));
           return;
         }
-        if (this.opts.requireServerConfig) {
-          const cfg = args.context?.["configuration"] as Record<string, unknown> | undefined;
-          if (!cfg?.["server"]) {
-            h.fireError(
-              contextRequiredError({
-                target: "https://api.example.com",
-                alternatives: [
-                  { requirements: [configValueRequirement("server", "/url", "supply a connection URL")] },
-                ],
-              }),
-            );
-            return;
-          }
+        if (this.opts.requireServerConfig && !serverConfigured(args.context)) {
+          h.fireError(contextRequiredError(SERVER_DETAILS));
+          return;
         }
         void h.closeInput();
         const id = (first as Record<string, unknown>)["id"];
@@ -182,8 +188,8 @@ class MockBindingInvoker implements BindingInvoker {
         return;
       }
       case "watchThenChallenge": {
-        // Mid-stream challenge: observable progress happened, so the
-        // operation layer must surface, not retry.
+        // Mid-stream challenge: the operation layer surfaces it as the
+        // terminal, after the output it followed.
         void h.closeInput();
         await h.emitOutput({ id: "ord_1", status: "created" });
         h.fireError(contextRequiredError(BEARER_DETAILS));
@@ -224,9 +230,10 @@ class MockBindingInvoker implements BindingInvoker {
       }
       case "collectThenChallenge": {
         // Client-streaming with a context gate: reads the WHOLE input stream
-        // first, then challenges if unauthenticated (read ≠ consumed — the
-        // streamed-prefix replay case). With context, acks per input AS READ,
-        // so the retry's first output lands while the replay is in flight.
+        // first, then challenges if unauthenticated (read ≠ consumed). The
+        // operation layer retains none of that stream: the challenge ends
+        // the invocation and the caller re-runs its producer. With context,
+        // acks per input as read.
         if (!args.context?.["bearerToken"]) {
           for await (const chunk of h.inputs()) {
             reads.push(chunk);
@@ -768,10 +775,6 @@ describe("OBI-T-08 — output validation", () => {
 });
 
 // ---------------------------------------------------------------------------
-// CONTEXT_REQUIRED negotiation
-// ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
 // OBI-T-16 — claim semantics: unresolvable graph is distinct from mismatch;
 // `format` is an annotation, never an assertion
 // ---------------------------------------------------------------------------
@@ -864,48 +867,53 @@ describe("CONTEXT_REQUIRED", () => {
     });
   });
 
-  it("resolve-and-retry carries a config.value into configuration, preserving a sibling point (R1a)", async () => {
-    const mock = new MockBindingInvoker({ requireServerConfig: true });
+  it("preflight resolution carries a config.value into configuration, preserving a sibling point (R1a)", async () => {
+    const mock = new MockBindingInvoker({ requireServerConfig: true, preflight: true });
     const resolver = vi.fn(async () => ({
       configuration: { server: { url: "https://api.example.com" } },
     }));
     const op = makeInvoker(mock, { contextResolver: resolver });
     // The caller pre-supplies a DIFFERENT configuration point (decode); it must
-    // survive the resolve-and-retry merge rather than being clobbered.
+    // survive the preflight merge rather than being clobbered.
     const call = op.invoke(testInterface(), operationSignature("getUser"), {
       context: { configuration: { decode: { lane: "text" } } },
     });
     await call.write({ id: "u1" });
     await expect(single(call.outputs)).resolves.toEqual({ id: "u1", name: "Ada" });
 
+    expect(mock.prepares).toBe(1);
     expect(resolver).toHaveBeenCalledTimes(1);
-    expect(mock.attempts).toBe(2);
-    const retryCfg = mock.contexts[1]?.["configuration"] as Record<string, unknown>;
-    expect(retryCfg["server"]).toEqual({ url: "https://api.example.com" });
+    expect(resolver).toHaveBeenCalledWith(SERVER_DETAILS);
+    // One attempt, started with the merged context.
+    expect(mock.attempts).toBe(1);
+    const cfg = mock.contexts[0]?.["configuration"] as Record<string, unknown>;
+    expect(cfg["server"]).toEqual({ url: "https://api.example.com" });
     // The caller's decode point was not clobbered by the merge.
-    expect(retryCfg["decode"]).toEqual({ lane: "text" });
+    expect(cfg["decode"]).toEqual({ lane: "text" });
   });
 
-  it("resolve-and-retry replays the already-forwarded input (read ≠ consumed) [U]", async () => {
+  it("a live challenge after a written input terminates the invocation with details intact; the resolver is not consulted [U]", async () => {
     const mock = new MockBindingInvoker({ requireBearer: true });
     const resolver = vi.fn(async () => ({ bearerToken: "tok-123" }));
     const op = makeInvoker(mock, { contextResolver: resolver });
     const call = op.invoke(testInterface(), operationSignature("getUser"));
-    await call.write({ id: "u1" }); // written ONCE
-    await expect(single(call.outputs)).resolves.toEqual({ id: "u1", name: "Ada" });
+    await call.write({ id: "u1" });
+    await expect(single(call.outputs)).rejects.toMatchObject({
+      code: CONTEXT_REQUIRED,
+      data: BEARER_DETAILS,
+    });
+    await expect(call.closed).rejects.toMatchObject({
+      code: CONTEXT_REQUIRED,
+      data: BEARER_DETAILS,
+    });
 
-    expect(resolver).toHaveBeenCalledTimes(1);
-    expect(resolver).toHaveBeenCalledWith(BEARER_DETAILS);
-    expect(mock.attempts).toBe(2);
-    // Both attempts read the same lone input: the prefix was replayed.
-    expect(mock.reads).toEqual([[{ id: "u1" }], [{ id: "u1" }]]);
-    expect(mock.contexts[1]).toMatchObject({ bearerToken: "tok-123" });
+    expect(resolver).not.toHaveBeenCalled();
+    expect(mock.attempts).toBe(1);
+    // The input was accepted into exactly one attempt and never replayed.
+    expect(mock.reads).toEqual([[{ id: "u1" }]]);
   });
 
-  it("resolve-and-retry replays a streamed multi-input prefix in full [CS]", async () => {
-    // Regression: the retry attempt's own first output closes the retry
-    // window mid-replay; the in-flight replay must still deliver the FULL
-    // prefix (a live-rebound log truncated it to 3 items and closed clean).
+  it("a live challenge after a streamed input prefix terminates the invocation; nothing is retained or replayed [CS]", async () => {
     const mock = new MockBindingInvoker();
     const resolver = vi.fn(async () => ({ bearerToken: "tok" }));
     const op = makeInvoker(mock, { contextResolver: resolver });
@@ -914,13 +922,40 @@ describe("CONTEXT_REQUIRED", () => {
     for (let n = 1; n <= N; n++) await call.write({ n });
     await call.close();
 
-    const acks = await collect(call.outputs);
-    expect(acks).toEqual(Array.from({ length: N }, (_, i) => ({ ack: i + 1 })));
+    await expect(collect(call.outputs)).rejects.toMatchObject({
+      code: CONTEXT_REQUIRED,
+      data: BEARER_DETAILS,
+    });
+    expect(resolver).not.toHaveBeenCalled();
+    expect(mock.attempts).toBe(1);
+    // The binding read the whole stream once; no second attempt saw any of it.
+    expect(mock.reads).toEqual([Array.from({ length: N }, (_, i) => ({ n: i + 1 }))]);
+  });
+
+  it("the caller owns the redo: resolve the surfaced challenge and invoke again with merged context", async () => {
+    // The README's caller loop, against the [U] binding above: the first
+    // attempt surfaces CONTEXT_REQUIRED after reading its input; the caller
+    // scopes its resolution to the challenge and invokes again.
+    const mock = new MockBindingInvoker({ requireBearer: true });
+    const op = makeInvoker(mock);
+    let given: Record<string, unknown> = {};
+    let user: unknown;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const call = op.invoke(testInterface(), operationSignature("getUser"), { context: given });
+      await call.write({ id: "u1" });
+      try {
+        user = await single(call.outputs);
+        break;
+      } catch (err) {
+        if (!isContextRequired(err) || attempt === 1) throw err;
+        given = { ...given, ...scopeContext({ bearerToken: "tok-123", unrelated: "x" }, err.data) };
+      }
+    }
+    expect(user).toEqual({ id: "u1", name: "Ada" });
     expect(mock.attempts).toBe(2);
-    // Attempt 1 read all N (then challenged); attempt 2 must replay all N.
-    expect(mock.reads[0]).toHaveLength(N);
-    expect(mock.reads[1]).toHaveLength(N);
-    expect(mock.reads[1]).toEqual(Array.from({ length: N }, (_, i) => ({ n: i + 1 })));
+    expect(mock.reads).toEqual([[{ id: "u1" }], [{ id: "u1" }]]);
+    expect(mock.contexts[0]).toEqual({});
+    expect(mock.contexts[1]).toEqual({ bearerToken: "tok-123" });
   });
 
   it("a T-07 terminal tears down the in-flight binding attempt", async () => {
@@ -938,51 +973,65 @@ describe("CONTEXT_REQUIRED", () => {
     expect(mock.signals[0]?.aborted).toBe(true);
   });
 
-  it("surfaces when the resolver declines", async () => {
-    const mock = new MockBindingInvoker({ requireBearer: true });
-    const op = makeInvoker(mock, { contextResolver: async () => null });
+  it("preflight surfaces the requirement, details intact, when the resolver declines", async () => {
+    const mock = new MockBindingInvoker({ requireBearer: true, preflight: true });
+    const resolver = vi.fn(async () => null);
+    const op = makeInvoker(mock, { contextResolver: resolver });
     const call = op.invoke(testInterface(), operationSignature("getUser"));
-    await call.write({ id: "u1" });
-    await expect(call.closed).rejects.toMatchObject({ code: CONTEXT_REQUIRED });
-    expect(mock.attempts).toBe(1);
+    await expect(call.closed).rejects.toMatchObject({
+      code: CONTEXT_REQUIRED,
+      data: BEARER_DETAILS,
+    });
+    expect(resolver).toHaveBeenCalledTimes(1);
+    expect(mock.attempts).toBe(0);
   });
 
-  it("surfaces resolver failures as local runtime errors", async () => {
-    const mock = new MockBindingInvoker({ requireBearer: true });
+  it("preflight surfaces resolver failures as local runtime errors", async () => {
+    const mock = new MockBindingInvoker({ requireBearer: true, preflight: true });
     const op = makeInvoker(mock, {
       contextResolver: async () => { throw new Error("credential store unavailable"); },
     });
     const call = op.invoke(testInterface(), operationSignature("getUser"));
-    await call.write({ id: "u1" });
     await expect(call.closed).rejects.toMatchObject({ code: "ERR_RUNTIME" });
-    expect(mock.attempts).toBe(1);
+    expect(mock.attempts).toBe(0);
   });
 
-  it("does not retry when resolution makes no structural context change", async () => {
-    const mock = new MockBindingInvoker({ challengeAlways: true });
+  it("preflight surfaces the requirement when resolution makes no structural context change", async () => {
+    const mock = new MockBindingInvoker();
+    // Reports the requirement regardless of context, so the resolver's
+    // answer is the only thing that could move the attempt forward.
+    mock.prepareBinding = async () => BEARER_DETAILS;
     const resolver = vi.fn(async () => ({ bearerToken: "same" }));
     const op = makeInvoker(mock, { contextResolver: resolver });
     const call = op.invoke(testInterface(), operationSignature("getUser"), {
       context: { bearerToken: "same" },
     });
-    await call.write({ id: "u1" });
-    await expect(call.closed).rejects.toMatchObject({ code: CONTEXT_REQUIRED });
+    await expect(call.closed).rejects.toMatchObject({
+      code: CONTEXT_REQUIRED,
+      data: BEARER_DETAILS,
+    });
     expect(resolver).toHaveBeenCalledTimes(1);
-    expect(mock.attempts).toBe(1);
+    expect(mock.attempts).toBe(0);
   });
 
-  it("caps resolve-and-retry rounds instead of looping forever", async () => {
-    const mock = new MockBindingInvoker({ challengeAlways: true });
-    const resolver = vi.fn(async () => ({ bearerToken: "never-enough" }));
+  it("the resolver serves preflight only: a live challenge after a satisfied preflight surfaces from the one attempt", async () => {
+    const mock = new MockBindingInvoker({ requireBearer: true, challengeAlways: true, preflight: true });
+    const resolver = vi.fn(async () => ({ bearerToken: "tok-pre" }));
     const op = makeInvoker(mock, { contextResolver: resolver });
     const call = op.invoke(testInterface(), operationSignature("getUser"));
     await call.write({ id: "u1" });
-    await expect(call.closed).rejects.toMatchObject({ code: CONTEXT_REQUIRED });
-    expect(resolver.mock.calls.length).toBeLessThanOrEqual(4);
-    expect(mock.attempts).toBeLessThanOrEqual(5);
+    await expect(call.closed).rejects.toMatchObject({
+      code: CONTEXT_REQUIRED,
+      data: BEARER_DETAILS,
+    });
+    expect(mock.prepares).toBe(1);
+    // Consulted once, at preflight; never for the live challenge.
+    expect(resolver).toHaveBeenCalledTimes(1);
+    expect(mock.attempts).toBe(1);
+    expect(mock.contexts[0]).toMatchObject({ bearerToken: "tok-pre" });
   });
 
-  it("a mid-stream challenge surfaces (no retry after observable progress) [SS]", async () => {
+  it("a challenge after outputs surfaces to the caller with details intact [SS]", async () => {
     const mock = new MockBindingInvoker();
     const resolver = vi.fn(async () => ({ bearerToken: "tok" }));
     const op = makeInvoker(mock, { contextResolver: resolver });
@@ -997,7 +1046,7 @@ describe("CONTEXT_REQUIRED", () => {
       caught = err;
     }
     expect(seen).toEqual([{ id: "ord_1", status: "created" }]);
-    expect(caught).toMatchObject({ code: CONTEXT_REQUIRED });
+    expect(caught).toMatchObject({ code: CONTEXT_REQUIRED, data: BEARER_DETAILS });
     expect(resolver).not.toHaveBeenCalled();
     expect(mock.attempts).toBe(1);
   });

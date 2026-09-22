@@ -362,8 +362,11 @@ output from separate async contexts); lifecycle is observable via `closed`,
 and termination via `cancel()`. Binding-native evidence remains below the
 abstract invocation boundary in artifact runtimes, logs, and protocol tooling.
 Missing runtime context surfaces as a
-`CONTEXT_REQUIRED` terminal error raised before any side effect, resolved by
-the operation invoker's `contextResolver` when one is configured.
+`CONTEXT_REQUIRED` terminal error raised before any side effect. The operation
+invoker resolves the requirements a binding reports at preflight through its
+`contextResolver` when one is configured; a challenge raised live, during the
+invocation, terminates it for the caller to resolve and invoke again (see
+[Context and authentication](#context-and-authentication)).
 
 ## Binding invokers
 
@@ -440,8 +443,33 @@ browser, a keychain-backed file on a server, an in-memory map in tests. It is
 not required by binding invocation.
 
 A binding that needs context it wasn't given raises a `CONTEXT_REQUIRED`
-challenge before any side effect; the operation invoker resolves challenges
-through its configured `contextResolver` and re-drives the binding.
+challenge before any side effect. Resolution runs in one place: before the
+attempt starts, the operation invoker asks the binding for its known
+requirements (`prepareBinding`), consults its configured `contextResolver`,
+and starts the one attempt with the merged context. A challenge the binding
+raises live, during the attempt, is not resolved by the invoker: the
+invocation terminates with `CONTEXT_REQUIRED` and its details intact, whether
+or not inputs were written or outputs produced, and nothing written is
+retained or replayed. The caller resolves it and invokes again; for a
+streaming call that means re-running its own producer.
+
+```typescript
+import { isContextRequired, scopeContext, single } from "@openbindings/invoke";
+
+let given: Record<string, unknown> = {};
+for (let attempt = 0; attempt < 2; attempt++) {
+  const call = invoker.invoke(iface, operationSignature("getUser"), { context: given });
+  await call.write({ id: "u1" });
+  try {
+    return await single(call.outputs);
+  } catch (err) {
+    if (!isContextRequired(err) || attempt === 1) throw err;
+    const resolved = await resolve(err.data); // your prompt, keychain, or store
+    given = { ...given, ...scopeContext(resolved, err.data) };
+  }
+}
+```
+
 `storeContextResolver(store)` is an optional store-backed realization of the
 published binding-invoker challenge. It treats a challenge as a scope, not a
 hint: via `scopeContext` it returns only the fields the satisfied
