@@ -3,7 +3,7 @@
  * layered OpenBindings packages:
  *
  *   - @openbindings/core — the spec-defined document model (parse, validate,
- *     resolve, verify)
+ *     resolve)
  *   - @openbindings/invoke — the binding-invoker / operation-invoker pattern
  *   - @openbindings/synthesize — the interface-synthesizer / source-inspector
  *     pattern
@@ -50,8 +50,8 @@ export type {
   PreparedDependencyDescriptor,
   PreparedOperationDescriptor,
   RuleEvidenceStatus,
-  VerificationConclusion,
-  VerificationReport,
+  ConformanceConclusion,
+  ValidationReport,
   BindingSpecInfo,
   BindingSpecVerdict,
   ProcessorScenarioFile,
@@ -95,7 +95,7 @@ export {
   unknownFields,
   resolveOperation,
   allOperationIdentifiers,
-  concludeVerification,
+  concludeConformance,
   isHttpUrl,
   checkBindingSpecs,
   MEDIA_TYPE,

@@ -1,52 +1,52 @@
 import { describe, expect, it } from "vitest";
-import { concludeVerification } from "./verification.js";
+import { concludeConformance } from "./conformance.js";
 
-describe("concludeVerification", () => {
+describe("concludeConformance", () => {
   it("reports conformant when all applicable evidence is satisfied", () => {
     expect(
-      concludeVerification({
+      concludeConformance({
         "OBI-D-02": "satisfied",
         "OBI-D-13": "not-applicable",
       }),
-    ).toEqual({ conclusion: "conformant", violated: [], unverified: [] });
+    ).toEqual({ conclusion: "conformant", violated: [], inconclusive: [] });
   });
 
   it("reports undetermined and identifies incomplete checks", () => {
     expect(
-      concludeVerification({
+      concludeConformance({
         "OBI-D-02": "satisfied",
-        "OBI-D-11": "unverified",
+        "OBI-D-11": "inconclusive",
       }),
     ).toEqual({
       conclusion: "conformance-undetermined",
       violated: [],
-      unverified: ["OBI-D-11"],
+      inconclusive: ["OBI-D-11"],
     });
   });
 
   it("makes violations decisive while retaining incomplete checks", () => {
     expect(
-      concludeVerification({
-        "OBI-D-17": "unverified",
+      concludeConformance({
+        "OBI-D-17": "inconclusive",
         "OBI-D-03": "violated",
         "OBI-D-02": "violated",
       }),
     ).toEqual({
       conclusion: "non-conformant",
       violated: ["OBI-D-02", "OBI-D-03"],
-      unverified: ["OBI-D-17"],
+      inconclusive: ["OBI-D-17"],
     });
   });
 
   it("does not let an unknown runtime status produce conformant", () => {
     expect(
-      concludeVerification({
+      concludeConformance({
         "OBI-D-02": "misspelled",
-      } as unknown as Parameters<typeof concludeVerification>[0]),
+      } as unknown as Parameters<typeof concludeConformance>[0]),
     ).toEqual({
       conclusion: "conformance-undetermined",
       violated: [],
-      unverified: ["OBI-D-02"],
+      inconclusive: ["OBI-D-02"],
     });
   });
 });

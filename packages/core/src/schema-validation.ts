@@ -201,7 +201,7 @@ function jsonTypeName(v: unknown): string {
  * JSON Schema 2020-12 schema in object or boolean form, and the object
  * form must validate against the 2020-12 meta-schemas (which cover
  * subschemas recursively; the meta-schemas are vendored locally, never
- * fetched, per the rule's verification note). The check is deliberately
+ * fetched, per the rule's validation note). The check is deliberately
  * narrow, mirroring §5.2: unknown keywords, unparseable `pattern` values,
  * and unresolvable `$ref` targets all pass — they surface when the schema
  * is used, not here.
@@ -763,7 +763,7 @@ function validateBindingShape(
  * schema. An explicit `null` is a provided example value, distinct from an
  * absent field, and is validated.
  *
- * Verification is capability-relative (cf. the spec's §8 / OBI-D-13
+ * Validation is capability-relative (cf. the spec's §8 / OBI-D-13
  * discussion): when a schema's $refs point outside the document, this
  * validator cannot resolve them and abstains from example validation for
  * that operation rather than failing the document.
@@ -832,8 +832,8 @@ export function validateExamplesAgainstOpSchemas(
  * unresolvable without fetching external resources, so document validation
  * abstains from example checks against them. (An absolute $ref matching an
  * embedded $id would resolve locally per §10; abstaining on it here is
- * conservative partial verification, which the spec's §10.2 posture
- * permits — unverified, not non-conformant.)
+ * conservative partial validation, which the spec's §10.2 posture
+ * permits — inconclusive, not non-conformant.)
  */
 function schemaHasExternalRef(value: unknown): boolean {
   if (Array.isArray(value)) {

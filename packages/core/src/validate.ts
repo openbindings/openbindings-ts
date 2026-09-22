@@ -485,12 +485,12 @@ function validateLocation(errs: string[], prefix: string, raw: string): void {
   }
   // OBI-D-05's exemption: a bindingSpec-defined absolute address (a gRPC
   // host:port, a usage exec argv vector) is well-formed per its own binding
-  // specification, which the core cannot verify. The decidable
+  // specification, which the core cannot decide. The decidable
   // discriminator is the hierarchical URI form: a value whose scheme is
   // followed by "//" claims RFC 3986 URI form and is held to it; a
   // scheme-opaque non-relative value may be a bindingSpec-defined address
-  // and passes core validation (per-family verification belongs to family
-  // processors, per the partial-verification posture).
+  // and passes core validation (per-family validation belongs to family
+  // processors, per the partial-validation posture).
   if (!isHierarchicalURIForm(raw)) return;
   if (!screenURIChars(errs, prefix, raw)) return;
   try {

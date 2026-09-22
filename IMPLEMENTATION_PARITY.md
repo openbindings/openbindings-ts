@@ -6,6 +6,13 @@ processor, and Operation Graph corpora. The checked-in
 [`reference-sdk-correspondence.json`](../spec/conformance/reference-sdk-correspondence.json)
 also guards the public role and family correspondence.
 
+Document validation reports the core's §10.5 conformance conclusion in Go:
+`Interface.Validate()` and `ValidateDocument(data)` return a
+`ValidationReport` with per-rule evidence, findings, and OBI-T-02
+diagnostics. TypeScript applies OBI-T-17 to caller evidence through
+`concludeConformance`, but `validateInterface` still returns violations
+alone; TypeScript alignment is pending.
+
 | Concept                                                        | Go                                                         | TypeScript                                                 |
 | -------------------------------------------------------------- | ---------------------------------------------------------- | ---------------------------------------------------------- |
 | binding implementation                                         | `BindingInvoker`                                           | `BindingInvoker`                                           |
@@ -15,6 +22,8 @@ also guards the public role and family correspondence.
 | artifact → OBI                                                 | `InterfaceSynthesizer.SynthesizeInterface(...)`            | `InterfaceSynthesizer.synthesizeInterface(...)`            |
 | artifact → OBI + exhaustiveness-qualified disposition evidence | `CoverageSynthesizer.SynthesizeInterfaceWithCoverage(...)` | `CoverageSynthesizer.synthesizeInterfaceWithCoverage(...)` |
 | inspect bindable targets                                       | `SourceInspector.InspectSource(...)`                       | `SourceInspector.inspectSource(...)`                       |
+| validate a document, with its conformance conclusion           | `Interface.Validate()` / `ValidateDocument(...)`           | `validateInterface(...)` (report pending)                  |
+| apply OBI-T-17 to rule evidence                                | `ConcludeConformance(...)`                                 | `concludeConformance(...)`                                 |
 | source-less scaffold                                           | `SynthesisSkeleton(...)`                                   | `synthesisSkeleton(...)`                                   |
 | shared authoring directives + validation                       | `FinalizeSynthesis(...)`                                   | `finalizeSynthesis(...)`                                   |
 | one consumed operation contract                                | `NewOperationRequirement(...)`                             | `operationRequirement(...)`                                |
