@@ -27,16 +27,12 @@ const openAPIClientDirectory = process.env.OPENBINDINGS_OPENAPI_CLIENT_DIR
   ?? join(root, "..", "openapi-client", "typescript");
 const asyncAPIClientDirectory = process.env.OPENBINDINGS_ASYNCAPI_CLIENT_DIR
   ?? join(root, "..", "asyncapi-client", "typescript");
-const jsonataRuntimeDirectory = process.env.JSONATA_RUNTIME_DIR
-  ?? join(root, "..", "jsonata", "javascript");
 
 function run(command, args, cwd = root) {
   execFileSync(command, args, { cwd, stdio: "inherit" });
 }
 
 try {
-  const jsonataRuntimeTarball = join(temporary, "jsonata.tgz");
-  run("pnpm", ["--dir", jsonataRuntimeDirectory, "pack", "--out", jsonataRuntimeTarball]);
   if (!existsSync(join(openAPIClientDirectory, "package.json"))) {
     throw new Error(
       `standalone OpenAPI client checkout not found at ${openAPIClientDirectory}; set OPENBINDINGS_OPENAPI_CLIENT_DIR`,
@@ -125,8 +121,6 @@ if (!result.ok || result.data?.ok !== true) throw new Error("packed client did n
 
 const { OpenBindingsRuntime, single } = await import("@openbindings/sdk");
 const { OpenAPIAdapter, decimalParameterConversion } = await import("@openbindings/openapi");
-const { createJSONataExecutor } = await import("@openbindings/jsonata");
-const { createJSONataEvaluator } = await import("@openbindings/invoke/jsonata");
 const adapterRequests = [];
 const adapterFetch = async input => {
   const url = String(input);
@@ -139,7 +133,6 @@ const adapterFetch = async input => {
 const runtime = new OpenBindingsRuntime({
   providers: [new OpenAPIAdapter({ fetch: adapterFetch, parameterConversion: decimalParameterConversion })],
   fetch: adapterFetch,
-  transformEvaluator: createJSONataEvaluator(createJSONataExecutor()),
 });
 const synthesized = await runtime.synthesizeInterfaceWithCoverage({
   sources: [{ bindingSpec: "openbindings.openapi-3.1@1", content: {
@@ -162,15 +155,7 @@ const synthesized = await runtime.synthesizeInterfaceWithCoverage({
 if (!synthesized.coverage.exhaustive) throw new Error("packed adapter coverage was not exhaustive");
 const invocation = runtime.invoke(synthesized.interface, "ping");
 if ((await single(invocation.outputs))?.ok !== true) throw new Error("packed adapter did not yield the application value");
-const listBinding = Object.values(synthesized.interface.bindings).find(binding => binding.operation === "listItems");
-if (!listBinding?.inputTransform) throw new Error("parameterized consumer did not exercise a synthesized transform");
-const listInvocation = runtime.invoke(synthesized.interface, "listItems");
-await listInvocation.write({ limit: 10 });
-if ((await single(listInvocation.outputs))?.ok !== true) throw new Error("parameterized packed adapter lost the output");
-if (adapterRequests.filter(url => url === "https://api.example.test/list?limit=10").length !== 1) {
-  throw new Error("parameterized packed adapter did not dispatch exactly one transformed request");
-}
-console.log("packed parameterized SDK invocation verified with explicit JSONata evaluator");
+console.log("packed SDK invocation verified");
 `,
   );
   writeFileSync(
@@ -191,7 +176,7 @@ console.log("packed parameterized SDK invocation verified with explicit JSONata 
   // not-yet-published sibling package from the registry while constructing a
   // single multi-tarball add transaction.
   run("pnpm", ["add", openAPIClientTarball, asyncAPIClientTarball, tarballs[0]], temporary);
-  run("pnpm", ["add", ...tarballs.slice(1), jsonataRuntimeTarball], temporary);
+  run("pnpm", ["add", ...tarballs.slice(1)], temporary);
   run(process.execPath, ["import-smoke.mjs"], temporary);
   run(process.execPath, ["require-smoke.cjs"], temporary);
   run(

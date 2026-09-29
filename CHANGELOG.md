@@ -2,6 +2,15 @@
 
 ## 0.2.0 (working draft)
 
+### Removed
+
+- **The `@openbindings/jsonata` development dependency.** The project no
+  longer depends on that runtime. The tests and packaging checks that invoked
+  synthesized transforms through it are dropped for now, among them the
+  OpenAPI processor scenarios, which evaluate transforms. The SDK still
+  selects no evaluator, and `@openbindings/invoke/jsonata` still adapts one an
+  application supplies.
+
 ### Changed
 
 - **`concludeVerification` is now `concludeConformance`** (breaking,
