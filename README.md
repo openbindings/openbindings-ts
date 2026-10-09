@@ -1,5 +1,8 @@
 # openbindings-ts
 
+> **Legacy implementation.** The maintained reference SDK is now [openbindings/sdk](https://github.com/openbindings/sdk), with a Rust engine and TypeScript/Wasm API. This repository preserves earlier APIs and supports consumers during migration. The successor is unpublished and does not yet replace every invocation, synthesis or binding-adapter workflow. See [the transition policy](LIFECYCLE.md).
+
+
 TypeScript SDK for the [OpenBindings](https://openbindings.com) specification. Parse, validate, resolve, and invoke OpenBindings interfaces from TypeScript and JavaScript.
 
 OpenBindings is an open standard. **One interface. Any binding.** Describe what a service does separately from how you access it. An OBI (OpenBindings Interface) document describes what operations a service offers and how to reach them, independent of protocol. See the [spec](https://github.com/openbindings/spec) and [guides](https://github.com/openbindings/spec/tree/main/guides) for details.
