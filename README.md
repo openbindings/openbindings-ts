@@ -531,3 +531,11 @@ application or tooling that chose it.
 ## License
 
 Apache-2.0
+
+## Legacy CI
+
+This independent implementation retains its own build, package, type, unit and
+conformance checks against fixed compatible dependencies. Ongoing Go/TypeScript
+export symmetry is retired under the project’s 2026-10-09 CI policy. The retained
+`correspondence` script is historical inspection tooling, not a current parity
+requirement. Existing publication controls are separate from ordinary CI.
