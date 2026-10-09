@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { OBInterface } from "./types.js";
 import { prepareInterface, compareBoundaryContracts } from "./prepared-interface.js";
-import { parse, stringify } from "@openbindings/json";
+import { parse, stringify, type Value } from "@openbindings/json";
 
 function document(): OBInterface {
   return {
@@ -53,7 +53,9 @@ describe("PreparedInterface", () => {
     const spelled = document();
     spelled.bindings!.local!.preference = parse("1.0") as never;
     const asValue = await prepareInterface(spelled);
-    expect(stringify(asValue.interfaceSnapshot.bindings!.local!.preference)).toBe("1");
+    const preference = asValue.interfaceSnapshot.bindings!.local!.preference;
+    if (preference === undefined) throw new Error("Prepared snapshot lost its preference");
+    expect(stringify(preference)).toBe("1");
 
     // A preference must be a safe integer, so every admissible one is a
     // primitive. A value that needs more digits than that is refused, not
@@ -190,7 +192,10 @@ describe("PreparedInterface", () => {
     const raw = '{"openbindings":"0.2.0","operations":{"wide":{"input":{"const":9007199254740993}}}}';
     const prepared = await prepareInterface(parse(raw) as unknown as OBInterface);
     await expect(prepared.exportJCS()).rejects.toThrow(/JCS/);
-    expect(stringify(prepared.interfaceSnapshot)).toBe(raw);
+    // The typed document model has no generic JSON index signature. The
+    // checked stringifier still admits every value at runtime, including the
+    // wide leaf this test must preserve.
+    expect(stringify(prepared.interfaceSnapshot as unknown as Value)).toBe(raw);
     expect(prepared.schemaValidator("wide", "input")!.validate(parse("9007199254740993")).valid).toBe(true);
   });
 
