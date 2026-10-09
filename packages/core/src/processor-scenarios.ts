@@ -223,7 +223,7 @@ function semanticValue(
       if (lines.some((line) => line === "" || line.includes("\r"))) {
         throw new Error("invalid JSON Lines record boundary");
       }
-      return lines.map((line) => parse(line));
+      return lines.map((line): unknown => parse(line));
     }
     case "json-sequence": {
       if (typeof actual !== "string" || actual === "") {

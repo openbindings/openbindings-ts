@@ -37,7 +37,7 @@ describe.skipIf(!pack)("official SDK qualification — exact snapshots (not Core
       ["candidate", c.rightJSON, witness.candidateValid],
     ] as const;
     for (const [side, raw, want] of sides) it(c.id + "/" + side, async () => {
-      const iface = parse(raw) as unknown as OBInterface;
+      const iface = parse(raw) as OBInterface;
       const sample = parse(witness.instanceJSON);
       const prepared = await prepareInterface(iface);
       const validator = prepared.schemaValidator("test", c.direction);
@@ -58,7 +58,7 @@ describe.skipIf(!pack)("official SDK qualification — authored identity and loc
     if (!(c.id in identities)) continue;
     it(c.id, async () => {
       const boundary = async (raw: string) => {
-        const prepared = await prepareInterface(parse(raw) as unknown as OBInterface);
+        const prepared = await prepareInterface(parse(raw) as OBInterface);
         const before = prepared.schemaValidator("test", c.direction);
         const contract = await prepared.boundaryContract("test")!;
         expect(contract.complete).toBe(true);

@@ -209,7 +209,7 @@ export class PreparedInterface {
     // Admission is the private, deeply frozen copy this snapshot promises:
     // it refuses anything outside the JSON domain and freezes what it returns,
     // so a caller cannot reach back into it afterwards.
-    const snapshot = admit(iface as never) as unknown as OBInterface;
+    const snapshot = admit(iface) as unknown as OBInterface;
     validateInterface(snapshot, options?.validation);
 
     // Public enumeration stays deterministic without canonicalizing values.
