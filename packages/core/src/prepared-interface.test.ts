@@ -51,7 +51,7 @@ describe("PreparedInterface", () => {
     // A number is its value, not its spelling: "1.0" is one, and one is a
     // primitive. Exactness is what a primitive cannot hold, and that is kept.
     const spelled = document();
-    spelled.bindings!.local!.preference = parse("1.0") as never;
+    spelled.bindings!.local!.preference = parse("1.0");
     const asValue = await prepareInterface(spelled);
     const preference = asValue.interfaceSnapshot.bindings!.local!.preference;
     if (preference === undefined) throw new Error("Prepared snapshot lost its preference");
@@ -61,7 +61,7 @@ describe("PreparedInterface", () => {
     // primitive. A value that needs more digits than that is refused, not
     // rounded into range.
     const wide = document();
-    wide.bindings!.local!.preference = parse("9007199254740993") as never;
+    wide.bindings!.local!.preference = parse("9007199254740993");
     await expect(prepareInterface(wide)).rejects.toThrow(/must be a safe integer/);
   });
   it("is locally owned, immutable, and idempotent with optional JCS export", async () => {
@@ -190,7 +190,7 @@ describe("PreparedInterface", () => {
 
   it("retains wide values when JCS cannot export them", async () => {
     const raw = '{"openbindings":"0.2.0","operations":{"wide":{"input":{"const":9007199254740993}}}}';
-    const prepared = await prepareInterface(parse(raw) as unknown as OBInterface);
+    const prepared = await prepareInterface(parse(raw) as OBInterface);
     await expect(prepared.exportJCS()).rejects.toThrow(/JCS/);
     // The typed document model has no generic JSON index signature. The
     // checked stringifier still admits every value at runtime, including the
@@ -200,7 +200,7 @@ describe("PreparedInterface", () => {
   });
 
   it("exports equivalent decimal spellings without requiring binary exactness", async () => {
-    const prepared = await prepareInterface(parse('{"openbindings":"0.2.0","operations":{"n":{"input":{"const":0.100}}}}') as unknown as OBInterface);
+    const prepared = await prepareInterface(parse('{"openbindings":"0.2.0","operations":{"n":{"input":{"const":0.100}}}}') as OBInterface);
     expect((await prepared.exportJCS()).canonical).toContain('"const":0.1');
   });
 });

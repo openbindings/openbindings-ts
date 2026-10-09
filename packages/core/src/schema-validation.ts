@@ -111,7 +111,7 @@ const VALIDATION_KEYWORD_BY_CODE: Readonly<Record<string, string>> = Object.free
  * immutable leaf and carries by reference.
  */
 function mutableCopy<T>(value: T): T {
-  if (Array.isArray(value)) return value.map((item) => mutableCopy(item)) as unknown as T;
+  if (Array.isArray(value)) return value.map((item: unknown): unknown => mutableCopy(item)) as unknown as T;
   if (typeof value !== "object" || value === null || isDecimal(value) || isEncoded(value)) return value;
   const out: Record<string, unknown> = {};
   for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
@@ -162,7 +162,7 @@ function validationSchemaPath(error: JslError, paths: WeakMap<object, string>): 
  * recognize it as a number.
  */
 function compileAdmitted(root: unknown, options?: Parameters<typeof compile>[1]): CompiledSchema {
-  const admitted = admit(root as Value);
+  const admitted = admit(root);
   return wrapSchema(compile(admitted, options), admitted);
 }
 
@@ -897,7 +897,7 @@ export function compileOperationSchema(
   if (cached) return cached;
 
   const closure = operationSchemaClosure(iface, operationName, position);
-  const document: Record<string, unknown> = closure ?? mutableCopy(iface) as unknown as Record<string, unknown>;
+  const document: Record<string, unknown> = closure ?? mutableCopy(iface) as Record<string, unknown>;
   // The OBI root is a resolution container, not itself a JSON Schema. Ignore
   // every root field that happens to spell a JSON Schema keyword; Core says
   // unknown OBI fields are ignored, so (for example) an unknown root `type`
@@ -1111,7 +1111,7 @@ function compileDocumentRootSchema(
   const options = { formatAssertion: false as const };
   if (remotes.length > 0) {
     // The embedded resources are admitted with the root by the compiler.
-    return compileAdmitted(root, { ...options, remotes } as Parameters<typeof compile>[1]);
+    return compileAdmitted(root, { ...options, remotes });
   }
   return compileAdmitted(root, options);
 }
